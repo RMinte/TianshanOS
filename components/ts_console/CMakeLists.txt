@@ -5,6 +5,7 @@ set(TS_CONSOLE_SRCS
     "src/ts_console_args.c"
     "src/ts_console_builtin.c"
     "src/ts_i18n.c"
+    "src/ts_script.c"
     "commands/ts_cmd_led.c"
 )
 
