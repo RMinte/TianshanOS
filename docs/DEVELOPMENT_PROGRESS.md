@@ -213,8 +213,8 @@
 - [x] HMAC
 - [x] AES-GCM 加解密
 - [x] Base64/Hex 编解码
+- [x] RSA/EC 密钥对 (RSA-2048/4096, EC-P256/P384, PEM导入导出, 签名验证)
 - [ ] SSH 客户端 - 待实现
-- [ ] RSA/EC 密钥对 - 待实现
 
 ---
 

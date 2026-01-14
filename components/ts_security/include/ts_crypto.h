@@ -75,6 +75,78 @@ esp_err_t ts_crypto_hex_encode(const void *src, size_t src_len,
 esp_err_t ts_crypto_hex_decode(const char *src, size_t src_len,
                                 void *dst, size_t *dst_len);
 
+/*===========================================================================*/
+/*                          RSA/EC Key Pair                                   */
+/*===========================================================================*/
+
+/** Crypto key types (for key pair operations) */
+typedef enum {
+    TS_CRYPTO_KEY_RSA_2048,
+    TS_CRYPTO_KEY_RSA_4096,
+    TS_CRYPTO_KEY_EC_P256,
+    TS_CRYPTO_KEY_EC_P384
+} ts_crypto_key_type_t;
+
+/** Key pair handle */
+typedef struct ts_keypair_s *ts_keypair_t;
+
+/**
+ * @brief Generate a key pair
+ * 
+ * @param type Key type (RSA or EC)
+ * @param keypair Output keypair handle
+ * @return ESP_OK on success
+ */
+esp_err_t ts_crypto_keypair_generate(ts_crypto_key_type_t type, ts_keypair_t *keypair);
+
+/**
+ * @brief Free a key pair
+ */
+void ts_crypto_keypair_free(ts_keypair_t keypair);
+
+/**
+ * @brief Export public key in PEM format
+ */
+esp_err_t ts_crypto_keypair_export_public(ts_keypair_t keypair, char *pem, size_t *pem_len);
+
+/**
+ * @brief Export private key in PEM format
+ */
+esp_err_t ts_crypto_keypair_export_private(ts_keypair_t keypair, char *pem, size_t *pem_len);
+
+/**
+ * @brief Import key pair from PEM
+ */
+esp_err_t ts_crypto_keypair_import(const char *pem, size_t pem_len, ts_keypair_t *keypair);
+
+/**
+ * @brief RSA sign (PKCS#1 v1.5)
+ */
+esp_err_t ts_crypto_rsa_sign(ts_keypair_t keypair, ts_hash_algo_t hash_algo,
+                              const void *hash, size_t hash_len,
+                              void *signature, size_t *sig_len);
+
+/**
+ * @brief RSA verify
+ */
+esp_err_t ts_crypto_rsa_verify(ts_keypair_t keypair, ts_hash_algo_t hash_algo,
+                                const void *hash, size_t hash_len,
+                                const void *signature, size_t sig_len);
+
+/**
+ * @brief ECDSA sign
+ */
+esp_err_t ts_crypto_ecdsa_sign(ts_keypair_t keypair, 
+                                const void *hash, size_t hash_len,
+                                void *signature, size_t *sig_len);
+
+/**
+ * @brief ECDSA verify
+ */
+esp_err_t ts_crypto_ecdsa_verify(ts_keypair_t keypair,
+                                  const void *hash, size_t hash_len,
+                                  const void *signature, size_t sig_len);
+
 #ifdef __cplusplus
 }
 #endif
