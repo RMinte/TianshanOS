@@ -2,7 +2,8 @@
 
 > **项目**：TianShanOS（天山操作系统）  
 > **版本**：0.1.0-dev  
-> **最后更新**：2026年1月15日
+> **最后更新**：2026年1月15日  
+> **代码统计**：57 个 C 源文件，41 个头文件
 
 ---
 
@@ -41,7 +42,7 @@
 | 命令格式 | 参数风格，基于 esp_console |
 | 组件通信 | 增强的事件总线 + 发布订阅 |
 | 服务管理 | 阶段化启动 + 依赖图 |
-| SSH | wolfSSH 客户端 |
+| SSH | SSH-2.0 客户端 (mbedtls) |
 | 图像格式 | BMP/PNG/JPG/GIF |
 | 文件系统 | FAT32(SD卡) + SPIFFS(内部) |
 
@@ -243,6 +244,7 @@
 - [x] 快速入门指南 (docs/QUICK_START.md)
 - [x] API 参考文档 (docs/API_REFERENCE.md)
 - [x] 板级配置指南 (docs/BOARD_CONFIGURATION.md)
+- [x] 测试计划文档 (docs/TEST_PLAN.md)
 - [ ] 集成测试用例 - 后续版本
 - [ ] 性能测试 - 后续版本
 - [ ] 稳定性测试 - 后续版本
