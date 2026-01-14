@@ -2,7 +2,7 @@ idf_component_register(
     SRCS
         "src/ts_webui.c"
         "src/ts_webui_api.c"
-        # "src/ts_webui_ws.c"    # TODO: Enable HTTPD_WS in menuconfig
+        "src/ts_webui_ws.c"
     INCLUDE_DIRS
         "include"
     REQUIRES
