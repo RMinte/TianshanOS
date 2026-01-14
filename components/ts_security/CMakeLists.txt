@@ -3,12 +3,14 @@ idf_component_register(
         "src/ts_security.c"
         "src/ts_crypto.c"
         "src/ts_auth.c"
+        "src/ts_ssh_client.c"
     INCLUDE_DIRS
         "include"
     REQUIRES
         ts_core
         mbedtls
         nvs_flash
+        lwip
     PRIV_REQUIRES
         esp_timer
 )
