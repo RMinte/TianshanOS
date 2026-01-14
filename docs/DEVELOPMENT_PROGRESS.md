@@ -125,9 +125,9 @@
 - [x] 结果格式化 (JSON)
 - [x] 系统 API (system.info, system.memory, system.tasks, system.reboot, system.log.level)
 - [x] 配置 API (config.get, config.set, config.delete, config.list, config.save)
-- [ ] 设备 API
-- [ ] LED API
-- [ ] 网络 API
+- [x] 设备 API (device.info, device.set, device.fan, device.power)
+- [x] LED API (led.list, led.info, led.brightness, led.clear, led.fill, led.effect)
+- [x] 网络 API (net.status, net.wifi.scan, net.wifi.connect, net.info)
 - [ ] 单元测试
 
 ### ts_storage - 存储管理
@@ -150,12 +150,12 @@
 - [x] 特效库 (rainbow, breathing, chase, sparkle, fire, solid)
 - [x] 颜色工具 (HSV/RGB转换, 调色盘, 颜色解析)
 - [x] 图像解码（BMP - 24位）
-- [ ] 图像解码（PNG）- 待实现
-- [ ] 图像解码（JPG）- 待实现
-- [ ] 图像解码（GIF）- 待实现
+- [x] 图像解码（PNG）- libpng
+- [x] 图像解码（JPG）- esp_jpeg
+- [x] 图像解码（GIF）- 简化解码
 - [x] 设备实例（touch/board/matrix 预设）
 - [x] 状态指示绑定
-- [ ] LED 命令 - Phase 7 集成
+- [x] LED 命令 (led, led_brightness, led_clear, led_fill, led_effect, led_color)
 
 ---
 
@@ -170,7 +170,8 @@
 ### ts_drivers/power - 电源监控
 - [x] ADC 电压监测
 - [x] 电压警报 (高低阈值)
-- [ ] INA226/INA3221 I2C芯片 - 待实现
+- [x] INA226 I2C芯片支持
+- [x] INA3221 I2C芯片支持 (3通道)
 - [ ] UART 电源芯片 - 待实现
 
 ### ts_drivers/device - 设备控制
@@ -197,7 +198,7 @@
 - [x] HTTP 服务器 (esp_http_server)
 - [x] 路由注册/处理
 - [x] 静态文件服务
-- [ ] WebSocket - Phase 7 集成
+- [x] WebSocket (ts_webui_ws)
 - [ ] HTTPS/mTLS - 待完善
 
 ### ts_security - 安全
