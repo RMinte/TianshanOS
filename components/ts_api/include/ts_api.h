@@ -257,6 +257,35 @@ const char *ts_api_category_name(ts_api_category_t category);
  */
 ts_api_category_t ts_api_category_by_name(const char *name);
 
+/*===========================================================================*/
+/*                          API Module Registration                           */
+/*===========================================================================*/
+
+/**
+ * @brief Register system APIs
+ */
+esp_err_t ts_api_system_register(void);
+
+/**
+ * @brief Register config APIs
+ */
+esp_err_t ts_api_config_register(void);
+
+/**
+ * @brief Register device APIs
+ */
+esp_err_t ts_api_device_register(void);
+
+/**
+ * @brief Register LED APIs
+ */
+esp_err_t ts_api_led_register(void);
+
+/**
+ * @brief Register network APIs
+ */
+esp_err_t ts_api_network_register(void);
+
 #ifdef __cplusplus
 }
 #endif
