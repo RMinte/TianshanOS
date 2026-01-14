@@ -14,5 +14,5 @@ idf_component_register(
     SRCS ${TS_LED_SRCS}
     INCLUDE_DIRS "include"
     REQUIRES ts_core ts_hal driver led_strip
-    PRIV_REQUIRES ts_storage ts_event
+    PRIV_REQUIRES ts_storage ts_event espressif__zlib espressif__esp_jpeg espressif__libpng
 )

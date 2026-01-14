@@ -2524,6 +2524,12 @@ CONFIG_TS_SERVICE_ENABLE_WATCHDOG=y
 CONFIG_TS_SERVICE_WATCHDOG_TIMEOUT_MS=60000
 # CONFIG_TS_SERVICE_DEBUG is not set
 # end of TianShanOS Service Management
+
+#
+# JPEG Decoder
+#
+CONFIG_JD_USE_ROM=y
+# end of JPEG Decoder
 # end of Component config
 
 # CONFIG_IDF_EXPERIMENTAL_FEATURES is not set
