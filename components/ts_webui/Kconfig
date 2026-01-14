@@ -1,0 +1,37 @@
+menu "TianShanOS WebUI Configuration"
+
+    config TS_WEBUI_ENABLE
+        bool "Enable WebUI"
+        default y
+
+    config TS_WEBUI_API_PREFIX
+        string "API URL Prefix"
+        default "/api/v1"
+        depends on TS_WEBUI_ENABLE
+
+    config TS_WEBUI_WS_ENABLE
+        bool "Enable WebSocket"
+        default y
+        depends on TS_WEBUI_ENABLE
+
+    config TS_WEBUI_WS_MAX_CLIENTS
+        int "Max WebSocket Clients"
+        default 4
+        depends on TS_WEBUI_WS_ENABLE
+
+    config TS_WEBUI_AUTH_REQUIRED
+        bool "Require Authentication for API"
+        default y
+        depends on TS_WEBUI_ENABLE
+
+    config TS_WEBUI_CORS_ENABLE
+        bool "Enable CORS"
+        default y
+        depends on TS_WEBUI_ENABLE
+
+    config TS_WEBUI_STATIC_PATH
+        string "Static Files Path"
+        default "/www"
+        depends on TS_WEBUI_ENABLE
+
+endmenu

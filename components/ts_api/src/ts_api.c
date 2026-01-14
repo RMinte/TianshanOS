@@ -1,0 +1,509 @@
+/**
+ * @file ts_api.c
+ * @brief TianShanOS Core API Layer Implementation
+ * 
+ * @author TianShanOS Team
+ * @version 1.0.0
+ * @date 2026-01-15
+ */
+
+#include "ts_api.h"
+#include "ts_log.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
+#include <string.h>
+#include <stdlib.h>
+
+#define TAG "ts_api"
+
+/*===========================================================================*/
+/*                          Name Tables                                       */
+/*===========================================================================*/
+
+static const char *s_code_names[] = {
+    [TS_API_OK]              = "OK",
+    [TS_API_ERR_INVALID_ARG] = "INVALID_ARG",
+    [TS_API_ERR_NOT_FOUND]   = "NOT_FOUND",
+    [TS_API_ERR_NO_PERMISSION] = "NO_PERMISSION",
+    [TS_API_ERR_BUSY]        = "BUSY",
+    [TS_API_ERR_TIMEOUT]     = "TIMEOUT",
+    [TS_API_ERR_NO_MEM]      = "NO_MEM",
+    [TS_API_ERR_INTERNAL]    = "INTERNAL",
+    [TS_API_ERR_NOT_SUPPORTED] = "NOT_SUPPORTED",
+    [TS_API_ERR_HARDWARE]    = "HARDWARE"
+};
+
+static const char *s_category_names[] = {
+    [TS_API_CAT_SYSTEM]  = "system",
+    [TS_API_CAT_CONFIG]  = "config",
+    [TS_API_CAT_HAL]     = "hal",
+    [TS_API_CAT_LED]     = "led",
+    [TS_API_CAT_FAN]     = "fan",
+    [TS_API_CAT_POWER]   = "power",
+    [TS_API_CAT_NETWORK] = "network",
+    [TS_API_CAT_DEVICE]  = "device",
+    [TS_API_CAT_STORAGE] = "storage"
+};
+
+/*===========================================================================*/
+/*                          Endpoint Registry                                 */
+/*===========================================================================*/
+
+#ifndef CONFIG_TS_API_MAX_ENDPOINTS
+#define CONFIG_TS_API_MAX_ENDPOINTS 128
+#endif
+
+#ifndef CONFIG_TS_API_MAX_NAME_LENGTH
+#define CONFIG_TS_API_MAX_NAME_LENGTH 64
+#endif
+
+typedef struct {
+    char name[CONFIG_TS_API_MAX_NAME_LENGTH];
+    char *description;
+    ts_api_category_t category;
+    ts_api_handler_t handler;
+    bool requires_auth;
+    char *permission;
+    bool used;
+} api_entry_t;
+
+/*===========================================================================*/
+/*                          Private Data                                      */
+/*===========================================================================*/
+
+static struct {
+    bool initialized;
+    SemaphoreHandle_t mutex;
+    api_entry_t *endpoints;
+    size_t endpoint_count;
+} s_api = {0};
+
+/*===========================================================================*/
+/*                          Private Functions                                 */
+/*===========================================================================*/
+
+static api_entry_t *find_endpoint(const char *name)
+{
+    for (size_t i = 0; i < CONFIG_TS_API_MAX_ENDPOINTS; i++) {
+        if (s_api.endpoints[i].used && 
+            strcmp(s_api.endpoints[i].name, name) == 0) {
+            return &s_api.endpoints[i];
+        }
+    }
+    return NULL;
+}
+
+static api_entry_t *find_free_slot(void)
+{
+    for (size_t i = 0; i < CONFIG_TS_API_MAX_ENDPOINTS; i++) {
+        if (!s_api.endpoints[i].used) {
+            return &s_api.endpoints[i];
+        }
+    }
+    return NULL;
+}
+
+/*===========================================================================*/
+/*                          Core API Implementation                           */
+/*===========================================================================*/
+
+esp_err_t ts_api_init(void)
+{
+    if (s_api.initialized) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    
+    /* Create mutex */
+    s_api.mutex = xSemaphoreCreateMutex();
+    if (s_api.mutex == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+    
+    /* Allocate endpoint array */
+    s_api.endpoints = calloc(CONFIG_TS_API_MAX_ENDPOINTS, sizeof(api_entry_t));
+    if (s_api.endpoints == NULL) {
+        vSemaphoreDelete(s_api.mutex);
+        return ESP_ERR_NO_MEM;
+    }
+    
+    s_api.endpoint_count = 0;
+    s_api.initialized = true;
+    
+    TS_LOGI(TAG, "API layer initialized (max %d endpoints)", CONFIG_TS_API_MAX_ENDPOINTS);
+    
+    return ESP_OK;
+}
+
+esp_err_t ts_api_deinit(void)
+{
+    if (!s_api.initialized) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    
+    /* Free descriptions and permissions */
+    for (size_t i = 0; i < CONFIG_TS_API_MAX_ENDPOINTS; i++) {
+        if (s_api.endpoints[i].used) {
+            free(s_api.endpoints[i].description);
+            free(s_api.endpoints[i].permission);
+        }
+    }
+    
+    free(s_api.endpoints);
+    vSemaphoreDelete(s_api.mutex);
+    
+    s_api.endpoints = NULL;
+    s_api.mutex = NULL;
+    s_api.endpoint_count = 0;
+    s_api.initialized = false;
+    
+    TS_LOGI(TAG, "API layer deinitialized");
+    
+    return ESP_OK;
+}
+
+esp_err_t ts_api_register(const ts_api_endpoint_t *endpoint)
+{
+    if (!s_api.initialized) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    
+    if (endpoint == NULL || endpoint->name == NULL || endpoint->handler == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    
+    if (strlen(endpoint->name) >= CONFIG_TS_API_MAX_NAME_LENGTH) {
+        TS_LOGE(TAG, "API name too long: %s", endpoint->name);
+        return ESP_ERR_INVALID_ARG;
+    }
+    
+    xSemaphoreTake(s_api.mutex, portMAX_DELAY);
+    
+    /* Check for duplicate */
+    if (find_endpoint(endpoint->name) != NULL) {
+        xSemaphoreGive(s_api.mutex);
+        TS_LOGE(TAG, "API already registered: %s", endpoint->name);
+        return ESP_ERR_INVALID_STATE;
+    }
+    
+    /* Find free slot */
+    api_entry_t *entry = find_free_slot();
+    if (entry == NULL) {
+        xSemaphoreGive(s_api.mutex);
+        TS_LOGE(TAG, "No free API slots");
+        return ESP_ERR_NO_MEM;
+    }
+    
+    /* Fill entry */
+    strncpy(entry->name, endpoint->name, CONFIG_TS_API_MAX_NAME_LENGTH - 1);
+    entry->name[CONFIG_TS_API_MAX_NAME_LENGTH - 1] = '\0';
+    
+    entry->description = endpoint->description ? strdup(endpoint->description) : NULL;
+    entry->category = endpoint->category;
+    entry->handler = endpoint->handler;
+    entry->requires_auth = endpoint->requires_auth;
+    entry->permission = endpoint->permission ? strdup(endpoint->permission) : NULL;
+    entry->used = true;
+    
+    s_api.endpoint_count++;
+    
+    xSemaphoreGive(s_api.mutex);
+    
+    TS_LOGD(TAG, "Registered API: %s", endpoint->name);
+    
+    return ESP_OK;
+}
+
+esp_err_t ts_api_register_multiple(const ts_api_endpoint_t *endpoints, size_t count)
+{
+    if (endpoints == NULL || count == 0) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    
+    for (size_t i = 0; i < count; i++) {
+        esp_err_t ret = ts_api_register(&endpoints[i]);
+        if (ret != ESP_OK) {
+            return ret;
+        }
+    }
+    
+    return ESP_OK;
+}
+
+esp_err_t ts_api_unregister(const char *name)
+{
+    if (!s_api.initialized) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    
+    if (name == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    
+    xSemaphoreTake(s_api.mutex, portMAX_DELAY);
+    
+    api_entry_t *entry = find_endpoint(name);
+    if (entry == NULL) {
+        xSemaphoreGive(s_api.mutex);
+        return ESP_ERR_NOT_FOUND;
+    }
+    
+    free(entry->description);
+    free(entry->permission);
+    memset(entry, 0, sizeof(api_entry_t));
+    s_api.endpoint_count--;
+    
+    xSemaphoreGive(s_api.mutex);
+    
+    TS_LOGD(TAG, "Unregistered API: %s", name);
+    
+    return ESP_OK;
+}
+
+esp_err_t ts_api_call(const char *name, const cJSON *params, ts_api_result_t *result)
+{
+    if (!s_api.initialized) {
+        if (result) {
+            ts_api_result_error(result, TS_API_ERR_INTERNAL, "API not initialized");
+        }
+        return ESP_ERR_INVALID_STATE;
+    }
+    
+    if (name == NULL || result == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    
+    ts_api_result_init(result);
+    
+    xSemaphoreTake(s_api.mutex, portMAX_DELAY);
+    
+    api_entry_t *entry = find_endpoint(name);
+    if (entry == NULL) {
+        xSemaphoreGive(s_api.mutex);
+        ts_api_result_error(result, TS_API_ERR_NOT_FOUND, "API not found");
+        return ESP_ERR_NOT_FOUND;
+    }
+    
+    /* Copy handler to call outside mutex */
+    ts_api_handler_t handler = entry->handler;
+    
+    xSemaphoreGive(s_api.mutex);
+    
+    /* Call handler */
+    TS_LOGD(TAG, "Calling API: %s", name);
+    esp_err_t ret = handler(params, result);
+    
+    if (ret != ESP_OK && result->code == TS_API_OK) {
+        ts_api_result_error(result, TS_API_ERR_INTERNAL, "Handler error");
+    }
+    
+    return ret;
+}
+
+esp_err_t ts_api_call_str(const char *name, const char *params_json, ts_api_result_t *result)
+{
+    cJSON *params = NULL;
+    
+    if (params_json && strlen(params_json) > 0) {
+        params = cJSON_Parse(params_json);
+        if (params == NULL) {
+            if (result) {
+                ts_api_result_error(result, TS_API_ERR_INVALID_ARG, "Invalid JSON");
+            }
+            return ESP_ERR_INVALID_ARG;
+        }
+    }
+    
+    esp_err_t ret = ts_api_call(name, params, result);
+    
+    if (params) {
+        cJSON_Delete(params);
+    }
+    
+    return ret;
+}
+
+cJSON *ts_api_list(ts_api_category_t category)
+{
+    if (!s_api.initialized) {
+        return NULL;
+    }
+    
+    cJSON *arr = cJSON_CreateArray();
+    if (arr == NULL) {
+        return NULL;
+    }
+    
+    xSemaphoreTake(s_api.mutex, portMAX_DELAY);
+    
+    for (size_t i = 0; i < CONFIG_TS_API_MAX_ENDPOINTS; i++) {
+        if (s_api.endpoints[i].used) {
+            if (category >= TS_API_CAT_MAX || 
+                s_api.endpoints[i].category == category) {
+                cJSON_AddItemToArray(arr, 
+                    cJSON_CreateString(s_api.endpoints[i].name));
+            }
+        }
+    }
+    
+    xSemaphoreGive(s_api.mutex);
+    
+    return arr;
+}
+
+cJSON *ts_api_get_info(const char *name)
+{
+    if (!s_api.initialized || name == NULL) {
+        return NULL;
+    }
+    
+    xSemaphoreTake(s_api.mutex, portMAX_DELAY);
+    
+    api_entry_t *entry = find_endpoint(name);
+    if (entry == NULL) {
+        xSemaphoreGive(s_api.mutex);
+        return NULL;
+    }
+    
+    cJSON *info = cJSON_CreateObject();
+    if (info) {
+        cJSON_AddStringToObject(info, "name", entry->name);
+        if (entry->description) {
+            cJSON_AddStringToObject(info, "description", entry->description);
+        }
+        cJSON_AddStringToObject(info, "category", 
+            ts_api_category_name(entry->category));
+        cJSON_AddBoolToObject(info, "requires_auth", entry->requires_auth);
+        if (entry->permission) {
+            cJSON_AddStringToObject(info, "permission", entry->permission);
+        }
+    }
+    
+    xSemaphoreGive(s_api.mutex);
+    
+    return info;
+}
+
+/*===========================================================================*/
+/*                          Result Helpers                                    */
+/*===========================================================================*/
+
+void ts_api_result_init(ts_api_result_t *result)
+{
+    if (result) {
+        result->code = TS_API_OK;
+        result->message = NULL;
+        result->data = NULL;
+    }
+}
+
+void ts_api_result_free(ts_api_result_t *result)
+{
+    if (result) {
+        free(result->message);
+        if (result->data) {
+            cJSON_Delete(result->data);
+        }
+        result->message = NULL;
+        result->data = NULL;
+    }
+}
+
+void ts_api_result_ok(ts_api_result_t *result, cJSON *data)
+{
+    if (result) {
+        result->code = TS_API_OK;
+        free(result->message);
+        result->message = NULL;
+        if (result->data) {
+            cJSON_Delete(result->data);
+        }
+        result->data = data;
+    }
+}
+
+void ts_api_result_error(ts_api_result_t *result, ts_api_result_code_t code,
+                          const char *message)
+{
+    if (result) {
+        result->code = code;
+        free(result->message);
+        result->message = message ? strdup(message) : NULL;
+        if (result->data) {
+            cJSON_Delete(result->data);
+            result->data = NULL;
+        }
+    }
+}
+
+cJSON *ts_api_result_to_json(const ts_api_result_t *result)
+{
+    if (result == NULL) {
+        return NULL;
+    }
+    
+    cJSON *json = cJSON_CreateObject();
+    if (json == NULL) {
+        return NULL;
+    }
+    
+    cJSON_AddBoolToObject(json, "success", result->code == TS_API_OK);
+    cJSON_AddStringToObject(json, "code", ts_api_code_name(result->code));
+    
+    if (result->message) {
+        cJSON_AddStringToObject(json, "message", result->message);
+    }
+    
+    if (result->data) {
+        cJSON_AddItemToObject(json, "data", cJSON_Duplicate(result->data, 1));
+    }
+    
+    return json;
+}
+
+char *ts_api_result_to_string(const ts_api_result_t *result)
+{
+    cJSON *json = ts_api_result_to_json(result);
+    if (json == NULL) {
+        return NULL;
+    }
+    
+    char *str = cJSON_PrintUnformatted(json);
+    cJSON_Delete(json);
+    
+    return str;
+}
+
+const char *ts_api_code_name(ts_api_result_code_t code)
+{
+    if (code >= TS_API_ERR_MAX) {
+        return "UNKNOWN";
+    }
+    return s_code_names[code];
+}
+
+/*===========================================================================*/
+/*                          Category Info                                     */
+/*===========================================================================*/
+
+const char *ts_api_category_name(ts_api_category_t category)
+{
+    if (category >= TS_API_CAT_MAX) {
+        return "unknown";
+    }
+    return s_category_names[category];
+}
+
+ts_api_category_t ts_api_category_by_name(const char *name)
+{
+    if (name == NULL) {
+        return TS_API_CAT_MAX;
+    }
+    
+    for (int i = 0; i < TS_API_CAT_MAX; i++) {
+        if (strcmp(s_category_names[i], name) == 0) {
+            return (ts_api_category_t)i;
+        }
+    }
+    
+    return TS_API_CAT_MAX;
+}

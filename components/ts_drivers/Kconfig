@@ -1,0 +1,49 @@
+menu "TianShanOS Drivers Configuration"
+
+    config TS_DRIVERS_FAN_ENABLE
+        bool "Enable Fan Control"
+        default y
+        help
+            Enable fan control driver with PWM and temperature curves.
+
+    config TS_DRIVERS_FAN_PWM_FREQ
+        int "Fan PWM Frequency (Hz)"
+        default 25000
+        depends on TS_DRIVERS_FAN_ENABLE
+        help
+            PWM frequency for fan control. Default 25kHz for 4-pin fans.
+
+    config TS_DRIVERS_FAN_TEMP_UPDATE_MS
+        int "Temperature Update Interval (ms)"
+        default 1000
+        depends on TS_DRIVERS_FAN_ENABLE
+
+    config TS_DRIVERS_POWER_ENABLE
+        bool "Enable Power Monitor"
+        default y
+        help
+            Enable power monitoring via ADC or UART power chips.
+
+    config TS_DRIVERS_POWER_ADC_SAMPLES
+        int "ADC Sample Count for Averaging"
+        default 16
+        depends on TS_DRIVERS_POWER_ENABLE
+
+    config TS_DRIVERS_DEVICE_ENABLE
+        bool "Enable Device Control (AGX/LPMU)"
+        default y
+        help
+            Enable AGX and LPMU power control.
+
+    config TS_DRIVERS_AGX_POWER_ON_DELAY_MS
+        int "AGX Power On Delay (ms)"
+        default 100
+        depends on TS_DRIVERS_DEVICE_ENABLE
+
+    config TS_DRIVERS_USB_MUX_ENABLE
+        bool "Enable USB MUX Control"
+        default y
+        help
+            Enable USB MUX switching between host and device modes.
+
+endmenu

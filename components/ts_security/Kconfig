@@ -1,0 +1,32 @@
+menu "TianShanOS Security Configuration"
+
+    config TS_SECURITY_ENABLE
+        bool "Enable Security Module"
+        default y
+
+    config TS_SECURITY_KEY_STORAGE_NVS
+        bool "Store keys in NVS"
+        default y
+        depends on TS_SECURITY_ENABLE
+
+    config TS_SECURITY_MTLS_ENABLE
+        bool "Enable mTLS Authentication"
+        default y
+        depends on TS_SECURITY_ENABLE
+
+    config TS_SECURITY_TOKEN_EXPIRE_SEC
+        int "Auth Token Expiration (seconds)"
+        default 3600
+        depends on TS_SECURITY_ENABLE
+
+    config TS_SECURITY_MAX_SESSIONS
+        int "Maximum Active Sessions"
+        default 8
+        depends on TS_SECURITY_ENABLE
+
+    config TS_SECURITY_PERMISSION_LEVELS
+        int "Number of Permission Levels"
+        default 4
+        depends on TS_SECURITY_ENABLE
+
+endmenu

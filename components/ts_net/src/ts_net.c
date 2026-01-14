@@ -1,0 +1,210 @@
+/**
+ * @file ts_net.c
+ * @brief Network Subsystem Main
+ */
+
+#include "ts_net.h"
+#include "ts_eth.h"
+#include "ts_wifi.h"
+#include "ts_log.h"
+#include "esp_netif.h"
+#include "esp_event.h"
+#include <string.h>
+#include <lwip/ip4_addr.h>
+
+#define TAG "ts_net"
+
+static bool s_initialized = false;
+static char s_hostname[32] = "tianshanOS";
+static char s_ip_str[16];
+
+esp_err_t ts_net_init(void)
+{
+    if (s_initialized) return ESP_OK;
+    
+    esp_err_t ret = esp_netif_init();
+    if (ret != ESP_OK) {
+        TS_LOGE(TAG, "esp_netif_init failed");
+        return ret;
+    }
+    
+    s_initialized = true;
+    TS_LOGI(TAG, "Network subsystem initialized");
+    return ESP_OK;
+}
+
+esp_err_t ts_net_deinit(void)
+{
+    if (!s_initialized) return ESP_OK;
+    
+#ifdef CONFIG_TS_NET_WIFI_ENABLE
+    ts_wifi_deinit();
+#endif
+#ifdef CONFIG_TS_NET_ETHERNET_ENABLE
+    ts_eth_deinit();
+#endif
+    
+    s_initialized = false;
+    return ESP_OK;
+}
+
+ts_net_status_t ts_net_get_status(ts_net_if_t iface)
+{
+    switch (iface) {
+        case TS_NET_IF_ETH:
+#ifdef CONFIG_TS_NET_ETHERNET_ENABLE
+            return ts_eth_is_link_up() ? TS_NET_STATUS_CONNECTED : TS_NET_STATUS_DOWN;
+#else
+            return TS_NET_STATUS_DOWN;
+#endif
+        
+        case TS_NET_IF_WIFI_STA:
+#ifdef CONFIG_TS_NET_WIFI_ENABLE
+            return ts_wifi_sta_is_connected() ? TS_NET_STATUS_CONNECTED : TS_NET_STATUS_DOWN;
+#else
+            return TS_NET_STATUS_DOWN;
+#endif
+        
+        case TS_NET_IF_WIFI_AP:
+#ifdef CONFIG_TS_NET_WIFI_ENABLE
+            return (ts_wifi_get_mode() == TS_WIFI_MODE_AP || 
+                    ts_wifi_get_mode() == TS_WIFI_MODE_APSTA) ? 
+                    TS_NET_STATUS_CONNECTED : TS_NET_STATUS_DOWN;
+#else
+            return TS_NET_STATUS_DOWN;
+#endif
+        
+        default:
+            return TS_NET_STATUS_DOWN;
+    }
+}
+
+static esp_netif_t *get_netif(ts_net_if_t iface)
+{
+    switch (iface) {
+        case TS_NET_IF_ETH:
+#ifdef CONFIG_TS_NET_ETHERNET_ENABLE
+            return ts_eth_get_netif();
+#else
+            return NULL;
+#endif
+        case TS_NET_IF_WIFI_STA:
+            return esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+        case TS_NET_IF_WIFI_AP:
+            return esp_netif_get_handle_from_ifkey("WIFI_AP_DEF");
+        default:
+            return NULL;
+    }
+}
+
+esp_err_t ts_net_get_ip_info(ts_net_if_t iface, ts_net_ip_info_t *info)
+{
+    if (!info) return ESP_ERR_INVALID_ARG;
+    
+    esp_netif_t *netif = get_netif(iface);
+    if (!netif) return ESP_ERR_NOT_FOUND;
+    
+    esp_netif_ip_info_t ip_info;
+    esp_err_t ret = esp_netif_get_ip_info(netif, &ip_info);
+    if (ret != ESP_OK) return ret;
+    
+    info->ip = ip_info.ip.addr;
+    info->netmask = ip_info.netmask.addr;
+    info->gateway = ip_info.gw.addr;
+    
+    esp_netif_dns_info_t dns;
+    if (esp_netif_get_dns_info(netif, ESP_NETIF_DNS_MAIN, &dns) == ESP_OK) {
+        info->dns1 = dns.ip.u_addr.ip4.addr;
+    }
+    if (esp_netif_get_dns_info(netif, ESP_NETIF_DNS_BACKUP, &dns) == ESP_OK) {
+        info->dns2 = dns.ip.u_addr.ip4.addr;
+    }
+    
+    return ESP_OK;
+}
+
+esp_err_t ts_net_set_ip_info(ts_net_if_t iface, const ts_net_ip_info_t *info)
+{
+    if (!info) return ESP_ERR_INVALID_ARG;
+    
+    esp_netif_t *netif = get_netif(iface);
+    if (!netif) return ESP_ERR_NOT_FOUND;
+    
+    esp_netif_dhcpc_stop(netif);
+    
+    esp_netif_ip_info_t ip_info = {
+        .ip.addr = info->ip,
+        .netmask.addr = info->netmask,
+        .gw.addr = info->gateway
+    };
+    
+    esp_err_t ret = esp_netif_set_ip_info(netif, &ip_info);
+    if (ret != ESP_OK) return ret;
+    
+    if (info->dns1) {
+        esp_netif_dns_info_t dns = {.ip.u_addr.ip4.addr = info->dns1};
+        esp_netif_set_dns_info(netif, ESP_NETIF_DNS_MAIN, &dns);
+    }
+    if (info->dns2) {
+        esp_netif_dns_info_t dns = {.ip.u_addr.ip4.addr = info->dns2};
+        esp_netif_set_dns_info(netif, ESP_NETIF_DNS_BACKUP, &dns);
+    }
+    
+    return ESP_OK;
+}
+
+esp_err_t ts_net_enable_dhcp(ts_net_if_t iface)
+{
+    esp_netif_t *netif = get_netif(iface);
+    if (!netif) return ESP_ERR_NOT_FOUND;
+    
+    return esp_netif_dhcpc_start(netif);
+}
+
+esp_err_t ts_net_get_stats(ts_net_if_t iface, ts_net_stats_t *stats)
+{
+    if (!stats) return ESP_ERR_INVALID_ARG;
+    memset(stats, 0, sizeof(*stats));
+    return ESP_OK;
+}
+
+esp_err_t ts_net_get_mac(ts_net_if_t iface, uint8_t mac[6])
+{
+    if (!mac) return ESP_ERR_INVALID_ARG;
+    
+    esp_netif_t *netif = get_netif(iface);
+    if (!netif) return ESP_ERR_NOT_FOUND;
+    
+    return esp_netif_get_mac(netif, mac);
+}
+
+esp_err_t ts_net_set_hostname(const char *hostname)
+{
+    if (!hostname) return ESP_ERR_INVALID_ARG;
+    strncpy(s_hostname, hostname, sizeof(s_hostname) - 1);
+    return ESP_OK;
+}
+
+const char *ts_net_get_hostname(void)
+{
+    return s_hostname;
+}
+
+const char *ts_net_ip_to_str(uint32_t ip)
+{
+    ip4_addr_t addr = {.addr = ip};
+    strncpy(s_ip_str, ip4addr_ntoa(&addr), sizeof(s_ip_str) - 1);
+    return s_ip_str;
+}
+
+esp_err_t ts_net_str_to_ip(const char *str, uint32_t *ip)
+{
+    if (!str || !ip) return ESP_ERR_INVALID_ARG;
+    
+    ip4_addr_t addr;
+    if (ip4addr_aton(str, &addr)) {
+        *ip = addr.addr;
+        return ESP_OK;
+    }
+    return ESP_ERR_INVALID_ARG;
+}

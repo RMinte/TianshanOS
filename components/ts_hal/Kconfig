@@ -1,0 +1,70 @@
+menu "TianShanOS HAL Configuration"
+
+    config TS_HAL_MAX_PINS
+        int "Maximum number of managed pins"
+        default 48
+        help
+            Maximum number of pins that can be managed by the pin manager.
+
+    config TS_HAL_MAX_GPIO_HANDLES
+        int "Maximum GPIO handles"
+        default 32
+        help
+            Maximum number of GPIO handles that can be created.
+
+    config TS_HAL_MAX_PWM_HANDLES
+        int "Maximum PWM handles"
+        default 8
+        help
+            Maximum number of PWM handles that can be created.
+
+    config TS_HAL_MAX_I2C_HANDLES
+        int "Maximum I2C handles"
+        default 4
+        help
+            Maximum number of I2C handles that can be created.
+
+    config TS_HAL_MAX_SPI_HANDLES
+        int "Maximum SPI handles"
+        default 4
+        help
+            Maximum number of SPI handles that can be created.
+
+    config TS_HAL_MAX_UART_HANDLES
+        int "Maximum UART handles"
+        default 3
+        help
+            Maximum number of UART handles that can be created.
+
+    config TS_HAL_MAX_ADC_HANDLES
+        int "Maximum ADC handles"
+        default 8
+        help
+            Maximum number of ADC handles that can be created.
+
+    config TS_HAL_PIN_CONFIG_PATH
+        string "Default pin configuration file path"
+        default "/sdcard/config/pins.json"
+        help
+            Default path for loading pin configuration from file.
+
+    config TS_HAL_ENABLE_PIN_CONFLICT_CHECK
+        bool "Enable pin conflict checking"
+        default y
+        help
+            Enable runtime checking for pin conflicts.
+
+    config TS_HAL_PWM_DEFAULT_FREQ
+        int "Default PWM frequency (Hz)"
+        default 25000
+        help
+            Default PWM frequency for fan control and other PWM outputs.
+
+    config TS_HAL_PWM_DEFAULT_RESOLUTION
+        int "Default PWM resolution (bits)"
+        default 8
+        range 1 14
+        help
+            Default PWM resolution in bits.
+
+endmenu

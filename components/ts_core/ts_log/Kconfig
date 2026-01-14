@@ -1,0 +1,123 @@
+menu "TianShanOS Logging"
+
+    config TS_LOG_ENABLE
+        bool "Enable TianShanOS Logging System"
+        default y
+        help
+            Enable the TianShanOS logging system with multiple outputs.
+
+    choice TS_LOG_DEFAULT_LEVEL
+        prompt "Default log level"
+        default TS_LOG_DEFAULT_LEVEL_INFO
+        help
+            Select the default log level.
+
+        config TS_LOG_DEFAULT_LEVEL_NONE
+            bool "None"
+        config TS_LOG_DEFAULT_LEVEL_ERROR
+            bool "Error"
+        config TS_LOG_DEFAULT_LEVEL_WARN
+            bool "Warning"
+        config TS_LOG_DEFAULT_LEVEL_INFO
+            bool "Info"
+        config TS_LOG_DEFAULT_LEVEL_DEBUG
+            bool "Debug"
+        config TS_LOG_DEFAULT_LEVEL_VERBOSE
+            bool "Verbose"
+    endchoice
+
+    config TS_LOG_DEFAULT_LEVEL
+        int
+        default 0 if TS_LOG_DEFAULT_LEVEL_NONE
+        default 1 if TS_LOG_DEFAULT_LEVEL_ERROR
+        default 2 if TS_LOG_DEFAULT_LEVEL_WARN
+        default 3 if TS_LOG_DEFAULT_LEVEL_INFO
+        default 4 if TS_LOG_DEFAULT_LEVEL_DEBUG
+        default 5 if TS_LOG_DEFAULT_LEVEL_VERBOSE
+
+    config TS_LOG_COLORS
+        bool "Enable colored output"
+        default y
+        help
+            Enable ANSI color codes in log output.
+
+    config TS_LOG_TIMESTAMP
+        bool "Include timestamp in logs"
+        default y
+        help
+            Include timestamp in log messages.
+
+    config TS_LOG_TASK_NAME
+        bool "Include task name in logs"
+        default y
+        help
+            Include FreeRTOS task name in log messages.
+
+    menu "Log Outputs"
+
+        config TS_LOG_OUTPUT_CONSOLE
+            bool "Console output (UART)"
+            default y
+            help
+                Enable console (UART) log output.
+
+        config TS_LOG_OUTPUT_FILE
+            bool "File output"
+            default n
+            help
+                Enable file log output.
+
+        config TS_LOG_FILE_PATH
+            string "Log file path"
+            default "/sdcard/logs"
+            depends on TS_LOG_OUTPUT_FILE
+            help
+                Directory path for log files.
+
+        config TS_LOG_FILE_MAX_SIZE
+            int "Maximum log file size (KB)"
+            default 1024
+            range 64 10240
+            depends on TS_LOG_OUTPUT_FILE
+            help
+                Maximum size of each log file in kilobytes.
+
+        config TS_LOG_FILE_MAX_FILES
+            int "Maximum number of log files"
+            default 5
+            range 1 20
+            depends on TS_LOG_OUTPUT_FILE
+            help
+                Maximum number of log files to keep (rotation).
+
+        config TS_LOG_OUTPUT_BUFFER
+            bool "Memory buffer output"
+            default y
+            help
+                Enable memory buffer for recent logs (useful for diagnostics).
+
+        config TS_LOG_BUFFER_SIZE
+            int "Log buffer size (entries)"
+            default 100
+            range 10 1000
+            depends on TS_LOG_OUTPUT_BUFFER
+            help
+                Number of recent log entries to keep in memory.
+
+    endmenu
+
+    config TS_LOG_TAG_MAX_LENGTH
+        int "Maximum tag length"
+        default 16
+        range 8 32
+        help
+            Maximum length of log tags.
+
+    config TS_LOG_MESSAGE_MAX_LENGTH
+        int "Maximum message length"
+        default 256
+        range 64 1024
+        help
+            Maximum length of log messages.
+
+endmenu

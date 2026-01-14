@@ -1,0 +1,63 @@
+menu "TianShanOS Event System"
+
+    config TS_EVENT_ENABLE
+        bool "Enable TianShanOS Event System"
+        default y
+        help
+            Enable the TianShanOS event bus system.
+
+    config TS_EVENT_LOOP_TASK_PRIORITY
+        int "Event loop task priority"
+        default 5
+        range 1 25
+        help
+            FreeRTOS priority for the event loop task.
+
+    config TS_EVENT_LOOP_TASK_STACK_SIZE
+        int "Event loop task stack size"
+        default 4096
+        range 2048 16384
+        help
+            Stack size for the event loop task in bytes.
+
+    config TS_EVENT_QUEUE_SIZE
+        int "Event queue size"
+        default 32
+        range 8 256
+        help
+            Maximum number of events that can be queued.
+
+    config TS_EVENT_MAX_HANDLERS
+        int "Maximum event handlers"
+        default 64
+        range 16 256
+        help
+            Maximum number of event handlers that can be registered.
+
+    config TS_EVENT_MAX_EVENT_TYPES
+        int "Maximum event types"
+        default 64
+        range 16 256
+        help
+            Maximum number of event types that can be defined.
+
+    config TS_EVENT_DATA_MAX_SIZE
+        int "Maximum event data size"
+        default 256
+        range 32 1024
+        help
+            Maximum size of event data in bytes.
+
+    config TS_EVENT_ENABLE_STATS
+        bool "Enable event statistics"
+        default y
+        help
+            Enable collection of event statistics.
+
+    config TS_EVENT_ENABLE_TRACING
+        bool "Enable event tracing"
+        default n
+        help
+            Enable detailed event tracing for debugging.
+
+endmenu

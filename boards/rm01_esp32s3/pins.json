@@ -1,0 +1,143 @@
+{
+    "board": "rm01_esp32s3",
+    "version": "1.0",
+    "description": "Pin mapping for RM01 ESP32S3 board",
+    "pins": {
+        "LED_TOUCH": {
+            "gpio": 45,
+            "description": "Touch LED WS2812 data line"
+        },
+        "LED_BOARD": {
+            "gpio": 42,
+            "description": "Board LED WS2812 data line"
+        },
+        "LED_MATRIX": {
+            "gpio": 9,
+            "description": "Matrix LED WS2812 data line"
+        },
+        "LED_STATUS": {
+            "gpio": 47,
+            "description": "Status indicator LED"
+        },
+        "FAN_PWM_0": {
+            "gpio": 41,
+            "description": "Fan 0 PWM control"
+        },
+        "FAN_PWM_1": {
+            "gpio": 40,
+            "description": "Fan 1 PWM control"
+        },
+        "ETH_MISO": {
+            "gpio": 13,
+            "description": "W5500 SPI MISO"
+        },
+        "ETH_MOSI": {
+            "gpio": 11,
+            "description": "W5500 SPI MOSI"
+        },
+        "ETH_SCLK": {
+            "gpio": 12,
+            "description": "W5500 SPI SCLK"
+        },
+        "ETH_CS": {
+            "gpio": 10,
+            "description": "W5500 SPI CS"
+        },
+        "ETH_INT": {
+            "gpio": 38,
+            "description": "W5500 interrupt"
+        },
+        "ETH_RST": {
+            "gpio": 39,
+            "description": "W5500 reset"
+        },
+        "USB_MUX_0": {
+            "gpio": 8,
+            "description": "USB MUX select 0"
+        },
+        "USB_MUX_1": {
+            "gpio": 48,
+            "description": "USB MUX select 1"
+        },
+        "AGX_POWER": {
+            "gpio": 1,
+            "description": "AGX power control"
+        },
+        "AGX_RESET": {
+            "gpio": 2,
+            "description": "AGX reset control"
+        },
+        "AGX_FORCE_RECOVERY": {
+            "gpio": 46,
+            "description": "AGX force recovery"
+        },
+        "LPMU_POWER": {
+            "gpio": 3,
+            "description": "LPMU power control"
+        },
+        "LPMU_RESET": {
+            "gpio": 14,
+            "description": "LPMU reset control"
+        },
+        "POWER_ADC": {
+            "gpio": 4,
+            "description": "Power monitor ADC input"
+        },
+        "POWER_UART_TX": {
+            "gpio": 17,
+            "description": "Power module UART TX"
+        },
+        "POWER_UART_RX": {
+            "gpio": 18,
+            "description": "Power module UART RX"
+        },
+        "SD_CMD": {
+            "gpio": 35,
+            "description": "SD card CMD"
+        },
+        "SD_CLK": {
+            "gpio": 36,
+            "description": "SD card CLK"
+        },
+        "SD_D0": {
+            "gpio": 37,
+            "description": "SD card D0"
+        },
+        "SD_D1": {
+            "gpio": 33,
+            "description": "SD card D1"
+        },
+        "SD_D2": {
+            "gpio": 34,
+            "description": "SD card D2"
+        },
+        "SD_D3": {
+            "gpio": 21,
+            "description": "SD card D3"
+        },
+        "I2C0_SDA": {
+            "gpio": 5,
+            "description": "I2C bus 0 SDA"
+        },
+        "I2C0_SCL": {
+            "gpio": 6,
+            "description": "I2C bus 0 SCL"
+        },
+        "I2C1_SDA": {
+            "gpio": 15,
+            "description": "I2C bus 1 SDA"
+        },
+        "I2C1_SCL": {
+            "gpio": 16,
+            "description": "I2C bus 1 SCL"
+        },
+        "UART1_TX": {
+            "gpio": 17,
+            "description": "UART1 TX"
+        },
+        "UART1_RX": {
+            "gpio": 18,
+            "description": "UART1 RX"
+        }
+    }
+}

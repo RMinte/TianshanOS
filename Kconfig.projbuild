@@ -1,0 +1,38 @@
+menu "TianShanOS Configuration"
+
+    config TIANSHAN_OS_VERSION
+        string "TianShanOS Version"
+        default "0.1.0-dev"
+        help
+            Version string for TianShanOS.
+
+    menu "Board Selection"
+        choice TIANSHAN_BOARD
+            prompt "Target board"
+            default TIANSHAN_BOARD_RM01_ESP32S3
+            help
+                Select the target board.
+
+            config TIANSHAN_BOARD_RM01_ESP32S3
+                bool "RM01 with ESP32-S3"
+                help
+                    Rack Manager 01 board with ESP32-S3.
+
+            config TIANSHAN_BOARD_RM01_ESP32P4
+                bool "RM01 with ESP32-P4"
+                help
+                    Rack Manager 01 board with ESP32-P4.
+
+            config TIANSHAN_BOARD_CUSTOM
+                bool "Custom board"
+                help
+                    Custom board configuration.
+        endchoice
+    endmenu
+
+    rsource "components/ts_core/ts_config/Kconfig"
+    rsource "components/ts_core/ts_log/Kconfig"
+    rsource "components/ts_core/ts_event/Kconfig"
+    rsource "components/ts_core/ts_service/Kconfig"
+
+endmenu

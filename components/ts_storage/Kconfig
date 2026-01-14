@@ -1,0 +1,67 @@
+menu "TianShanOS Storage Configuration"
+
+    config TS_STORAGE_ENABLE_SPIFFS
+        bool "Enable SPIFFS support"
+        default y
+        help
+            Enable SPIFFS filesystem for internal storage.
+
+    config TS_STORAGE_SPIFFS_MOUNT_POINT
+        string "SPIFFS mount point"
+        default "/spiffs"
+        depends on TS_STORAGE_ENABLE_SPIFFS
+        help
+            Mount point for SPIFFS filesystem.
+
+    config TS_STORAGE_SPIFFS_PARTITION
+        string "SPIFFS partition label"
+        default "storage"
+        depends on TS_STORAGE_ENABLE_SPIFFS
+        help
+            Partition label for SPIFFS.
+
+    config TS_STORAGE_SPIFFS_MAX_FILES
+        int "Maximum SPIFFS open files"
+        default 5
+        range 1 20
+        depends on TS_STORAGE_ENABLE_SPIFFS
+        help
+            Maximum number of simultaneously open SPIFFS files.
+
+    config TS_STORAGE_ENABLE_SD
+        bool "Enable SD card support"
+        default y
+        help
+            Enable SD card filesystem support.
+
+    config TS_STORAGE_SD_MOUNT_POINT
+        string "SD card mount point"
+        default "/sdcard"
+        depends on TS_STORAGE_ENABLE_SD
+        help
+            Mount point for SD card.
+
+    config TS_STORAGE_SD_MAX_FREQ_KHZ
+        int "SD card maximum frequency (kHz)"
+        default 20000
+        range 400 40000
+        depends on TS_STORAGE_ENABLE_SD
+        help
+            Maximum frequency for SD card communication.
+
+    choice TS_STORAGE_SD_MODE
+        prompt "SD card interface mode"
+        default TS_STORAGE_SD_MODE_SDIO_4BIT
+        depends on TS_STORAGE_ENABLE_SD
+        help
+            Select SD card interface mode.
+
+        config TS_STORAGE_SD_MODE_SPI
+            bool "SPI mode"
+        config TS_STORAGE_SD_MODE_SDIO_1BIT
+            bool "SDIO 1-bit mode"
+        config TS_STORAGE_SD_MODE_SDIO_4BIT
+            bool "SDIO 4-bit mode"
+    endchoice
+
+endmenu

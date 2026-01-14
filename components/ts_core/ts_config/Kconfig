@@ -1,0 +1,116 @@
+menu "TianShanOS Configuration Management"
+
+    config TS_CONFIG_ENABLE
+        bool "Enable Configuration Management"
+        default y
+        help
+            Enable the TianShanOS configuration management system.
+
+    config TS_CONFIG_MAX_KEY_LENGTH
+        int "Maximum configuration key length"
+        default 64
+        range 16 256
+        help
+            Maximum length of configuration key names.
+
+    config TS_CONFIG_MAX_VALUE_SIZE
+        int "Maximum configuration value size"
+        default 512
+        range 64 4096
+        help
+            Maximum size of configuration values in bytes.
+
+    config TS_CONFIG_MAX_LISTENERS
+        int "Maximum configuration change listeners"
+        default 16
+        range 4 64
+        help
+            Maximum number of configuration change listeners that can be registered.
+
+    config TS_CONFIG_NVS_NAMESPACE
+        string "NVS namespace for configuration"
+        default "ts_config"
+        help
+            The NVS namespace used to store configuration data.
+
+    menu "Configuration Backends"
+        config TS_CONFIG_NVS_BACKEND
+            bool "Enable NVS backend"
+            default y
+            help
+                Enable NVS (Non-Volatile Storage) as a configuration backend.
+
+        config TS_CONFIG_FILE_BACKEND
+            bool "Enable file backend"
+            default y
+            help
+                Enable file system as a configuration backend.
+
+        config TS_CONFIG_FILE_PATH
+            string "Configuration file path"
+            default "/sdcard/config"
+            depends on TS_CONFIG_FILE_BACKEND
+            help
+                Default path for configuration files.
+
+        config TS_CONFIG_FILE_FORMAT_JSON
+            bool "Support JSON format"
+            default y
+            depends on TS_CONFIG_FILE_BACKEND
+            help
+                Enable JSON format support for configuration files.
+
+    endmenu
+
+    menu "Configuration Priorities"
+        config TS_CONFIG_PRIORITY_CLI
+            int "CLI configuration priority"
+            default 100
+            range 0 255
+            help
+                Priority for CLI-set configurations. Higher value = higher priority.
+
+        config TS_CONFIG_PRIORITY_NVS
+            int "NVS configuration priority"
+            default 80
+            range 0 255
+            help
+                Priority for NVS-stored configurations.
+
+        config TS_CONFIG_PRIORITY_FILE
+            int "File configuration priority"
+            default 60
+            range 0 255
+            help
+                Priority for file-based configurations.
+
+        config TS_CONFIG_PRIORITY_DEFAULT
+            int "Default configuration priority"
+            default 0
+            range 0 255
+            help
+                Priority for default configurations.
+    endmenu
+
+    config TS_CONFIG_AUTO_SAVE
+        bool "Auto-save configuration changes"
+        default y
+        help
+            Automatically save configuration changes to persistent storage.
+
+    config TS_CONFIG_AUTO_SAVE_DELAY_MS
+        int "Auto-save delay in milliseconds"
+        default 1000
+        range 100 10000
+        depends on TS_CONFIG_AUTO_SAVE
+        help
+            Delay before auto-saving configuration changes.
+            Multiple changes within this period will be batched.
+
+    config TS_CONFIG_DEBUG
+        bool "Enable configuration debug logging"
+        default n
+        help
+            Enable detailed debug logging for configuration operations.
+
+endmenu

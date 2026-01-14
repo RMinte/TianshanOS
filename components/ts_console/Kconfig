@@ -1,0 +1,49 @@
+menu "TianShanOS Console Configuration"
+
+    config TS_CONSOLE_MAX_LINE_LENGTH
+        int "Maximum command line length"
+        default 256
+        range 64 1024
+        help
+            Maximum length of a command line input.
+
+    config TS_CONSOLE_MAX_HISTORY
+        int "Maximum history entries"
+        default 50
+        range 10 200
+        help
+            Maximum number of command history entries to store.
+
+    config TS_CONSOLE_TASK_PRIORITY
+        int "Console task priority"
+        default 5
+        range 1 24
+        help
+            FreeRTOS priority for the console task.
+
+    config TS_CONSOLE_TASK_STACK_SIZE
+        int "Console task stack size"
+        default 8192
+        range 4096 16384
+        help
+            Stack size for the console task in bytes.
+
+    config TS_CONSOLE_DEFAULT_PROMPT
+        string "Default console prompt"
+        default "tianshan> "
+        help
+            Default prompt string displayed in the console.
+
+    config TS_CONSOLE_ENABLE_COLORS
+        bool "Enable colored output"
+        default y
+        help
+            Enable ANSI color codes in console output.
+
+    config TS_CONSOLE_HISTORY_FILE
+        string "History file path"
+        default "/sdcard/.console_history"
+        help
+            Path to save command history.
+
+endmenu

@@ -1,0 +1,23 @@
+menu "TianShanOS API Configuration"
+
+    config TS_API_MAX_ENDPOINTS
+        int "Maximum API endpoints"
+        default 128
+        range 32 512
+        help
+            Maximum number of API endpoints that can be registered.
+
+    config TS_API_MAX_NAME_LENGTH
+        int "Maximum API name length"
+        default 64
+        range 32 128
+        help
+            Maximum length of an API endpoint name.
+
+    config TS_API_ENABLE_AUTH
+        bool "Enable API authentication"
+        default y
+        help
+            Enable authentication checking for API calls.
+
+endmenu

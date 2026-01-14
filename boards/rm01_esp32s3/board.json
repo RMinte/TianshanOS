@@ -1,0 +1,56 @@
+{
+    "board": {
+        "name": "rm01_esp32s3",
+        "description": "TianShanOS RM01 Board with ESP32S3",
+        "version": "1.0",
+        "mcu": "ESP32S3",
+        "flash_size_mb": 8,
+        "psram_size_mb": 8
+    },
+    "features": {
+        "ethernet": true,
+        "wifi": true,
+        "bluetooth": true,
+        "usb_otg": true,
+        "sd_card": true,
+        "led_touch": true,
+        "led_board": true,
+        "led_matrix": true,
+        "fan_control": true,
+        "power_monitor": true
+    },
+    "peripherals": {
+        "ethernet": {
+            "type": "W5500",
+            "spi_host": 2,
+            "clock_mhz": 20
+        },
+        "led_touch": {
+            "type": "WS2812",
+            "count": 16,
+            "rmt_channel": 0
+        },
+        "led_board": {
+            "type": "WS2812",
+            "count": 32,
+            "rmt_channel": 1
+        },
+        "led_matrix": {
+            "type": "WS2812",
+            "width": 8,
+            "height": 8,
+            "count": 64,
+            "rmt_channel": 2
+        },
+        "fans": {
+            "count": 2,
+            "pwm_frequency": 25000,
+            "min_duty": 20,
+            "max_duty": 100
+        },
+        "sd_card": {
+            "mode": "4bit",
+            "max_freq_khz": 20000
+        }
+    }
+}

@@ -1,0 +1,14 @@
+idf_component_register(
+    SRCS
+        "src/ts_security.c"
+        "src/ts_crypto.c"
+        "src/ts_auth.c"
+    INCLUDE_DIRS
+        "include"
+    REQUIRES
+        ts_core
+        mbedtls
+        nvs_flash
+    PRIV_REQUIRES
+        esp_timer
+)

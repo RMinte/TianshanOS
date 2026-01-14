@@ -1,0 +1,188 @@
+{
+    "board": "rm01_esp32s3",
+    "version": "1.0",
+    "description": "Default service configuration for RM01",
+    "services": [
+        {
+            "name": "ts_hal",
+            "enabled": true,
+            "phase": "hal",
+            "auto_start": true,
+            "restart_policy": "never",
+            "description": "Hardware abstraction layer"
+        },
+        {
+            "name": "storage",
+            "enabled": true,
+            "phase": "drivers",
+            "depends_on": ["ts_hal"],
+            "auto_start": true,
+            "restart_policy": "on_failure",
+            "config": {
+                "mount_sd": true,
+                "mount_spiffs": true,
+                "sd_mount_point": "/sdcard",
+                "spiffs_mount_point": "/spiffs"
+            }
+        },
+        {
+            "name": "ethernet",
+            "enabled": true,
+            "phase": "network",
+            "depends_on": ["ts_hal", "storage"],
+            "auto_start": true,
+            "restart_policy": "on_failure",
+            "config": {
+                "dhcp": true,
+                "hostname": "tianshaos"
+            }
+        },
+        {
+            "name": "wifi",
+            "enabled": false,
+            "phase": "network",
+            "depends_on": ["ts_hal"],
+            "auto_start": false,
+            "restart_policy": "on_failure",
+            "config": {
+                "mode": "sta",
+                "ssid": "",
+                "password": ""
+            }
+        },
+        {
+            "name": "fan_controller",
+            "enabled": true,
+            "phase": "drivers",
+            "depends_on": ["ts_hal"],
+            "auto_start": true,
+            "restart_policy": "on_failure",
+            "config": {
+                "mode": "auto",
+                "check_interval_ms": 1000,
+                "temp_low": 40,
+                "temp_high": 70,
+                "duty_min": 20,
+                "duty_max": 100
+            }
+        },
+        {
+            "name": "led_touch",
+            "enabled": true,
+            "phase": "drivers",
+            "depends_on": ["ts_hal"],
+            "auto_start": true,
+            "restart_policy": "on_failure",
+            "config": {
+                "brightness": 80,
+                "default_effect": "idle"
+            }
+        },
+        {
+            "name": "led_board",
+            "enabled": true,
+            "phase": "drivers",
+            "depends_on": ["ts_hal"],
+            "auto_start": true,
+            "restart_policy": "on_failure",
+            "config": {
+                "brightness": 60,
+                "default_effect": "breathing"
+            }
+        },
+        {
+            "name": "led_matrix",
+            "enabled": true,
+            "phase": "drivers",
+            "depends_on": ["ts_hal", "storage"],
+            "auto_start": true,
+            "restart_policy": "on_failure",
+            "config": {
+                "brightness": 50,
+                "default_image": "/sdcard/images/logo.png"
+            }
+        },
+        {
+            "name": "power_monitor",
+            "enabled": true,
+            "phase": "drivers",
+            "depends_on": ["ts_hal"],
+            "auto_start": true,
+            "restart_policy": "on_failure",
+            "config": {
+                "poll_interval_ms": 1000
+            }
+        },
+        {
+            "name": "agx_controller",
+            "enabled": true,
+            "phase": "service",
+            "depends_on": ["ts_hal", "ethernet"],
+            "optional_depends": ["ssh_client"],
+            "auto_start": true,
+            "restart_policy": "on_failure",
+            "config": {
+                "auto_power_on": false,
+                "watchdog_enabled": true,
+                "watchdog_timeout_sec": 120
+            }
+        },
+        {
+            "name": "lpmu_controller",
+            "enabled": true,
+            "phase": "service",
+            "depends_on": ["ts_hal"],
+            "auto_start": true,
+            "restart_policy": "on_failure"
+        },
+        {
+            "name": "usb_mux",
+            "enabled": true,
+            "phase": "drivers",
+            "depends_on": ["ts_hal"],
+            "auto_start": true,
+            "restart_policy": "never",
+            "config": {
+                "default_port": 0
+            }
+        },
+        {
+            "name": "console",
+            "enabled": true,
+            "phase": "ui",
+            "depends_on": ["ts_hal", "storage"],
+            "auto_start": true,
+            "restart_policy": "always",
+            "config": {
+                "prompt": "tianshan> ",
+                "history_size": 100
+            }
+        },
+        {
+            "name": "http_server",
+            "enabled": true,
+            "phase": "ui",
+            "depends_on": ["ethernet"],
+            "optional_depends": ["wifi"],
+            "auto_start": true,
+            "restart_policy": "on_failure",
+            "config": {
+                "port": 80,
+                "https_port": 443,
+                "enable_https": true,
+                "enable_mtls": false
+            }
+        },
+        {
+            "name": "ssh_client",
+            "enabled": true,
+            "phase": "security",
+            "depends_on": ["ethernet", "storage"],
+            "auto_start": false,
+            "restart_policy": "never",
+            "config": {
+                "key_path": "/sdcard/ssh/id_rsa"
+            }
+        }
+    ]
+}

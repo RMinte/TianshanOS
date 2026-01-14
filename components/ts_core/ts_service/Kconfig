@@ -1,0 +1,115 @@
+menu "TianShanOS Service Management"
+
+    config TS_SERVICE_ENABLE
+        bool "Enable TianShanOS Service Management"
+        default y
+        help
+            Enable the TianShanOS service management system.
+
+    config TS_SERVICE_MAX_SERVICES
+        int "Maximum number of services"
+        default 32
+        range 8 128
+        help
+            Maximum number of services that can be registered.
+
+    config TS_SERVICE_NAME_MAX_LENGTH
+        int "Maximum service name length"
+        default 32
+        range 16 64
+        help
+            Maximum length of service names.
+
+    config TS_SERVICE_MAX_DEPENDENCIES
+        int "Maximum dependencies per service"
+        default 8
+        range 4 16
+        help
+            Maximum number of dependencies a service can have.
+
+    config TS_SERVICE_STARTUP_TIMEOUT_MS
+        int "Service startup timeout (ms)"
+        default 30000
+        range 5000 120000
+        help
+            Maximum time allowed for a service to start, in milliseconds.
+
+    config TS_SERVICE_SHUTDOWN_TIMEOUT_MS
+        int "Service shutdown timeout (ms)"
+        default 10000
+        range 1000 60000
+        help
+            Maximum time allowed for a service to stop, in milliseconds.
+
+    menu "Startup Phases"
+        
+        config TS_SERVICE_PHASE_PLATFORM_PRIORITY
+            int "Platform phase priority"
+            default 10
+            help
+                Priority for platform initialization phase.
+
+        config TS_SERVICE_PHASE_CORE_PRIORITY
+            int "Core phase priority"
+            default 20
+            help
+                Priority for core services phase.
+
+        config TS_SERVICE_PHASE_HAL_PRIORITY
+            int "HAL phase priority"
+            default 30
+            help
+                Priority for hardware abstraction layer phase.
+
+        config TS_SERVICE_PHASE_DRIVER_PRIORITY
+            int "Driver phase priority"
+            default 40
+            help
+                Priority for driver initialization phase.
+
+        config TS_SERVICE_PHASE_NETWORK_PRIORITY
+            int "Network phase priority"
+            default 50
+            help
+                Priority for network services phase.
+
+        config TS_SERVICE_PHASE_SECURITY_PRIORITY
+            int "Security phase priority"
+            default 60
+            help
+                Priority for security services phase.
+
+        config TS_SERVICE_PHASE_SERVICE_PRIORITY
+            int "Service phase priority"
+            default 70
+            help
+                Priority for application services phase.
+
+        config TS_SERVICE_PHASE_UI_PRIORITY
+            int "UI phase priority"
+            default 80
+            help
+                Priority for user interface services phase.
+
+    endmenu
+
+    config TS_SERVICE_ENABLE_WATCHDOG
+        bool "Enable service watchdog"
+        default y
+        help
+            Enable watchdog monitoring for services.
+
+    config TS_SERVICE_WATCHDOG_TIMEOUT_MS
+        int "Watchdog timeout (ms)"
+        default 60000
+        depends on TS_SERVICE_ENABLE_WATCHDOG
+        help
+            Watchdog timeout for unresponsive services.
+
+    config TS_SERVICE_DEBUG
+        bool "Enable service debug logging"
+        default n
+        help
+            Enable detailed debug logging for service operations.
+
+endmenu

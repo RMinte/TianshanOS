@@ -1,0 +1,60 @@
+menu "TianShanOS Network Configuration"
+
+    config TS_NET_ETHERNET_ENABLE
+        bool "Enable Ethernet"
+        default y
+        help
+            Enable Ethernet networking with W5500.
+
+    config TS_NET_ETH_SPI_HOST
+        int "Ethernet SPI Host"
+        default 2
+        depends on TS_NET_ETHERNET_ENABLE
+
+    config TS_NET_WIFI_ENABLE
+        bool "Enable WiFi"
+        default y
+        help
+            Enable WiFi networking.
+
+    config TS_NET_WIFI_AP_SSID
+        string "WiFi AP SSID"
+        default "TianShanOS"
+        depends on TS_NET_WIFI_ENABLE
+
+    config TS_NET_WIFI_AP_PASS
+        string "WiFi AP Password"
+        default "tianshan123"
+        depends on TS_NET_WIFI_ENABLE
+
+    config TS_NET_WIFI_AP_CHANNEL
+        int "WiFi AP Channel"
+        default 1
+        range 1 13
+        depends on TS_NET_WIFI_ENABLE
+
+    config TS_NET_WIFI_AP_MAX_CONN
+        int "WiFi AP Max Connections"
+        default 4
+        range 1 10
+        depends on TS_NET_WIFI_ENABLE
+
+    config TS_NET_DHCP_SERVER_ENABLE
+        bool "Enable DHCP Server"
+        default y
+
+    config TS_NET_HTTP_SERVER_ENABLE
+        bool "Enable HTTP Server"
+        default y
+
+    config TS_NET_HTTP_PORT
+        int "HTTP Server Port"
+        default 80
+        depends on TS_NET_HTTP_SERVER_ENABLE
+
+    config TS_NET_HTTPS_PORT
+        int "HTTPS Server Port"
+        default 443
+        depends on TS_NET_HTTP_SERVER_ENABLE
+
+endmenu

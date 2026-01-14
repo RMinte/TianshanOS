@@ -1,0 +1,108 @@
+menu "TianShanOS LED Configuration"
+
+    config TS_LED_MAX_DEVICES
+        int "Maximum LED devices"
+        default 8
+        range 1 16
+        help
+            Maximum number of LED devices that can be created.
+
+    config TS_LED_MAX_LAYERS
+        int "Maximum layers per device"
+        default 8
+        range 1 16
+        help
+            Maximum number of layers per LED device.
+
+    config TS_LED_DEFAULT_BRIGHTNESS
+        int "Default brightness"
+        default 128
+        range 0 255
+        help
+            Default brightness for new LED devices.
+
+    config TS_LED_TASK_PRIORITY
+        int "LED render task priority"
+        default 5
+        range 1 24
+        help
+            FreeRTOS priority for the LED render task.
+
+    config TS_LED_TASK_STACK_SIZE
+        int "LED render task stack size"
+        default 4096
+        range 2048 8192
+        help
+            Stack size for the LED render task.
+
+    config TS_LED_REFRESH_RATE_HZ
+        int "Default refresh rate (Hz)"
+        default 60
+        range 1 120
+        help
+            Default refresh rate in Hz for LED rendering.
+
+    menu "Touch LED Settings"
+        config TS_LED_TOUCH_COUNT
+            int "Touch LED count"
+            default 16
+            range 1 256
+            help
+                Number of LEDs in the touch panel.
+
+        config TS_LED_TOUCH_DEFAULT_BRIGHTNESS
+            int "Touch LED default brightness"
+            default 80
+            range 0 255
+    endmenu
+
+    menu "Board LED Settings"
+        config TS_LED_BOARD_COUNT
+            int "Board LED count"
+            default 32
+            range 1 512
+            help
+                Number of LEDs on the board indicator strip.
+
+        config TS_LED_BOARD_DEFAULT_BRIGHTNESS
+            int "Board LED default brightness"
+            default 60
+            range 0 255
+    endmenu
+
+    menu "Matrix LED Settings"
+        config TS_LED_MATRIX_WIDTH
+            int "Matrix width"
+            default 8
+            range 1 64
+
+        config TS_LED_MATRIX_HEIGHT
+            int "Matrix height"
+            default 8
+            range 1 64
+
+        config TS_LED_MATRIX_DEFAULT_BRIGHTNESS
+            int "Matrix default brightness"
+            default 50
+            range 0 255
+    endmenu
+
+    menu "Image Support"
+        config TS_LED_ENABLE_BMP
+            bool "Enable BMP image support"
+            default y
+
+        config TS_LED_ENABLE_PNG
+            bool "Enable PNG image support"
+            default y
+
+        config TS_LED_ENABLE_JPG
+            bool "Enable JPEG image support"
+            default y
+
+        config TS_LED_ENABLE_GIF
+            bool "Enable GIF image support"
+            default y
+    endmenu
+
+endmenu
