@@ -198,7 +198,7 @@ boards/<board_name>/
       "priority": 5,
       "depends": ["hal"],
       "config": {
-        "led_count": 16,
+        "led_count": 1,
         "brightness": 80,
         "default_effect": "rainbow"
       }
@@ -209,7 +209,7 @@ boards/<board_name>/
       "priority": 5,
       "depends": ["hal"],
       "config": {
-        "led_count": 32,
+        "led_count": 28,
         "brightness": 60
       }
     },

@@ -45,10 +45,10 @@ menu "TianShanOS LED Configuration"
     menu "Touch LED Settings"
         config TS_LED_TOUCH_COUNT
             int "Touch LED count"
-            default 16
+            default 1
             range 1 256
             help
-                Number of LEDs in the touch panel.
+                Number of LEDs in the touch panel. RM01 has single indicator.
 
         config TS_LED_TOUCH_DEFAULT_BRIGHTNESS
             int "Touch LED default brightness"
@@ -59,10 +59,10 @@ menu "TianShanOS LED Configuration"
     menu "Board LED Settings"
         config TS_LED_BOARD_COUNT
             int "Board LED count"
-            default 32
+            default 28
             range 1 512
             help
-                Number of LEDs on the board indicator strip.
+                Number of LEDs on the board indicator strip. RM01 has 28 LEDs.
 
         config TS_LED_BOARD_DEFAULT_BRIGHTNESS
             int "Board LED default brightness"
@@ -73,12 +73,12 @@ menu "TianShanOS LED Configuration"
     menu "Matrix LED Settings"
         config TS_LED_MATRIX_WIDTH
             int "Matrix width"
-            default 8
+            default 32
             range 1 64
 
         config TS_LED_MATRIX_HEIGHT
             int "Matrix height"
-            default 8
+            default 32
             range 1 64
 
         config TS_LED_MATRIX_DEFAULT_BRIGHTNESS

@@ -1,0 +1,132 @@
+{
+    "board": "rm01_esp32s3",
+    "version": "1.0",
+    "description": "Device configurations for RM01 ESP32S3 board",
+    "devices": {
+        "led_touch": {
+            "type": "ws2812",
+            "count": 1,
+            "gpio": "LED_TOUCH",
+            "brightness": 128,
+            "description": "Single touch indicator LED"
+        },
+        "led_board": {
+            "type": "ws2812",
+            "count": 28,
+            "gpio": "LED_BOARD",
+            "brightness": 128,
+            "description": "28-LED status strip"
+        },
+        "led_matrix": {
+            "type": "ws2812_matrix",
+            "width": 32,
+            "height": 32,
+            "count": 1024,
+            "gpio": "LED_MATRIX",
+            "brightness": 64,
+            "serpentine": true,
+            "description": "32x32 RGB LED matrix display"
+        },
+        "fan_0": {
+            "type": "pwm_fan",
+            "gpio": "FAN_PWM_0",
+            "frequency_hz": 25000,
+            "resolution_bits": 10,
+            "min_duty_percent": 10,
+            "max_duty_percent": 100,
+            "description": "Primary cooling fan"
+        },
+        "fan_1": {
+            "type": "pwm_fan",
+            "gpio": "FAN_PWM_1",
+            "frequency_hz": 25000,
+            "resolution_bits": 10,
+            "min_duty_percent": 10,
+            "max_duty_percent": 100,
+            "description": "Secondary cooling fan"
+        },
+        "usb_mux": {
+            "type": "usb_mux",
+            "sel_gpio": "USB_MUX_0",
+            "oe_gpio": "USB_MUX_1",
+            "channels": 4,
+            "description": "USB multiplexer for AGX/LPMU switching"
+        },
+        "ethernet": {
+            "type": "w5500",
+            "spi_host": 2,
+            "miso_gpio": "ETH_MISO",
+            "mosi_gpio": "ETH_MOSI",
+            "sclk_gpio": "ETH_SCLK",
+            "cs_gpio": "ETH_CS",
+            "int_gpio": "ETH_INT",
+            "rst_gpio": "ETH_RST",
+            "spi_clock_mhz": 25,
+            "description": "W5500 Ethernet controller"
+        },
+        "power_monitor_adc": {
+            "type": "adc",
+            "gpio": "POWER_ADC",
+            "adc_unit": 2,
+            "adc_channel": 7,
+            "attenuation": "11db",
+            "divider_ratio": 11.4,
+            "max_voltage": 72.0,
+            "description": "DC input voltage monitor (6.3V per ADC volt)"
+        },
+        "power_monitor_uart": {
+            "type": "pzem",
+            "tx_gpio": "POWER_UART_TX",
+            "rx_gpio": "POWER_UART_RX",
+            "uart_port": 1,
+            "baud_rate": 9600,
+            "address": 1,
+            "description": "PZEM power meter for voltage/current/power monitoring"
+        },
+        "sd_card": {
+            "type": "sdmmc",
+            "mode": "4bit",
+            "cmd_gpio": "SD_CMD",
+            "clk_gpio": "SD_CLK",
+            "d0_gpio": "SD_D0",
+            "d1_gpio": "SD_D1",
+            "d2_gpio": "SD_D2",
+            "d3_gpio": "SD_D3",
+            "max_freq_khz": 40000,
+            "description": "SD card storage for config, animations, scripts"
+        },
+        "i2c_bus_0": {
+            "type": "i2c",
+            "port": 0,
+            "sda_gpio": "I2C0_SDA",
+            "scl_gpio": "I2C0_SCL",
+            "clock_hz": 400000,
+            "description": "I2C bus 0 for sensors and peripherals"
+        },
+        "i2c_bus_1": {
+            "type": "i2c",
+            "port": 1,
+            "sda_gpio": "I2C1_SDA",
+            "scl_gpio": "I2C1_SCL",
+            "clock_hz": 400000,
+            "description": "I2C bus 1 for additional peripherals"
+        },
+        "agx_control": {
+            "type": "gpio_control",
+            "power_gpio": "AGX_POWER",
+            "reset_gpio": "AGX_RESET",
+            "recovery_gpio": "AGX_FORCE_RECOVERY",
+            "power_delay_ms": 100,
+            "reset_pulse_ms": 200,
+            "description": "Jetson AGX power and reset control"
+        },
+        "lpmu_control": {
+            "type": "gpio_control",
+            "power_gpio": "LPMU_POWER",
+            "reset_gpio": "LPMU_RESET",
+            "power_delay_ms": 100,
+            "reset_pulse_ms": 200,
+            "description": "LPMU power and reset control"
+        }
+    }
+}

@@ -15,10 +15,6 @@
             "gpio": 9,
             "description": "Matrix LED WS2812 data line"
         },
-        "LED_STATUS": {
-            "gpio": 47,
-            "description": "Status indicator LED"
-        },
         "FAN_PWM_0": {
             "gpio": 41,
             "description": "Fan 0 PWM control"
@@ -80,16 +76,21 @@
             "description": "LPMU reset control"
         },
         "POWER_ADC": {
-            "gpio": 4,
-            "description": "Power monitor ADC input"
+            "gpio": 18,
+            "adc_unit": 2,
+            "adc_channel": 7,
+            "divider_ratio": 11.4,
+            "description": "Power monitor ADC input (72V max / 11.4 divider)"
         },
         "POWER_UART_TX": {
             "gpio": 17,
             "description": "Power module UART TX"
         },
         "POWER_UART_RX": {
-            "gpio": 18,
-            "description": "Power module UART RX"
+            "gpio": 47,
+            "uart_port": 1,
+            "baud_rate": 9600,
+            "description": "Power module UART RX (PZEM protocol)"
         },
         "SD_CMD": {
             "gpio": 35,
@@ -133,11 +134,11 @@
         },
         "UART1_TX": {
             "gpio": 17,
-            "description": "UART1 TX"
+            "description": "UART1 TX (shared with POWER_UART_TX)"
         },
         "UART1_RX": {
-            "gpio": 18,
-            "description": "UART1 RX"
+            "gpio": 47,
+            "description": "UART1 RX (shared with POWER_UART_RX)"
         }
     }
 }

@@ -27,7 +27,7 @@ esp_err_t ts_led_touch_init(void)
 #ifdef CONFIG_TS_LED_TOUCH_COUNT
     cfg.led_count = CONFIG_TS_LED_TOUCH_COUNT;
 #else
-    cfg.led_count = 16;
+    cfg.led_count = 1;  // RM01: Single WS2812 touch indicator
 #endif
 #ifdef CONFIG_TS_LED_TOUCH_DEFAULT_BRIGHTNESS
     cfg.brightness = CONFIG_TS_LED_TOUCH_DEFAULT_BRIGHTNESS;
@@ -54,7 +54,7 @@ esp_err_t ts_led_board_init(void)
 #ifdef CONFIG_TS_LED_BOARD_COUNT
     cfg.led_count = CONFIG_TS_LED_BOARD_COUNT;
 #else
-    cfg.led_count = 32;
+    cfg.led_count = 28;  // RM01: 28 LED strip
 #endif
 #ifdef CONFIG_TS_LED_BOARD_DEFAULT_BRIGHTNESS
     cfg.brightness = CONFIG_TS_LED_BOARD_DEFAULT_BRIGHTNESS;
@@ -83,12 +83,12 @@ esp_err_t ts_led_matrix_init(void)
 #ifdef CONFIG_TS_LED_MATRIX_WIDTH
     cfg.width = CONFIG_TS_LED_MATRIX_WIDTH;
 #else
-    cfg.width = 8;
+    cfg.width = 32;  // RM01: 32x32 matrix
 #endif
 #ifdef CONFIG_TS_LED_MATRIX_HEIGHT
     cfg.height = CONFIG_TS_LED_MATRIX_HEIGHT;
 #else
-    cfg.height = 8;
+    cfg.height = 32;  // RM01: 32x32 matrix
 #endif
     cfg.led_count = cfg.width * cfg.height;
     cfg.scan = TS_LED_SCAN_ZIGZAG_ROWS;
