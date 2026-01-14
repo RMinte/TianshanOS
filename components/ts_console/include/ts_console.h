@@ -365,6 +365,17 @@ esp_err_t ts_console_register_builtin_cmds(void);
  */
 const char *ts_console_category_name(ts_cmd_category_t category);
 
+/*===========================================================================*/
+/*                          Command Modules                                   */
+/*===========================================================================*/
+
+/**
+ * @brief Register LED commands
+ * 
+ * @return ESP_OK on success
+ */
+esp_err_t ts_cmd_led_register(void);
+
 #ifdef __cplusplus
 }
 #endif
