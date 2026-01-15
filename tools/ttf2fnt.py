@@ -94,7 +94,8 @@ def render_glyph(font, codepoint, size):
     except:
         return None, 0, 0
     
-    # Render in grayscale for quality
+    # Render in grayscale then threshold
+    # (1-bit mode has rendering issues with some pixel fonts)
     glyph_width = bbox[2] - bbox[0]
     glyph_height = bbox[3] - bbox[1]
     
@@ -114,8 +115,8 @@ def render_glyph(font, codepoint, size):
     final_width = content_bbox[2] - content_bbox[0]
     final_height = content_bbox[3] - content_bbox[1]
     
-    # Threshold to binary (low threshold ~12% to preserve pixel font details)
-    glyph_binary = glyph_img.point(lambda x: 1 if x > 30 else 0, mode='1')
+    # Threshold to binary (threshold ~8% to capture pixel font edges without noise)
+    glyph_binary = glyph_img.point(lambda x: 1 if x > 20 else 0, mode='1')
     
     # Convert to packed bits
     pixels = list(glyph_binary.getdata())
