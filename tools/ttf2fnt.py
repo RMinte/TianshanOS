@@ -114,8 +114,8 @@ def render_glyph(font, codepoint, size):
     final_width = content_bbox[2] - content_bbox[0]
     final_height = content_bbox[3] - content_bbox[1]
     
-    # Threshold to binary (40% threshold for LED visibility)
-    glyph_binary = glyph_img.point(lambda x: 1 if x > 100 else 0, mode='1')
+    # Threshold to binary (low threshold ~12% to preserve pixel font details)
+    glyph_binary = glyph_img.point(lambda x: 1 if x > 30 else 0, mode='1')
     
     # Convert to packed bits
     pixels = list(glyph_binary.getdata())
