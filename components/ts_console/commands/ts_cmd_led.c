@@ -1621,13 +1621,27 @@ static int do_led_qrcode(const char *device_name, const char *text,
         }
     }
     
+    // 加载背景图（复用图像加载接口）
+    ts_led_image_t bg_image = NULL;
+    if (bg_image_path) {
+        esp_err_t img_ret = ts_led_image_load(bg_image_path, TS_LED_IMG_FMT_AUTO, &bg_image);
+        if (img_ret != ESP_OK) {
+            ts_console_error("Failed to load background image: %s (%s)\n", 
+                             bg_image_path, esp_err_to_name(img_ret));
+            return 1;
+        }
+        ts_led_image_info_t info;
+        ts_led_image_get_info(bg_image, &info);
+        ts_console_printf("Loaded background image: %ux%u\n", info.width, info.height);
+    }
+    
     // 配置 QR 码
     ts_led_qr_config_t config = TS_LED_QR_DEFAULT_CONFIG();
     config.text = text;
     config.ecc = ecc;
     config.fg_color = fg_color;
     config.bg_color = TS_LED_BLACK;
-    config.bg_image_path = bg_image_path;  // 背景图路径（可为 NULL）
+    config.bg_image = bg_image;  // 背景图句柄（可为 NULL）
     config.center = true;
     // 强制使用 v4（33x33 模块）以获得最大容量
     config.version_min = 4;
@@ -1636,6 +1650,11 @@ static int do_led_qrcode(const char *device_name, const char *text,
     // 生成并显示
     ts_led_qr_result_t result;
     esp_err_t ret = ts_led_qrcode_show_on_device(internal_name, &config, &result);
+    
+    // 释放背景图
+    if (bg_image) {
+        ts_led_image_free(bg_image);
+    }
     
     if (ret == ESP_ERR_INVALID_SIZE) {
         ts_console_error("Text too long for QR code v4 (max ~50 alphanumeric chars)\n");

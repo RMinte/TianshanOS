@@ -195,20 +195,11 @@ esp_err_t ts_led_qrcode_show(ts_led_layer_t layer,
         ESP_LOGW(TAG, "QR code larger than matrix, cropping %d pixels from edges", crop);
     }
     
-    // Load background image if specified
-    ts_led_image_t bg_image = NULL;
+    // Get background image info if provided
     ts_led_image_info_t bg_info = {0};
-    
-    if (config->bg_image_path) {
-        esp_err_t img_ret = ts_led_image_load(config->bg_image_path, TS_LED_IMG_FMT_AUTO, &bg_image);
-        if (img_ret == ESP_OK) {
-            ts_led_image_get_info(bg_image, &bg_info);
-            ESP_LOGI(TAG, "Loaded background image: %s (%dx%d)", 
-                     config->bg_image_path, bg_info.width, bg_info.height);
-        } else {
-            ESP_LOGW(TAG, "Failed to load background image: %s, using solid color", 
-                     config->bg_image_path);
-        }
+    if (config->bg_image) {
+        ts_led_image_get_info(config->bg_image, &bg_info);
+        ESP_LOGI(TAG, "Using background image: %dx%d", bg_info.width, bg_info.height);
     }
     
     // Clear layer with background color
@@ -232,11 +223,11 @@ esp_err_t ts_led_qrcode_show(ts_led_layer_t layer,
             
             if (is_dark) {
                 // Foreground: use background image pixel if available
-                if (bg_image) {
+                if (config->bg_image) {
                     // Map matrix position to image position with scaling
                     uint16_t img_x = (uint16_t)(mx * bg_info.width / matrix_size);
                     uint16_t img_y = (uint16_t)(my * bg_info.height / matrix_size);
-                    if (ts_led_image_get_pixel(bg_image, img_x, img_y, &color) != ESP_OK) {
+                    if (ts_led_image_get_pixel(config->bg_image, img_x, img_y, &color) != ESP_OK) {
                         color = config->fg_color;
                     }
                 } else {
@@ -248,11 +239,6 @@ esp_err_t ts_led_qrcode_show(ts_led_layer_t layer,
             
             ts_led_set_pixel_xy(layer, mx, my, color);
         }
-    }
-    
-    // Free background image
-    if (bg_image) {
-        ts_led_image_free(bg_image);
     }
     
     // Fill result if requested
