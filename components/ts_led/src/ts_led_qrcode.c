@@ -227,7 +227,18 @@ esp_err_t ts_led_qrcode_show(ts_led_layer_t layer,
                     // Map matrix position to image position with scaling
                     uint16_t img_x = (uint16_t)(mx * bg_info.width / matrix_size);
                     uint16_t img_y = (uint16_t)(my * bg_info.height / matrix_size);
-                    if (ts_led_image_get_pixel(config->bg_image, img_x, img_y, &color) != ESP_OK) {
+                    if (ts_led_image_get_pixel(config->bg_image, img_x, img_y, &color) == ESP_OK) {
+                        // Calculate luminance: Y = 0.299*R + 0.587*G + 0.114*B
+                        // Using integer approximation: (77*R + 150*G + 29*B) >> 8
+                        uint8_t luminance = (77 * color.r + 150 * color.g + 29 * color.b) >> 8;
+                        
+                        // If too dark (low luminance), invert to ensure QR readability
+                        if (luminance < 96) {
+                            color.r = 255 - color.r;
+                            color.g = 255 - color.g;
+                            color.b = 255 - color.b;
+                        }
+                    } else {
                         color = config->fg_color;
                     }
                 } else {
