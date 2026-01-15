@@ -1046,6 +1046,16 @@ esp_err_t ts_led_image_get_info(ts_led_image_t image, ts_led_image_info_t *info)
     return ESP_OK;
 }
 
+esp_err_t ts_led_image_get_pixel(ts_led_image_t image, uint16_t x, uint16_t y,
+                                  ts_led_rgb_t *color)
+{
+    if (!image || !color) return ESP_ERR_INVALID_ARG;
+    if (x >= image->width || y >= image->height) return ESP_ERR_INVALID_ARG;
+    
+    *color = image->pixels[y * image->width + x];
+    return ESP_OK;
+}
+
 /**
  * @brief 计算图像中非透明像素的边界框
  * 

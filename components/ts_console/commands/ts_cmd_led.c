@@ -65,6 +65,7 @@ static struct {
     struct arg_lit *invert;           /**< 反色显示（与底层图像） */
     struct arg_lit *loop;             /**< 循环滚动 */
     struct arg_str *ecc;
+    struct arg_str *qr_bg;            /**< QR码背景图路径 */
     struct arg_lit *test;
     struct arg_str *file;
     struct arg_str *device;
@@ -1581,7 +1582,8 @@ static int do_led_draw_text(const char *device_name, const char *text,
 /*===========================================================================*/
 
 static int do_led_qrcode(const char *device_name, const char *text, 
-                          const char *ecc_str, const char *fg_color_str)
+                          const char *ecc_str, const char *fg_color_str,
+                          const char *bg_image_path)
 {
     if (!device_name) {
         device_name = "matrix";  // 默认使用 matrix 设备
@@ -1625,6 +1627,7 @@ static int do_led_qrcode(const char *device_name, const char *text,
     config.ecc = ecc;
     config.fg_color = fg_color;
     config.bg_color = TS_LED_BLACK;
+    config.bg_image_path = bg_image_path;  // 背景图路径（可为 NULL）
     config.center = true;
     // 强制使用 v4（33x33 模块）以获得最大容量
     config.version_min = 4;
@@ -1819,6 +1822,8 @@ static int cmd_led(int argc, char **argv)
                           s_led_args.text->sval[0] : NULL;
     const char *qr_ecc = s_led_args.ecc->count > 0 ?
                          s_led_args.ecc->sval[0] : NULL;
+    const char *qr_bg_path = s_led_args.qr_bg->count > 0 ?
+                             s_led_args.qr_bg->sval[0] : NULL;
     const char *font_name = s_led_args.font->count > 0 ?
                             s_led_args.font->sval[0] : NULL;
     const char *text_align = s_led_args.align->count > 0 ?
@@ -1855,7 +1860,7 @@ static int cmd_led(int argc, char **argv)
     
     // 生成 QR 码
     if (s_led_args.qrcode->count > 0) {
-        return do_led_qrcode(device, qr_text, qr_ecc, color);
+        return do_led_qrcode(device, qr_text, qr_ecc, color, qr_bg_path);
     }
     
     // 显示图像
@@ -1976,6 +1981,7 @@ esp_err_t ts_cmd_led_register(void)
     s_led_args.invert       = arg_lit0(NULL, "invert", "Invert on overlap for readability");
     s_led_args.loop         = arg_lit0(NULL, "loop", "Loop scroll continuously");
     s_led_args.ecc          = arg_str0(NULL, "ecc", "<L|M|Q|H>", "QR error correction");
+    s_led_args.qr_bg        = arg_str0(NULL, "bg", "<path>", "QR foreground uses image pixels");
     s_led_args.test         = arg_lit0("t", "test", "Show test pattern");
     s_led_args.save         = arg_lit0(NULL, "save", "Save as boot config");
     s_led_args.clear_boot   = arg_lit0(NULL, "clear-boot", "Clear boot config");

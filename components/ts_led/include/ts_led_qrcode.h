@@ -43,6 +43,7 @@ typedef struct {
     ts_led_qr_ecc_t ecc;         /**< Error correction level */
     ts_led_rgb_t fg_color;       /**< Foreground (module) color */
     ts_led_rgb_t bg_color;       /**< Background color */
+    const char *bg_image_path;   /**< Background image path (foreground uses image pixels) */
     int8_t version_min;          /**< Minimum QR version (1-4, 0=auto) */
     int8_t version_max;          /**< Maximum QR version (1-4, 0=auto) */
     bool center;                 /**< Center QR code on matrix */
@@ -71,6 +72,7 @@ typedef struct {
     .ecc = TS_LED_QR_ECC_MEDIUM, \
     .fg_color = TS_LED_WHITE, \
     .bg_color = TS_LED_BLACK, \
+    .bg_image_path = NULL, \
     .version_min = 0, \
     .version_max = 0, \
     .center = true \

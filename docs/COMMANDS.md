@@ -227,6 +227,7 @@ led [options]
 | `--qrcode` | | 生成并显示 QR 码（仅 matrix） |
 | `--text <string>` | | 文本内容（--draw-text/--qrcode 使用） |
 | `--ecc <L\|M\|Q\|H>` | | QR 纠错等级 |
+| `--bg <path>` | | QR 前景图片路径（前景像素使用图片颜色） |
 | `--file <path>` | `-f` | 图像文件路径（PNG/GIF） |
 | `--center <mode>` | | 居中模式：image（图像居中）或 content（内容居中） |
 | `--parse-color` | | 解析颜色信息 |
@@ -439,6 +440,7 @@ led --qrcode --text "https://rminte.com/"           # 默认白色，ECC=M
 led --qrcode --text "HELLO WORLD" --ecc H           # 高纠错等级
 led --qrcode --text "192.168.1.100:8080" --color green  # 绿色 QR 码
 led --qrcode --text "WIFI:T:WPA;S:MySSID;P:password;;" --ecc M  # WiFi 配置
+led --qrcode --text "https://example.com" --bg /sdcard/images/logo.png  # 图片前景
 ```
 
 ### QR Code 功能
@@ -450,6 +452,7 @@ Matrix 设备支持生成 QR Code v4（33x33 模块）显示：
 | `--text` | 要编码的文本内容（必需） |
 | `--ecc` | 纠错等级：L/M/Q/H |
 | `--color` | 前景色（模块颜色），默认白色 |
+| `--bg` | 前景图片路径，前景像素使用图片对应位置的颜色 |
 
 **纠错等级与容量（字母数字模式）：**
 

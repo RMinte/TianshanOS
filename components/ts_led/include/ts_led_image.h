@@ -154,6 +154,18 @@ esp_err_t ts_led_image_free(ts_led_image_t image);
 esp_err_t ts_led_image_get_info(ts_led_image_t image, ts_led_image_info_t *info);
 
 /**
+ * @brief Get pixel color at specified position
+ * 
+ * @param image Image handle
+ * @param x X coordinate
+ * @param y Y coordinate
+ * @param color Output color
+ * @return ESP_OK on success, ESP_ERR_INVALID_ARG if out of bounds
+ */
+esp_err_t ts_led_image_get_pixel(ts_led_image_t image, uint16_t x, uint16_t y,
+                                  ts_led_rgb_t *color);
+
+/**
  * @brief Display image on layer (static)
  * 
  * @param layer Layer handle
