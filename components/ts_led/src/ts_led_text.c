@@ -628,28 +628,43 @@ static void render_overlay_text(ts_text_overlay_state_t *state)
     // 获取 layer 0 用于反色计算
     ts_led_layer_t base_layer = ts_led_layer_get(state->device, 0);
     
-    // 逐字符绘制
+    // 字间距（与 TS_TEXT_DEFAULT_OPTIONS 保持一致）
+    const uint8_t spacing = 1;
+    
+    // 逐字符绘制（使用动态间距）
     const char *p = state->text;
     uint16_t cp;
     
     while (ts_utf8_decode(&p, &cp) > 0 && cp != 0) {
+        // 获取字形
+        const uint8_t *bitmap;
+        esp_err_t err = ts_font_get_glyph(state->font, cp, &bitmap);
+        
+        // 计算字符实际宽度
+        int char_width;
+        if (err == ESP_OK) {
+            char_width = get_glyph_actual_width(bitmap, state->font->header.width, state->font->header.height);
+        } else {
+            // 缺失字形 - 使用半宽
+            char_width = state->font->header.width / 2;
+        }
+        
         // 检查是否超出屏幕（完全不可见则跳过）
         if (draw_x >= layer_width) break;
-        if (draw_x + state->font->header.width < 0) {
-            draw_x += state->font->header.width + 1;  // spacing
+        if (draw_x + char_width < 0) {
+            draw_x += char_width + spacing;
             continue;
         }
         
-        // 获取字形
-        const uint8_t *bitmap;
-        if (ts_font_get_glyph(state->font, cp, &bitmap) == ESP_OK) {
+        // 绘制字形
+        if (err == ESP_OK) {
             draw_glyph_overlay(state->overlay_layer, base_layer, bitmap, draw_x, draw_y,
                                state->font->header.width, state->font->header.height,
                                state->color, state->invert_on_overlap,
                                layer_width, layer_height);
         }
         
-        draw_x += state->font->header.width + 1;  // spacing
+        draw_x += char_width + spacing;
     }
 }
 
