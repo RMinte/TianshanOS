@@ -1643,8 +1643,9 @@ static int do_led_qrcode(const char *device_name, const char *text,
     config.bg_color = TS_LED_BLACK;
     config.bg_image = bg_image;  // 背景图句柄（可为 NULL）
     config.center = true;
-    // 强制使用 v4（33x33 模块）以获得最大容量
-    config.version_min = 4;
+    // 优先使用 v3 (29x29)，放不下时自动升级到 v4 (33x33)
+    // v3 刚好能放入 32x32 matrix；v4 需要裁剪 1px 边缘
+    config.version_min = 1;
     config.version_max = 4;
     
     // 生成并显示
