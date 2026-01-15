@@ -206,23 +206,43 @@ led [options]
 | `--off` | | 关闭 LED |
 | `--brightness` | `-b` | 获取/设置亮度 |
 | `--clear` | `-c` | 清除 LED（熄灭） |
-| `--effect` | `-e` | 启动 LED 特效 |
-| `--stop-effect` | | 停止运行中的特效 |
-| `--list-effects` | | 列出可用特效 |
+| `--effect` | `-e` | 启动程序动画（Animation） |
+| `--stop-effect` | | 停止运行中的程序动画 |
+| `--list-effects` | | 列出可用程序动画 |
+| `--filter` | | 应用后处理效果（Filter） |
+| `--stop-filter` | | 停止后处理效果 |
+| `--list-filters` | | 列出可用后处理效果 |
+| `--filter-name <name>` | | 后处理效果名称 |
 | `--image` | | 显示图像/动画（仅 matrix） |
+| `--qrcode` | | 生成并显示 QR 码（仅 matrix） |
+| `--text <string>` | | QR 码内容（URL/文本） |
+| `--ecc <L\|M\|Q\|H>` | | QR 纠错等级 |
 | `--file <path>` | `-f` | 图像文件路径（PNG/GIF） |
 | `--center <mode>` | | 居中模式：image（图像居中）或 content（内容居中） |
 | `--parse-color` | | 解析颜色信息 |
 | `--device <name>` | `-d` | 指定设备名称 |
-| `--name <effect>` | `-n` | 特效名称 |
+| `--name <effect>` | `-n` | 程序动画名称 |
 | `--value <0-255>` | `-v` | 亮度值 |
 | `--color <color>` | | 颜色值 |
-| `--speed <1-100>` | | 特效速度（1=慢, 100=快） |
-| `--save` | | 保存当前状态为开机配置（含图像） |
+| `--speed <1-100>` | | 动画/效果速度（1=慢, 100=快） |
+| `--save` | | 保存当前状态为开机配置（含动画和后处理效果） |
 | `--show-boot` | | 显示已保存的开机配置 |
 | `--clear-boot` | | 清除开机配置 |
 | `--json` | `-j` | JSON 格式输出 |
 | `--help` | `-h` | 显示帮助 |
+
+### Animation vs Filter
+
+TianShanOS LED 系统区分两类效果：
+
+| 类型 | 说明 | 示例 |
+|------|------|------|
+| **Animation（程序动画）** | 生成帧内容的程序 | rainbow, fire, rain, plasma |
+| **Filter（后处理效果）** | 对已有内容进行后处理 | pulse, blink, breathing, color-shift |
+
+- Animation 是内容生成器，可独立运行
+- Filter 叠加在 Animation 或 Image 之上，对输出进行调整
+- 两者可以组合使用：Animation + Filter
 
 ### 可用设备
 
@@ -270,6 +290,25 @@ led [options]
 | `rain` | 数字雨/雨滴（下落动画） |
 | `plasma` | 等离子效果（2D 波纹） |
 | `ripple` | 水波纹（中心扩散） |
+
+### 可用后处理效果（Filter）
+
+Filter 是叠加在内容之上的后处理效果，可与 Animation 或 Image 组合使用：
+
+| 效果名 | 说明 |
+|--------|------|
+| `pulse` | 脉冲亮度（正弦波调节） |
+| `blink` | 开关闪烁 |
+| `breathing` | 平滑呼吸效果 |
+| `fade-in` | 淡入（一次性） |
+| `fade-out` | 淡出（一次性） |
+| `color-shift` | 色相旋转 |
+| `saturation` | 饱和度调整 |
+| `invert` | 反色 |
+| `grayscale` | 灰度转换 |
+| `scanline` | 扫描线效果 |
+| `wave` | 亮度波浪 |
+| `glitch` | 随机故障效果 |
 
 ### 颜色格式
 
@@ -354,19 +393,64 @@ led --image --device matrix --file /sdcard/icon.png --center content
 led --status --json
 led --list-effects --json
 
-# 保存当前 LED 状态为开机配置（支持图像/动画）
-led --save --device matrix         # 保存 matrix（包括当前图像）
+# 保存当前 LED 状态为开机配置（支持图像/动画/后处理效果）
+led --save --device matrix         # 保存 matrix（包括当前图像和 filter）
 led --save --device touch          # 保存 touch 设备
 led --save                          # 保存所有设备
 
-# 查看已保存的开机配置
+# 查看已保存的开机配置（显示 ANIMATION 和 FILTER 列）
 led --show-boot
 led --show-boot --device touch
 
 # 清除开机配置
 led --clear-boot --device touch    # 清除 touch 配置
 led --clear-boot                    # 清除所有配置
+
+# 后处理效果（Filter）命令
+led --filter --device matrix --filter-name pulse           # 应用脉冲效果
+led --filter --device matrix --filter-name pulse --speed 80  # 带速度参数
+led --filter --device matrix --filter-name breathing       # 呼吸效果
+led --filter --device matrix --filter-name color-shift     # 色相旋转
+
+# 组合使用：先启动动画，再叠加后处理效果
+led --effect --device matrix --name fire
+led --filter --device matrix --filter-name pulse --speed 50
+led --save --device matrix                                  # 保存组合效果
+
+# 停止后处理效果
+led --stop-filter --device matrix
+
+# 列出可用后处理效果
+led --list-filters
+led --list-filters --json
+
+# QR 码生成（仅 matrix 设备，使用 v4 版本 33x33 模块）
+led --qrcode --text "https://rminte.com/"           # 默认白色，ECC=M
+led --qrcode --text "HELLO WORLD" --ecc H           # 高纠错等级
+led --qrcode --text "192.168.1.100:8080" --color green  # 绿色 QR 码
+led --qrcode --text "WIFI:T:WPA;S:MySSID;P:password;;" --ecc M  # WiFi 配置
 ```
+
+### QR Code 功能
+
+Matrix 设备支持生成 QR Code v4（33x33 模块）显示：
+
+| 参数 | 说明 |
+|------|------|
+| `--text` | 要编码的文本内容（必需） |
+| `--ecc` | 纠错等级：L/M/Q/H |
+| `--color` | 前景色（模块颜色），默认白色 |
+
+**纠错等级与容量（字母数字模式）：**
+
+| ECC | 纠错能力 | 最大容量 |
+|-----|---------|---------|
+| L | ~7% | 114 字符 |
+| M | ~15% | 90 字符 |
+| Q | ~25% | 67 字符 |
+| H | ~30% | 50 字符 |
+
+> **注意**：QR v4 尺寸为 33x33，显示在 32x32 matrix 上时会裁剪边缘 1 像素（静默区）。
 
 ---
 

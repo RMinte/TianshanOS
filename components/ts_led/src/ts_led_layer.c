@@ -110,6 +110,50 @@ esp_err_t ts_led_layer_clear(ts_led_layer_t layer)
     return ESP_OK;
 }
 
+/*===========================================================================*/
+/*                      Post-Processing Effect API                            */
+/*===========================================================================*/
+
+esp_err_t ts_led_layer_set_effect(ts_led_layer_t layer, const ts_led_effect_config_t *config)
+{
+    if (!layer || !config) return ESP_ERR_INVALID_ARG;
+    ts_led_layer_impl_t *l = (ts_led_layer_impl_t *)layer;
+    
+    /* Copy effect configuration */
+    l->post_effect = *config;
+    l->effect_start_time = xTaskGetTickCount() * portTICK_PERIOD_MS;
+    
+    TS_LOGI(TAG, "Layer effect set: type=%d", config->type);
+    return ESP_OK;
+}
+
+esp_err_t ts_led_layer_clear_effect(ts_led_layer_t layer)
+{
+    if (!layer) return ESP_ERR_INVALID_ARG;
+    ts_led_layer_impl_t *l = (ts_led_layer_impl_t *)layer;
+    
+    memset(&l->post_effect, 0, sizeof(l->post_effect));
+    l->post_effect.type = TS_LED_EFFECT_NONE;
+    l->effect_start_time = 0;
+    
+    TS_LOGI(TAG, "Layer effect cleared");
+    return ESP_OK;
+}
+
+bool ts_led_layer_has_effect(ts_led_layer_t layer)
+{
+    if (!layer) return false;
+    ts_led_layer_impl_t *l = (ts_led_layer_impl_t *)layer;
+    return l->post_effect.type != TS_LED_EFFECT_NONE;
+}
+
+ts_led_effect_type_t ts_led_layer_get_effect_type(ts_led_layer_t layer)
+{
+    if (!layer) return TS_LED_EFFECT_NONE;
+    ts_led_layer_impl_t *l = (ts_led_layer_impl_t *)layer;
+    return l->post_effect.type;
+}
+
 /* Drawing operations */
 esp_err_t ts_led_set_pixel(ts_led_layer_t layer, uint16_t index, ts_led_rgb_t color)
 {

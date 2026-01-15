@@ -16,6 +16,7 @@
 #include "esp_err.h"
 #include <stdint.h>
 #include <stdbool.h>
+#include "ts_led_effect.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -42,6 +43,8 @@ extern "C" {
 /*                              Color Types                                   */
 /*===========================================================================*/
 
+#ifndef TS_LED_RGB_DEFINED
+#define TS_LED_RGB_DEFINED
 /**
  * @brief RGB color (24-bit)
  */
@@ -50,6 +53,7 @@ typedef struct {
     uint8_t g;
     uint8_t b;
 } ts_led_rgb_t;
+#endif
 
 /**
  * @brief RGBW color (32-bit)
@@ -108,11 +112,23 @@ typedef enum {
 /**
  * @brief LED layout type
  */
+#ifndef TS_LED_LAYOUT_DEFINED
+#define TS_LED_LAYOUT_DEFINED
 typedef enum {
     TS_LED_LAYOUT_STRIP = 0,     /**< Linear strip */
     TS_LED_LAYOUT_MATRIX,        /**< 2D matrix */
     TS_LED_LAYOUT_RING           /**< Circular ring */
 } ts_led_layout_t;
+#endif
+
+/* Forward declaration for layer */
+#ifndef TS_LED_LAYER_DEFINED
+#define TS_LED_LAYER_DEFINED
+typedef struct ts_led_layer *ts_led_layer_t;
+#endif
+
+/* Include animation types early so they're available for API declarations */
+#include "ts_led_animation.h"
 
 /**
  * @brief Matrix origin position
@@ -159,10 +175,7 @@ typedef enum {
  */
 typedef struct ts_led_device *ts_led_device_t;
 
-/**
- * @brief LED layer handle
- */
-typedef struct ts_led_layer *ts_led_layer_t;
+/* ts_led_layer_t already defined above with TS_LED_LAYER_DEFINED guard */
 
 /**
  * @brief Animation handle
@@ -200,20 +213,8 @@ typedef struct {
     bool visible;                /**< Visibility */
 } ts_led_layer_config_t;
 
-/**
- * @brief Effect function type
- */
-typedef void (*ts_led_effect_fn_t)(ts_led_layer_t layer, uint32_t time_ms, void *user_data);
-
-/**
- * @brief Effect definition
- */
-typedef struct {
-    const char *name;            /**< Effect name */
-    ts_led_effect_fn_t func;     /**< Effect function */
-    uint32_t frame_interval_ms;  /**< Frame interval */
-    void *user_data;             /**< User data */
-} ts_led_effect_t;
+/* Note: Effect/Animation types moved to ts_led_animation.h */
+/* For backward compatibility, include ts_led_animation.h below */
 
 /*===========================================================================*/
 /*                         Default Configuration                              */
@@ -417,6 +418,42 @@ esp_err_t ts_led_layer_set_visible(ts_led_layer_t layer, bool visible);
  */
 esp_err_t ts_led_layer_clear(ts_led_layer_t layer);
 
+/**
+ * @brief Apply a post-processing effect to a layer
+ * 
+ * Post-processing effects modify the final output after animations
+ * have rendered their content. Examples include pulse, blink, fade, etc.
+ * 
+ * @param layer Layer handle
+ * @param config Effect configuration
+ * @return ESP_OK on success
+ */
+esp_err_t ts_led_layer_set_effect(ts_led_layer_t layer, const ts_led_effect_config_t *config);
+
+/**
+ * @brief Remove post-processing effect from layer
+ * 
+ * @param layer Layer handle
+ * @return ESP_OK on success
+ */
+esp_err_t ts_led_layer_clear_effect(ts_led_layer_t layer);
+
+/**
+ * @brief Check if layer has an active post-processing effect
+ * 
+ * @param layer Layer handle
+ * @return true if effect is active
+ */
+bool ts_led_layer_has_effect(ts_led_layer_t layer);
+
+/**
+ * @brief Get current post-processing effect type
+ * 
+ * @param layer Layer handle
+ * @return Effect type, or TS_LED_EFFECT_NONE if no effect
+ */
+ts_led_effect_type_t ts_led_layer_get_effect_type(ts_led_layer_t layer);
+
 /*===========================================================================*/
 /*                           Drawing Operations                               */
 /*===========================================================================*/
@@ -519,57 +556,60 @@ esp_err_t ts_led_gradient(ts_led_layer_t layer, uint16_t start, uint16_t count,
                            ts_led_rgb_t color1, ts_led_rgb_t color2);
 
 /*===========================================================================*/
-/*                              Effects                                       */
+/*                            Animations                                      */
 /*===========================================================================*/
 
 /**
- * @brief Start effect on layer
+ * @brief Start animation on layer
+ * 
+ * @note For backward compatibility, ts_led_effect_* macros are provided
+ *       in ts_led_animation.h
  * 
  * @param layer Layer handle
- * @param effect Effect definition
+ * @param animation Animation definition
  * @return ESP_OK on success
  */
-esp_err_t ts_led_effect_start(ts_led_layer_t layer, const ts_led_effect_t *effect);
+esp_err_t ts_led_animation_start(ts_led_layer_t layer, const ts_led_animation_def_t *animation);
 
 /**
- * @brief Stop effect on layer
+ * @brief Stop animation on layer
  * 
  * @param layer Layer handle
  * @return ESP_OK on success
  */
-esp_err_t ts_led_effect_stop(ts_led_layer_t layer);
+esp_err_t ts_led_animation_stop(ts_led_layer_t layer);
 
 /**
- * @brief Get built-in effect by name
+ * @brief Get built-in animation by name
  * 
- * @param name Effect name
- * @return Effect definition or NULL
+ * @param name Animation name
+ * @return Animation definition or NULL
  */
-const ts_led_effect_t *ts_led_effect_get_builtin(const char *name);
+const ts_led_animation_def_t *ts_led_animation_get_builtin(const char *name);
 
 /**
- * @brief List built-in effect names
+ * @brief List built-in animation names
  * 
  * @param names Array to store names
  * @param max_names Maximum names to retrieve
- * @return Number of effects
+ * @return Number of animations
  */
-size_t ts_led_effect_list_builtin(const char **names, size_t max_names);
+size_t ts_led_animation_list_builtin(const char **names, size_t max_names);
 
 /**
- * @brief List effects suitable for a specific device layout
+ * @brief List animations suitable for a specific device layout
  * 
- * 不同形态的LED设备支持不同特效：
- * - TS_LED_LAYOUT_STRIP: 点光源特效 (pulse, heartbeat, color_cycle)
- * - TS_LED_LAYOUT_RING: 环形特效 (chase, comet, spin, breathe_wave)
- * - TS_LED_LAYOUT_MATRIX: 矩阵特效 (fire, rain, plasma, ripple)
+ * 不同形态的LED设备支持不同动画：
+ * - TS_LED_LAYOUT_STRIP: 点光源动画 (pulse, heartbeat, color_cycle)
+ * - TS_LED_LAYOUT_RING: 环形动画 (chase, comet, spin, breathe_wave)
+ * - TS_LED_LAYOUT_MATRIX: 矩阵动画 (fire, rain, plasma, ripple)
  * 
  * @param layout Device layout type
- * @param names Array to store effect names (NULL to just count)
+ * @param names Array to store animation names (NULL to just count)
  * @param max_names Maximum names to retrieve
- * @return Number of suitable effects
+ * @return Number of suitable animations
  */
-size_t ts_led_effect_list_for_device(ts_led_layout_t layout, const char **names, size_t max_names);
+size_t ts_led_animation_list_for_device(ts_led_layout_t layout, const char **names, size_t max_names);
 
 /*===========================================================================*/
 /*                            Color Utilities                                 */

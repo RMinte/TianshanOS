@@ -17,8 +17,10 @@
 
 #include "ts_console.h"
 #include "ts_led.h"
+#include "ts_led_effect.h"
 #include "ts_led_preset.h"
 #include "ts_led_image.h"
+#include "ts_led_qrcode.h"
 #include "ts_log.h"
 #include "argtable3/argtable3.h"
 #include <string.h>
@@ -39,11 +41,18 @@ static struct {
     struct arg_lit *effect;
     struct arg_lit *stop_effect;
     struct arg_lit *list_effects;
+    struct arg_lit *filter;
+    struct arg_lit *stop_filter;
+    struct arg_lit *list_filters;
+    struct arg_str *filter_name;
     struct arg_lit *parse_color;
     struct arg_lit *save;
     struct arg_lit *clear_boot;
     struct arg_lit *show_boot;
     struct arg_lit *image;
+    struct arg_lit *qrcode;
+    struct arg_str *text;
+    struct arg_str *ecc;
     struct arg_lit *test;
     struct arg_str *file;
     struct arg_str *device;
@@ -206,7 +215,7 @@ static int do_led_clear(const char *device_name)
     /* Stop any running effect/animation first */
     ts_led_layer_t layer = ts_led_layer_get(dev, 0);
     if (layer) {
-        ts_led_effect_stop(layer);
+        ts_led_animation_stop(layer);
         ts_led_image_animate_stop(layer);
         /* Clear layer buffer too */
         ts_led_layer_clear(layer);
@@ -264,8 +273,8 @@ static int do_led_effect(const char *device_name, const char *effect_name, int s
         return 1;
     }
     
-    // 获取内置特效
-    const ts_led_effect_t *effect = ts_led_effect_get_builtin(effect_name);
+    // 获取内置动画
+    const ts_led_animation_def_t *effect = ts_led_animation_get_builtin(effect_name);
     if (!effect) {
         ts_console_error("Effect '%s' not found\n", effect_name);
         ts_console_printf("Use 'led --list-effects' to see available effects\n");
@@ -291,8 +300,8 @@ static int do_led_effect(const char *device_name, const char *effect_name, int s
         s_effect_color_valid = false;
     }
     
-    // 创建修改后的效果（速度和/或颜色）
-    ts_led_effect_t modified_effect = *effect;
+    // 创建修改后的动画（速度和/或颜色）
+    ts_led_animation_def_t modified_effect = *effect;
     
     if (speed > 0) {
         // 速度 1-100 映射到帧间隔：速度1=200ms, 速度100=5ms
@@ -306,8 +315,8 @@ static int do_led_effect(const char *device_name, const char *effect_name, int s
         modified_effect.user_data = &s_effect_color;
     }
     
-    // 启动特效
-    esp_err_t ret = ts_led_effect_start(layer, &modified_effect);
+    // 启动动画
+    esp_err_t ret = ts_led_animation_start(layer, &modified_effect);
     if (ret != ESP_OK) {
         ts_console_error("Failed to start effect: %s\n", esp_err_to_name(ret));
         return 1;
@@ -358,9 +367,9 @@ static int do_led_stop_effect(const char *device_name)
         return 1;
     }
     
-    esp_err_t ret = ts_led_effect_stop(layer);
+    esp_err_t ret = ts_led_animation_stop(layer);
     if (ret != ESP_OK) {
-        ts_console_error("Failed to stop effect\n");
+        ts_console_error("Failed to stop animation\n");
         return 1;
     }
     
@@ -368,6 +377,255 @@ static int do_led_stop_effect(const char *device_name)
     ts_led_preset_set_current_effect(device_name, NULL, 0);
     
     ts_console_success("Effect stopped on '%s'\n", device_name);
+    return 0;
+}
+
+/*===========================================================================*/
+/*                      Command: led --filter (Post-Processing)               */
+/*===========================================================================*/
+
+/**
+ * @brief 后处理效果类型名称映射
+ */
+static const struct {
+    const char *name;
+    ts_led_effect_type_t type;
+    const char *description;
+} s_filter_types[] = {
+    {"none",        TS_LED_EFFECT_NONE,        "No effect"},
+    {"brightness",  TS_LED_EFFECT_BRIGHTNESS,  "Static brightness adjustment"},
+    {"pulse",       TS_LED_EFFECT_PULSE,       "Pulsing brightness (sine wave)"},
+    {"blink",       TS_LED_EFFECT_BLINK,       "On/off blinking"},
+    {"fade-in",     TS_LED_EFFECT_FADE_IN,     "Fade in (one-shot)"},
+    {"fade-out",    TS_LED_EFFECT_FADE_OUT,    "Fade out (one-shot)"},
+    {"breathing",   TS_LED_EFFECT_BREATHING,   "Smooth breathing effect"},
+    {"color-shift", TS_LED_EFFECT_COLOR_SHIFT, "Hue rotation over time"},
+    {"saturation",  TS_LED_EFFECT_SATURATION,  "Saturation adjustment"},
+    {"invert",      TS_LED_EFFECT_INVERT,      "Invert colors"},
+    {"grayscale",   TS_LED_EFFECT_GRAYSCALE,   "Convert to grayscale"},
+    {"scanline",    TS_LED_EFFECT_SCANLINE,    "Horizontal/vertical scanline"},
+    {"wave",        TS_LED_EFFECT_WAVE,        "Brightness wave"},
+    {"glitch",      TS_LED_EFFECT_GLITCH,      "Random glitch artifacts"},
+    {NULL, 0, NULL}
+};
+
+static ts_led_effect_type_t filter_name_to_type(const char *name)
+{
+    if (!name) return TS_LED_EFFECT_NONE;
+    for (int i = 0; s_filter_types[i].name; i++) {
+        if (strcmp(s_filter_types[i].name, name) == 0) {
+            return s_filter_types[i].type;
+        }
+    }
+    return TS_LED_EFFECT_NONE;
+}
+
+static int do_led_filter(const char *device_name, const char *filter_name, int speed)
+{
+    if (!device_name) {
+        ts_console_error("--device required\n");
+        return 1;
+    }
+    
+    if (!filter_name) {
+        ts_console_error("--filter-name required (e.g. pulse, blink, breathing, fade-in)\n");
+        return 1;
+    }
+    
+    const char *internal_name = resolve_device_name(device_name);
+    ts_led_device_t dev = ts_led_device_get(internal_name);
+    if (!dev) {
+        ts_console_error("Device '%s' not found\n", device_name);
+        return 1;
+    }
+    
+    ts_led_effect_type_t type = filter_name_to_type(filter_name);
+    if (type == TS_LED_EFFECT_NONE && strcmp(filter_name, "none") != 0) {
+        ts_console_error("Filter '%s' not found\n", filter_name);
+        ts_console_printf("Use 'led --list-filters' to see available filters\n");
+        return 1;
+    }
+    
+    ts_led_layer_t layer = ts_led_layer_get(dev, 0);
+    if (!layer) {
+        ts_console_error("Failed to get layer\n");
+        return 1;
+    }
+    
+    // 配置后处理效果
+    ts_led_effect_config_t config = {
+        .type = type,
+        .params = {
+            .brightness = {.level = 255}
+        }
+    };
+    
+    // 根据速度参数调整效果参数
+    if (speed > 0) {
+        // 速度 1-100 映射到频率：速度1=0.2Hz, 速度100=5Hz
+        float freq = 0.2f + (speed - 1) * 4.8f / 99.0f;
+        
+        switch (type) {
+            case TS_LED_EFFECT_PULSE:
+                config.params.pulse.frequency = freq;
+                config.params.pulse.min_level = 20;
+                config.params.pulse.max_level = 255;
+                break;
+            case TS_LED_EFFECT_BLINK: {
+                uint16_t period_ms = (uint16_t)(1000.0f / freq);
+                config.params.blink.on_time_ms = period_ms / 2;
+                config.params.blink.off_time_ms = period_ms / 2;
+                break;
+            }
+            case TS_LED_EFFECT_BREATHING:
+                config.params.breathing.frequency = freq;
+                config.params.breathing.min_level = 10;
+                config.params.breathing.max_level = 255;
+                break;
+            case TS_LED_EFFECT_FADE_IN:
+            case TS_LED_EFFECT_FADE_OUT:
+                config.params.fade.duration_ms = (uint16_t)(1000.0f / freq);
+                config.params.fade.auto_remove = false;
+                break;
+            case TS_LED_EFFECT_COLOR_SHIFT:
+                config.params.color_shift.speed = speed * 3.6f;  // 度/秒
+                config.params.color_shift.static_shift = 0;
+                break;
+            case TS_LED_EFFECT_SCANLINE:
+                config.params.scanline.speed = (float)speed;
+                config.params.scanline.width = 3;
+                config.params.scanline.direction = TS_LED_EFFECT_DIR_HORIZONTAL;
+                config.params.scanline.intensity = 200;
+                break;
+            case TS_LED_EFFECT_WAVE:
+                config.params.wave.speed = (float)speed;
+                config.params.wave.wavelength = 8.0f;
+                config.params.wave.amplitude = 128;
+                config.params.wave.direction = TS_LED_EFFECT_DIR_HORIZONTAL;
+                break;
+            default:
+                break;
+        }
+    } else {
+        // 使用默认参数
+        switch (type) {
+            case TS_LED_EFFECT_PULSE:
+                config.params.pulse.frequency = 0.5f;
+                config.params.pulse.min_level = 20;
+                config.params.pulse.max_level = 255;
+                break;
+            case TS_LED_EFFECT_BLINK:
+                config.params.blink.on_time_ms = 500;
+                config.params.blink.off_time_ms = 500;
+                break;
+            case TS_LED_EFFECT_BREATHING:
+                config.params.breathing.frequency = 0.3f;
+                config.params.breathing.min_level = 10;
+                config.params.breathing.max_level = 255;
+                break;
+            case TS_LED_EFFECT_FADE_IN:
+            case TS_LED_EFFECT_FADE_OUT:
+                config.params.fade.duration_ms = 1000;
+                config.params.fade.auto_remove = false;
+                break;
+            case TS_LED_EFFECT_COLOR_SHIFT:
+                config.params.color_shift.speed = 90.0f;
+                config.params.color_shift.static_shift = 0;
+                break;
+            case TS_LED_EFFECT_SCANLINE:
+                config.params.scanline.speed = 50.0f;
+                config.params.scanline.width = 3;
+                config.params.scanline.direction = TS_LED_EFFECT_DIR_HORIZONTAL;
+                config.params.scanline.intensity = 200;
+                break;
+            case TS_LED_EFFECT_WAVE:
+                config.params.wave.speed = 50.0f;
+                config.params.wave.wavelength = 8.0f;
+                config.params.wave.amplitude = 128;
+                config.params.wave.direction = TS_LED_EFFECT_DIR_HORIZONTAL;
+                break;
+            case TS_LED_EFFECT_GLITCH:
+                config.params.glitch.intensity = 50;
+                config.params.glitch.frequency = 10;
+                break;
+            default:
+                break;
+        }
+    }
+    
+    esp_err_t ret = ts_led_layer_set_effect(layer, &config);
+    if (ret != ESP_OK) {
+        ts_console_error("Failed to apply filter: %s\n", esp_err_to_name(ret));
+        return 1;
+    }
+    
+    // 记录当前 filter（供保存用）
+    ts_led_preset_set_current_filter(internal_name, filter_name);
+    
+    if (speed > 0) {
+        ts_console_success("Filter '%s' applied on '%s' (speed=%d)\n", filter_name, device_name, speed);
+    } else {
+        ts_console_success("Filter '%s' applied on '%s'\n", filter_name, device_name);
+    }
+    return 0;
+}
+
+static int do_led_stop_filter(const char *device_name)
+{
+    if (!device_name) {
+        ts_console_error("--device required\n");
+        return 1;
+    }
+    
+    const char *internal_name = resolve_device_name(device_name);
+    ts_led_device_t dev = ts_led_device_get(internal_name);
+    if (!dev) {
+        ts_console_error("Device '%s' not found\n", device_name);
+        return 1;
+    }
+    
+    ts_led_layer_t layer = ts_led_layer_get(dev, 0);
+    if (!layer) {
+        ts_console_error("Failed to get layer\n");
+        return 1;
+    }
+    
+    esp_err_t ret = ts_led_layer_clear_effect(layer);
+    if (ret != ESP_OK) {
+        ts_console_error("Failed to clear filter\n");
+        return 1;
+    }
+    
+    // 清除 filter 记录
+    ts_led_preset_set_current_filter(internal_name, NULL);
+    
+    ts_console_success("Filter cleared on '%s'\n", device_name);
+    return 0;
+}
+
+static int do_led_list_filters(bool json)
+{
+    if (json) {
+        ts_console_printf("{\"filters\":[");
+        bool first = true;
+        for (int i = 0; s_filter_types[i].name; i++) {
+            if (!first) ts_console_printf(",");
+            ts_console_printf("{\"name\":\"%s\",\"description\":\"%s\"}",
+                              s_filter_types[i].name, s_filter_types[i].description);
+            first = false;
+        }
+        ts_console_printf("]}\n");
+    } else {
+        ts_console_printf("\n╭─ Post-Processing Filters ───────────────────────────────╮\n");
+        for (int i = 0; s_filter_types[i].name; i++) {
+            ts_console_printf("│ %-14s  %-40s │\n", 
+                              s_filter_types[i].name, 
+                              s_filter_types[i].description);
+        }
+        ts_console_printf("╰──────────────────────────────────────────────────────────╯\n");
+        ts_console_printf("\nUsage: led --filter -d <device> --filter-name <name> [--speed <1-100>]\n");
+        ts_console_printf("       led --stop-filter -d <device>\n");
+    }
     return 0;
 }
 
@@ -445,7 +703,7 @@ static int do_led_list_effects(const char *device_name, bool json)
             return 1;
         }
         
-        size_t count = ts_led_effect_list_for_device(layout, names, 32);
+        size_t count = ts_led_animation_list_for_device(layout, names, 32);
         
         if (json) {
             ts_console_printf("{\"device\":\"%s\",\"effects\":[", device_name);
@@ -465,7 +723,7 @@ static int do_led_list_effects(const char *device_name, bool json)
             ts_console_printf("{");
             
             // Touch 特效
-            size_t count = ts_led_effect_list_for_device(TS_LED_LAYOUT_STRIP, names, 32);
+            size_t count = ts_led_animation_list_for_device(TS_LED_LAYOUT_STRIP, names, 32);
             ts_console_printf("\"touch\":[");
             for (size_t i = 0; i < count; i++) {
                 ts_console_printf("%s\"%s\"", i > 0 ? "," : "", names[i]);
@@ -473,7 +731,7 @@ static int do_led_list_effects(const char *device_name, bool json)
             ts_console_printf("],");
             
             // Board 特效
-            count = ts_led_effect_list_for_device(TS_LED_LAYOUT_RING, names, 32);
+            count = ts_led_animation_list_for_device(TS_LED_LAYOUT_RING, names, 32);
             ts_console_printf("\"board\":[");
             for (size_t i = 0; i < count; i++) {
                 ts_console_printf("%s\"%s\"", i > 0 ? "," : "", names[i]);
@@ -481,7 +739,7 @@ static int do_led_list_effects(const char *device_name, bool json)
             ts_console_printf("],");
             
             // Matrix 特效
-            count = ts_led_effect_list_for_device(TS_LED_LAYOUT_MATRIX, names, 32);
+            count = ts_led_animation_list_for_device(TS_LED_LAYOUT_MATRIX, names, 32);
             ts_console_printf("\"matrix\":[");
             for (size_t i = 0; i < count; i++) {
                 ts_console_printf("%s\"%s\"", i > 0 ? "," : "", names[i]);
@@ -492,21 +750,21 @@ static int do_led_list_effects(const char *device_name, bool json)
             
             // Touch 特效 (点光源)
             ts_console_printf("Touch (point light, 1 LED):\n");
-            size_t count = ts_led_effect_list_for_device(TS_LED_LAYOUT_STRIP, names, 32);
+            size_t count = ts_led_animation_list_for_device(TS_LED_LAYOUT_STRIP, names, 32);
             for (size_t i = 0; i < count; i++) {
                 ts_console_printf("  - %s\n", names[i]);
             }
             
             // Board 特效 (环形)
             ts_console_printf("\nBoard (ring, 28 LEDs):\n");
-            count = ts_led_effect_list_for_device(TS_LED_LAYOUT_RING, names, 32);
+            count = ts_led_animation_list_for_device(TS_LED_LAYOUT_RING, names, 32);
             for (size_t i = 0; i < count; i++) {
                 ts_console_printf("  - %s\n", names[i]);
             }
             
             // Matrix 特效 (矩阵)
             ts_console_printf("\nMatrix (32x32 panel):\n");
-            count = ts_led_effect_list_for_device(TS_LED_LAYOUT_MATRIX, names, 32);
+            count = ts_led_animation_list_for_device(TS_LED_LAYOUT_MATRIX, names, 32);
             for (size_t i = 0; i < count; i++) {
                 ts_console_printf("  - %s\n", names[i]);
             }
@@ -621,11 +879,12 @@ static int do_led_show_boot(const char *device_name, bool json)
             ts_led_boot_config_t cfg;
             if (ts_led_get_boot_config(devices[i], &cfg) == ESP_OK) {
                 if (!first) ts_console_printf(",");
-                ts_console_printf("{\"device\":\"%s\",\"enabled\":%s,\"effect\":\"%s\","
-                    "\"image\":\"%s\",\"speed\":%d,\"brightness\":%d}",
+                ts_console_printf("{\"device\":\"%s\",\"enabled\":%s,\"animation\":\"%s\","
+                    "\"filter\":\"%s\",\"image\":\"%s\",\"speed\":%d,\"brightness\":%d}",
                     devices[i],
                     cfg.enabled ? "true" : "false",
-                    cfg.effect,
+                    cfg.animation,
+                    cfg.filter,
                     cfg.image_path,
                     cfg.speed,
                     cfg.brightness);
@@ -635,23 +894,24 @@ static int do_led_show_boot(const char *device_name, bool json)
         ts_console_printf("]}\n");
     } else {
         ts_console_printf("Boot Configuration:\n\n");
-        ts_console_printf("%-10s  %-8s  %-15s  %-30s  %6s  %10s\n", 
-            "DEVICE", "ENABLED", "EFFECT", "IMAGE", "SPEED", "BRIGHTNESS");
-        ts_console_printf("---------------------------------------------------------------------------------------------\n");
+        ts_console_printf("%-10s  %-8s  %-15s  %-12s  %-25s  %6s  %10s\n", 
+            "DEVICE", "ENABLED", "ANIMATION", "FILTER", "IMAGE", "SPEED", "BRIGHTNESS");
+        ts_console_printf("------------------------------------------------------------------------------------------------------\n");
         
         for (int i = start; i < end; i++) {
             ts_led_boot_config_t cfg;
             if (ts_led_get_boot_config(devices[i], &cfg) == ESP_OK && cfg.enabled) {
-                ts_console_printf("%-10s  %-8s  %-15s  %-30s  %6d  %10d\n",
+                ts_console_printf("%-10s  %-8s  %-15s  %-12s  %-25s  %6d  %10d\n",
                     devices[i],
                     cfg.enabled ? "yes" : "no",
-                    cfg.effect[0] ? cfg.effect : "(none)",
+                    cfg.animation[0] ? cfg.animation : "(none)",
+                    cfg.filter[0] ? cfg.filter : "(none)",
                     cfg.image_path[0] ? cfg.image_path : "(none)",
                     cfg.speed,
                     cfg.brightness);
             } else {
-                ts_console_printf("%-10s  %-8s  %-15s  %-30s  %6s  %10s\n",
-                    devices[i], "no", "-", "-", "-", "-");
+                ts_console_printf("%-10s  %-8s  %-15s  %-12s  %-25s  %6s  %10s\n",
+                    devices[i], "no", "-", "-", "-", "-", "-");
             }
         }
         ts_console_printf("\n");
@@ -683,8 +943,8 @@ static int do_led_test(const char *device_name, int mode)
         return 1;
     }
     
-    // 停止当前特效
-    ts_led_effect_stop(layer);
+    // 停止当前动画
+    ts_led_animation_stop(layer);
     
     // 获取设备信息（假设矩阵32x32）
     uint16_t w = 32, h = 32;
@@ -785,7 +1045,7 @@ static int do_led_image(const char *device_name, const char *file_path, const ch
     ts_led_layer_t layer = ts_led_layer_get(dev, 0);
     if (layer) {
         ts_led_image_animate_stop(layer);
-        ts_led_effect_stop(layer);
+        ts_led_animation_stop(layer);
     }
     
     // 释放之前的图像（现在安全了，动画已停止）
@@ -850,6 +1110,82 @@ static int do_led_image(const char *device_name, const char *file_path, const ch
 }
 
 /*===========================================================================*/
+/*                          Command: led --qrcode                             */
+/*===========================================================================*/
+
+static int do_led_qrcode(const char *device_name, const char *text, 
+                          const char *ecc_str, const char *fg_color_str)
+{
+    if (!device_name) {
+        device_name = "matrix";  // 默认使用 matrix 设备
+    }
+    
+    if (!text || strlen(text) == 0) {
+        ts_console_error("--text required for QR code generation\n");
+        return 1;
+    }
+    
+    // 只支持 matrix 设备
+    if (strcmp(device_name, "matrix") != 0 && strcmp(device_name, "led_matrix") != 0) {
+        ts_console_error("QR code only supported on matrix device (32x32)\n");
+        return 1;
+    }
+    
+    // 解析设备名称（别名 → 内部名称）
+    const char *internal_name = resolve_device_name(device_name);
+    
+    // 解析 ECC 等级
+    ts_led_qr_ecc_t ecc = TS_LED_QR_ECC_MEDIUM;  // 默认 Medium
+    if (ecc_str) {
+        if (ts_led_qr_ecc_parse(ecc_str, &ecc) != ESP_OK) {
+            ts_console_error("Invalid ECC level: %s (use L, M, Q, or H)\n", ecc_str);
+            return 1;
+        }
+    }
+    
+    // 解析前景色
+    ts_led_rgb_t fg_color = TS_LED_WHITE;  // 默认白色
+    if (fg_color_str) {
+        if (ts_led_parse_color(fg_color_str, &fg_color) != ESP_OK) {
+            ts_console_error("Invalid color: %s\n", fg_color_str);
+            return 1;
+        }
+    }
+    
+    // 配置 QR 码
+    ts_led_qr_config_t config = TS_LED_QR_DEFAULT_CONFIG();
+    config.text = text;
+    config.ecc = ecc;
+    config.fg_color = fg_color;
+    config.bg_color = TS_LED_BLACK;
+    config.center = true;
+    // 强制使用 v4（33x33 模块）以获得最大容量
+    config.version_min = 4;
+    config.version_max = 4;
+    
+    // 生成并显示
+    ts_led_qr_result_t result;
+    esp_err_t ret = ts_led_qrcode_show_on_device(internal_name, &config, &result);
+    
+    if (ret == ESP_ERR_INVALID_SIZE) {
+        ts_console_error("Text too long for QR code v4 (max ~50 alphanumeric chars)\n");
+        return 1;
+    }
+    if (ret != ESP_OK) {
+        ts_console_error("Failed to generate QR code: %s\n", esp_err_to_name(ret));
+        return 1;
+    }
+    
+    ts_console_success("QR code v%d (%dx%d) displayed, ECC=%s\n", 
+                       result.version, result.size, result.size,
+                       ts_led_qr_ecc_name(ecc));
+    ts_console_printf("  Text: %s\n", text);
+    ts_console_printf("  Remaining capacity: %d chars\n", result.data_capacity);
+    
+    return 0;
+}
+
+/*===========================================================================*/
 /*                          Main Command Handler                              */
 /*===========================================================================*/
 
@@ -866,14 +1202,21 @@ static int cmd_led(int argc, char **argv)
         ts_console_printf("      --off              Turn off LED\n");
         ts_console_printf("  -b, --brightness       Get/set brightness\n");
         ts_console_printf("  -c, --clear            Clear all LEDs on device\n");
-        ts_console_printf("  -e, --effect           Start LED effect\n");
-        ts_console_printf("      --stop-effect      Stop running effect\n");
-        ts_console_printf("      --list-effects     List available effects\n");
+        ts_console_printf("  -e, --effect           Start LED animation effect\n");
+        ts_console_printf("      --stop-effect      Stop running animation\n");
+        ts_console_printf("      --list-effects     List available animations\n");
+        ts_console_printf("      --filter           Apply post-processing filter\n");
+        ts_console_printf("      --stop-filter      Remove post-processing filter\n");
+        ts_console_printf("      --list-filters     List available filters\n");
+        ts_console_printf("      --filter-name      Filter name (pulse, blink, etc.)\n");
         ts_console_printf("      --parse-color      Parse color info\n");
         ts_console_printf("      --image            Display image on matrix\n");
+        ts_console_printf("      --qrcode           Generate and display QR code\n");
+        ts_console_printf("      --text <string>    Text content for QR code\n");
+        ts_console_printf("      --ecc <L|M|Q|H>    QR error correction level\n");
         ts_console_printf("      --file <path>      Image file path\n");
         ts_console_printf("  -d, --device <name>    Device: touch, board, matrix\n");
-        ts_console_printf("  -n, --name <effect>    Effect name\n");
+        ts_console_printf("  -n, --name <effect>    Animation name\n");
         ts_console_printf("  -v, --value <0-255>    Brightness value\n");
         ts_console_printf("      --color <color>    Color: #RRGGBB or name\n");
         ts_console_printf("      --speed <1-100>    Effect speed (1=slow, 100=fast)\n");
@@ -909,7 +1252,19 @@ static int cmd_led(int argc, char **argv)
         ts_console_printf("  led --save                               (save all)\n");
         ts_console_printf("  led --show-boot                          (show saved)\n");
         ts_console_printf("  led --image --device matrix --file /sdcard/logo.png\n");
+        ts_console_printf("  led --filter --device matrix --filter-name pulse\n");
+        ts_console_printf("  led --filter --device matrix --filter-name blink --speed 80\n");
+        ts_console_printf("  led --stop-filter --device matrix\n");
+        ts_console_printf("  led --list-filters\n");
+        ts_console_printf("  led --qrcode --text \"https://tianshan.io\"\n");
+        ts_console_printf("  led --qrcode --text \"HELLO\" --ecc H\n");
+        ts_console_printf("  led --qrcode --text \"192.168.1.1\" --color green\n");
         ts_console_printf("\nSupported image formats: PNG, BMP, JPG, GIF (animated)\n");
+        ts_console_printf("\nQR Code v4 capacity (alphanumeric):\n");
+        ts_console_printf("  ECC L (~7%% recovery):  114 chars\n");
+        ts_console_printf("  ECC M (~15%% recovery): 90 chars\n");
+        ts_console_printf("  ECC Q (~25%% recovery): 67 chars\n");
+        ts_console_printf("  ECC H (~30%% recovery): 50 chars\n");
         return 0;
     }
     
@@ -933,10 +1288,36 @@ static int cmd_led(int argc, char **argv)
                             s_led_args.file->sval[0] : NULL;
     const char *center_mode = s_led_args.center->count > 0 ?
                               s_led_args.center->sval[0] : NULL;
+    const char *filter_name_val = s_led_args.filter_name->count > 0 ?
+                                  s_led_args.filter_name->sval[0] : NULL;
+    const char *qr_text = s_led_args.text->count > 0 ?
+                          s_led_args.text->sval[0] : NULL;
+    const char *qr_ecc = s_led_args.ecc->count > 0 ?
+                         s_led_args.ecc->sval[0] : NULL;
+    
+    // 生成 QR 码
+    if (s_led_args.qrcode->count > 0) {
+        return do_led_qrcode(device, qr_text, qr_ecc, color);
+    }
     
     // 显示图像
     if (s_led_args.image->count > 0) {
         return do_led_image(device, file_path, center_mode);
+    }
+    
+    // 应用后处理效果
+    if (s_led_args.filter->count > 0) {
+        return do_led_filter(device, filter_name_val, speed);
+    }
+    
+    // 停止后处理效果
+    if (s_led_args.stop_filter->count > 0) {
+        return do_led_stop_filter(device);
+    }
+    
+    // 列出后处理效果
+    if (s_led_args.list_filters->count > 0) {
+        return do_led_list_filters(json);
     }
     
     // 测试模式
@@ -1015,11 +1396,18 @@ esp_err_t ts_cmd_led_register(void)
     s_led_args.off          = arg_lit0(NULL, "off", "Turn off LED");
     s_led_args.brightness   = arg_lit0("b", "brightness", "Get/set brightness");
     s_led_args.clear        = arg_lit0("c", "clear", "Clear LEDs");
-    s_led_args.effect       = arg_lit0("e", "effect", "Start effect");
-    s_led_args.stop_effect  = arg_lit0(NULL, "stop-effect", "Stop effect");
-    s_led_args.list_effects = arg_lit0(NULL, "list-effects", "List effects");
+    s_led_args.effect       = arg_lit0("e", "effect", "Start animation");
+    s_led_args.stop_effect  = arg_lit0(NULL, "stop-effect", "Stop animation");
+    s_led_args.list_effects = arg_lit0(NULL, "list-effects", "List animations");
+    s_led_args.filter       = arg_lit0(NULL, "filter", "Apply post-processing filter");
+    s_led_args.stop_filter  = arg_lit0(NULL, "stop-filter", "Remove filter");
+    s_led_args.list_filters = arg_lit0(NULL, "list-filters", "List filters");
+    s_led_args.filter_name  = arg_str0(NULL, "filter-name", "<name>", "Filter name");
     s_led_args.parse_color  = arg_lit0(NULL, "parse-color", "Parse color info");
     s_led_args.image        = arg_lit0(NULL, "image", "Display image");
+    s_led_args.qrcode       = arg_lit0(NULL, "qrcode", "Generate QR code");
+    s_led_args.text         = arg_str0(NULL, "text", "<string>", "QR code text content");
+    s_led_args.ecc          = arg_str0(NULL, "ecc", "<L|M|Q|H>", "QR error correction");
     s_led_args.test         = arg_lit0("t", "test", "Show test pattern");
     s_led_args.save         = arg_lit0(NULL, "save", "Save as boot config");
     s_led_args.clear_boot   = arg_lit0(NULL, "clear-boot", "Clear boot config");

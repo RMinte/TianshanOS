@@ -1455,15 +1455,15 @@ esp_err_t ts_led_image_animate_start(ts_led_layer_t layer, ts_led_image_t image,
     /* Display first frame */
     ts_led_image_display_frame(layer, image, 0, &ctx->options);
     
-    /* Create effect to drive animation */
-    ts_led_effect_t anim_effect = {
+    /* Create animation to drive GIF playback */
+    ts_led_animation_def_t anim_def = {
         .name = "gif_anim",
         .func = gif_animation_effect,
         .user_data = ctx,
         .frame_interval_ms = 20,  /* Check every 20ms */
     };
     
-    esp_err_t ret = ts_led_effect_start(layer, &anim_effect);
+    esp_err_t ret = ts_led_animation_start(layer, &anim_def);
     if (ret != ESP_OK) {
         free(ctx);
         s_anim_ctx = NULL;
@@ -1478,7 +1478,7 @@ esp_err_t ts_led_image_animate_stop(ts_led_layer_t layer)
 {
     if (!layer) return ESP_ERR_INVALID_ARG;
     
-    ts_led_effect_stop(layer);
+    ts_led_animation_stop(layer);
     
     if (s_anim_ctx) {
         free(s_anim_ctx);

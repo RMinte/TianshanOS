@@ -1,27 +1,34 @@
 /**
- * @file ts_led_effects.c
- * @brief Built-in LED Effects
+ * @file ts_led_animation.c
+ * @brief Built-in LED Animations (Procedural)
  * 
- * 针对三种不同形态的LED设备设计专属特效:
+ * 针对三种不同形态的LED设备设计专属动画:
  * - Touch (点光源): 呼吸、脉冲、闪烁、颜色渐变
  * - Board (环形): 追逐、旋转彩虹、流星、呼吸波
  * - Matrix (矩阵): 火焰、雨滴、等离子、波纹
+ * 
+ * Note: These were previously called "effects" but are actually
+ * procedural animations that generate content. True post-processing
+ * effects are defined in ts_led_effect.c.
+ * 
+ * @version 2.0.0 - Renamed from ts_led_effects.c
  */
 
 #include "ts_led_private.h"
+#include "ts_led_animation.h"
 #include "esp_timer.h"
 #include "esp_random.h"
 #include <string.h>
 #include <math.h>
 
-#define TAG "led_effects"
+#define TAG "led_animation"
 
 /*===========================================================================*/
-/*                       通用特效 (所有设备)                                   */
+/*                       通用动画 (所有设备)                                   */
 /*===========================================================================*/
 
-/* Effect: Rainbow - 彩虹渐变 */
-static void effect_rainbow(ts_led_layer_t layer, uint32_t time_ms, void *data)
+/* Animation: Rainbow - 彩虹渐变 */
+static void anim_rainbow(ts_led_layer_t layer, uint32_t time_ms, void *data)
 {
     ts_led_layer_impl_t *l = (ts_led_layer_impl_t *)layer;
     uint16_t count = l->device->config.led_count;
@@ -33,8 +40,8 @@ static void effect_rainbow(ts_led_layer_t layer, uint32_t time_ms, void *data)
     }
 }
 
-/* Effect: Breathing - 呼吸灯 */
-static void effect_breathing(ts_led_layer_t layer, uint32_t time_ms, void *data)
+/* Animation: Breathing - 呼吸灯 */
+static void anim_breathing(ts_led_layer_t layer, uint32_t time_ms, void *data)
 {
     ts_led_rgb_t *color = (ts_led_rgb_t *)data;
     ts_led_rgb_t c = color ? *color : TS_LED_WHITE;
@@ -46,19 +53,19 @@ static void effect_breathing(ts_led_layer_t layer, uint32_t time_ms, void *data)
     ts_led_fill(layer, scaled);
 }
 
-/* Effect: Solid Color - 纯色填充 */
-static void effect_solid(ts_led_layer_t layer, uint32_t time_ms, void *data)
+/* Animation: Solid Color - 纯色填充 */
+static void anim_solid(ts_led_layer_t layer, uint32_t time_ms, void *data)
 {
     ts_led_rgb_t *color = (ts_led_rgb_t *)data;
     ts_led_fill(layer, color ? *color : TS_LED_WHITE);
 }
 
 /*===========================================================================*/
-/*                     Touch 专属特效 (点光源)                                 */
+/*                     Touch 专属动画 (点光源)                                 */
 /*===========================================================================*/
 
-/* Effect: Pulse - 脉冲闪烁 (快速闪烁后渐灭) */
-static void effect_pulse(ts_led_layer_t layer, uint32_t time_ms, void *data)
+/* Animation: Pulse - 脉冲闪烁 (快速闪烁后渐灭) */
+static void anim_pulse(ts_led_layer_t layer, uint32_t time_ms, void *data)
 {
     uint32_t cycle = time_ms % 1000;
     uint8_t brightness;
@@ -77,16 +84,16 @@ static void effect_pulse(ts_led_layer_t layer, uint32_t time_ms, void *data)
     ts_led_fill(layer, ts_led_scale_color(TS_LED_WHITE, brightness));
 }
 
-/* Effect: Color Cycle - 颜色循环 (点光源用单色渐变更合适) */
-static void effect_color_cycle(ts_led_layer_t layer, uint32_t time_ms, void *data)
+/* Animation: Color Cycle - 颜色循环 (点光源用单色渐变更合适) */
+static void anim_color_cycle(ts_led_layer_t layer, uint32_t time_ms, void *data)
 {
     uint8_t hue = (time_ms / 30) & 0xFF;
     ts_led_rgb_t c = ts_led_color_wheel(hue);
     ts_led_fill(layer, c);
 }
 
-/* Effect: Heartbeat - 心跳 */
-static void effect_heartbeat(ts_led_layer_t layer, uint32_t time_ms, void *data)
+/* Animation: Heartbeat - 心跳 */
+static void anim_heartbeat(ts_led_layer_t layer, uint32_t time_ms, void *data)
 {
     uint32_t cycle = time_ms % 1200;
     uint8_t brightness = 0;
@@ -105,11 +112,11 @@ static void effect_heartbeat(ts_led_layer_t layer, uint32_t time_ms, void *data)
 }
 
 /*===========================================================================*/
-/*                     Board 专属特效 (环形灯带)                               */
+/*                     Board 专属动画 (环形灯带)                               */
 /*===========================================================================*/
 
-/* Effect: Chase - 追逐/跑马灯 */
-static void effect_chase(ts_led_layer_t layer, uint32_t time_ms, void *data)
+/* Animation: Chase - 追逐/跑马灯 */
+static void anim_chase(ts_led_layer_t layer, uint32_t time_ms, void *data)
 {
     ts_led_layer_impl_t *l = (ts_led_layer_impl_t *)layer;
     uint16_t count = l->device->config.led_count;
@@ -125,8 +132,8 @@ static void effect_chase(ts_led_layer_t layer, uint32_t time_ms, void *data)
     }
 }
 
-/* Effect: Comet - 流星 (单向快速移动带长拖尾) */
-static void effect_comet(ts_led_layer_t layer, uint32_t time_ms, void *data)
+/* Animation: Comet - 流星 (单向快速移动带长拖尾) */
+static void anim_comet(ts_led_layer_t layer, uint32_t time_ms, void *data)
 {
     ts_led_layer_impl_t *l = (ts_led_layer_impl_t *)layer;
     uint16_t count = l->device->config.led_count;
@@ -144,8 +151,8 @@ static void effect_comet(ts_led_layer_t layer, uint32_t time_ms, void *data)
     }
 }
 
-/* Effect: Spin - 旋转彩虹 (环形专用) */
-static void effect_spin(ts_led_layer_t layer, uint32_t time_ms, void *data)
+/* Animation: Spin - 旋转彩虹 (环形专用) */
+static void anim_spin(ts_led_layer_t layer, uint32_t time_ms, void *data)
 {
     ts_led_layer_impl_t *l = (ts_led_layer_impl_t *)layer;
     uint16_t count = l->device->config.led_count;
@@ -160,8 +167,8 @@ static void effect_spin(ts_led_layer_t layer, uint32_t time_ms, void *data)
     }
 }
 
-/* Effect: Breathe Wave - 呼吸波 (环形波浪式呼吸) */
-static void effect_breathe_wave(ts_led_layer_t layer, uint32_t time_ms, void *data)
+/* Animation: Breathe Wave - 呼吸波 (环形波浪式呼吸) */
+static void anim_breathe_wave(ts_led_layer_t layer, uint32_t time_ms, void *data)
 {
     ts_led_layer_impl_t *l = (ts_led_layer_impl_t *)layer;
     uint16_t count = l->device->config.led_count;
@@ -176,11 +183,11 @@ static void effect_breathe_wave(ts_led_layer_t layer, uint32_t time_ms, void *da
 }
 
 /*===========================================================================*/
-/*                     Matrix 专属特效 (矩阵屏)                                */
+/*                     Matrix 专属动画 (矩阵屏)                                */
 /*===========================================================================*/
 
-/* Effect: Fire - 火焰 (向上燃烧) */
-static void effect_fire(ts_led_layer_t layer, uint32_t time_ms, void *data)
+/* Animation: Fire - 火焰 (向上燃烧) */
+static void anim_fire(ts_led_layer_t layer, uint32_t time_ms, void *data)
 {
     ts_led_layer_impl_t *l = (ts_led_layer_impl_t *)layer;
     uint16_t width = l->device->config.width > 0 ? l->device->config.width : 32;
@@ -223,9 +230,9 @@ static void effect_fire(ts_led_layer_t layer, uint32_t time_ms, void *data)
     }
 }
 
-/* Effect: Rain - 简单雨滴效果 */
-/* 雨滴颜色优先级: effect_data (通过 --color 参数) > 默认蓝色 */
-static void effect_rain(ts_led_layer_t layer, uint32_t time_ms, void *data)
+/* Animation: Rain - 简单雨滴效果 */
+/* 雨滴颜色优先级: user_data (通过 --color 参数) > 默认蓝色 */
+static void anim_rain(ts_led_layer_t layer, uint32_t time_ms, void *data)
 {
     ts_led_layer_impl_t *l = (ts_led_layer_impl_t *)layer;
     uint16_t width = l->device->config.width > 0 ? l->device->config.width : 32;
@@ -237,8 +244,8 @@ static void effect_rain(ts_led_layer_t layer, uint32_t time_ms, void *data)
     static bool drop_active[32];     // 是否活跃
     static ts_led_rgb_t rain_color;  // 雨滴颜色
     
-    // 检测特效刚启动（effect_last_time == 0 表示刚启动）
-    if (l->effect_last_time == 0) {
+    // 检测动画刚启动（anim_last_time == 0 表示刚启动）
+    if (l->anim_last_time == 0) {
         // 重置状态
         for (int i = 0; i < 32; i++) {
             drop_active[i] = false;
@@ -290,8 +297,8 @@ static void effect_rain(ts_led_layer_t layer, uint32_t time_ms, void *data)
     }
 }
 
-/* Effect: Coderain - 黑客帝国代码雨效果 */
-static void effect_coderain(ts_led_layer_t layer, uint32_t time_ms, void *data)
+/* Animation: Coderain - 黑客帝国代码雨效果 */
+static void anim_coderain(ts_led_layer_t layer, uint32_t time_ms, void *data)
 {
     ts_led_layer_impl_t *l = (ts_led_layer_impl_t *)layer;
     uint16_t width = l->device->config.width > 0 ? l->device->config.width : 32;
@@ -378,8 +385,8 @@ static void effect_coderain(ts_led_layer_t layer, uint32_t time_ms, void *data)
     }
 }
 
-/* Effect: Plasma - 等离子 */
-static void effect_plasma(ts_led_layer_t layer, uint32_t time_ms, void *data)
+/* Animation: Plasma - 等离子 */
+static void anim_plasma(ts_led_layer_t layer, uint32_t time_ms, void *data)
 {
     ts_led_layer_impl_t *l = (ts_led_layer_impl_t *)layer;
     uint16_t width = l->device->config.width > 0 ? l->device->config.width : 32;
@@ -400,8 +407,8 @@ static void effect_plasma(ts_led_layer_t layer, uint32_t time_ms, void *data)
     }
 }
 
-/* Effect: Ripple - 水波纹 */
-static void effect_ripple(ts_led_layer_t layer, uint32_t time_ms, void *data)
+/* Animation: Ripple - 水波纹 */
+static void anim_ripple(ts_led_layer_t layer, uint32_t time_ms, void *data)
 {
     ts_led_layer_impl_t *l = (ts_led_layer_impl_t *)layer;
     uint16_t width = l->device->config.width > 0 ? l->device->config.width : 32;
@@ -425,8 +432,8 @@ static void effect_ripple(ts_led_layer_t layer, uint32_t time_ms, void *data)
     }
 }
 
-/* Effect: Sparkle */
-static void effect_sparkle(ts_led_layer_t layer, uint32_t time_ms, void *data)
+/* Animation: Sparkle */
+static void anim_sparkle(ts_led_layer_t layer, uint32_t time_ms, void *data)
 {
     ts_led_layer_impl_t *l = (ts_led_layer_impl_t *)layer;
     uint16_t count = l->device->config.led_count;
@@ -444,124 +451,142 @@ static void effect_sparkle(ts_led_layer_t layer, uint32_t time_ms, void *data)
 }
 
 /*===========================================================================*/
-/*                          特效注册表                                        */
+/*                          动画注册表                                        */
 /*===========================================================================*/
 
-/* 特效类型标志 */
-#define EFFECT_ALL      0x07
-#define EFFECT_TOUCH    0x01
-#define EFFECT_BOARD    0x02
-#define EFFECT_MATRIX   0x04
+/* 设备类型标志 */
+#define ANIM_ALL      0x07
+#define ANIM_TOUCH    0x01
+#define ANIM_BOARD    0x02
+#define ANIM_MATRIX   0x04
 
 typedef struct {
     const char *name;
-    ts_led_effect_fn_t func;
+    ts_led_animation_fn_t func;
     uint32_t frame_interval_ms;
     void *user_data;
     uint8_t device_types;  // 适用的设备类型
-} ts_led_effect_entry_t;
+} ts_led_animation_entry_t;
 
-static const ts_led_effect_entry_t s_effect_registry[] = {
-    // 通用特效
-    {"rainbow",       effect_rainbow,      20,  NULL, EFFECT_ALL},
-    {"breathing",     effect_breathing,    20,  NULL, EFFECT_ALL},
-    {"solid",         effect_solid,       100,  NULL, EFFECT_ALL},
-    {"sparkle",       effect_sparkle,      30,  NULL, EFFECT_ALL},
+static const ts_led_animation_entry_t s_animation_registry[] = {
+    // 通用动画
+    {"rainbow",       anim_rainbow,      20,  NULL, ANIM_ALL},
+    {"breathing",     anim_breathing,    20,  NULL, ANIM_ALL},
+    {"solid",         anim_solid,       100,  NULL, ANIM_ALL},
+    {"sparkle",       anim_sparkle,      30,  NULL, ANIM_ALL},
     
     // Touch 专属 (点光源)
-    {"pulse",         effect_pulse,        20,  NULL, EFFECT_TOUCH},
-    {"color_cycle",   effect_color_cycle,  30,  NULL, EFFECT_TOUCH},
-    {"heartbeat",     effect_heartbeat,    20,  NULL, EFFECT_TOUCH},
+    {"pulse",         anim_pulse,        20,  NULL, ANIM_TOUCH},
+    {"color_cycle",   anim_color_cycle,  30,  NULL, ANIM_TOUCH},
+    {"heartbeat",     anim_heartbeat,    20,  NULL, ANIM_TOUCH},
     
     // Board 专属 (环形)
-    {"chase",         effect_chase,        50,  NULL, EFFECT_BOARD},
-    {"comet",         effect_comet,        30,  NULL, EFFECT_BOARD},
-    {"spin",          effect_spin,         25,  NULL, EFFECT_BOARD},
-    {"breathe_wave",  effect_breathe_wave, 30,  NULL, EFFECT_BOARD},
+    {"chase",         anim_chase,        50,  NULL, ANIM_BOARD},
+    {"comet",         anim_comet,        30,  NULL, ANIM_BOARD},
+    {"spin",          anim_spin,         25,  NULL, ANIM_BOARD},
+    {"breathe_wave",  anim_breathe_wave, 30,  NULL, ANIM_BOARD},
     
     // Matrix 专属 (矩阵)
-    {"fire",          effect_fire,         30,  NULL, EFFECT_MATRIX},
-    {"rain",          effect_rain,         50,  NULL, EFFECT_MATRIX},
-    {"coderain",      effect_coderain,     50,  NULL, EFFECT_MATRIX},
-    {"plasma",        effect_plasma,       30,  NULL, EFFECT_MATRIX},
-    {"ripple",        effect_ripple,       30,  NULL, EFFECT_MATRIX},
+    {"fire",          anim_fire,         30,  NULL, ANIM_MATRIX},
+    {"rain",          anim_rain,         50,  NULL, ANIM_MATRIX},
+    {"coderain",      anim_coderain,     50,  NULL, ANIM_MATRIX},
+    {"plasma",        anim_plasma,       30,  NULL, ANIM_MATRIX},
+    {"ripple",        anim_ripple,       30,  NULL, ANIM_MATRIX},
     
     {NULL, NULL, 0, NULL, 0}
 };
 
-const ts_led_effect_t *ts_led_effect_get_builtin(const char *name)
+/*===========================================================================*/
+/*                          公开 API                                          */
+/*===========================================================================*/
+
+const ts_led_animation_def_t *ts_led_animation_get_builtin(const char *name)
 {
-    for (int i = 0; s_effect_registry[i].name; i++) {
-        if (strcmp(s_effect_registry[i].name, name) == 0) {
-            // 返回一个临时的 ts_led_effect_t 结构
-            static ts_led_effect_t effect;
-            effect.name = s_effect_registry[i].name;
-            effect.func = s_effect_registry[i].func;
-            effect.frame_interval_ms = s_effect_registry[i].frame_interval_ms;
-            effect.user_data = s_effect_registry[i].user_data;
-            return &effect;
+    for (int i = 0; s_animation_registry[i].name; i++) {
+        if (strcmp(s_animation_registry[i].name, name) == 0) {
+            // 返回一个临时的 ts_led_animation_def_t 结构
+            static ts_led_animation_def_t anim;
+            anim.name = s_animation_registry[i].name;
+            anim.func = s_animation_registry[i].func;
+            anim.frame_interval_ms = s_animation_registry[i].frame_interval_ms;
+            anim.user_data = s_animation_registry[i].user_data;
+            return &anim;
         }
     }
     return NULL;
 }
 
-size_t ts_led_effect_list_builtin(const char **names, size_t max_names)
+size_t ts_led_animation_list_builtin(const char **names, size_t max_names)
 {
     size_t count = 0;
-    for (int i = 0; s_effect_registry[i].name && count < max_names; i++) {
-        if (names) names[count] = s_effect_registry[i].name;
+    for (int i = 0; s_animation_registry[i].name && count < max_names; i++) {
+        if (names) names[count] = s_animation_registry[i].name;
         count++;
     }
     return count;
 }
 
 /**
- * @brief 获取指定设备类型的特效列表
+ * @brief 获取指定设备类型的动画列表
  */
-size_t ts_led_effect_list_for_device(ts_led_layout_t layout, const char **names, size_t max_names)
+size_t ts_led_animation_list_for_device(ts_led_layout_t layout, const char **names, size_t max_names)
 {
     uint8_t type_flag;
     switch (layout) {
         case TS_LED_LAYOUT_STRIP:
-            type_flag = EFFECT_TOUCH;  // 单颗LED视为点光源
+            type_flag = ANIM_TOUCH;  // 单颗LED视为点光源
             break;
         case TS_LED_LAYOUT_RING:
-            type_flag = EFFECT_BOARD;
+            type_flag = ANIM_BOARD;
             break;
         case TS_LED_LAYOUT_MATRIX:
-            type_flag = EFFECT_MATRIX;
+            type_flag = ANIM_MATRIX;
             break;
         default:
-            type_flag = EFFECT_ALL;
+            type_flag = ANIM_ALL;
     }
     
     size_t count = 0;
-    for (int i = 0; s_effect_registry[i].name && count < max_names; i++) {
-        if (s_effect_registry[i].device_types & type_flag) {
-            if (names) names[count] = s_effect_registry[i].name;
+    for (int i = 0; s_animation_registry[i].name && count < max_names; i++) {
+        if (s_animation_registry[i].device_types & type_flag) {
+            if (names) names[count] = s_animation_registry[i].name;
             count++;
         }
     }
     return count;
 }
 
-esp_err_t ts_led_effect_start(ts_led_layer_t layer, const ts_led_effect_t *effect)
+esp_err_t ts_led_animation_start(ts_led_layer_t layer, const ts_led_animation_def_t *animation)
 {
-    if (!layer || !effect) return ESP_ERR_INVALID_ARG;
+    if (!layer || !animation) return ESP_ERR_INVALID_ARG;
     ts_led_layer_impl_t *l = (ts_led_layer_impl_t *)layer;
     
-    l->effect_fn = effect->func;
-    l->effect_data = effect->user_data;
-    l->effect_interval = effect->frame_interval_ms;
-    l->effect_last_time = 0;
+    l->anim_fn = animation->func;
+    l->anim_data = animation->user_data;
+    l->anim_interval = animation->frame_interval_ms;
+    l->anim_last_time = 0;
     
     return ESP_OK;
 }
 
-esp_err_t ts_led_effect_stop(ts_led_layer_t layer)
+esp_err_t ts_led_animation_stop(ts_led_layer_t layer)
 {
     if (!layer) return ESP_ERR_INVALID_ARG;
     ts_led_layer_impl_t *l = (ts_led_layer_impl_t *)layer;
-    l->effect_fn = NULL;
+    l->anim_fn = NULL;
     return ESP_OK;
+}
+
+bool ts_led_animation_is_running(ts_led_layer_t layer)
+{
+    if (!layer) return false;
+    ts_led_layer_impl_t *l = (ts_led_layer_impl_t *)layer;
+    return l->anim_fn != NULL;
+}
+
+ts_led_animation_state_t ts_led_animation_get_state(ts_led_layer_t layer)
+{
+    if (!layer) return TS_LED_ANIMATION_STOPPED;
+    ts_led_layer_impl_t *l = (ts_led_layer_impl_t *)layer;
+    return l->anim_fn ? TS_LED_ANIMATION_PLAYING : TS_LED_ANIMATION_STOPPED;
 }

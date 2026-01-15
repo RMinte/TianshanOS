@@ -131,22 +131,37 @@ esp_err_t ts_led_bind_event_status(uint32_t event_id, ts_led_status_t status,
  * @brief LED 启动配置结构
  */
 typedef struct {
-    char effect[32];        /**< 特效名称，空字符串表示无特效 */
+    char animation[32];     /**< 动画名称，空字符串表示无动画 */
+    char filter[32];        /**< 后处理效果名称，空字符串表示无效果 */
     char image_path[128];   /**< 图像/动画路径，空字符串表示无图像 */
     uint8_t brightness;     /**< 亮度 0-255 */
-    ts_led_rgb_t color;     /**< 静态颜色（当effect为空时使用） */
-    uint8_t speed;          /**< 特效速度 1-100，0 使用默认 */
+    ts_led_rgb_t color;     /**< 静态颜色（当animation为空时使用） */
+    uint8_t speed;          /**< 动画速度 1-100，0 使用默认 */
     bool enabled;           /**< 是否启用 */
 } ts_led_boot_config_t;
 
 /**
- * @brief 记录当前运行的特效（内部使用）
+ * @brief 记录当前运行的动画（内部使用）
  * 
- * 当通过命令启动特效时调用，以便后续保存。
+ * 当通过命令启动动画时调用，以便后续保存。
  * 
  * @param device_name 设备名
- * @param effect 特效名，NULL 表示无特效
+ * @param animation 动画名，NULL 表示无动画
  * @param speed 速度，0 表示默认
+ */
+void ts_led_preset_set_current_animation(const char *device_name, const char *animation, uint8_t speed);
+
+/**
+ * @brief 记录当前运行的后处理效果（内部使用）
+ * 
+ * @param device_name 设备名
+ * @param filter 后处理效果名，NULL 表示无效果
+ */
+void ts_led_preset_set_current_filter(const char *device_name, const char *filter);
+
+/**
+ * @brief 兼容 API - 映射到 ts_led_preset_set_current_animation
+ * @deprecated 使用 ts_led_preset_set_current_animation 替代
  */
 void ts_led_preset_set_current_effect(const char *device_name, const char *effect, uint8_t speed);
 

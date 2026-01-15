@@ -283,7 +283,7 @@ static esp_err_t api_led_effect_list(const cJSON *params, ts_api_result_t *resul
     cJSON *effects = cJSON_AddArrayToObject(data, "effects");
     
     const char *names[16];
-    size_t count = ts_led_effect_list_builtin(names, 16);
+    size_t count = ts_led_animation_list_builtin(names, 16);
     
     for (size_t i = 0; i < count; i++) {
         cJSON_AddItemToArray(effects, cJSON_CreateString(names[i]));
@@ -320,7 +320,7 @@ static esp_err_t api_led_effect_start(const cJSON *params, ts_api_result_t *resu
         return ESP_ERR_NOT_FOUND;
     }
     
-    const ts_led_effect_t *effect = ts_led_effect_get_builtin(effect_param->valuestring);
+    const ts_led_animation_def_t *effect = ts_led_animation_get_builtin(effect_param->valuestring);
     if (!effect) {
         ts_api_result_error(result, TS_API_ERR_NOT_FOUND, "Effect not found");
         return ESP_ERR_NOT_FOUND;

@@ -10,6 +10,8 @@
 #define TS_LED_PRIVATE_H
 
 #include "ts_led.h"
+#include "ts_led_animation.h"
+#include "ts_led_effect.h"
 #include "led_strip.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -41,6 +43,7 @@ typedef struct ts_led_device {
  * @brief LED layer implementation structure
  */
 typedef struct ts_led_layer {
+    int id;                             /**< Layer ID for debugging */
     ts_led_device_impl_t *device;
     ts_led_rgb_t *buffer;
     uint16_t size;
@@ -48,10 +51,22 @@ typedef struct ts_led_layer {
     uint8_t opacity;
     bool visible;
     bool dirty;
-    ts_led_effect_fn_t effect_fn;
-    void *effect_data;
-    uint32_t effect_interval;
-    uint32_t effect_last_time;
+    
+    /* Animation state (procedural animations, formerly "effects") */
+    ts_led_animation_fn_t anim_fn;
+    void *anim_data;
+    uint32_t anim_interval;
+    uint32_t anim_last_time;
+    
+    /* Post-processing effect state */
+    ts_led_effect_config_t post_effect;    /**< Current post-processing effect */
+    uint32_t effect_start_time;            /**< Effect start time (for fade, etc.) */
+    
+    /* For backward compatibility */
+    #define effect_fn       anim_fn
+    #define effect_data     anim_data
+    #define effect_interval anim_interval
+    #define effect_last_time anim_last_time
 } ts_led_layer_impl_t;
 
 /**

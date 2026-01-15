@@ -5,6 +5,7 @@
 
 #include "ts_led_preset.h"
 #include "ts_led.h"
+#include "ts_led_effect.h"
 #include "ts_led_image.h"
 #include "ts_pin_manager.h"
 #include "ts_log.h"
@@ -190,8 +191,9 @@ esp_err_t ts_led_bind_event_status(uint32_t event_id, ts_led_status_t status,
 /*                          Boot Configuration                                */
 /*===========================================================================*/
 
-/* 当前运行的特效名称、速度和颜色（每设备一个） */
-static char s_current_effect[3][32] = {{0}, {0}, {0}};
+/* 当前运行的动画名称、速度和颜色（每设备一个） */
+static char s_current_animation[3][32] = {{0}, {0}, {0}};
+static char s_current_filter[3][32] = {{0}, {0}, {0}};
 static uint8_t s_current_speed[3] = {0, 0, 0};
 static ts_led_rgb_t s_current_color[3] = {{0, 0, 0}, {0, 0, 0}, {0, 0, 0}};
 static bool s_current_color_valid[3] = {false, false, false};
@@ -202,6 +204,59 @@ static esp_timer_handle_t s_delayed_image_timer = NULL;
 static char s_delayed_image_path[128] = {0};
 static int s_delayed_device_idx = -1;
 static uint8_t s_delayed_brightness = 128;
+
+/**
+ * @brief 根据 filter 名称应用后处理效果到 layer
+ */
+static void apply_filter_to_layer(ts_led_layer_t layer, const char *filter)
+{
+    if (!layer || !filter || !filter[0]) return;
+    
+    ts_led_effect_config_t cfg = {0};
+    
+    if (strcmp(filter, "pulse") == 0) {
+        cfg.type = TS_LED_EFFECT_PULSE;
+        cfg.params.pulse.frequency = 0.5f;
+        cfg.params.pulse.min_level = 20;
+        cfg.params.pulse.max_level = 255;
+    } else if (strcmp(filter, "blink") == 0) {
+        cfg.type = TS_LED_EFFECT_BLINK;
+        cfg.params.blink.on_time_ms = 500;
+        cfg.params.blink.off_time_ms = 500;
+    } else if (strcmp(filter, "breathing") == 0) {
+        cfg.type = TS_LED_EFFECT_BREATHING;
+        cfg.params.breathing.frequency = 0.3f;
+        cfg.params.breathing.min_level = 10;
+        cfg.params.breathing.max_level = 255;
+    } else if (strcmp(filter, "color-shift") == 0) {
+        cfg.type = TS_LED_EFFECT_COLOR_SHIFT;
+        cfg.params.color_shift.speed = 90.0f;
+    } else if (strcmp(filter, "scanline") == 0) {
+        cfg.type = TS_LED_EFFECT_SCANLINE;
+        cfg.params.scanline.speed = 50.0f;
+        cfg.params.scanline.width = 3;
+        cfg.params.scanline.direction = TS_LED_EFFECT_DIR_HORIZONTAL;
+        cfg.params.scanline.intensity = 200;
+    } else if (strcmp(filter, "wave") == 0) {
+        cfg.type = TS_LED_EFFECT_WAVE;
+        cfg.params.wave.speed = 50.0f;
+        cfg.params.wave.wavelength = 8.0f;
+        cfg.params.wave.amplitude = 128;
+        cfg.params.wave.direction = TS_LED_EFFECT_DIR_HORIZONTAL;
+    } else if (strcmp(filter, "glitch") == 0) {
+        cfg.type = TS_LED_EFFECT_GLITCH;
+        cfg.params.glitch.intensity = 50;
+        cfg.params.glitch.frequency = 10;
+    } else if (strcmp(filter, "grayscale") == 0) {
+        cfg.type = TS_LED_EFFECT_GRAYSCALE;
+    } else if (strcmp(filter, "invert") == 0) {
+        cfg.type = TS_LED_EFFECT_INVERT;
+    }
+    
+    if (cfg.type != TS_LED_EFFECT_NONE) {
+        ts_led_layer_set_effect(layer, &cfg);
+    }
+}
 
 /* 延迟加载图像的回调 */
 static void delayed_image_load_callback(void *arg)
@@ -256,6 +311,13 @@ static void delayed_image_load_callback(void *arg)
             
             strncpy(s_current_image_path[s_delayed_device_idx], s_delayed_image_path, 
                     sizeof(s_current_image_path[s_delayed_device_idx]) - 1);
+            
+            // 应用之前保存的 filter（如果有）
+            if (s_current_filter[s_delayed_device_idx][0]) {
+                apply_filter_to_layer(layer, s_current_filter[s_delayed_device_idx]);
+                TS_LOGI(TAG, "Applied filter '%s' to %s", 
+                        s_current_filter[s_delayed_device_idx], device_name);
+            }
         } else {
             ts_led_image_free(image);
         }
@@ -302,18 +364,37 @@ static ts_led_device_t get_device_by_index(int idx)
     }
 }
 
-/* 记录当前运行的特效（供保存用） */
-void ts_led_preset_set_current_effect(const char *device_name, const char *effect, uint8_t speed)
+/* 记录当前运行的动画（供保存用） */
+void ts_led_preset_set_current_animation(const char *device_name, const char *animation, uint8_t speed)
 {
     int idx = get_device_index(device_name);
     if (idx >= 0) {
-        if (effect) {
-            strncpy(s_current_effect[idx], effect, sizeof(s_current_effect[idx]) - 1);
+        if (animation) {
+            strncpy(s_current_animation[idx], animation, sizeof(s_current_animation[idx]) - 1);
         } else {
-            s_current_effect[idx][0] = '\0';
+            s_current_animation[idx][0] = '\0';
         }
         s_current_speed[idx] = speed;
     }
+}
+
+/* 记录当前运行的后处理效果（供保存用） */
+void ts_led_preset_set_current_filter(const char *device_name, const char *filter)
+{
+    int idx = get_device_index(device_name);
+    if (idx >= 0) {
+        if (filter) {
+            strncpy(s_current_filter[idx], filter, sizeof(s_current_filter[idx]) - 1);
+        } else {
+            s_current_filter[idx][0] = '\0';
+        }
+    }
+}
+
+/* 兼容旧 API：set_current_effect 映射到 set_current_animation */
+void ts_led_preset_set_current_effect(const char *device_name, const char *effect, uint8_t speed)
+{
+    ts_led_preset_set_current_animation(device_name, effect, speed);
 }
 
 /* 记录当前运行特效的颜色 */
@@ -343,8 +424,8 @@ void ts_led_preset_set_current_image(const char *device_name, const char *path)
         if (path) {
             strncpy(s_current_image_path[idx], path, sizeof(s_current_image_path[idx]) - 1);
             s_current_image_path[idx][sizeof(s_current_image_path[idx]) - 1] = '\0';
-            // 设置图像时清除特效记录
-            s_current_effect[idx][0] = '\0';
+            // 设置图像时清除动画记录
+            s_current_animation[idx][0] = '\0';
         } else {
             s_current_image_path[idx][0] = '\0';
         }
@@ -385,9 +466,17 @@ esp_err_t ts_led_save_boot_config(const char *device_name)
         return ret;
     }
     
-    // 保存特效名称
+    // 保存动画名称
     snprintf(key, sizeof(key), "%s.ef", nvs_prefix);
-    nvs_set_str(nvs, key, s_current_effect[idx]);
+    nvs_set_str(nvs, key, s_current_animation[idx]);
+    
+    // 保存后处理效果（filter）名称
+    snprintf(key, sizeof(key), "%s.flt", nvs_prefix);
+    if (s_current_filter[idx][0]) {
+        nvs_set_str(nvs, key, s_current_filter[idx]);
+    } else {
+        nvs_erase_key(nvs, key);  // 无 filter 时删除键
+    }
     
     // 保存速度
     snprintf(key, sizeof(key), "%s.sp", nvs_prefix);
@@ -431,16 +520,18 @@ esp_err_t ts_led_save_boot_config(const char *device_name)
         TS_LOGI(TAG, "Saved boot config for %s: image=%s, brightness=%d",
                 device_name, s_current_image_path[idx], ts_led_device_get_brightness(dev));
     } else if (s_current_color_valid[idx]) {
-        TS_LOGI(TAG, "Saved boot config for %s: effect=%s, speed=%d, brightness=%d, color=#%02X%02X%02X",
+        TS_LOGI(TAG, "Saved boot config for %s: animation=%s, filter=%s, speed=%d, brightness=%d, color=#%02X%02X%02X",
                 device_name, 
-                s_current_effect[idx][0] ? s_current_effect[idx] : "(none)",
+                s_current_animation[idx][0] ? s_current_animation[idx] : "(none)",
+                s_current_filter[idx][0] ? s_current_filter[idx] : "(none)",
                 s_current_speed[idx],
                 ts_led_device_get_brightness(dev),
                 s_current_color[idx].r, s_current_color[idx].g, s_current_color[idx].b);
     } else {
-        TS_LOGI(TAG, "Saved boot config for %s: effect=%s, speed=%d, brightness=%d",
+        TS_LOGI(TAG, "Saved boot config for %s: animation=%s, filter=%s, speed=%d, brightness=%d",
                 device_name, 
-                s_current_effect[idx][0] ? s_current_effect[idx] : "(none)",
+                s_current_animation[idx][0] ? s_current_animation[idx] : "(none)",
+                s_current_filter[idx][0] ? s_current_filter[idx] : "(none)",
                 s_current_speed[idx],
                 ts_led_device_get_brightness(dev));
     }
@@ -513,6 +604,12 @@ esp_err_t ts_led_load_boot_config(const char *device_name)
     char image_path[128] = {0};
     size_t img_len = sizeof(image_path);
     if (nvs_get_str(nvs, key, image_path, &img_len) == ESP_OK && image_path[0]) {
+        // 在关闭 NVS 之前先读取 filter
+        snprintf(key, sizeof(key), "%s.flt", nvs_prefix);
+        char filter[32] = {0};
+        size_t flt_len = sizeof(filter);
+        bool has_filter = (nvs_get_str(nvs, key, filter, &flt_len) == ESP_OK && filter[0]);
+        
         nvs_close(nvs);
         
         // 检查文件是否存在（SD卡可能还未挂载）
@@ -521,10 +618,13 @@ esp_err_t ts_led_load_boot_config(const char *device_name)
             // 文件不存在，可能SD卡还未挂载，延迟加载
             TS_LOGI(TAG, "Image file not ready, scheduling delayed load: %s", image_path);
             
-            // 保存延迟加载信息
+            // 保存延迟加载信息（包括 filter）
             strncpy(s_delayed_image_path, image_path, sizeof(s_delayed_image_path) - 1);
             s_delayed_device_idx = idx;
             s_delayed_brightness = brightness;
+            if (has_filter) {
+                strncpy(s_current_filter[idx], filter, sizeof(s_current_filter[idx]) - 1);
+            }
             
             // 创建一次性定时器，1秒后尝试加载
             if (s_delayed_image_timer == NULL) {
@@ -566,6 +666,13 @@ esp_err_t ts_led_load_boot_config(const char *device_name)
                 
                 // 记录当前图像路径
                 strncpy(s_current_image_path[idx], image_path, sizeof(s_current_image_path[idx]) - 1);
+                
+                // 应用 filter（如果有）
+                if (has_filter) {
+                    strncpy(s_current_filter[idx], filter, sizeof(s_current_filter[idx]) - 1);
+                    apply_filter_to_layer(layer, filter);
+                    TS_LOGI(TAG, "Applied filter '%s' to %s", filter, device_name);
+                }
             } else {
                 ts_led_image_free(image);
                 TS_LOGW(TAG, "Failed to get layer for %s", device_name);
@@ -577,11 +684,11 @@ esp_err_t ts_led_load_boot_config(const char *device_name)
         return ESP_OK;
     }
     
-    // 加载特效
+    // 加载动画
     snprintf(key, sizeof(key), "%s.ef", nvs_prefix);
-    char effect[32] = {0};
-    size_t len = sizeof(effect);
-    if (nvs_get_str(nvs, key, effect, &len) == ESP_OK && effect[0]) {
+    char animation[32] = {0};
+    size_t len = sizeof(animation);
+    if (nvs_get_str(nvs, key, animation, &len) == ESP_OK && animation[0]) {
         // 获取速度
         snprintf(key, sizeof(key), "%s.sp", nvs_prefix);
         uint8_t speed = 0;
@@ -598,43 +705,55 @@ esp_err_t ts_led_load_boot_config(const char *device_name)
             s_current_color_valid[idx] = true;
         }
         
+        // 加载后处理效果（filter）
+        snprintf(key, sizeof(key), "%s.flt", nvs_prefix);
+        char filter[32] = {0};
+        size_t flt_len = sizeof(filter);
+        bool has_filter = (nvs_get_str(nvs, key, filter, &flt_len) == ESP_OK && filter[0]);
+        
         nvs_close(nvs);
         
-        // 启动特效
-        const ts_led_effect_t *eff = ts_led_effect_get_builtin(effect);
+        // 启动动画
+        const ts_led_animation_def_t *eff = ts_led_animation_get_builtin(animation);
         if (eff) {
             ts_led_layer_t layer = ts_led_layer_get(dev, 0);
             if (layer) {
-                ts_led_effect_t modified = *eff;
+                ts_led_animation_def_t modified = *eff;
                 if (speed > 0 && speed <= 100) {
                     // 速度映射：1->200ms, 100->5ms
                     modified.frame_interval_ms = 200 - (speed - 1) * 195 / 99;
                 }
-                // 如果有保存的颜色，传递给特效
+                // 如果有保存的颜色，传递给动画
                 if (has_color) {
                     modified.user_data = &s_current_color[idx];
                 }
-                ts_led_effect_start(layer, &modified);
+                ts_led_animation_start(layer, &modified);
                 
-                // 记录当前特效
-                strncpy(s_current_effect[idx], effect, sizeof(s_current_effect[idx]) - 1);
+                // 记录当前动画
+                strncpy(s_current_animation[idx], animation, sizeof(s_current_animation[idx]) - 1);
                 s_current_speed[idx] = speed;
                 
-                if (has_color) {
-                    TS_LOGI(TAG, "Restored %s: effect=%s, speed=%d, brightness=%d, color=#%02X%02X%02X",
-                            device_name, effect, (int)speed, (int)brightness,
+                // 应用后处理效果（如果有）
+                if (has_filter) {
+                    strncpy(s_current_filter[idx], filter, sizeof(s_current_filter[idx]) - 1);
+                    apply_filter_to_layer(layer, filter);
+                    TS_LOGI(TAG, "Restored %s: animation=%s, filter=%s, speed=%d, brightness=%d",
+                            device_name, animation, filter, (int)speed, (int)brightness);
+                } else if (has_color) {
+                    TS_LOGI(TAG, "Restored %s: animation=%s, speed=%d, brightness=%d, color=#%02X%02X%02X",
+                            device_name, animation, (int)speed, (int)brightness,
                             s_current_color[idx].r, s_current_color[idx].g, s_current_color[idx].b);
                 } else {
-                    TS_LOGI(TAG, "Restored %s: effect=%s, speed=%d, brightness=%d",
-                            device_name, effect, (int)speed, (int)brightness);
+                    TS_LOGI(TAG, "Restored %s: animation=%s, speed=%d, brightness=%d",
+                            device_name, animation, (int)speed, (int)brightness);
                 }
             }
         } else {
-            TS_LOGW(TAG, "Effect '%s' not found for %s", effect, device_name);
+            TS_LOGW(TAG, "Animation '%s' not found for %s", animation, device_name);
         }
     } else {
         nvs_close(nvs);
-        TS_LOGI(TAG, "Restored %s: brightness=%d (no effect)", device_name, (int)brightness);
+        TS_LOGI(TAG, "Restored %s: brightness=%d (no animation)", device_name, (int)brightness);
     }
     
     return ESP_OK;
@@ -669,6 +788,8 @@ esp_err_t ts_led_clear_boot_config(const char *device_name)
         snprintf(key, sizeof(key), "%s.en", nvs_prefix);
         nvs_erase_key(nvs, key);
         snprintf(key, sizeof(key), "%s.ef", nvs_prefix);
+        nvs_erase_key(nvs, key);
+        snprintf(key, sizeof(key), "%s.flt", nvs_prefix);
         nvs_erase_key(nvs, key);
         snprintf(key, sizeof(key), "%s.sp", nvs_prefix);
         nvs_erase_key(nvs, key);
@@ -722,10 +843,15 @@ esp_err_t ts_led_get_boot_config(const char *device_name, ts_led_boot_config_t *
         return ESP_ERR_NOT_FOUND;
     }
     
-    // 加载特效
+    // 加载动画
     snprintf(key, sizeof(key), "%s.ef", nvs_prefix);
-    size_t len = sizeof(config->effect);
-    nvs_get_str(nvs, key, config->effect, &len);
+    size_t len = sizeof(config->animation);
+    nvs_get_str(nvs, key, config->animation, &len);
+    
+    // 加载后处理效果
+    snprintf(key, sizeof(key), "%s.flt", nvs_prefix);
+    len = sizeof(config->filter);
+    nvs_get_str(nvs, key, config->filter, &len);
     
     // 加载图像路径
     snprintf(key, sizeof(key), "%s.img", nvs_prefix);

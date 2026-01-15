@@ -63,6 +63,16 @@ static void render_task(void *arg)
                                 dst->b = src->b;
                             }
                         }
+                        
+                        // 应用后处理效果（如果有）
+                        if (layer->post_effect.type != TS_LED_EFFECT_NONE) {
+                            ts_led_effect_process(layer, 
+                                                  dev->framebuffer,
+                                                  dev->config.led_count,
+                                                  dev->config.width,
+                                                  dev->config.height,
+                                                  tick_ms - layer->effect_start_time);
+                        }
                     }
                 }
             }
