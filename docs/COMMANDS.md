@@ -440,7 +440,7 @@ led --qrcode --text "https://rminte.com/"           # 默认白色，ECC=M
 led --qrcode --text "HELLO WORLD" --ecc H           # 高纠错等级
 led --qrcode --text "192.168.1.100:8080" --color green  # 绿色 QR 码
 led --qrcode --text "WIFI:T:WPA;S:MySSID;P:password;;" --ecc M  # WiFi 配置
-led --qrcode --text "https://example.com" --bg /sdcard/images/logo.png  # 图片前景
+led --qrcode --text "https://example.com" --bg /sdcard/me.png  # 图片前景
 ```
 
 ### QR Code 功能
