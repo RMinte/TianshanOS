@@ -1450,7 +1450,7 @@ static int do_led_draw_text(const char *device_name, const char *text,
     parse_escape_sequences(display_text, parsed_text, sizeof(parsed_text));
     
     if (!font_name) {
-        font_name = "boutique9x9";  // 默认字体
+        font_name = "cjk";  // 默认字体（支持中文）
     }
     
     // 只支持 matrix 设备
@@ -1681,7 +1681,7 @@ static int cmd_led(int argc, char **argv)
         ts_console_printf("      --qrcode           Generate and display QR code\n");
         ts_console_printf("      --draw-text        Display text on matrix\n");
         ts_console_printf("      --text <string>    Text content for QR code/text display\n");
-        ts_console_printf("      --font <name>      Font name (default: boutique9x9)\n");
+        ts_console_printf("      --font <name>      Font name (default: cjk)\n");
         ts_console_printf("      --align <mode>     Text align: left, center, right\n");
         ts_console_printf("      --ecc <L|M|Q|H>    QR error correction level\n");
         ts_console_printf("      --file <path>      Image file path\n");
@@ -1968,7 +1968,7 @@ esp_err_t ts_cmd_led_register(void)
     s_led_args.stop_text    = arg_lit0(NULL, "stop-text", "Stop text overlay");
     s_led_args.text         = arg_str0(NULL, "text", "<string>", "Text content");
     s_led_args.text_file    = arg_str0(NULL, "text-file", "<path>", "Read text from file (UTF-8)");
-    s_led_args.font         = arg_str0(NULL, "font", "<name>", "Font name (default: boutique9x9)");
+    s_led_args.font         = arg_str0(NULL, "font", "<name>", "Font name (default: cjk)");
     s_led_args.align        = arg_str0(NULL, "align", "<mode>", "Text align: left, center, right");
     s_led_args.scroll       = arg_str0(NULL, "scroll", "<dir>", "Scroll: left, right, up, down, none");
     s_led_args.text_x       = arg_int0(NULL, "x", "<pos>", "Text X position (default: 0)");

@@ -216,7 +216,7 @@ led [options]
 | `--image` | | 显示图像/动画（仅 matrix） |
 | `--draw-text` | | 绘制文本到 matrix（仅 matrix） |
 | `--stop-text` | | 停止文本覆盖层 |
-| `--font <name>` | | 字体名称（boutique9x9/cjk） |
+| `--font <name>` | | 字体名称（cjk/boutique9x9，默认 cjk） |
 | `--text-file <path>` | | 从文件读取文本（UTF-8，支持中文） |
 | `--align <mode>` | | 文本对齐：left/center/right |
 | `--scroll <dir>` | | 文本滚动方向：left/right/up/down/none |
@@ -503,7 +503,7 @@ led --stop-text
 | `--stop-text` | 停止文本覆盖层 |
 | `--text <string>` | 要显示的文本（ASCII） |
 | `--text-file <path>` | 从文件读取 UTF-8 文本（支持中文） |
-| `--font <name>` | 字体名称：boutique9x9（默认）或 cjk |
+| `--font <name>` | 字体名称：cjk（默认）或 boutique9x9 |
 | `--align <mode>` | 对齐方式：left/center/right |
 | `--color <color>` | 文本颜色 |
 | `--x <pos>` | 起始 X 位置（默认 0） |
@@ -517,8 +517,8 @@ led --stop-text
 
 | 字体名 | 说明 | 字符集 |
 |--------|------|--------|
+| `cjk` | BoutiqueBitmap 9x9 CJK（默认） | GB2312（6763 汉字 + ASCII） |
 | `boutique9x9` | BoutiqueBitmap 9x9 | ASCII（95 字符） |
-| `cjk` | BoutiqueBitmap 9x9 CJK | GB2312（6763 汉字） |
 
 **更多示例**：
 
