@@ -464,22 +464,60 @@ Matrix 设备支持生成 QR Code v4（33x33 模块）显示：
 
 ### 文本显示功能
 
-Matrix 设备支持使用 BoutiqueBitmap9x9 字体显示文本：
+Matrix 设备支持两种文本显示模式：
 
-| 参数 | 说明 |
-|------|------|
-| `--draw-text` | 启用文本绘制模式 |
-| `--stop-text` | 停止文本覆盖层 |
-| `--text <string>` | 要显示的文本（ASCII） |
-| `--text-file <path>` | 从文件读取 UTF-8 文本（支持中文） |
-| `--font <name>` | 字体名称：boutique9x9（默认）或 cjk |
-| `--align <mode>` | 对齐方式：left/center/right |
-| `--scroll <dir>` | 滚动方向：left/right/up/down/none |
-| `--x <pos>` | 起始 X 位置（默认 0） |
-| `--y <pos>` | 起始 Y 位置（默认 0） |
-| `--invert` | 反色覆盖（在亮色背景上自动反色显示） |
-| `--loop` | 循环滚动 |
-| `--color <color>` | 文本颜色 |
+#### 模式 1：静态文本（直接绘制）
+
+直接在 Layer 0 上绘制文本，**会覆盖现有内容**。适合简单的一次性显示。
+
+```bash
+# 静态显示（覆盖底层）
+led --draw-text --text "Hello" --color cyan
+
+# 居中显示
+led --draw-text --text "OK" --align center --color green
+
+# 指定位置显示
+led --draw-text --text "Hi" --x 5 --y 10
+```
+
+> **注意**：静态模式下 `--stop-text` 无效。要清除文本，使用 `led --clear` 或显示新内容。
+
+#### 模式 2：覆盖层文本（独立图层）
+
+使用 `--scroll`、`--invert` 或 `--loop` 参数时自动启用覆盖层模式。文本在 Layer 1 上渲染，**不影响底层动画/图像**。
+
+```bash
+# 滚动文本（启用覆盖层）
+led --draw-text --text "Hello World" --scroll left
+
+# 循环滚动
+led --draw-text --text "Breaking News..." --scroll left --loop
+
+# 反色覆盖（在亮色背景上自动反色）
+led --draw-text --text "警告" --font cjk --invert
+
+# 停止覆盖层（恢复底层内容）
+led --stop-text
+```
+
+#### 参数说明
+
+| 参数 | 说明 | 触发覆盖层 |
+|------|------|:----------:|
+| `--draw-text` | 启用文本绘制模式 | - |
+| `--stop-text` | 停止文本覆盖层 | - |
+| `--text <string>` | 要显示的文本（ASCII） | - |
+| `--text-file <path>` | 从文件读取 UTF-8 文本（支持中文） | - |
+| `--font <name>` | 字体名称：boutique9x9（默认）或 cjk | - |
+| `--align <mode>` | 对齐方式：left/center/right | - |
+| `--color <color>` | 文本颜色 | - |
+| `--x <pos>` | 起始 X 位置（默认 0） | - |
+| `--y <pos>` | 起始 Y 位置（默认 0） | - |
+| `--scroll <dir>` | 滚动方向：left/right/up/down/none | ✓ |
+| `--invert` | 反色覆盖（在亮色背景上自动反色显示） | ✓ |
+| `--loop` | 循环滚动 | 需配合 --scroll |
+| `--speed <1-100>` | 滚动速度（1=慢, 100=快） | - |
 
 **可用字体**：
 
@@ -488,52 +526,22 @@ Matrix 设备支持使用 BoutiqueBitmap9x9 字体显示文本：
 | `boutique9x9` | BoutiqueBitmap 9x9 | ASCII（95 字符） |
 | `cjk` | BoutiqueBitmap 9x9 CJK | GB2312（6763 汉字） |
 
-**基础示例**：
+**更多示例**：
 
 ```bash
-# 显示英文文本
-led --draw-text --text "Hello" --color cyan
-
-# 居中显示
-led --draw-text --text "OK" --align center --color green
-
 # 显示中文（通过文件，推荐方式）
 led --draw-text --text-file /sdcard/msg.txt --font cjk --color yellow
-
-# 指定位置显示
-led --draw-text --text "Hi" --x 5 --y 10
-```
-
-**滚动文本示例**：
-
-```bash
-# 向左滚动文本
-led --draw-text --text "Hello World" --scroll left
-
-# 循环滚动（文本滚出后重新从右侧进入）
-led --draw-text --text "Breaking News..." --scroll left --loop
 
 # 调整滚动速度（1=慢, 100=快）
 led --draw-text --text "Fast!" --scroll left --speed 80
 
 # 向上滚动
 led --draw-text --text "UP" --scroll up --loop
-```
 
-**覆盖层模式示例**：
-
-```bash
-# 先显示背景图像
-led --image -f /sdcard/images/bg.raw
-
-# 在图像上叠加文本（反色确保可读性）
-led --draw-text --text "提示" --invert
-
-# 滚动文本覆盖层
-led --draw-text --text "Long scrolling message..." --scroll left --invert --loop
-
-# 停止文本覆盖层（恢复原始图像）
-led --stop-text
+# 覆盖层组合使用
+led --image -f /sdcard/images/bg.png               # 先显示背景
+led --draw-text --text "提示" --invert --scroll left --loop  # 叠加滚动文本
+led --stop-text                                     # 恢复背景
 ```
 
 > **⚠️ 中文输入限制**：由于 ESP-IDF 串口控制台的 UTF-8 解析限制，直接在命令行输入中文（如 `--text "你好"`）可能导致参数解析错误。**请使用 `--text-file` 从文件读取中文文本**。
