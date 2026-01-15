@@ -192,7 +192,8 @@ esp_err_t ts_led_qrcode_show(ts_led_layer_t layer,
         // QR is larger than matrix (v4 = 33x33)
         // Crop edges to fit - remove quiet zone partially
         crop = (qr_size - matrix_size + 1) / 2;  // e.g., (33-32+1)/2 = 1
-        ESP_LOGW(TAG, "QR code larger than matrix, cropping %d pixels from edges", crop);
+        ESP_LOGD(TAG, "QR v%d (%dx%d) cropped %dpx edges to fit %dx%d matrix", 
+                 qr_version, qr_size, qr_size, crop, matrix_size, matrix_size);
     }
     
     // Get background image info if provided
