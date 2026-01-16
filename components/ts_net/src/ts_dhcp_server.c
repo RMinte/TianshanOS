@@ -127,6 +127,21 @@ typedef struct {
 #define NVS_KEY_AP_DNS          "ap_dns"
 #define NVS_KEY_AP_LEASE        "ap_lease"
 
+/* Ethernet 接口 NVS 键 */
+#define NVS_KEY_ETH_ENABLED     "eth_en"
+#define NVS_KEY_ETH_START_IP    "eth_start"
+#define NVS_KEY_ETH_END_IP      "eth_end"
+#define NVS_KEY_ETH_GATEWAY     "eth_gw"
+#define NVS_KEY_ETH_NETMASK     "eth_mask"
+#define NVS_KEY_ETH_DNS         "eth_dns"
+#define NVS_KEY_ETH_LEASE       "eth_lease"
+
+/* 静态绑定 NVS 键（blob 格式存储）*/
+#define NVS_KEY_AP_BINDINGS     "ap_bind"
+#define NVS_KEY_ETH_BINDINGS    "eth_bind"
+#define NVS_KEY_AP_BIND_CNT     "ap_bcnt"
+#define NVS_KEY_ETH_BIND_CNT    "eth_bcnt"
+
 /* ============================================================================
  * 内部状态
  * ========================================================================== */
@@ -1064,8 +1079,8 @@ esp_err_t ts_dhcp_server_save_config(void)
     
     xSemaphoreTake(s_state.mutex, portMAX_DELAY);
     
+    /* 保存 AP 接口配置 */
     ts_dhcp_config_t *cfg = &s_state.iface[TS_DHCP_IF_AP].config;
-    
     nvs_set_u8(handle, NVS_KEY_AP_ENABLED, cfg->enabled ? 1 : 0);
     nvs_set_str(handle, NVS_KEY_AP_START_IP, cfg->pool.start_ip);
     nvs_set_str(handle, NVS_KEY_AP_END_IP, cfg->pool.end_ip);
@@ -1074,12 +1089,39 @@ esp_err_t ts_dhcp_server_save_config(void)
     nvs_set_str(handle, NVS_KEY_AP_DNS, cfg->pool.dns1);
     nvs_set_u32(handle, NVS_KEY_AP_LEASE, cfg->lease_time_min);
     
+    /* 保存 AP 静态绑定 */
+    ts_dhcp_if_state_t *ap_state = &s_state.iface[TS_DHCP_IF_AP];
+    nvs_set_u8(handle, NVS_KEY_AP_BIND_CNT, (uint8_t)ap_state->static_binding_count);
+    if (ap_state->static_binding_count > 0) {
+        nvs_set_blob(handle, NVS_KEY_AP_BINDINGS, ap_state->static_bindings,
+                     ap_state->static_binding_count * sizeof(ts_dhcp_static_binding_t));
+    }
+    
+    /* 保存 ETH 接口配置 */
+    cfg = &s_state.iface[TS_DHCP_IF_ETH].config;
+    nvs_set_u8(handle, NVS_KEY_ETH_ENABLED, cfg->enabled ? 1 : 0);
+    nvs_set_str(handle, NVS_KEY_ETH_START_IP, cfg->pool.start_ip);
+    nvs_set_str(handle, NVS_KEY_ETH_END_IP, cfg->pool.end_ip);
+    nvs_set_str(handle, NVS_KEY_ETH_GATEWAY, cfg->pool.gateway);
+    nvs_set_str(handle, NVS_KEY_ETH_NETMASK, cfg->pool.netmask);
+    nvs_set_str(handle, NVS_KEY_ETH_DNS, cfg->pool.dns1);
+    nvs_set_u32(handle, NVS_KEY_ETH_LEASE, cfg->lease_time_min);
+    
+    /* 保存 ETH 静态绑定 */
+    ts_dhcp_if_state_t *eth_state = &s_state.iface[TS_DHCP_IF_ETH];
+    nvs_set_u8(handle, NVS_KEY_ETH_BIND_CNT, (uint8_t)eth_state->static_binding_count);
+    if (eth_state->static_binding_count > 0) {
+        nvs_set_blob(handle, NVS_KEY_ETH_BINDINGS, eth_state->static_bindings,
+                     eth_state->static_binding_count * sizeof(ts_dhcp_static_binding_t));
+    }
+    
     xSemaphoreGive(s_state.mutex);
     
     nvs_commit(handle);
     nvs_close(handle);
     
-    TS_LOGI(TAG, "Configuration saved to NVS");
+    TS_LOGI(TAG, "Configuration saved to NVS (AP: %zu bindings, ETH: %zu bindings)",
+            ap_state->static_binding_count, eth_state->static_binding_count);
     return ESP_OK;
 }
 
@@ -1098,8 +1140,8 @@ esp_err_t ts_dhcp_server_load_config(void)
     
     xSemaphoreTake(s_state.mutex, portMAX_DELAY);
     
+    /* 加载 AP 接口配置 */
     ts_dhcp_config_t *cfg = &s_state.iface[TS_DHCP_IF_AP].config;
-    
     uint8_t enabled;
     if (nvs_get_u8(handle, NVS_KEY_AP_ENABLED, &enabled) == ESP_OK) {
         cfg->enabled = (enabled != 0);
@@ -1115,8 +1157,49 @@ esp_err_t ts_dhcp_server_load_config(void)
     nvs_get_str(handle, NVS_KEY_AP_NETMASK, cfg->pool.netmask, &len);
     len = TS_DHCP_IP_STR_MAX_LEN;
     nvs_get_str(handle, NVS_KEY_AP_DNS, cfg->pool.dns1, &len);
-    
     nvs_get_u32(handle, NVS_KEY_AP_LEASE, &cfg->lease_time_min);
+    
+    /* 加载 AP 静态绑定 */
+    ts_dhcp_if_state_t *ap_state = &s_state.iface[TS_DHCP_IF_AP];
+    uint8_t bind_cnt = 0;
+    if (nvs_get_u8(handle, NVS_KEY_AP_BIND_CNT, &bind_cnt) == ESP_OK && bind_cnt > 0) {
+        if (bind_cnt > TS_DHCP_MAX_STATIC_BINDINGS) bind_cnt = TS_DHCP_MAX_STATIC_BINDINGS;
+        len = bind_cnt * sizeof(ts_dhcp_static_binding_t);
+        if (nvs_get_blob(handle, NVS_KEY_AP_BINDINGS, ap_state->static_bindings, &len) == ESP_OK) {
+            ap_state->static_binding_count = bind_cnt;
+            TS_LOGI(TAG, "Loaded %d AP static bindings from NVS", bind_cnt);
+        }
+    }
+    
+    /* 加载 ETH 接口配置 */
+    cfg = &s_state.iface[TS_DHCP_IF_ETH].config;
+    if (nvs_get_u8(handle, NVS_KEY_ETH_ENABLED, &enabled) == ESP_OK) {
+        cfg->enabled = (enabled != 0);
+    }
+    
+    len = TS_DHCP_IP_STR_MAX_LEN;
+    nvs_get_str(handle, NVS_KEY_ETH_START_IP, cfg->pool.start_ip, &len);
+    len = TS_DHCP_IP_STR_MAX_LEN;
+    nvs_get_str(handle, NVS_KEY_ETH_END_IP, cfg->pool.end_ip, &len);
+    len = TS_DHCP_IP_STR_MAX_LEN;
+    nvs_get_str(handle, NVS_KEY_ETH_GATEWAY, cfg->pool.gateway, &len);
+    len = TS_DHCP_IP_STR_MAX_LEN;
+    nvs_get_str(handle, NVS_KEY_ETH_NETMASK, cfg->pool.netmask, &len);
+    len = TS_DHCP_IP_STR_MAX_LEN;
+    nvs_get_str(handle, NVS_KEY_ETH_DNS, cfg->pool.dns1, &len);
+    nvs_get_u32(handle, NVS_KEY_ETH_LEASE, &cfg->lease_time_min);
+    
+    /* 加载 ETH 静态绑定 */
+    ts_dhcp_if_state_t *eth_state = &s_state.iface[TS_DHCP_IF_ETH];
+    bind_cnt = 0;
+    if (nvs_get_u8(handle, NVS_KEY_ETH_BIND_CNT, &bind_cnt) == ESP_OK && bind_cnt > 0) {
+        if (bind_cnt > TS_DHCP_MAX_STATIC_BINDINGS) bind_cnt = TS_DHCP_MAX_STATIC_BINDINGS;
+        len = bind_cnt * sizeof(ts_dhcp_static_binding_t);
+        if (nvs_get_blob(handle, NVS_KEY_ETH_BINDINGS, eth_state->static_bindings, &len) == ESP_OK) {
+            eth_state->static_binding_count = bind_cnt;
+            TS_LOGI(TAG, "Loaded %d ETH static bindings from NVS", bind_cnt);
+        }
+    }
     
     xSemaphoreGive(s_state.mutex);
     
