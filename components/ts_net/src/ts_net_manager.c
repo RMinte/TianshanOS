@@ -47,6 +47,18 @@
 #define NVS_KEY_ETH_DNS2        "eth_dns2"
 #define NVS_KEY_HOSTNAME        "hostname"
 
+/* WiFi AP NVS 键 */
+#define NVS_KEY_AP_ENABLED      "ap_en"
+#define NVS_KEY_AP_SSID         "ap_ssid"
+#define NVS_KEY_AP_PASS         "ap_pass"
+#define NVS_KEY_AP_CHANNEL      "ap_chan"
+#define NVS_KEY_AP_IP           "ap_ip"
+
+/* WiFi STA NVS 键 */
+#define NVS_KEY_STA_ENABLED     "sta_en"
+#define NVS_KEY_STA_SSID        "sta_ssid"
+#define NVS_KEY_STA_PASS        "sta_pass"
+
 /* ============================================================================
  * 内部状态
  * ========================================================================== */
@@ -465,6 +477,34 @@ esp_err_t ts_net_manager_init(void)
     }
 #endif
     
+    /* 初始化 WiFi */
+#ifdef CONFIG_TS_NET_WIFI_ENABLE
+    TS_LOGI(TAG, "Initializing WiFi...");
+    ret = ts_wifi_init();
+    if (ret == ESP_OK) {
+        s_state.wifi_ap_status.state = TS_NET_STATE_INITIALIZED;
+        s_state.wifi_sta_status.state = TS_NET_STATE_INITIALIZED;
+        
+        /* 设置默认 WiFi AP 配置（如果未从 NVS 加载） */
+        if (s_state.wifi_ap_config.ssid[0] == '\0') {
+            strncpy(s_state.wifi_ap_config.ssid, CONFIG_TS_NET_WIFI_AP_SSID, 
+                    sizeof(s_state.wifi_ap_config.ssid) - 1);
+            strncpy(s_state.wifi_ap_config.password, CONFIG_TS_NET_WIFI_AP_PASS,
+                    sizeof(s_state.wifi_ap_config.password) - 1);
+            s_state.wifi_ap_config.enabled = true;
+            s_state.wifi_ap_config.auto_start = true;
+            /* AP 默认 IP */
+            strncpy(s_state.wifi_ap_config.static_ip.ip, "192.168.4.1", TS_NET_IP_STR_MAX_LEN);
+            strncpy(s_state.wifi_ap_config.static_ip.netmask, "255.255.255.0", TS_NET_IP_STR_MAX_LEN);
+            strncpy(s_state.wifi_ap_config.static_ip.gateway, "192.168.4.1", TS_NET_IP_STR_MAX_LEN);
+        }
+        
+        TS_LOGI(TAG, "WiFi initialized");
+    } else {
+        TS_LOGE(TAG, "WiFi init failed: %s", esp_err_to_name(ret));
+    }
+#endif
+    
     s_state.initialized = true;
     TS_LOGI(TAG, "Network manager initialized");
     
@@ -582,9 +622,42 @@ esp_err_t ts_net_manager_start(ts_net_if_t iface)
             
         case TS_NET_IF_WIFI_STA:
 #ifdef CONFIG_TS_NET_WIFI_ENABLE
-            /* TODO: 实现 WiFi STA 启动 */
-            TS_LOGW(TAG, "WiFi STA start not implemented yet");
-            ret = ESP_ERR_NOT_SUPPORTED;
+            if (!s_state.wifi_sta_config.enabled) {
+                TS_LOGW(TAG, "WiFi STA is disabled");
+                ret = ESP_ERR_INVALID_STATE;
+                break;
+            }
+            
+            TS_LOGI(TAG, "Starting WiFi STA...");
+            s_state.wifi_sta_status.state = TS_NET_STATE_STARTING;
+            
+            /* 设置 STA 模式或 APSTA 模式 */
+            ts_wifi_mode_t current_mode = ts_wifi_get_mode();
+            if (current_mode == TS_WIFI_MODE_AP) {
+                ret = ts_wifi_set_mode(TS_WIFI_MODE_APSTA);
+            } else if (current_mode == TS_WIFI_MODE_OFF) {
+                ret = ts_wifi_set_mode(TS_WIFI_MODE_STA);
+            }
+            
+            if (ret == ESP_OK && s_state.wifi_sta_config.ssid[0] != '\0') {
+                /* 配置连接参数 */
+                ts_wifi_sta_config_t sta_cfg = {0};
+                strncpy(sta_cfg.ssid, s_state.wifi_sta_config.ssid, sizeof(sta_cfg.ssid) - 1);
+                strncpy(sta_cfg.password, s_state.wifi_sta_config.password, sizeof(sta_cfg.password) - 1);
+                
+                ret = ts_wifi_sta_config(&sta_cfg);
+                if (ret == ESP_OK) {
+                    ret = ts_wifi_sta_connect();
+                }
+            }
+            
+            if (ret == ESP_OK) {
+                s_state.wifi_sta_status.state = TS_NET_STATE_CONNECTING;
+                TS_LOGI(TAG, "WiFi STA connecting to %s...", s_state.wifi_sta_config.ssid);
+            } else {
+                s_state.wifi_sta_status.state = TS_NET_STATE_ERROR;
+                TS_LOGE(TAG, "Failed to start WiFi STA: %s", esp_err_to_name(ret));
+            }
 #else
             ret = ESP_ERR_NOT_SUPPORTED;
 #endif
@@ -592,9 +665,63 @@ esp_err_t ts_net_manager_start(ts_net_if_t iface)
             
         case TS_NET_IF_WIFI_AP:
 #ifdef CONFIG_TS_NET_WIFI_ENABLE
-            /* TODO: 实现 WiFi AP 启动 */
-            TS_LOGW(TAG, "WiFi AP start not implemented yet");
-            ret = ESP_ERR_NOT_SUPPORTED;
+            if (!s_state.wifi_ap_config.enabled) {
+                TS_LOGW(TAG, "WiFi AP is disabled");
+                ret = ESP_ERR_INVALID_STATE;
+                break;
+            }
+            
+            TS_LOGI(TAG, "Starting WiFi AP...");
+            s_state.wifi_ap_status.state = TS_NET_STATE_STARTING;
+            
+            /* 设置 AP 模式或 APSTA 模式 */
+            ts_wifi_mode_t cur_mode = ts_wifi_get_mode();
+            if (cur_mode == TS_WIFI_MODE_STA) {
+                ret = ts_wifi_set_mode(TS_WIFI_MODE_APSTA);
+            } else if (cur_mode == TS_WIFI_MODE_OFF) {
+                ret = ts_wifi_set_mode(TS_WIFI_MODE_AP);
+            }
+            
+            if (ret == ESP_OK) {
+                /* 配置 AP 参数 */
+                ts_wifi_ap_config_t ap_cfg = {
+                    .channel = CONFIG_TS_NET_WIFI_AP_CHANNEL,
+                    .max_connections = CONFIG_TS_NET_WIFI_AP_MAX_CONN,
+                    .auth_mode = WIFI_AUTH_WPA2_PSK,
+                    .hidden = false
+                };
+                strncpy(ap_cfg.ssid, s_state.wifi_ap_config.ssid, sizeof(ap_cfg.ssid) - 1);
+                strncpy(ap_cfg.password, s_state.wifi_ap_config.password, sizeof(ap_cfg.password) - 1);
+                
+                /* 如果没有密码，使用开放认证 */
+                if (strlen(ap_cfg.password) == 0) {
+                    ap_cfg.auth_mode = WIFI_AUTH_OPEN;
+                }
+                
+                ret = ts_wifi_ap_config(&ap_cfg);
+                if (ret == ESP_OK) {
+                    ret = ts_wifi_ap_start();
+                }
+            }
+            
+            if (ret == ESP_OK) {
+                s_state.wifi_ap_status.state = TS_NET_STATE_CONNECTED;
+                s_state.wifi_ap_status.has_ip = true;
+                
+                /* 设置 AP 的 IP 地址 */
+                strncpy(s_state.wifi_ap_status.ip_info.ip, 
+                        s_state.wifi_ap_config.static_ip.ip, TS_NET_IP_STR_MAX_LEN);
+                strncpy(s_state.wifi_ap_status.ip_info.netmask, 
+                        s_state.wifi_ap_config.static_ip.netmask, TS_NET_IP_STR_MAX_LEN);
+                strncpy(s_state.wifi_ap_status.ip_info.gateway, 
+                        s_state.wifi_ap_config.static_ip.gateway, TS_NET_IP_STR_MAX_LEN);
+                
+                TS_LOGI(TAG, "WiFi AP started: SSID=%s, IP=%s", 
+                        s_state.wifi_ap_config.ssid, s_state.wifi_ap_status.ip_info.ip);
+            } else {
+                s_state.wifi_ap_status.state = TS_NET_STATE_ERROR;
+                TS_LOGE(TAG, "Failed to start WiFi AP: %s", esp_err_to_name(ret));
+            }
 #else
             ret = ESP_ERR_NOT_SUPPORTED;
 #endif
@@ -628,7 +755,40 @@ esp_err_t ts_net_manager_stop(ts_net_if_t iface)
             
         case TS_NET_IF_WIFI_STA:
 #ifdef CONFIG_TS_NET_WIFI_ENABLE
-            /* TODO */
+            TS_LOGI(TAG, "Stopping WiFi STA...");
+            ret = ts_wifi_sta_disconnect();
+            
+            /* 如果 AP 也没启动，关闭 WiFi */
+            if (s_state.wifi_ap_status.state == TS_NET_STATE_INITIALIZED ||
+                s_state.wifi_ap_status.state == TS_NET_STATE_DISCONNECTED) {
+                ts_wifi_set_mode(TS_WIFI_MODE_OFF);
+            } else {
+                /* 只有 AP 在运行，切换到纯 AP 模式 */
+                ts_wifi_set_mode(TS_WIFI_MODE_AP);
+            }
+            
+            s_state.wifi_sta_status.state = TS_NET_STATE_INITIALIZED;
+            s_state.wifi_sta_status.has_ip = false;
+            memset(&s_state.wifi_sta_status.ip_info, 0, sizeof(s_state.wifi_sta_status.ip_info));
+#endif
+            break;
+            
+        case TS_NET_IF_WIFI_AP:
+#ifdef CONFIG_TS_NET_WIFI_ENABLE
+            TS_LOGI(TAG, "Stopping WiFi AP...");
+            ret = ts_wifi_ap_stop();
+            
+            /* 如果 STA 也没启动，关闭 WiFi */
+            if (s_state.wifi_sta_status.state == TS_NET_STATE_INITIALIZED ||
+                s_state.wifi_sta_status.state == TS_NET_STATE_DISCONNECTED) {
+                ts_wifi_set_mode(TS_WIFI_MODE_OFF);
+            } else {
+                /* 只有 STA 在运行，切换到纯 STA 模式 */
+                ts_wifi_set_mode(TS_WIFI_MODE_STA);
+            }
+            
+            s_state.wifi_ap_status.state = TS_NET_STATE_INITIALIZED;
+            s_state.wifi_ap_status.has_ip = false;
 #endif
             break;
             
@@ -890,6 +1050,20 @@ esp_err_t ts_net_manager_save_config(void)
     nvs_set_str(handle, NVS_KEY_ETH_DNS1, s_state.eth_config.static_ip.dns1);
     nvs_set_str(handle, NVS_KEY_HOSTNAME, s_state.hostname);
     
+    /* 保存 WiFi AP 配置 */
+#ifdef CONFIG_TS_NET_WIFI_ENABLE
+    nvs_set_u8(handle, NVS_KEY_AP_ENABLED, s_state.wifi_ap_config.enabled ? 1 : 0);
+    nvs_set_str(handle, NVS_KEY_AP_SSID, s_state.wifi_ap_config.ssid);
+    nvs_set_str(handle, NVS_KEY_AP_PASS, s_state.wifi_ap_config.password);
+    nvs_set_u8(handle, NVS_KEY_AP_CHANNEL, s_state.wifi_ap_config.channel);
+    nvs_set_str(handle, NVS_KEY_AP_IP, s_state.wifi_ap_config.static_ip.ip);
+    
+    /* 保存 WiFi STA 配置 */
+    nvs_set_u8(handle, NVS_KEY_STA_ENABLED, s_state.wifi_sta_config.enabled ? 1 : 0);
+    nvs_set_str(handle, NVS_KEY_STA_SSID, s_state.wifi_sta_config.ssid);
+    nvs_set_str(handle, NVS_KEY_STA_PASS, s_state.wifi_sta_config.password);
+#endif
+    
     xSemaphoreGive(s_state.mutex);
     
     ret = nvs_commit(handle);
@@ -944,6 +1118,37 @@ esp_err_t ts_net_manager_load_config(void)
     
     str_len = TS_NET_HOSTNAME_MAX_LEN;
     nvs_get_str(handle, NVS_KEY_HOSTNAME, s_state.hostname, &str_len);
+    
+    /* 加载 WiFi AP 配置 */
+#ifdef CONFIG_TS_NET_WIFI_ENABLE
+    if (nvs_get_u8(handle, NVS_KEY_AP_ENABLED, &u8_val) == ESP_OK) {
+        s_state.wifi_ap_config.enabled = (u8_val != 0);
+    }
+    
+    str_len = sizeof(s_state.wifi_ap_config.ssid);
+    nvs_get_str(handle, NVS_KEY_AP_SSID, s_state.wifi_ap_config.ssid, &str_len);
+    
+    str_len = sizeof(s_state.wifi_ap_config.password);
+    nvs_get_str(handle, NVS_KEY_AP_PASS, s_state.wifi_ap_config.password, &str_len);
+    
+    if (nvs_get_u8(handle, NVS_KEY_AP_CHANNEL, &u8_val) == ESP_OK) {
+        s_state.wifi_ap_config.channel = u8_val;
+    }
+    
+    str_len = TS_NET_IP_STR_MAX_LEN;
+    nvs_get_str(handle, NVS_KEY_AP_IP, s_state.wifi_ap_config.static_ip.ip, &str_len);
+    
+    /* 加载 WiFi STA 配置 */
+    if (nvs_get_u8(handle, NVS_KEY_STA_ENABLED, &u8_val) == ESP_OK) {
+        s_state.wifi_sta_config.enabled = (u8_val != 0);
+    }
+    
+    str_len = sizeof(s_state.wifi_sta_config.ssid);
+    nvs_get_str(handle, NVS_KEY_STA_SSID, s_state.wifi_sta_config.ssid, &str_len);
+    
+    str_len = sizeof(s_state.wifi_sta_config.password);
+    nvs_get_str(handle, NVS_KEY_STA_PASS, s_state.wifi_sta_config.password, &str_len);
+#endif
     
     xSemaphoreGive(s_state.mutex);
     

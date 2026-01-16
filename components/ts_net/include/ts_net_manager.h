@@ -101,6 +101,12 @@ typedef struct {
     ts_net_ip_info_str_t static_ip;             /**< 静态 IP 配置 */
     char hostname[TS_NET_HOSTNAME_MAX_LEN];     /**< 主机名 */
     bool auto_start;                            /**< 是否自动启动 */
+    
+    /* WiFi 专用配置 */
+    char ssid[32];                              /**< WiFi SSID */
+    char password[64];                          /**< WiFi 密码 */
+    uint8_t channel;                            /**< WiFi 信道（仅 AP） */
+    uint8_t max_connections;                    /**< 最大连接数（仅 AP） */
 } ts_net_if_config_t;
 
 /**

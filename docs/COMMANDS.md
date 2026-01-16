@@ -15,6 +15,7 @@
 - [fs - 文件系统操作](#fs---文件系统操作)
 - [net - 网络管理](#net---网络管理)
 - [dhcp - DHCP 服务器管理](#dhcp---dhcp-服务器管理)
+- [wifi - WiFi 管理](#wifi---wifi-管理)
 - [device - 设备控制](#device---设备控制)
 
 ---
@@ -692,7 +693,7 @@ storage --status --json
 
 > **当前状态**：
 > - ✅ 以太网（W5500）完全支持
-> - ❌ WiFi 未实现（硬件未启用）
+> - ✅ WiFi 请使用 `wifi` 命令
 > - ✅ 配置保存/加载支持 NVS 持久化
 
 ### 语法
@@ -892,6 +893,82 @@ DHCP 配置存储在 NVS 中，重启后自动加载。使用 `--save` 命令保
 
 ---
 
+## wifi - WiFi 管理
+
+管理 WiFi AP 模式（热点）和 STA 模式（连接外网）。
+
+### 语法
+
+```
+wifi [options]
+```
+
+### 选项
+
+| 选项 | 简写 | 说明 |
+|------|------|------|
+| `--status` | `-s` | 显示 WiFi 状态 |
+| `--scan` | | 扫描附近 WiFi 网络 |
+| `--ap` | | 配置/查看 AP 模式 |
+| `--connect` | | 连接到 WiFi 网络（STA 模式） |
+| `--disconnect` | | 断开 WiFi 连接（STA 模式） |
+| `--start` | | 启动 WiFi 接口 |
+| `--stop` | | 停止 WiFi 接口 |
+| `--save` | | 保存配置到 NVS |
+| `--ssid <name>` | | WiFi 网络名称 |
+| `--pass <password>` | | WiFi 密码 |
+| `--iface <if>` | | 接口：`ap`（默认）或 `sta` |
+| `--channel <1-13>` | | WiFi 信道（仅 AP 模式） |
+| `--json` | `-j` | JSON 格式输出 |
+| `--help` | `-h` | 显示帮助 |
+
+### 示例
+
+```bash
+# 显示 WiFi 状态
+wifi --status
+
+# 扫描附近 WiFi 网络
+wifi --scan
+
+# 配置并启动 AP 热点
+wifi --ap --ssid TianShanOS --pass tianshan123
+wifi --start --iface ap
+
+# 连接到外网 WiFi（STA 模式）
+wifi --connect --ssid HomeWiFi --pass secret123
+
+# 断开 STA 连接
+wifi --disconnect
+
+# 停止 AP
+wifi --stop --iface ap
+
+# 保存配置
+wifi --save
+
+# JSON 输出
+wifi --status --json
+```
+
+### AP 模式（热点）
+
+AP 模式用于：
+- 备用管理通道（手机直连 ESP32）
+- 为以太网设备提供外网（配合 STA 模式 + NAT）
+
+默认配置：
+- SSID: `TianShanOS`
+- 密码: `tianshan123`
+- IP: `192.168.4.1`
+- 信道: 1
+
+### STA 模式（客户端）
+
+STA 模式用于连接外部 WiFi 路由器，获取外网访问能力。
+
+---
+
 ## fs - 文件系统操作
 
 类 Unix 风格的文件系统操作命令。
@@ -1070,8 +1147,9 @@ device --agx --status --json
 | `led` | ✅ 可用 | touch/board/matrix 全部可用 |
 | `fan` | ✅ 可用 | 支持 Fan 0（GPIO 41） |
 | `storage` | ✅ 可用 | SPIFFS 可用，SD 卡需插入 |
-| `net` | ⚠️ 部分 | 以太网可用，WiFi 未实现 |
+| `net` | ✅ 可用 | 以太网完全可用 |
 | `dhcp` | ✅ 可用 | 完整 DHCP 服务器，支持静态绑定 |
+| `wifi` | ✅ 可用 | AP/STA 模式，扫描、连接、热点 |
 | `fs` | ✅ 可用 | 文件系统操作（ls/cat/rm/mkdir 等） |
 | `device` | ⚠️ 模拟 | 未接入真实驱动 |
 
