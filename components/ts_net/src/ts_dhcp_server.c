@@ -7,6 +7,7 @@
  * - 配置持久化到 NVS
  * - 客户端租约跟踪
  * - 事件通知
+ * - 静态 MAC-IP 绑定（通过预填充 lwIP 租约池实现）
  *
  * @author TianShanOS Team
  * @version 1.0.0
@@ -22,6 +23,7 @@
 #include "nvs.h"
 #include "lwip/ip4_addr.h"
 #include "lwip/ip_addr.h"
+#include "lwip/mem.h"
 #include "dhcpserver/dhcpserver.h"  /* For dhcps_lease_t */
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -33,7 +35,75 @@
 
 #define TAG "ts_dhcps"
 
-/* 事件队列配置 */
+/* ============================================================================
+ * lwIP DHCP 服务器内部结构定义（从 dhcpserver.c 复制）
+ * 
+ * 警告：这些结构必须与 ESP-IDF lwIP 组件保持同步！
+ * 如果升级 ESP-IDF 版本，需要检查 dhcpserver.c 中的结构是否变化。
+ * ========================================================================== */
+
+/* 链表节点 - 用于租约池 */
+typedef struct list_node_s {
+    void *pnode;
+    struct list_node_s *pnext;
+} list_node_t;
+
+/* 租约池条目 */
+typedef struct dhcps_pool_s {
+    ip4_addr_t ip;
+    uint8_t mac[6];
+    uint32_t lease_timer;
+} dhcps_pool_t;
+
+/* DHCP 服务器句柄状态 */
+typedef enum {
+    DHCPS_HANDLE_CREATED,
+    DHCPS_HANDLE_STARTED,
+    DHCPS_HANDLE_STOPPED,
+    DHCPS_HANDLE_DELETE_PENDING
+} dhcps_handle_state_t;
+
+/* DHCP 服务器内部结构（与 dhcpserver.c 中定义匹配） */
+typedef struct dhcps_internal_s {
+    struct netif *dhcps_netif;
+    ip4_addr_t broadcast_dhcps;
+    ip4_addr_t server_address;
+    ip4_addr_t dns_server[2];  /* DNS_TYPE_MAX = 2 */
+    ip4_addr_t client_address;
+    ip4_addr_t client_address_plus;
+    ip4_addr_t dhcps_mask;
+    list_node_t *plist;        /* 租约池链表 */
+    bool renew;
+    dhcps_lease_t dhcps_poll;
+    uint32_t dhcps_lease_time;
+    uint8_t dhcps_offer;
+    uint8_t dhcps_dns;
+    char *dhcps_captiveportal_uri;
+    void *dhcps_cb;
+    void *dhcps_cb_arg;
+    struct udp_pcb *dhcps_pcb;
+    dhcps_handle_state_t state;
+    bool has_declined_ip;
+} dhcps_internal_t;
+
+/* esp_netif 内部结构（从 esp_netif_lwip_internal.h 简化）*/
+typedef struct esp_netif_internal_s {
+    uint8_t mac[6];
+    void *ip_info;
+    void *ip_info_old;
+    struct netif *lwip_netif;
+    void *lwip_init_fn;
+    void *lwip_input_fn;
+    void *netif_handle;
+    void *related_data;
+    dhcps_internal_t *dhcps;   /* DHCP 服务器句柄 */
+    /* ... 其他字段省略 ... */
+} esp_netif_internal_t;
+
+/* ============================================================================
+ * 事件队列配置
+ * ========================================================================== */
+
 #define DHCP_EVENT_QUEUE_SIZE  8
 #define DHCP_EVENT_TASK_STACK  3072
 #define DHCP_EVENT_TASK_PRIO   5
@@ -308,6 +378,148 @@ static esp_err_t apply_config_to_netif(ts_dhcp_if_t iface)
     TS_LOGI(TAG, "  Pool:    %s - %s", if_state->config.pool.start_ip, if_state->config.pool.end_ip);
     TS_LOGI(TAG, "  Lease:   %lu min", (unsigned long)if_state->config.lease_time_min);
     
+    return ESP_OK;
+}
+
+/**
+ * @brief 将节点按 IP 顺序插入到链表
+ * 
+ * 复制自 lwIP dhcpserver.c 的 node_insert_to_list
+ * 保持与 lwIP 内部实现一致的排序方式
+ */
+static void inject_node_to_list(list_node_t **phead, list_node_t *pinsert)
+{
+    list_node_t *plist = NULL;
+    dhcps_pool_t *pdhcps_pool = NULL;
+    dhcps_pool_t *pdhcps_node = NULL;
+
+    if (*phead == NULL) {
+        *phead = pinsert;
+    } else {
+        plist = *phead;
+        pdhcps_node = (dhcps_pool_t *)pinsert->pnode;
+        pdhcps_pool = (dhcps_pool_t *)plist->pnode;
+
+        if (pdhcps_node->ip.addr < pdhcps_pool->ip.addr) {
+            pinsert->pnext = plist;
+            *phead = pinsert;
+        } else {
+            while (plist->pnext != NULL) {
+                pdhcps_pool = (dhcps_pool_t *)plist->pnext->pnode;
+
+                if (pdhcps_node->ip.addr < pdhcps_pool->ip.addr) {
+                    pinsert->pnext = plist->pnext;
+                    plist->pnext = pinsert;
+                    return;
+                }
+
+                plist = plist->pnext;
+            }
+
+            plist->pnext = pinsert;
+        }
+    }
+}
+
+/**
+ * @brief 将静态绑定预填充到 lwIP DHCP 服务器的租约池
+ * 
+ * 通过直接操作 lwIP 内部数据结构实现真正的静态绑定。
+ * 当 DHCP 服务器收到请求时，会先在 plist 中查找 MAC 地址，
+ * 如果找到则返回预先绑定的 IP，实现静态绑定功能。
+ * 
+ * @param iface 接口
+ * @return ESP_OK 成功
+ * 
+ * @warning 此函数直接操作 lwIP 内部结构，必须在 DHCP 服务器启动后调用
+ */
+static esp_err_t inject_static_bindings_to_lwip(ts_dhcp_if_t iface)
+{
+    ts_dhcp_if_state_t *if_state = &s_state.iface[iface];
+    esp_netif_t *netif = if_state->netif;
+    
+    if (!netif || if_state->static_binding_count == 0) {
+        return ESP_OK;  /* 无绑定需要注入 */
+    }
+    
+    /* 获取 lwIP DHCP 服务器内部结构 */
+    esp_netif_internal_t *netif_internal = (esp_netif_internal_t *)netif;
+    dhcps_internal_t *dhcps = netif_internal->dhcps;
+    
+    if (!dhcps) {
+        TS_LOGW(TAG, "DHCP server handle is NULL, cannot inject bindings");
+        return ESP_ERR_INVALID_STATE;
+    }
+    
+    /* 检查 DHCP 服务器是否已启动 */
+    if (dhcps->state != DHCPS_HANDLE_STARTED) {
+        TS_LOGW(TAG, "DHCP server not started (state=%d), will inject after start", dhcps->state);
+        return ESP_ERR_INVALID_STATE;
+    }
+    
+    uint32_t lease_timer = (dhcps->dhcps_lease_time * CONFIG_LWIP_DHCPS_LEASE_UNIT) / 1;
+    size_t injected = 0;
+    
+    TS_LOGI(TAG, "Injecting %zu static bindings to lwIP...", if_state->static_binding_count);
+    
+    for (size_t i = 0; i < if_state->static_binding_count; i++) {
+        ts_dhcp_static_binding_t *binding = &if_state->static_bindings[i];
+        
+        if (!binding->enabled) {
+            continue;
+        }
+        
+        /* 检查 MAC 是否已在 plist 中 */
+        bool found = false;
+        list_node_t *node = dhcps->plist;
+        while (node) {
+            dhcps_pool_t *pool = (dhcps_pool_t *)node->pnode;
+            if (memcmp(pool->mac, binding->mac, 6) == 0) {
+                /* 已存在，更新 IP */
+                pool->ip.addr = ipaddr_addr(binding->ip);
+                pool->lease_timer = lease_timer;
+                found = true;
+                char mac_str[18];
+                ts_dhcp_mac_array_to_str(binding->mac, mac_str, sizeof(mac_str));
+                TS_LOGI(TAG, "  Updated: %s -> %s", mac_str, binding->ip);
+                break;
+            }
+            node = node->pnext;
+        }
+        
+        if (!found) {
+            /* 创建新的租约池条目 */
+            dhcps_pool_t *new_pool = (dhcps_pool_t *)mem_calloc(1, sizeof(dhcps_pool_t));
+            if (!new_pool) {
+                TS_LOGE(TAG, "Failed to allocate pool entry");
+                continue;
+            }
+            
+            new_pool->ip.addr = ipaddr_addr(binding->ip);
+            memcpy(new_pool->mac, binding->mac, 6);
+            new_pool->lease_timer = lease_timer;
+            
+            list_node_t *new_node = (list_node_t *)mem_calloc(1, sizeof(list_node_t));
+            if (!new_node) {
+                mem_free(new_pool);
+                TS_LOGE(TAG, "Failed to allocate list node");
+                continue;
+            }
+            
+            new_node->pnode = new_pool;
+            new_node->pnext = NULL;
+            
+            /* 按 IP 顺序插入到链表 */
+            inject_node_to_list(&dhcps->plist, new_node);
+            
+            char mac_str[18];
+            ts_dhcp_mac_array_to_str(binding->mac, mac_str, sizeof(mac_str));
+            TS_LOGI(TAG, "  Injected: %s -> %s", mac_str, binding->ip);
+            injected++;
+        }
+    }
+    
+    TS_LOGI(TAG, "Static bindings injection complete: %zu new entries", injected);
     return ESP_OK;
 }
 
@@ -630,6 +842,13 @@ esp_err_t ts_dhcp_server_start(ts_dhcp_if_t iface)
             if_state->state = TS_DHCP_STATE_ERROR;
             xSemaphoreGive(s_state.mutex);
             return ret;
+        }
+        
+        /* 注入静态绑定到 lwIP 租约池
+         * 必须在 DHCP 服务器启动后执行，因为 dhcps 句柄需要处于 STARTED 状态
+         */
+        if (if_state->static_binding_count > 0) {
+            inject_static_bindings_to_lwip(iface);
         }
     }
     
@@ -1042,23 +1261,35 @@ esp_err_t ts_dhcp_server_add_static_binding(ts_dhcp_if_t iface,
     ts_dhcp_if_state_t *if_state = &s_state.iface[iface];
     
     /* 检查是否已存在 */
+    bool is_update = false;
     for (size_t i = 0; i < if_state->static_binding_count; i++) {
         if (memcmp(if_state->static_bindings[i].mac, binding->mac, 6) == 0) {
             if_state->static_bindings[i] = *binding;
-            xSemaphoreGive(s_state.mutex);
-            return ESP_OK;
+            is_update = true;
+            break;
         }
     }
     
     /* 添加新绑定 */
-    if (if_state->static_binding_count >= TS_DHCP_MAX_STATIC_BINDINGS) {
-        xSemaphoreGive(s_state.mutex);
-        return ESP_ERR_NO_MEM;
+    if (!is_update) {
+        if (if_state->static_binding_count >= TS_DHCP_MAX_STATIC_BINDINGS) {
+            xSemaphoreGive(s_state.mutex);
+            return ESP_ERR_NO_MEM;
+        }
+        if_state->static_bindings[if_state->static_binding_count++] = *binding;
     }
     
-    if_state->static_bindings[if_state->static_binding_count++] = *binding;
+    /* 如果 DHCP 服务器正在运行，立即注入到 lwIP */
+    if (if_state->state == TS_DHCP_STATE_RUNNING && binding->enabled) {
+        inject_static_bindings_to_lwip(iface);
+    }
     
     xSemaphoreGive(s_state.mutex);
+    
+    char mac_str[18];
+    ts_dhcp_mac_array_to_str(binding->mac, mac_str, sizeof(mac_str));
+    TS_LOGI(TAG, "Static binding %s: %s -> %s (enabled=%d)", 
+            is_update ? "updated" : "added", mac_str, binding->ip, binding->enabled);
     
     return ESP_OK;
 }
