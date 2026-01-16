@@ -12,6 +12,7 @@
 - [led - LED 控制](#led---led-控制)
 - [fan - 风扇控制](#fan---风扇控制)
 - [storage - 存储管理](#storage---存储管理)
+- [fs - 文件系统操作](#fs---文件系统操作)
 - [net - 网络管理](#net---网络管理)
 - [dhcp - DHCP 服务器管理](#dhcp---dhcp-服务器管理)
 - [device - 设备控制](#device---设备控制)
@@ -860,6 +861,92 @@ DHCP 配置存储在 NVS 中，重启后自动加载。使用 `--save` 命令保
 
 ---
 
+## fs - 文件系统操作
+
+类 Unix 风格的文件系统操作命令。
+
+### 可用命令
+
+| 命令 | 说明 |
+|------|------|
+| `ls [path]` | 列出目录内容 |
+| `cat <file>` | 显示文件内容 |
+| `cd <path>` | 切换工作目录 |
+| `pwd` | 显示当前工作目录 |
+| `mkdir <path>` | 创建目录 |
+| `rm <path>` | 删除文件或目录 |
+| `cp <src> <dst>` | 复制文件 |
+| `mv <src> <dst>` | 移动/重命名文件 |
+| `touch <file>` | 创建空文件 |
+
+### 路径说明
+
+- 支持绝对路径（以 `/` 开头）和相对路径
+- 默认工作目录：`/sdcard`
+- 支持 `..`（上级目录）和 `.`（当前目录）
+
+### 挂载点
+
+| 路径 | 说明 |
+|------|------|
+| `/spiffs` | SPIFFS 分区（内置 Flash） |
+| `/sdcard` | SD 卡挂载点 |
+
+### 示例
+
+```bash
+# 显示当前目录
+pwd
+
+# 列出当前目录
+ls
+
+# 列出指定目录
+ls /sdcard/images
+
+# 详细列表（显示大小、时间）
+ls -l
+ls -l /sdcard
+
+# 切换目录
+cd /sdcard/config
+cd ..            # 上级目录
+cd images        # 相对路径
+
+# 查看文件内容
+cat config.json
+cat /sdcard/scripts/startup.sh
+
+# 创建目录
+mkdir /sdcard/backup
+mkdir logs
+
+# 创建空文件
+touch /sdcard/test.txt
+
+# 复制文件
+cp config.json config.json.bak
+cp /sdcard/a.txt /sdcard/backup/a.txt
+
+# 移动/重命名
+mv old.txt new.txt
+mv /sdcard/temp.txt /sdcard/archive/temp.txt
+
+# 删除文件
+rm /sdcard/temp.txt
+
+# 删除空目录
+rm /sdcard/empty_dir
+```
+
+### 注意事项
+
+- `rm` 命令只能删除文件或空目录
+- SD 卡需要插入才能访问 `/sdcard`
+- SPIFFS 分区空间有限，不建议存放大文件
+
+---
+
 ## device - 设备控制
 
 控制外部设备（AGX、LPMU、USB MUX）。
@@ -952,7 +1039,9 @@ device --agx --status --json
 | `led` | ✅ 可用 | touch/board/matrix 全部可用 |
 | `fan` | ✅ 可用 | 支持 Fan 0（GPIO 41） |
 | `storage` | ✅ 可用 | SPIFFS 可用，SD 卡需插入 |
-| `net` | ⚠️ 部分 | 状态查询可用 |
+| `net` | ✅ 可用 | W5500 以太网，静态 IP/DHCP 服务器 |
+| `dhcp` | ✅ 可用 | 完整 DHCP 服务器，支持静态绑定 |
+| `fs` | ✅ 可用 | 文件系统操作（ls/cat/rm/mkdir 等） |
 | `device` | ⚠️ 模拟 | 未接入真实驱动 |
 
 ---
@@ -985,6 +1074,6 @@ fan set speed 75
 
 ## 版本信息
 
-- **文档版本**: 1.0.0
-- **适用版本**: TianShanOS v1.0.0+
-- **最后更新**: 2026-01-15
+- **文档版本**: 1.1.0
+- **适用版本**: TianShanOS v0.1.0+
+- **最后更新**: 2026-01-17
