@@ -539,10 +539,10 @@ led --stop-text
 led --draw-text --text-file /sdcard/msg.txt --font cjk --color yellow
 
 # 调整滚动速度（1=慢, 100=快）
-led --draw-text --text "Fast!" --scroll left --speed 80
+led --draw-text --text "Fast!" --scroll left --font boutique9x9 --speed 80
 
 # 向上滚动
-led --draw-text --text "UP" --scroll up --loop
+led --draw-text --text "不错" --scroll up --font boutique9x9  --loop
 
 # 覆盖层组合使用
 led --image -f /sdcard/images/bg.png               # 先显示背景
