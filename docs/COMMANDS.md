@@ -1157,6 +1157,7 @@ ssh [options]
 | `--user <name>` | 用户名 |
 | `--password <pwd>` | 密码（密码认证） |
 | `--key <path>` | 私钥文件路径（公钥认证） |
+| `--keyid <id>` | 使用安全存储中的密钥（公钥认证） |
 | `--exec <cmd>` | 执行远程命令 |
 | `--shell` | 启动交互式 Shell |
 | `--forward <spec>` | 端口转发（格式：`L<local>:<remote_host>:<remote_port>`） |
@@ -1164,14 +1165,28 @@ ssh [options]
 | `--timeout <sec>` | 连接超时（秒） |
 | `--verbose` | 详细输出 |
 
-### 密钥生成选项
+### 密钥文件生成选项
 
 | 选项 | 说明 |
 |------|------|
-| `--keygen` | 生成 SSH 密钥对 |
+| `--keygen` | 生成 SSH 密钥对到文件 |
 | `--type <type>` | 密钥类型：`rsa`, `rsa2048`, `rsa4096`, `ecdsa`, `ec256`, `ec384` |
 | `--output <path>` | 私钥输出路径 |
 | `--comment <text>` | 公钥注释（可选） |
+
+### 安全密钥存储选项（推荐）
+
+密钥存储在 ESP32 的 NVS 加密分区中，比文件存储更安全。
+
+| 选项 | 说明 |
+|------|------|
+| `--keys` | 进入密钥管理模式 |
+| `--keys --list` | 列出所有存储的密钥 |
+| `--keys --import --id <name> --key <path>` | 从文件导入密钥到安全存储 |
+| `--keys --import --id <name> --type <type>` | 生成密钥并存储到安全存储 |
+| `--keys --delete --id <name>` | 删除存储的密钥 |
+| `--keys --export --id <name> --output <path>` | 导出公钥到文件 |
+| `--id <name>` | 密钥 ID（用于安全存储操作） |
 
 ### 密钥部署选项
 
@@ -1185,10 +1200,39 @@ ssh [options]
 - `--password` - 密码（用于初始认证）
 - `--key` - 私钥路径（公钥为 `<path>.pub`）
 
-### 密钥生成示例
+### 安全密钥存储示例（推荐）
 
 ```bash
-# 生成 RSA 2048 位密钥对
+# 查看存储的密钥
+ssh --keys --list
+
+# 生成 ECDSA 密钥并存储到安全存储（推荐）
+ssh --keys --import --id agx --type ecdsa --comment "AGX production key"
+
+# 从 SD 卡导入已有密钥到安全存储
+ssh --keys --import --id backup --key /sdcard/id_rsa
+
+# 使用安全存储的密钥连接
+ssh --host 192.168.1.100 --user nvidia --keyid agx --shell
+ssh --host 192.168.1.100 --user nvidia --keyid agx --exec "nvidia-smi"
+
+# 导出公钥用于部署
+ssh --keys --export --id agx --output /sdcard/agx.pub
+
+# 删除不需要的密钥
+ssh --keys --delete --id old_key
+```
+
+安全密钥存储的优势：
+- **硬件保护**：密钥存储在 ESP32 的 NVS 加密分区
+- **无需文件**：避免私钥文件泄露风险
+- **使用方便**：通过 `--keyid` 直接引用密钥
+- **支持旋转**：可随时删除旧密钥、添加新密钥
+
+### 密钥文件生成示例
+
+```bash
+# 生成 RSA 2048 位密钥对（保存到文件）
 ssh --keygen --type rsa2048 --output /sdcard/id_rsa
 
 # 生成 ECDSA P-256 密钥对（推荐，更快更安全）
@@ -1271,6 +1315,30 @@ Trust this host? (yes/no):
 
 ### 典型工作流
 
+#### 方式一：使用安全存储（推荐）
+
+1. **生成密钥并存储到安全区域**：
+   ```bash
+   ssh --keys --import --id agx --type ecdsa --comment "TianShanOS AGX"
+   ```
+
+2. **导出公钥用于部署**：
+   ```bash
+   ssh --keys --export --id agx --output /sdcard/agx.pub
+   ```
+
+3. **部署公钥到目标服务器**：
+   ```bash
+   ssh --copyid --host 192.168.1.100 --user nvidia --password secret --key /sdcard/agx
+   ```
+
+4. **使用安全存储的密钥连接**：
+   ```bash
+   ssh --host 192.168.1.100 --user nvidia --keyid agx --shell
+   ```
+
+#### 方式二：使用文件存储
+
 1. **在 TianShanOS 上生成密钥对**：
    ```bash
    ssh --keygen --type ecdsa --output /sdcard/id_ecdsa --comment "TianShanOS"
@@ -1287,6 +1355,21 @@ Trust this host? (yes/no):
    ```bash
    ssh --host 192.168.1.100 --user nvidia --key /sdcard/id_ecdsa --exec "hostname"
    ```
+
+#### 密钥迁移：文件 → 安全存储
+
+已有密钥文件的用户可以迁移到安全存储：
+```bash
+# 导入已有密钥
+ssh --keys --import --id mykey --key /sdcard/id_rsa
+
+# 验证导入成功
+ssh --keys --list
+
+# 删除原文件（可选，确保安全）
+fs --rm /sdcard/id_rsa
+fs --rm /sdcard/id_rsa.pub
+```
 
 ---
 

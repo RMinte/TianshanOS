@@ -9,6 +9,7 @@ idf_component_register(
         "src/ts_known_hosts.c"
         "src/ts_port_forward.c"
         "src/ts_ssh_shell.c"
+        "src/ts_keystore.c"
     INCLUDE_DIRS
         "include"
     REQUIRES
@@ -17,6 +18,7 @@ idf_component_register(
         nvs_flash
         lwip
         ch405labs_esp_libssh2
+        json
     PRIV_REQUIRES
         esp_timer
 )

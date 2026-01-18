@@ -224,8 +224,8 @@
 - [x] SSH 交互式 Shell (ts_ssh_shell - PTY分配, 多终端类型, 双向I/O, 信号处理)
 - [x] SSH 密钥生成 (CLI --keygen - RSA/ECDSA生成, PEM私钥导出, OpenSSH公钥格式)
 - [x] SSH 公钥部署 (CLI --copyid - 自动部署公钥到远程服务器, 权限设置, 验证)
-- [ ] SSH 安全存储 (将私钥存储在 ESP32 安全 Flash 区域)
-- [ ] SSH 密钥轮换 (密钥更新和旧密钥废弃机制)
+- [x] SSH 安全密钥存储 (ts_keystore - NVS加密存储私钥, 支持导入/生成/删除/列表)
+- [x] SSH 使用安全存储密钥 (--keyid 选项从安全存储加载密钥进行认证)
 
 ---
 
