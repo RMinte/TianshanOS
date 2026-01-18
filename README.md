@@ -28,8 +28,9 @@ TianShanOS 是一个**面向配置而非面向代码**的嵌入式操作系统�
 
 ### 核心特性
 
-- **完全模块化** - 57 个 C 源文件，41 个头文件，每个功能都是独立组件
+- **完全模块化** - 85+ 个 C 源文件，60+ 个头文件，每个功能都是独立组件
 - **面向配置** - 通过 JSON 配置文件定义硬件引脚和系统行为
+- **统一配置系统** - SD 卡优先 + NVS 备份双写，支持热插拔同步、Schema 版本迁移
 - **运行时灵活** - 引脚配置、服务管理等支持运行时加载
 - **跨平台设计** - 支持 ESP32S3 和 ESP32P4
 - **安全优先** - HTTPS/mTLS、SSH 公钥认证、AES-GCM 加密、分级权限
@@ -120,6 +121,8 @@ idf.py -p /dev/ttyUSB0 flash monitor
 |-----|------|
 | [快速入门](docs/QUICK_START.md) | 环境搭建与首次运行 |
 | [架构设计](docs/ARCHITECTURE_DESIGN.md) | 系统架构与设计决策 |
+| [配置系统设计](docs/CONFIG_SYSTEM_DESIGN.md) | 统一配置系统详细设计 |
+| [GPIO 引脚映射](docs/GPIO_MAPPING.md) | 硬件引脚定义与 PCB 对应关系 |
 | [API 参考](docs/API_REFERENCE.md) | REST API 和 CLI 命令 |
 | [命令规范](docs/COMMAND_SPECIFICATION.md) | CLI 命令格式规范 |
 | [板级配置](docs/BOARD_CONFIGURATION.md) | 引脚和服务配置指南 |
@@ -131,20 +134,31 @@ idf.py -p /dev/ttyUSB0 flash monitor
 ## 🎯 当前状态
 
 **版本**: 0.1.0-dev  
-**阶段**: Phase 8 完成 - 所有核心功能已实现
+**阶段**: Phase 9 完成 - 统一配置系统已实现
 
 ### 已完成功能
 
 | 模块 | 功能 |
 |-----|------|
 | 核心框架 | 配置管理、事件总线、服务管理、日志系统 |
+| 配置系统 | SD 卡优先 + NVS 备份双写、热插拔同步、Schema 版本迁移 |
 | 硬件抽象 | GPIO、PWM、I2C、SPI、UART、ADC |
 | LED 系统 | WS2812 驱动、图层、特效、BMP/PNG/JPG/GIF |
-| 控制台 | 命令系统、多语言、脚本引擎 |
+| 控制台 | 命令系统、多语言、脚本引擎、配置持久化 |
 | 网络 | WiFi、以太网 W5500、HTTP/HTTPS 服务器 |
 | 安全 | 会话管理、Token 认证、AES-GCM、RSA/EC、SSH 客户端 |
-| 驱动 | 风扇控制、电源监控 (ADC/INA3221/PZEM)、AGX 电源控制 |
+| 驱动 | 风扇控制、电源监控 (ADC/INA3221/PZEM)、AGX/LPMU 电源控制、USB MUX |
 | WebUI | REST API 网关、WebSocket 广播、前端仪表盘 |
+
+### 统一配置系统特性
+
+- **7 个配置模块**：网络、DHCP、WiFi、LED、风扇、设备、系统
+- **双写同步机制**：NVS + SD 卡同时写入，确保一致性
+- **热插拔处理**：SD 卡拔出期间标记 `pending_sync`，插入后自动同步
+- **优先级管理**：内存缓存 > SD 卡 > NVS > Schema 默认值
+- **序列号机制**：无需 RTC，通过单调递增序列号判断配置新旧
+- **Schema 迁移**：支持配置格式升级与向后兼容
+- **显式持久化**：CLI 修改默认临时，`--save` 显式持久化
 
 查看 [开发进度](docs/DEVELOPMENT_PROGRESS.md) 了解详细状态。
 
