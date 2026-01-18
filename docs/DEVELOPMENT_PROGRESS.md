@@ -2,7 +2,7 @@
 
 > **项目**：TianShanOS（天山操作系统）  
 > **版本**：0.1.0-dev  
-> **最后更新**：2026年1月17日  
+> **最后更新**：2026年1月18日  
 > **代码统计**：78 个 C 源文件，52 个头文件
 
 ---
@@ -219,6 +219,9 @@
 - [x] Base64/Hex 编解码
 - [x] RSA/EC 密钥对 (RSA-2048/4096, EC-P256/P384, PEM导入导出, 签名验证)
 - [x] SSH 客户端 (ts_ssh_client - SSH-2.0协议, 密码/公钥认证, 远程命令执行)
+- [x] SSH Known Hosts (ts_ssh_known_hosts - 主机密钥验证, SHA256指纹, TOFU策略, NVS存储)
+- [x] SSH 端口转发 (ts_port_forward - 本地转发, 多并发连接, libssh2隧道)
+- [x] SSH 交互式 Shell (ts_ssh_shell - PTY分配, 多终端类型, 双向I/O, 信号处理)
 
 ---
 
@@ -255,6 +258,36 @@
 ---
 
 ## 📝 开发日志
+
+### 2026-01-18
+- **SSH 高级功能**：
+  - 实现端口转发模块 (ts_port_forward)
+    - 本地端口转发：`-L localport:remotehost:remoteport`
+    - 使用 `libssh2_channel_direct_tcpip()` 建立隧道
+    - 支持多并发连接（最多 5 个）
+    - 后台任务异步处理数据转发
+  - 实现交互式 Shell 模块 (ts_ssh_shell)
+    - PTY 分配：`libssh2_channel_request_pty_ex()`
+    - 支持 xterm/vt100/vt220/ansi/dumb 终端类型
+    - 双向 I/O 回调机制
+    - 窗口大小调整（SIGWINCH）支持
+    - 信号发送（Ctrl+C 等）
+  - CLI 命令扩展：
+    - `ssh --shell` - 交互式 Shell
+    - `ssh --forward` - 端口转发配置
+  - 调试修复：交互式 Shell 字符回显延迟问题
+    - 问题：输入字符不立即显示，按回车后才可见
+    - 原因：UART 读取 50ms 超时阻塞主循环
+    - 修复：非阻塞 UART 读取 + fwrite/fflush 立即输出
+
+### 2026-01-17
+- **SSH 安全功能完善**：
+  - 实现 Known Hosts 验证 (ts_ssh_known_hosts)
+    - 主机密钥指纹验证
+    - SHA256 指纹格式（OpenSSH 兼容）
+    - 首次连接信任策略（TOFU）
+    - NVS 持久化存储
+  - CLI 命令：`ssh --known-hosts list/remove/clear`
 
 ### 2026-01-16
 - **LED 文本显示系统**：

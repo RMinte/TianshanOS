@@ -185,6 +185,111 @@ static void handle_task(void *arg)
 
 ---
 
+## 4. SSH 交互式 Shell 字符回显延迟问题
+
+### 问题描述
+
+**症状**：使用 `ssh --shell` 连接远程主机后，输入的字符在屏幕上看不到，只有按下回车后才能看到输入的命令和执行结果。Shell 提示符也显示不完整（例如只显示 `(base)` 而非完整的提示符）。
+
+**用户反馈**：
+> "打的字立即看不到，回车之后才能看见，这个对于大部分的操作人员来说都是很不舒服的"
+
+### 错误诊断过程
+
+**错误假设 1：网络延迟**
+- 被否定："你的逻辑不成立啊，我是本地网络。不可能是网络延迟"
+
+**错误修复 1：添加本地回显**
+```c
+// 错误方案：在本地回显输入字符
+ts_console_printf("%c", ch);
+```
+- 结果：输入 `ls` 显示为 `llss`（双重回显）
+- 原因：远程 SSH 服务器已经回显字符，本地再回显导致重复
+
+### 根本原因分析
+
+问题出在 `shell_input_callback()` 中的 UART 读取：
+
+```c
+// 问题代码：50ms 超时阻塞
+int len = uart_read_bytes(UART_NUM_0, data, sizeof(data), pdMS_TO_TICKS(50));
+```
+
+**问题机制**：
+1. UART 读取有 50ms 超时，每次循环都会阻塞 50ms
+2. 在阻塞期间，远程服务器的回显数据无法被及时读取和显示
+3. 即使远程数据已到达，也要等 UART 超时后才能处理输出
+4. 导致用户感知到的延迟约为 50-100ms，累积起来非常明显
+
+### 解决方案
+
+**修复 1：非阻塞 UART 读取**
+
+```c
+// 正确方案：timeout = 0，立即返回
+int len = uart_read_bytes(UART_NUM_0, data, sizeof(data), 0);
+```
+
+**修复 2：立即刷新输出缓冲区**
+
+```c
+// 原代码：逐字符 printf（可能有缓冲）
+for (int i = 0; i < len; i++) {
+    ts_console_printf("%c", data[i]);
+}
+
+// 正确方案：fwrite + fflush 立即输出
+fwrite(data, 1, len, stdout);
+fflush(stdout);
+```
+
+**修复 3：优化主循环顺序**
+
+```c
+// ts_ssh_shell_run() 主循环优化
+while (running) {
+    bool had_activity = false;
+    
+    // 1. 先处理本地输入（非阻塞读取）
+    if (input_callback) {
+        // ... 发送到远程
+        had_activity = true;
+    }
+    
+    // 2. 用 do-while 循环排空所有远程数据
+    do {
+        ssize_t nread = libssh2_channel_read(...);
+        if (nread > 0) {
+            output_callback(buf, nread);
+            had_activity = true;
+        } else {
+            break;
+        }
+    } while (1);
+    
+    // 3. 只有没有活动时才等待
+    if (!had_activity) {
+        wait_socket(session, 10);  // 短超时
+    }
+}
+```
+
+### 技术要点
+
+1. **ESP-IDF VFS stdout 缓冲**：默认可能有行缓冲或块缓冲，必须 `fflush(stdout)` 才能立即显示
+2. **非阻塞 I/O 模式**：嵌入式实时系统中，阻塞操作会影响响应性
+3. **远程回显机制**：SSH PTY 模式下，服务器负责回显字符，客户端不应重复回显
+4. **libssh2 非阻塞模式**：需配合 `wait_socket()` 使用 `select()` 等待数据
+
+### 相关文件
+
+- [ts_cmd_ssh.c](../components/ts_console/commands/ts_cmd_ssh.c) - `shell_input_callback()`, `shell_output_callback()`
+- [ts_ssh_shell.c](../components/ts_security/src/ts_ssh_shell.c) - `ts_ssh_shell_run()` 主循环
+
+---
+
 ## 更新日志
 
+- 2026-01-18: 添加 SSH 交互式 Shell 字符回显延迟问题调试记录
 - 2026-01-17: 初始版本，记录 DHCP 服务器崩溃问题及解决方案

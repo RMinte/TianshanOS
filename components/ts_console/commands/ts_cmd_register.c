@@ -66,6 +66,14 @@ esp_err_t ts_cmd_register_all(void)
     ts_cmd_nat_register();
     success_count++;
 
+    // SSH 命令
+    ret = ts_cmd_ssh_register();
+    if (ret == ESP_OK) success_count++; else fail_count++;
+
+    // SFTP/SCP 文件传输命令
+    ret = ts_cmd_sftp_register();
+    if (ret == ESP_OK) success_count++; else fail_count++;
+
     // 文件系统命令 (ls, cat, cd, pwd, mkdir, rm, cp, mv, hexdump)
     ret = ts_cmd_fs_register();
     if (ret == ESP_OK) success_count++; else fail_count++;

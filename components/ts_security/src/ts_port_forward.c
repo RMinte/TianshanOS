@@ -1,0 +1,746 @@
+/**
+ * @file ts_port_forward.c
+ * @brief SSH Port Forwarding implementation using libssh2
+ *
+ * 实现本地端口转发（Local Forwarding）功能：
+ * - 在本地监听 TCP 端口
+ * - 通过 SSH 隧道将连接转发到远程目标
+ * - 支持多个并发连接
+ */
+
+#include "ts_port_forward.h"
+#include "ts_ssh_client.h"
+#include "esp_log.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "freertos/semphr.h"
+
+#include <libssh2.h>
+
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <errno.h>
+#include <string.h>
+#include <stdlib.h>
+#include <sys/select.h>
+
+static const char *TAG = "ts_forward";
+
+/* ============================================================================
+ * 内部数据结构
+ * ============================================================================ */
+
+/** 单个转发连接 */
+typedef struct forward_conn_s {
+    int client_sock;                /**< 客户端 socket */
+    LIBSSH2_CHANNEL *channel;       /**< SSH 通道 */
+    char client_addr[48];           /**< 客户端地址 */
+    uint16_t client_port;           /**< 客户端端口 */
+    uint64_t bytes_sent;            /**< 发送字节数 */
+    uint64_t bytes_received;        /**< 接收字节数 */
+    bool active;                    /**< 是否活跃 */
+    struct forward_conn_s *next;    /**< 链表下一个 */
+} forward_conn_t;
+
+/** 端口转发内部结构 */
+struct ts_port_forward_s {
+    ts_ssh_session_t ssh_session;   /**< SSH 会话 */
+    ts_forward_config_t config;     /**< 转发配置 */
+    ts_forward_state_t state;       /**< 当前状态 */
+    
+    int listen_sock;                /**< 监听 socket */
+    TaskHandle_t task_handle;       /**< 转发任务句柄 */
+    SemaphoreHandle_t mutex;        /**< 互斥锁 */
+    volatile bool stop_flag;        /**< 停止标志 */
+    
+    /* 连接管理 */
+    forward_conn_t *connections;    /**< 连接链表 */
+    uint32_t active_count;          /**< 活跃连接数 */
+    uint32_t total_count;           /**< 总连接数 */
+    
+    /* 统计 */
+    uint64_t total_bytes_sent;      /**< 总发送字节 */
+    uint64_t total_bytes_received;  /**< 总接收字节 */
+    
+    /* 回调 */
+    ts_forward_connect_cb_t connect_cb;
+    void *connect_cb_data;
+    ts_forward_disconnect_cb_t disconnect_cb;
+    void *disconnect_cb_data;
+    
+    /* 配置副本 */
+    char *local_host_copy;
+    char *remote_host_copy;
+};
+
+/* 外部声明（来自 ts_ssh_client.c） */
+extern LIBSSH2_SESSION *ts_ssh_get_libssh2_session(ts_ssh_session_t session);
+extern int ts_ssh_get_socket(ts_ssh_session_t session);
+
+/* ============================================================================
+ * 内部辅助函数
+ * ============================================================================ */
+
+/**
+ * @brief 设置 socket 为非阻塞模式
+ */
+static void set_nonblocking(int sock)
+{
+    int flags = fcntl(sock, F_GETFL, 0);
+    fcntl(sock, F_SETFL, flags | O_NONBLOCK);
+}
+
+/**
+ * @brief 等待 socket 就绪
+ */
+static int wait_socket_ready(int sock, LIBSSH2_SESSION *session, int timeout_ms)
+{
+    struct timeval timeout;
+    fd_set fd;
+    fd_set *readfd = NULL;
+    fd_set *writefd = NULL;
+    int dir;
+
+    timeout.tv_sec = timeout_ms / 1000;
+    timeout.tv_usec = (timeout_ms % 1000) * 1000;
+
+    FD_ZERO(&fd);
+    FD_SET(sock, &fd);
+
+    dir = libssh2_session_block_directions(session);
+
+    if (dir & LIBSSH2_SESSION_BLOCK_INBOUND) {
+        readfd = &fd;
+    }
+    if (dir & LIBSSH2_SESSION_BLOCK_OUTBOUND) {
+        writefd = &fd;
+    }
+
+    return select(sock + 1, readfd, writefd, NULL, &timeout);
+}
+
+/**
+ * @brief 创建监听 socket
+ */
+static int create_listen_socket(const char *host, uint16_t port)
+{
+    int sock = socket(AF_INET, SOCK_STREAM, 0);
+    if (sock < 0) {
+        ESP_LOGE(TAG, "Failed to create socket: %s", strerror(errno));
+        return -1;
+    }
+
+    /* 设置端口复用 */
+    int reuse = 1;
+    setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
+
+    /* 绑定地址 */
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(port);
+    
+    if (host && strcmp(host, "0.0.0.0") != 0) {
+        addr.sin_addr.s_addr = inet_addr(host);
+    } else {
+        addr.sin_addr.s_addr = INADDR_ANY;
+    }
+
+    if (bind(sock, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+        ESP_LOGE(TAG, "Failed to bind: %s", strerror(errno));
+        close(sock);
+        return -1;
+    }
+
+    if (listen(sock, 5) < 0) {
+        ESP_LOGE(TAG, "Failed to listen: %s", strerror(errno));
+        close(sock);
+        return -1;
+    }
+
+    set_nonblocking(sock);
+    return sock;
+}
+
+/**
+ * @brief 处理单个连接的数据转发
+ */
+static void process_connection(ts_port_forward_t forward, forward_conn_t *conn)
+{
+    LIBSSH2_SESSION *session = ts_ssh_get_libssh2_session(forward->ssh_session);
+    int ssh_sock = ts_ssh_get_socket(forward->ssh_session);
+    char buffer[4096];
+    ssize_t n;
+    int rc;
+
+    /* 从客户端读取并写入 SSH 通道 */
+    n = recv(conn->client_sock, buffer, sizeof(buffer), MSG_DONTWAIT);
+    if (n > 0) {
+        size_t written = 0;
+        while (written < (size_t)n) {
+            rc = libssh2_channel_write(conn->channel, buffer + written, n - written);
+            if (rc > 0) {
+                written += rc;
+                conn->bytes_sent += rc;
+            } else if (rc == LIBSSH2_ERROR_EAGAIN) {
+                wait_socket_ready(ssh_sock, session, 100);
+            } else {
+                ESP_LOGD(TAG, "Channel write error: %d", rc);
+                conn->active = false;
+                return;
+            }
+        }
+    } else if (n == 0) {
+        /* 客户端关闭连接 */
+        conn->active = false;
+        return;
+    } else if (errno != EAGAIN && errno != EWOULDBLOCK) {
+        conn->active = false;
+        return;
+    }
+
+    /* 从 SSH 通道读取并写入客户端 */
+    do {
+        rc = libssh2_channel_read(conn->channel, buffer, sizeof(buffer));
+        if (rc > 0) {
+            ssize_t sent = 0;
+            while (sent < rc) {
+                ssize_t s = send(conn->client_sock, buffer + sent, rc - sent, 0);
+                if (s > 0) {
+                    sent += s;
+                    conn->bytes_received += s;
+                } else if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                    vTaskDelay(pdMS_TO_TICKS(10));
+                } else {
+                    conn->active = false;
+                    return;
+                }
+            }
+        }
+    } while (rc > 0);
+
+    if (rc < 0 && rc != LIBSSH2_ERROR_EAGAIN) {
+        conn->active = false;
+    }
+
+    /* 检查通道是否已关闭 */
+    if (libssh2_channel_eof(conn->channel)) {
+        conn->active = false;
+    }
+}
+
+/**
+ * @brief 接受新连接
+ */
+static void accept_new_connection(ts_port_forward_t forward)
+{
+    LIBSSH2_SESSION *session = ts_ssh_get_libssh2_session(forward->ssh_session);
+    int ssh_sock = ts_ssh_get_socket(forward->ssh_session);
+
+    struct sockaddr_in client_addr;
+    socklen_t addr_len = sizeof(client_addr);
+    
+    int client_sock = accept(forward->listen_sock, (struct sockaddr *)&client_addr, &addr_len);
+    if (client_sock < 0) {
+        if (errno != EAGAIN && errno != EWOULDBLOCK) {
+            ESP_LOGE(TAG, "Accept failed: %s", strerror(errno));
+        }
+        return;
+    }
+
+    /* 检查连接数限制 */
+    if ((int)forward->active_count >= forward->config.max_connections) {
+        ESP_LOGW(TAG, "Max connections reached, rejecting");
+        close(client_sock);
+        return;
+    }
+
+    set_nonblocking(client_sock);
+
+    /* 创建 SSH 通道到远程目标 */
+    LIBSSH2_CHANNEL *channel = NULL;
+    
+    while ((channel = libssh2_channel_direct_tcpip(session, 
+                                                    forward->remote_host_copy,
+                                                    forward->config.remote_port)) == NULL) {
+        int err = libssh2_session_last_errno(session);
+        if (err == LIBSSH2_ERROR_EAGAIN) {
+            wait_socket_ready(ssh_sock, session, 100);
+        } else {
+            char *err_msg = NULL;
+            libssh2_session_last_error(session, &err_msg, NULL, 0);
+            ESP_LOGE(TAG, "Failed to create tunnel: %s", err_msg ? err_msg : "unknown");
+            close(client_sock);
+            return;
+        }
+    }
+
+    /* 创建连接记录 */
+    forward_conn_t *conn = calloc(1, sizeof(forward_conn_t));
+    if (!conn) {
+        libssh2_channel_free(channel);
+        close(client_sock);
+        return;
+    }
+
+    conn->client_sock = client_sock;
+    conn->channel = channel;
+    conn->active = true;
+    inet_ntop(AF_INET, &client_addr.sin_addr, conn->client_addr, sizeof(conn->client_addr));
+    conn->client_port = ntohs(client_addr.sin_port);
+
+    /* 添加到链表 */
+    xSemaphoreTake(forward->mutex, portMAX_DELAY);
+    conn->next = forward->connections;
+    forward->connections = conn;
+    forward->active_count++;
+    forward->total_count++;
+    xSemaphoreGive(forward->mutex);
+
+    ESP_LOGI(TAG, "New connection from %s:%d -> %s:%d",
+             conn->client_addr, conn->client_port,
+             forward->remote_host_copy, forward->config.remote_port);
+
+    /* 调用连接回调 */
+    if (forward->connect_cb) {
+        forward->connect_cb(forward, conn->client_addr, conn->client_port,
+                           forward->connect_cb_data);
+    }
+}
+
+/**
+ * @brief 清理已关闭的连接
+ */
+static void cleanup_connections(ts_port_forward_t forward)
+{
+    xSemaphoreTake(forward->mutex, portMAX_DELAY);
+    
+    forward_conn_t **pp = &forward->connections;
+    while (*pp) {
+        forward_conn_t *conn = *pp;
+        if (!conn->active) {
+            /* 从链表移除 */
+            *pp = conn->next;
+            forward->active_count--;
+            
+            /* 更新统计 */
+            forward->total_bytes_sent += conn->bytes_sent;
+            forward->total_bytes_received += conn->bytes_received;
+            
+            uint64_t transferred = conn->bytes_sent + conn->bytes_received;
+            
+            ESP_LOGI(TAG, "Connection closed: %s:%d (transferred %llu bytes)",
+                     conn->client_addr, conn->client_port, transferred);
+            
+            /* 调用断开回调 */
+            if (forward->disconnect_cb) {
+                forward->disconnect_cb(forward, transferred, forward->disconnect_cb_data);
+            }
+            
+            /* 清理资源 */
+            if (conn->channel) {
+                libssh2_channel_close(conn->channel);
+                libssh2_channel_free(conn->channel);
+            }
+            close(conn->client_sock);
+            free(conn);
+        } else {
+            pp = &conn->next;
+        }
+    }
+    
+    xSemaphoreGive(forward->mutex);
+}
+
+/**
+ * @brief 端口转发任务
+ */
+static void forward_task(void *arg)
+{
+    ts_port_forward_t forward = (ts_port_forward_t)arg;
+    
+    ESP_LOGI(TAG, "Port forwarding started: %s:%d -> %s:%d",
+             forward->config.local_host, forward->config.local_port,
+             forward->remote_host_copy, forward->config.remote_port);
+    
+    forward->state = TS_FORWARD_STATE_RUNNING;
+    
+    while (!forward->stop_flag) {
+        /* 接受新连接 */
+        accept_new_connection(forward);
+        
+        /* 处理现有连接 */
+        xSemaphoreTake(forward->mutex, portMAX_DELAY);
+        for (forward_conn_t *conn = forward->connections; conn; conn = conn->next) {
+            if (conn->active) {
+                process_connection(forward, conn);
+            }
+        }
+        xSemaphoreGive(forward->mutex);
+        
+        /* 清理已关闭的连接 */
+        cleanup_connections(forward);
+        
+        /* 短暂延迟避免 CPU 占用过高 */
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+    
+    /* 清理所有连接 */
+    xSemaphoreTake(forward->mutex, portMAX_DELAY);
+    while (forward->connections) {
+        forward_conn_t *conn = forward->connections;
+        forward->connections = conn->next;
+        
+        if (conn->channel) {
+            libssh2_channel_close(conn->channel);
+            libssh2_channel_free(conn->channel);
+        }
+        close(conn->client_sock);
+        free(conn);
+    }
+    forward->active_count = 0;
+    xSemaphoreGive(forward->mutex);
+    
+    forward->state = TS_FORWARD_STATE_STOPPED;
+    ESP_LOGI(TAG, "Port forwarding stopped");
+    
+    forward->task_handle = NULL;
+    vTaskDelete(NULL);
+}
+
+/* ============================================================================
+ * 公开 API 实现
+ * ============================================================================ */
+
+esp_err_t ts_port_forward_create(ts_ssh_session_t session,
+                                  const ts_forward_config_t *config,
+                                  ts_port_forward_t *forward_out)
+{
+    if (!session || !config || !forward_out) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (!ts_ssh_is_connected(session)) {
+        ESP_LOGE(TAG, "SSH session not connected");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    if (!config->remote_host || config->remote_port == 0) {
+        ESP_LOGE(TAG, "Remote host and port are required");
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (config->local_port == 0) {
+        ESP_LOGE(TAG, "Local port is required");
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    /* 目前只支持本地转发 */
+    if (config->direction != TS_FORWARD_LOCAL) {
+        ESP_LOGE(TAG, "Only local forwarding is currently supported");
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+
+    ts_port_forward_t forward = calloc(1, sizeof(struct ts_port_forward_s));
+    if (!forward) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    forward->ssh_session = session;
+    forward->config = *config;
+    forward->state = TS_FORWARD_STATE_IDLE;
+    forward->listen_sock = -1;
+    
+    /* 设置默认值 */
+    if (forward->config.timeout_ms == 0) {
+        forward->config.timeout_ms = 5000;
+    }
+    if (forward->config.buffer_size == 0) {
+        forward->config.buffer_size = 4096;
+    }
+    if (forward->config.max_connections == 0) {
+        forward->config.max_connections = 5;
+    }
+    if (!forward->config.local_host) {
+        forward->config.local_host = "127.0.0.1";
+    }
+
+    /* 复制字符串 */
+    forward->local_host_copy = strdup(forward->config.local_host);
+    forward->remote_host_copy = strdup(config->remote_host);
+    forward->config.local_host = forward->local_host_copy;
+    
+    if (!forward->local_host_copy || !forward->remote_host_copy) {
+        free(forward->local_host_copy);
+        free(forward->remote_host_copy);
+        free(forward);
+        return ESP_ERR_NO_MEM;
+    }
+
+    forward->mutex = xSemaphoreCreateMutex();
+    if (!forward->mutex) {
+        free(forward->local_host_copy);
+        free(forward->remote_host_copy);
+        free(forward);
+        return ESP_ERR_NO_MEM;
+    }
+
+    *forward_out = forward;
+    ESP_LOGD(TAG, "Port forward created: L%d -> %s:%d",
+             config->local_port, config->remote_host, config->remote_port);
+    return ESP_OK;
+}
+
+esp_err_t ts_port_forward_start(ts_port_forward_t forward)
+{
+    if (!forward) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (forward->state == TS_FORWARD_STATE_RUNNING) {
+        return ESP_OK;  /* 已运行 */
+    }
+
+    /* 创建监听 socket */
+    forward->listen_sock = create_listen_socket(forward->config.local_host,
+                                                 forward->config.local_port);
+    if (forward->listen_sock < 0) {
+        forward->state = TS_FORWARD_STATE_ERROR;
+        return ESP_FAIL;
+    }
+
+    /* 创建转发任务 */
+    forward->stop_flag = false;
+    BaseType_t ret = xTaskCreate(forward_task, "ssh_forward", 4096,
+                                  forward, 5, &forward->task_handle);
+    if (ret != pdPASS) {
+        close(forward->listen_sock);
+        forward->listen_sock = -1;
+        forward->state = TS_FORWARD_STATE_ERROR;
+        return ESP_ERR_NO_MEM;
+    }
+
+    return ESP_OK;
+}
+
+esp_err_t ts_port_forward_stop(ts_port_forward_t forward)
+{
+    if (!forward) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (forward->state != TS_FORWARD_STATE_RUNNING) {
+        return ESP_OK;
+    }
+
+    /* 设置停止标志 */
+    forward->stop_flag = true;
+
+    /* 等待任务结束 */
+    int timeout = 50;  /* 5 秒超时 */
+    while (forward->task_handle && timeout-- > 0) {
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
+
+    /* 关闭监听 socket */
+    if (forward->listen_sock >= 0) {
+        close(forward->listen_sock);
+        forward->listen_sock = -1;
+    }
+
+    return ESP_OK;
+}
+
+esp_err_t ts_port_forward_destroy(ts_port_forward_t forward)
+{
+    if (!forward) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    /* 先停止 */
+    ts_port_forward_stop(forward);
+
+    /* 释放资源 */
+    if (forward->mutex) {
+        vSemaphoreDelete(forward->mutex);
+    }
+    free(forward->local_host_copy);
+    free(forward->remote_host_copy);
+    free(forward);
+
+    return ESP_OK;
+}
+
+esp_err_t ts_port_forward_get_stats(ts_port_forward_t forward, 
+                                     ts_forward_stats_t *stats)
+{
+    if (!forward || !stats) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    xSemaphoreTake(forward->mutex, portMAX_DELAY);
+    
+    /* 累加当前活跃连接的统计 */
+    uint64_t active_sent = 0;
+    uint64_t active_received = 0;
+    for (forward_conn_t *conn = forward->connections; conn; conn = conn->next) {
+        active_sent += conn->bytes_sent;
+        active_received += conn->bytes_received;
+    }
+    
+    stats->bytes_sent = forward->total_bytes_sent + active_sent;
+    stats->bytes_received = forward->total_bytes_received + active_received;
+    stats->active_connections = forward->active_count;
+    stats->total_connections = forward->total_count;
+    stats->state = forward->state;
+    
+    xSemaphoreGive(forward->mutex);
+    
+    return ESP_OK;
+}
+
+ts_forward_state_t ts_port_forward_get_state(ts_port_forward_t forward)
+{
+    return forward ? forward->state : TS_FORWARD_STATE_IDLE;
+}
+
+esp_err_t ts_port_forward_set_connect_cb(ts_port_forward_t forward,
+                                          ts_forward_connect_cb_t cb,
+                                          void *user_data)
+{
+    if (!forward) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    forward->connect_cb = cb;
+    forward->connect_cb_data = user_data;
+    return ESP_OK;
+}
+
+esp_err_t ts_port_forward_set_disconnect_cb(ts_port_forward_t forward,
+                                             ts_forward_disconnect_cb_t cb,
+                                             void *user_data)
+{
+    if (!forward) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    forward->disconnect_cb = cb;
+    forward->disconnect_cb_data = user_data;
+    return ESP_OK;
+}
+
+esp_err_t ts_port_forward_direct(ts_ssh_session_t session,
+                                  const char *remote_host,
+                                  uint16_t remote_port,
+                                  int local_sock,
+                                  uint32_t timeout_ms)
+{
+    if (!session || !remote_host || remote_port == 0 || local_sock < 0) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (!ts_ssh_is_connected(session)) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    LIBSSH2_SESSION *ssh = ts_ssh_get_libssh2_session(session);
+    int ssh_sock = ts_ssh_get_socket(session);
+
+    /* 创建通道 */
+    LIBSSH2_CHANNEL *channel = NULL;
+    while ((channel = libssh2_channel_direct_tcpip(ssh, remote_host, remote_port)) == NULL) {
+        int err = libssh2_session_last_errno(ssh);
+        if (err == LIBSSH2_ERROR_EAGAIN) {
+            wait_socket_ready(ssh_sock, ssh, 100);
+        } else {
+            ESP_LOGE(TAG, "Failed to create direct-tcpip channel");
+            return ESP_FAIL;
+        }
+    }
+
+    ESP_LOGI(TAG, "Direct tunnel established to %s:%d", remote_host, remote_port);
+
+    /* 设置非阻塞 */
+    set_nonblocking(local_sock);
+
+    /* 数据转发循环 */
+    char buffer[4096];
+    uint32_t idle_time = 0;
+    const uint32_t idle_check_interval = 100;  /* 100ms */
+
+    while (1) {
+        bool activity = false;
+        
+        /* 从本地读取并写入 SSH */
+        ssize_t n = recv(local_sock, buffer, sizeof(buffer), MSG_DONTWAIT);
+        if (n > 0) {
+            activity = true;
+            size_t written = 0;
+            while (written < (size_t)n) {
+                int rc = libssh2_channel_write(channel, buffer + written, n - written);
+                if (rc > 0) {
+                    written += rc;
+                } else if (rc == LIBSSH2_ERROR_EAGAIN) {
+                    wait_socket_ready(ssh_sock, ssh, 100);
+                } else {
+                    goto cleanup;
+                }
+            }
+        } else if (n == 0) {
+            /* 本地关闭 */
+            break;
+        } else if (errno != EAGAIN && errno != EWOULDBLOCK) {
+            break;
+        }
+
+        /* 从 SSH 读取并写入本地 */
+        int rc;
+        do {
+            rc = libssh2_channel_read(channel, buffer, sizeof(buffer));
+            if (rc > 0) {
+                activity = true;
+                ssize_t sent = 0;
+                while (sent < rc) {
+                    ssize_t s = send(local_sock, buffer + sent, rc - sent, 0);
+                    if (s > 0) {
+                        sent += s;
+                    } else if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                        vTaskDelay(pdMS_TO_TICKS(10));
+                    } else {
+                        goto cleanup;
+                    }
+                }
+            }
+        } while (rc > 0);
+
+        if (rc < 0 && rc != LIBSSH2_ERROR_EAGAIN) {
+            break;
+        }
+
+        /* 检查通道是否关闭 */
+        if (libssh2_channel_eof(channel)) {
+            break;
+        }
+
+        /* 空闲超时检查 */
+        if (!activity) {
+            idle_time += idle_check_interval;
+            if (timeout_ms > 0 && idle_time >= timeout_ms) {
+                ESP_LOGW(TAG, "Idle timeout reached");
+                break;
+            }
+            vTaskDelay(pdMS_TO_TICKS(idle_check_interval));
+        } else {
+            idle_time = 0;
+        }
+    }
+
+cleanup:
+    libssh2_channel_close(channel);
+    libssh2_channel_free(channel);
+    ESP_LOGI(TAG, "Direct tunnel closed");
+    
+    return ESP_OK;
+}

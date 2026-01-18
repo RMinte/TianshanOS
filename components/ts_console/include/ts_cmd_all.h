@@ -85,6 +85,18 @@ esp_err_t ts_cmd_wifi_register(void);
 void ts_cmd_nat_register(void);
 
 /**
+ * @brief 注册 SSH 命令
+ * ssh --host/--user/--password/--exec/--test
+ */
+esp_err_t ts_cmd_ssh_register(void);
+
+/**
+ * @brief 注册 SFTP/SCP 命令
+ * sftp --ls/--get/--put/--rm/--mkdir
+ */
+esp_err_t ts_cmd_sftp_register(void);
+
+/**
  * @brief 注册文件系统命令
  * ls, cat, cd, pwd, mkdir, rm, cp, mv, hexdump
  */

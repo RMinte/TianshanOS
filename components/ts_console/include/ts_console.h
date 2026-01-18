@@ -357,6 +357,49 @@ esp_err_t ts_console_history_save(const char *path);
 esp_err_t ts_console_history_load(const char *path);
 
 /*===========================================================================*/
+/*                         Interrupt Handling                                 */
+/*===========================================================================*/
+
+/**
+ * @brief Check if command interrupt (Ctrl+C) was requested
+ * 
+ * Long-running commands should periodically call this function
+ * to check if the user has requested to abort the operation.
+ * 
+ * @return true if interrupt was requested
+ */
+bool ts_console_interrupted(void);
+
+/**
+ * @brief Clear the interrupt flag
+ * 
+ * Call this after handling an interrupt to reset the flag.
+ */
+void ts_console_clear_interrupt(void);
+
+/**
+ * @brief Request command interrupt
+ * 
+ * Called internally when Ctrl+C is detected during command execution.
+ */
+void ts_console_request_interrupt(void);
+
+/**
+ * @brief Start monitoring for Ctrl+C during command execution
+ * 
+ * This starts a background check for Ctrl+C input.
+ * Call before executing long-running commands.
+ */
+void ts_console_begin_interruptible(void);
+
+/**
+ * @brief Stop monitoring for Ctrl+C
+ * 
+ * Call after command execution completes.
+ */
+void ts_console_end_interruptible(void);
+
+/*===========================================================================*/
 /*                          Built-in Commands                                 */
 /*===========================================================================*/
 

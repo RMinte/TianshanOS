@@ -17,6 +17,7 @@
 - [dhcp - DHCP 服务器管理](#dhcp---dhcp-服务器管理)
 - [wifi - WiFi 管理](#wifi---wifi-管理)
 - [device - 设备控制](#device---设备控制)
+- [ssh - SSH 客户端](#ssh---ssh-客户端)
 
 ---
 
@@ -1137,6 +1138,90 @@ device --agx --status --json
 
 ---
 
+## ssh - SSH 客户端
+
+远程 SSH 连接、命令执行、交互式 Shell 和端口转发。
+
+### 语法
+
+```
+ssh [options]
+```
+
+### 选项
+
+| 选项 | 简写 | 说明 |
+|------|------|------|
+| `--connect <host>` | `-c` | 连接到远程主机 |
+| `--port <port>` | `-p` | SSH 端口（默认 22） |
+| `--user <username>` | `-u` | 用户名 |
+| `--password <pass>` | `-P` | 密码（不推荐明文） |
+| `--key <path>` | `-k` | 私钥文件路径 |
+| `--exec <command>` | `-e` | 执行远程命令 |
+| `--shell` | `-s` | 启动交互式 Shell |
+| `--forward <spec>` | `-f` | 端口转发（格式：`local:remote:port`） |
+| `--timeout <ms>` | `-t` | 连接超时（毫秒） |
+| `--known-hosts <op>` | | 管理已知主机（list/remove/clear） |
+| `--json` | `-j` | JSON 格式输出 |
+| `--help` | `-h` | 显示帮助 |
+
+### 示例
+
+```bash
+# 执行远程命令
+ssh --connect 192.168.1.100 --user root --password secret --exec "ls -la"
+
+# 使用私钥认证
+ssh --connect server.local --user admin --key /sdcard/id_rsa --exec "uptime"
+
+# 启动交互式 Shell
+ssh --connect 192.168.1.100 --user root --password secret --shell
+
+# 本地端口转发（将本地 8080 转发到远程的 localhost:80）
+ssh --connect gateway.local --user admin --password pass \
+    --forward "8080:localhost:80"
+
+# 管理已知主机
+ssh --known-hosts list          # 列出所有已知主机
+ssh --known-hosts remove --connect 192.168.1.100  # 移除指定主机
+ssh --known-hosts clear         # 清除所有
+
+# 自定义端口和超时
+ssh --connect 10.0.0.1 --port 2222 --user root --timeout 5000 --exec "whoami"
+```
+
+### 交互式 Shell
+
+使用 `--shell` 选项启动交互式 Shell：
+- 支持 PTY（伪终端），完整的终端体验
+- 支持 Ctrl+C 发送中断信号
+- 支持 Ctrl+D 退出 Shell
+- 自动回显远程服务器的输出
+
+### 端口转发
+
+端口转发格式：`localport:remotehost:remoteport`
+
+```bash
+# 将本地 8080 端口转发到远程的 internal.server:3000
+ssh --connect bastion --user admin --key /sdcard/key \
+    --forward "8080:internal.server:3000"
+```
+
+转发建立后，访问 ESP32 的 8080 端口等同于访问远程的 internal.server:3000。
+
+### Known Hosts 验证
+
+首次连接新主机时会显示指纹并询问是否信任：
+```
+Host key fingerprint: SHA256:AAAA...
+Trust this host? (yes/no):
+```
+
+输入 `yes` 后密钥会保存到 NVS，后续连接自动验证。
+
+---
+
 ## 命令状态总览
 
 | 命令 | 状态 | 说明 |
@@ -1152,6 +1237,7 @@ device --agx --status --json
 | `wifi` | ✅ 可用 | AP/STA 模式，扫描、连接、热点 |
 | `fs` | ✅ 可用 | 文件系统操作（ls/cat/rm/mkdir 等） |
 | `device` | ⚠️ 模拟 | 未接入真实驱动 |
+| `ssh` | ✅ 可用 | 命令执行、Shell、端口转发 |
 
 ---
 
@@ -1183,6 +1269,6 @@ fan set speed 75
 
 ## 版本信息
 
-- **文档版本**: 1.1.0
+- **文档版本**: 1.2.0
 - **适用版本**: TianShanOS v0.1.0+
-- **最后更新**: 2026-01-17
+- **最后更新**: 2026-01-18

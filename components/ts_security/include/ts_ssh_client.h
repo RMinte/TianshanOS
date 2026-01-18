@@ -158,11 +158,21 @@ esp_err_t ts_ssh_exec(ts_ssh_session_t session, const char *command,
  * @param callback Output callback
  * @param user_data User data for callback
  * @param exit_code Pointer to receive exit code (optional)
- * @return esp_err_t ESP_OK on success
+ * @return esp_err_t ESP_OK on success, ESP_ERR_TIMEOUT if interrupted
  */
 esp_err_t ts_ssh_exec_stream(ts_ssh_session_t session, const char *command,
                               ts_ssh_output_cb_t callback, void *user_data,
                               int *exit_code);
+
+/**
+ * @brief Abort ongoing SSH operation
+ * 
+ * Signals the SSH stream to stop. The ts_ssh_exec_stream function
+ * will return ESP_ERR_TIMEOUT on next iteration.
+ * 
+ * @param session Session handle
+ */
+void ts_ssh_abort(ts_ssh_session_t session);
 
 /**
  * @brief Free execution result
@@ -178,6 +188,22 @@ void ts_ssh_exec_result_free(ts_ssh_exec_result_t *result);
  * @return Error message string
  */
 const char *ts_ssh_get_error(ts_ssh_session_t session);
+
+/**
+ * @brief Get the remote host address
+ * 
+ * @param session Session handle
+ * @return Host address string or NULL
+ */
+const char *ts_ssh_get_host(ts_ssh_session_t session);
+
+/**
+ * @brief Get the remote port
+ * 
+ * @param session Session handle
+ * @return Port number
+ */
+uint16_t ts_ssh_get_port(ts_ssh_session_t session);
 
 /**
  * @brief Execute a simple command (convenience function)

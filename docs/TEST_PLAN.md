@@ -216,6 +216,14 @@
 | SSH-004 | 命令执行 | 返回输出 | P0 |
 | SSH-005 | 连接超时 | 正确处理 | P1 |
 | SSH-006 | 认证失败 | 返回错误 | P1 |
+| SSH-007 | Known Hosts 首次连接 | 提示确认并保存 | P0 |
+| SSH-008 | Known Hosts 验证通过 | 静默连接 | P0 |
+| SSH-009 | Known Hosts 密钥变更 | 警告并拒绝 | P0 |
+| SSH-010 | 交互式 Shell | PTY 分配成功 | P0 |
+| SSH-011 | Shell 字符回显 | 立即显示输入 | P0 |
+| SSH-012 | Shell Ctrl+C | 发送 SIGINT | P1 |
+| SSH-013 | 本地端口转发 | 隧道建立成功 | P1 |
+| SSH-014 | 端口转发数据 | 双向转发正确 | P1 |
 
 ### 12. ts_drivers (设备驱动)
 

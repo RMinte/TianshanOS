@@ -67,7 +67,61 @@ static struct {
     ts_console_output_cb_t output_cb;
     void *output_user_data;
     char prompt[TS_CONSOLE_MAX_PROMPT_LENGTH];
+    /* 中断处理相关 */
+    volatile bool interrupt_requested;
+    volatile bool interruptible_mode;
 } s_console = {0};
+
+/*===========================================================================*/
+/*                       Interrupt Handling                                   */
+/*===========================================================================*/
+
+bool ts_console_interrupted(void)
+{
+    return s_console.interrupt_requested;
+}
+
+void ts_console_clear_interrupt(void)
+{
+    s_console.interrupt_requested = false;
+}
+
+void ts_console_request_interrupt(void)
+{
+    s_console.interrupt_requested = true;
+}
+
+void ts_console_begin_interruptible(void)
+{
+    s_console.interrupt_requested = false;
+    s_console.interruptible_mode = true;
+}
+
+void ts_console_end_interruptible(void)
+{
+    s_console.interruptible_mode = false;
+    s_console.interrupt_requested = false;
+}
+
+/**
+ * @brief 检查是否有 Ctrl+C 输入（非阻塞）
+ * 
+ * 在命令执行期间调用，检测用户是否按下 Ctrl+C
+ */
+static void check_for_interrupt(void)
+{
+    if (!s_console.interruptible_mode) {
+        return;
+    }
+    
+    /* 非阻塞检查 UART 输入 */
+    uint8_t ch;
+    int len = uart_read_bytes(CONFIG_ESP_CONSOLE_UART_NUM, &ch, 1, 0);
+    if (len > 0 && ch == 0x03) {  /* Ctrl+C = ASCII 0x03 */
+        s_console.interrupt_requested = true;
+        ts_console_printf("\n^C\n");
+    }
+}
 
 /*===========================================================================*/
 /*                          Private Functions                                 */

@@ -4,6 +4,11 @@ idf_component_register(
         "src/ts_crypto.c"
         "src/ts_auth.c"
         "src/ts_ssh_client.c"
+        "src/ts_sftp.c"
+        "src/ts_scp.c"
+        "src/ts_known_hosts.c"
+        "src/ts_port_forward.c"
+        "src/ts_ssh_shell.c"
     INCLUDE_DIRS
         "include"
     REQUIRES
@@ -11,6 +16,7 @@ idf_component_register(
         mbedtls
         nvs_flash
         lwip
+        ch405labs_esp_libssh2
     PRIV_REQUIRES
         esp_timer
 )
