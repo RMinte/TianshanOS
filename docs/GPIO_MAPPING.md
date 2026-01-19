@@ -51,24 +51,58 @@
 
 | GPIO | 功能 | 电平逻辑 | 时序 |
 |------|------|----------|------|
-| 1 | AGX_RESET | HIGH=复位, LOW=正常 | 脉冲 1000ms |
+| 1 | AGX_RESET | HIGH=断电/复位, LOW=正常 | 脉冲或持续 |
 | 2 | LPMU_RESET | HIGH=复位, LOW=正常 | 脉冲 300ms |
-| 3 | AGX_FORCE_SHUTDOWN | LOW=开机, HIGH=关机 | 持续 HIGH |
+| 3 | AGX_FORCE_SHUTDOWN | LOW=开机, HIGH=关机 | 持续 |
 | 40 | AGX_RECOVERY | HIGH=恢复模式, LOW=正常 | 持续 HIGH |
 | 46 | LPMU_POWER | HIGH=按下电源键 | 脉冲 300ms |
 
+#### ⚠️ AGX 模组差异（重要）
+
+不同 NVIDIA 模组的电源控制行为存在差异：
+
+| 模组 | GPIO3 (FORCE_SHUTDOWN) | GPIO1 (RESET) | 电源控制方式 |
+|------|------------------------|---------------|--------------|
+| **T234 (AGX Orin)** | ✅ 有效：HIGH=关机, LOW=开机 | 脉冲复位 | GPIO3 控制开关机 |
+| **T5000/T4000 (NX Orin)** | ⚠️ 无效：必须保持 LOW | **持续 HIGH=断电** | GPIO1 控制供电 |
+
+**T234 模组（AGX Orin 系列）**:
+- GPIO3 支持软件电源控制（HIGH=强制关机）
+- GPIO1 用于复位（脉冲 HIGH 后恢复 LOW）
+
+**T5000/T4000 模组（NX Orin 系列）**:
+- GPIO3 必须**始终保持 LOW**，否则无法开机
+- GPIO1 **持续 HIGH = 断电**（实现关机效果）
+- 通过 GPIO1 持续拉高来切断模组供电
+
 **操作示例**:
 ```c
-// AGX 复位
- gpio_set_level(1, 1);  // HIGH = reset
+// ========== T234 模组 (AGX Orin) ==========
+
+// AGX 软件关机（GPIO3 控制）
+gpio_set_level(3, 1);  // HIGH = force off
+// 等待关机完成...
+gpio_set_level(3, 0);  // LOW = allow boot (下次开机)
+
+// AGX 复位（脉冲）
+gpio_set_level(1, 1);  // HIGH = reset
 vTaskDelay(pdMS_TO_TICKS(1000));
 gpio_set_level(1, 0);  // LOW = normal
 
-// AGX 强制关机
-gpio_set_level(3, 1);  // HIGH = force off
-vTaskDelay(pdMS_TO_TICKS(8000));
-gpio_set_level(3, 0);  // LOW = allow boot
+// ========== T5000/T4000 模组 (NX Orin) ==========
+
+// ⚠️ GPIO3 不要动！必须保持 LOW
+// gpio_set_level(3, 0);  // 始终保持 LOW
+
+// NX 断电关机（GPIO1 持续拉高）
+gpio_set_level(1, 1);  // HIGH = 切断供电（关机）
+// 保持 HIGH 状态...
+
+// NX 上电开机（GPIO1 拉低）
+gpio_set_level(1, 0);  // LOW = 恢复供电（开机）
 ```
+
+> **注意**: 当前代码默认使用 T234 逻辑。对于 T5000/T4000 模组，后续将通过配置文件或 menuconfig 选择模组类型。
 
 ### 2. SD 卡 (SDMMC 4-bit)
 
@@ -178,6 +212,7 @@ CONFIG_TS_STORAGE_SD_D3_GPIO=7
 
 | 日期 | 变更内容 |
 |------|----------|
+| 2026-01-20 | 添加 T234 vs T5000/T4000 模组电源控制差异说明 |
 | 2026-01-19 | 初始版本，与 PCB 图纸及 robOS 核对完成 |
 | 2026-01-19 | 修正 SD 卡引脚 (4,5,6,7,15,16) |
 | 2026-01-19 | 移除不存在的 FAN_PWM_1 (GPIO 40) |
