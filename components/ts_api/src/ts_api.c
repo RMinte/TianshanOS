@@ -574,6 +574,27 @@ esp_err_t ts_api_register_all(void)
         return ret;
     }
     
+    /* Service APIs */
+    ret = ts_api_service_register();
+    if (ret != ESP_OK) {
+        TS_LOGE(TAG, "Failed to register service APIs: %s", esp_err_to_name(ret));
+        return ret;
+    }
+    
+    /* Storage APIs */
+    ret = ts_api_storage_register();
+    if (ret != ESP_OK) {
+        TS_LOGE(TAG, "Failed to register storage APIs: %s", esp_err_to_name(ret));
+        return ret;
+    }
+    
+    /* GPIO APIs */
+    ret = ts_api_gpio_register();
+    if (ret != ESP_OK) {
+        TS_LOGE(TAG, "Failed to register GPIO APIs: %s", esp_err_to_name(ret));
+        return ret;
+    }
+    
     TS_LOGI(TAG, "All API modules registered (%zu endpoints)", s_api.endpoint_count);
     
     return ESP_OK;

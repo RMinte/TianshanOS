@@ -215,28 +215,43 @@ static esp_err_t gpio_toggle(int pin)
  */
 static void print_pin_info(int pin, bool json)
 {
+    /* JSON 模式使用 API */
+    if (json) {
+        cJSON *params = cJSON_CreateObject();
+        cJSON_AddNumberToObject(params, "pin", pin);
+        
+        ts_api_result_t result;
+        esp_err_t ret = ts_api_call("gpio.info", params, &result);
+        cJSON_Delete(params);
+        
+        if (ret == ESP_OK && result.code == TS_API_OK && result.data) {
+            char *json_str = cJSON_PrintUnformatted(result.data);
+            if (json_str) {
+                printf("%s\n", json_str);
+                free(json_str);
+            }
+        } else {
+            printf("{\"gpio\":%d,\"error\":\"%s\"}\n", pin,
+                result.message ? result.message : esp_err_to_name(ret));
+        }
+        ts_api_result_free(&result);
+        return;
+    }
+    
+    /* 格式化输出模式 */
     const controllable_pin_t *info = find_controllable_pin(pin);
     int level = gpio_get_level(pin);
     
-    if (json) {
-        if (info) {
-            printf("{\"gpio\":%d,\"name\":\"%s\",\"level\":%d,\"default\":%d}\n", 
-                   pin, info->name, level, info->default_level);
-        } else {
-            printf("{\"gpio\":%d,\"level\":%d,\"error\":\"not controllable\"}\n", pin, level);
-        }
+    if (info) {
+        const char *status = (level == info->default_level) ? "默认" : "已修改";
+        printf("GPIO%d (%s):\n", pin, info->name);
+        printf("  当前电平: %d (%s)\n", level, level ? "HIGH" : "LOW");
+        printf("  默认电平: %d (%s)\n", info->default_level, info->default_level ? "HIGH" : "LOW");
+        printf("  状态: %s\n", status);
+        printf("  说明: %s\n", info->description);
     } else {
-        if (info) {
-            const char *status = (level == info->default_level) ? "默认" : "已修改";
-            printf("GPIO%d (%s):\n", pin, info->name);
-            printf("  当前电平: %d (%s)\n", level, level ? "HIGH" : "LOW");
-            printf("  默认电平: %d (%s)\n", info->default_level, info->default_level ? "HIGH" : "LOW");
-            printf("  状态: %s\n", status);
-            printf("  说明: %s\n", info->description);
-        } else {
-            printf("GPIO%d 不在可控引脚列表中\n", pin);
-            printf("当前电平: %d (%s)\n", level, level ? "HIGH" : "LOW");
-        }
+        printf("GPIO%d 不在可控引脚列表中\n", pin);
+        printf("当前电平: %d (%s)\n", level, level ? "HIGH" : "LOW");
     }
 }
 
@@ -245,37 +260,43 @@ static void print_pin_info(int pin, bool json)
  */
 static void print_configured_pins(bool json)
 {
+    /* JSON 模式使用 API */
     if (json) {
-        printf("{\"pins\":[");
-        for (int i = 0; i < NUM_CONTROLLABLE_PINS; i++) {
-            int level = gpio_get_level(s_controllable_pins[i].pin);
-            printf("{\"gpio\":%d,\"name\":\"%s\",\"level\":%d,\"default\":%d}", 
-                   s_controllable_pins[i].pin, 
-                   s_controllable_pins[i].name, 
-                   level,
-                   s_controllable_pins[i].default_level);
-            if (i < NUM_CONTROLLABLE_PINS - 1) printf(",");
+        ts_api_result_t result;
+        esp_err_t ret = ts_api_call("gpio.list", NULL, &result);
+        
+        if (ret == ESP_OK && result.code == TS_API_OK && result.data) {
+            char *json_str = cJSON_PrintUnformatted(result.data);
+            if (json_str) {
+                printf("%s\n", json_str);
+                free(json_str);
+            }
+        } else {
+            printf("{\"error\":\"%s\"}\n", 
+                result.message ? result.message : esp_err_to_name(ret));
         }
-        printf("]}\n");
-    } else {
-        printf("可控引脚列表:\n");
-        printf("──────────────────────────────────────────────────────────────────────────\n");
-        printf("  GPIO   名称                 当前   默认   说明\n");
-        printf("──────────────────────────────────────────────────────────────────────────\n");
-        for (int i = 0; i < NUM_CONTROLLABLE_PINS; i++) {
-            int level = gpio_get_level(s_controllable_pins[i].pin);
-            const char *status = (level == s_controllable_pins[i].default_level) ? " " : "*";
-            printf("  %2d     %-20s %s%s   %s     %s\n", 
-                   s_controllable_pins[i].pin, 
-                   s_controllable_pins[i].name,
-                   status,
-                   level ? "HIGH" : "LOW ",
-                   s_controllable_pins[i].default_level ? "HIGH" : "LOW ",
-                   s_controllable_pins[i].description);
-        }
-        printf("──────────────────────────────────────────────────────────────────────────\n");
-        printf("  * 表示当前电平与默认值不同\n");
+        ts_api_result_free(&result);
+        return;
     }
+    
+    /* 格式化输出模式 */
+    printf("可控引脚列表:\n");
+    printf("──────────────────────────────────────────────────────────────────────────\n");
+    printf("  GPIO   名称                 当前   默认   说明\n");
+    printf("──────────────────────────────────────────────────────────────────────────\n");
+    for (int i = 0; i < NUM_CONTROLLABLE_PINS; i++) {
+        int level = gpio_get_level(s_controllable_pins[i].pin);
+        const char *status = (level == s_controllable_pins[i].default_level) ? " " : "*";
+        printf("  %2d     %-20s %s%s   %s     %s\n", 
+               s_controllable_pins[i].pin, 
+               s_controllable_pins[i].name,
+               status,
+               level ? "HIGH" : "LOW ",
+               s_controllable_pins[i].default_level ? "HIGH" : "LOW ",
+               s_controllable_pins[i].description);
+    }
+    printf("──────────────────────────────────────────────────────────────────────────\n");
+    printf("  * 表示当前电平与默认值不同\n");
 }
 
 /**

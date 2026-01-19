@@ -70,24 +70,36 @@ static void format_size(size_t bytes, char *buf, size_t len)
 
 static int do_storage_status(bool json)
 {
+    /* JSON 模式使用 API */
+    if (json) {
+        ts_api_result_t result;
+        esp_err_t ret = ts_api_call("storage.status", NULL, &result);
+        if (ret == ESP_OK && result.code == TS_API_OK && result.data) {
+            char *json_str = cJSON_PrintUnformatted(result.data);
+            if (json_str) {
+                ts_console_printf("%s\n", json_str);
+                free(json_str);
+            }
+        } else {
+            ts_console_error("API call failed: %s\n", 
+                result.message ? result.message : esp_err_to_name(ret));
+        }
+        ts_api_result_free(&result);
+        return (ret == ESP_OK) ? 0 : 1;
+    }
+    
+    /* 格式化输出模式 */
     bool spiffs_mounted = ts_storage_spiffs_mounted();
     bool sd_mounted = ts_storage_sd_mounted();
     
-    if (json) {
-        ts_console_printf(
-            "{\"spiffs\":{\"mounted\":%s},\"sd\":{\"mounted\":%s}}\n",
-            spiffs_mounted ? "true" : "false",
-            sd_mounted ? "true" : "false");
-    } else {
-        ts_console_printf("Storage Status:\n\n");
-        ts_console_printf("  SPIFFS:  %s%s\033[0m\n", 
-            spiffs_mounted ? "\033[32m" : "\033[33m",
-            spiffs_mounted ? "Mounted (/spiffs)" : "Not mounted");
-        ts_console_printf("  SD Card: %s%s\033[0m\n",
-            sd_mounted ? "\033[32m" : "\033[33m",
-            sd_mounted ? "Mounted (/sdcard)" : "Not mounted");
-        ts_console_printf("\n");
-    }
+    ts_console_printf("Storage Status:\n\n");
+    ts_console_printf("  SPIFFS:  %s%s\033[0m\n", 
+        spiffs_mounted ? "\033[32m" : "\033[33m",
+        spiffs_mounted ? "Mounted (/spiffs)" : "Not mounted");
+    ts_console_printf("  SD Card: %s%s\033[0m\n",
+        sd_mounted ? "\033[32m" : "\033[33m",
+        sd_mounted ? "Mounted (/sdcard)" : "Not mounted");
+    ts_console_printf("\n");
     
     return 0;
 }
@@ -212,19 +224,37 @@ static int do_storage_list(const char *path, bool recursive, bool json)
 {
     const char *dir_path = path ? path : "/sdcard";
     
+    /* JSON 模式使用 API */
     if (json) {
-        ts_console_printf("{\"path\":\"%s\",\"entries\":[", dir_path);
-        bool first = true;
-        list_directory(dir_path, recursive, 0, json, &first);
-        ts_console_printf("]}\n");
-    } else {
-        ts_console_printf("Contents of %s:\n\n", dir_path);
-        ts_console_printf("%-30s  %10s\n", "NAME", "SIZE");
-        ts_console_printf("────────────────────────────────────────────\n");
-        bool first = true;
-        list_directory(dir_path, recursive, 0, json, &first);
-        ts_console_printf("\n");
+        cJSON *params = cJSON_CreateObject();
+        cJSON_AddStringToObject(params, "path", dir_path);
+        cJSON_AddBoolToObject(params, "recursive", recursive);
+        
+        ts_api_result_t result;
+        esp_err_t ret = ts_api_call("storage.list", params, &result);
+        cJSON_Delete(params);
+        
+        if (ret == ESP_OK && result.code == TS_API_OK && result.data) {
+            char *json_str = cJSON_PrintUnformatted(result.data);
+            if (json_str) {
+                ts_console_printf("%s\n", json_str);
+                free(json_str);
+            }
+        } else {
+            ts_console_error("API call failed: %s\n", 
+                result.message ? result.message : esp_err_to_name(ret));
+        }
+        ts_api_result_free(&result);
+        return (ret == ESP_OK) ? 0 : 1;
     }
+    
+    /* 格式化输出模式 */
+    ts_console_printf("Contents of %s:\n\n", dir_path);
+    ts_console_printf("%-30s  %10s\n", "NAME", "SIZE");
+    ts_console_printf("────────────────────────────────────────────\n");
+    bool first = true;
+    list_directory(dir_path, recursive, 0, false, &first);
+    ts_console_printf("\n");
     
     return 0;
 }

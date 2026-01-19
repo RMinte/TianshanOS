@@ -95,35 +95,45 @@ static void print_separator(void)
 
 static int do_config_get(const char *key, bool json)
 {
+    /* JSON 模式使用 API */
+    if (json) {
+        cJSON *params = cJSON_CreateObject();
+        cJSON_AddStringToObject(params, "key", key);
+        
+        ts_api_result_t result;
+        esp_err_t ret = ts_api_call("config.get", params, &result);
+        cJSON_Delete(params);
+        
+        if (ret == ESP_OK && result.code == TS_API_OK && result.data) {
+            char *json_str = cJSON_PrintUnformatted(result.data);
+            if (json_str) {
+                ts_console_printf("%s\n", json_str);
+                free(json_str);
+            }
+        } else {
+            ts_console_error("Key '%s' not found\n", key);
+        }
+        ts_api_result_free(&result);
+        return (ret == ESP_OK) ? 0 : 1;
+    }
+    
+    /* 格式化输出模式 */
     int32_t i32_val;
     bool bool_val;
     char str_buf[128];
     
     if (ts_config_get_int32(key, &i32_val, 0) == ESP_OK) {
-        if (json) {
-            ts_console_printf("{\"key\":\"%s\",\"type\":\"int\",\"value\":%d}\n", key, i32_val);
-        } else {
-            ts_console_printf("%s = %d\n", key, i32_val);
-        }
+        ts_console_printf("%s = %d\n", key, i32_val);
         return 0;
     }
     
     if (ts_config_get_bool(key, &bool_val, false) == ESP_OK) {
-        if (json) {
-            ts_console_printf("{\"key\":\"%s\",\"type\":\"bool\",\"value\":%s}\n", 
-                key, bool_val ? "true" : "false");
-        } else {
-            ts_console_printf("%s = %s\n", key, bool_val ? "true" : "false");
-        }
+        ts_console_printf("%s = %s\n", key, bool_val ? "true" : "false");
         return 0;
     }
     
     if (ts_config_get_string(key, str_buf, sizeof(str_buf), "") == ESP_OK) {
-        if (json) {
-            ts_console_printf("{\"key\":\"%s\",\"type\":\"string\",\"value\":\"%s\"}\n", key, str_buf);
-        } else {
-            ts_console_printf("%s = \"%s\"\n", key, str_buf);
-        }
+        ts_console_printf("%s = \"%s\"\n", key, str_buf);
         return 0;
     }
     
@@ -274,14 +284,30 @@ static int do_module_set(ts_config_module_t module, const char *key, const char 
 
 static int do_config_list(bool json)
 {
+    /* JSON 模式使用 API */
     if (json) {
-        ts_console_printf("{\"modules\":[\n");
-    } else {
-        ts_console_printf("\nConfiguration Modules:\n");
-        print_separator();
-        ts_console_printf("%-10s %-12s %-8s %-8s %s\n", "Module", "NVS NS", "Version", "Status", "Dirty");
-        print_separator();
+        ts_api_result_t result;
+        esp_err_t ret = ts_api_call("config.list", NULL, &result);
+        
+        if (ret == ESP_OK && result.code == TS_API_OK && result.data) {
+            char *json_str = cJSON_PrintUnformatted(result.data);
+            if (json_str) {
+                ts_console_printf("%s\n", json_str);
+                free(json_str);
+            }
+        } else {
+            ts_console_error("API call failed: %s\n", 
+                result.message ? result.message : esp_err_to_name(ret));
+        }
+        ts_api_result_free(&result);
+        return (ret == ESP_OK) ? 0 : 1;
     }
+    
+    /* 格式化输出模式 */
+    ts_console_printf("\nConfiguration Modules:\n");
+    print_separator();
+    ts_console_printf("%-10s %-12s %-8s %-8s %s\n", "Module", "NVS NS", "Version", "Status", "Dirty");
+    print_separator();
     
     const char *names[] = {"net", "dhcp", "wifi", "led", "fan", "device", "system"};
     
@@ -289,43 +315,23 @@ static int do_config_list(bool json)
         ts_config_module_t mod = (ts_config_module_t)i;
         bool registered = ts_config_module_is_registered(mod);
         
-        if (json) {
-            ts_console_printf("  {\"name\":\"%s\",\"registered\":%s", 
-                names[i], registered ? "true" : "false");
-            if (registered) {
-                const char *nvs_ns = ts_config_module_get_nvs_namespace(mod);
-                uint16_t version = ts_config_module_get_schema_version(mod);
-                bool dirty = ts_config_module_is_dirty(mod);
-                bool pending = ts_config_meta_is_pending_sync(mod);
-                ts_console_printf(",\"nvs_ns\":\"%s\",\"version\":%d,\"pending\":%s,\"dirty\":%s",
-                    nvs_ns ? nvs_ns : "", version, pending ? "true" : "false", dirty ? "true" : "false");
-            }
-            ts_console_printf("}%s\n", i < TS_CONFIG_MODULE_MAX - 1 ? "," : "");
+        if (registered) {
+            const char *nvs_ns = ts_config_module_get_nvs_namespace(mod);
+            uint16_t version = ts_config_module_get_schema_version(mod);
+            bool dirty = ts_config_module_is_dirty(mod);
+            bool pending = ts_config_meta_is_pending_sync(mod);
+            ts_console_printf("%-10s %-12s v%-7d %-8s %s\n",
+                names[i], nvs_ns ? nvs_ns : "-", version,
+                pending ? "pending" : "synced", dirty ? "YES" : "-");
         } else {
-            if (registered) {
-                const char *nvs_ns = ts_config_module_get_nvs_namespace(mod);
-                uint16_t version = ts_config_module_get_schema_version(mod);
-                bool dirty = ts_config_module_is_dirty(mod);
-                bool pending = ts_config_meta_is_pending_sync(mod);
-                ts_console_printf("%-10s %-12s v%-7d %-8s %s\n",
-                    names[i], nvs_ns ? nvs_ns : "-", version,
-                    pending ? "pending" : "synced", dirty ? "YES" : "-");
-            } else {
-                ts_console_printf("%-10s %-12s %-8s %-8s %s\n", names[i], "-", "-", "N/A", "-");
-            }
+            ts_console_printf("%-10s %-12s %-8s %-8s %s\n", names[i], "-", "-", "N/A", "-");
         }
     }
     
-    if (json) {
-        ts_console_printf("],\"global_seq\":%lu,\"sync_seq\":%lu}\n",
-            (unsigned long)ts_config_meta_get_global_seq(),
-            (unsigned long)ts_config_meta_get_sync_seq());
-    } else {
-        print_separator();
-        ts_console_printf("global_seq: %lu, sync_seq: %lu\n",
-            (unsigned long)ts_config_meta_get_global_seq(),
-            (unsigned long)ts_config_meta_get_sync_seq());
-    }
+    print_separator();
+    ts_console_printf("global_seq: %lu, sync_seq: %lu\n",
+        (unsigned long)ts_config_meta_get_global_seq(),
+        (unsigned long)ts_config_meta_get_sync_seq());
     
     return 0;
 }

@@ -134,6 +134,25 @@ static bool service_list_callback(ts_service_handle_t handle,
 
 static int do_service_list(bool json_output)
 {
+    /* JSON 模式使用 API */
+    if (json_output) {
+        ts_api_result_t result;
+        esp_err_t ret = ts_api_call("service.list", NULL, &result);
+        if (ret == ESP_OK && result.code == TS_API_OK && result.data) {
+            char *json_str = cJSON_PrintUnformatted(result.data);
+            if (json_str) {
+                ts_console_printf("%s\n", json_str);
+                free(json_str);
+            }
+        } else {
+            ts_console_error("API call failed: %s\n", 
+                result.message ? result.message : esp_err_to_name(ret));
+        }
+        ts_api_result_free(&result);
+        return (ret == ESP_OK) ? 0 : 1;
+    }
+    
+    /* 格式化输出模式 */
     ts_service_stats_t stats;
     esp_err_t ret = ts_service_get_stats(&stats);
     if (ret != ESP_OK) {
@@ -142,29 +161,21 @@ static int do_service_list(bool json_output)
     }
     
     service_list_ctx_t ctx = {
-        .json = json_output,
+        .json = false,
         .first = true
     };
     
-    if (json_output) {
-        ts_console_printf("{\"services\":[");
-    } else {
-        ts_console_printf("Services (%lu total, %lu running):\n\n",
-            (unsigned long)stats.total_services, 
-            (unsigned long)stats.running_services);
-        ts_console_printf("%-20s  %-10s  %-10s  %s\n",
-            "NAME", "STATE", "PHASE", "HEALTHY");
-        ts_console_printf("────────────────────────────────────────────────────────\n");
-    }
+    ts_console_printf("Services (%lu total, %lu running):\n\n",
+        (unsigned long)stats.total_services, 
+        (unsigned long)stats.running_services);
+    ts_console_printf("%-20s  %-10s  %-10s  %s\n",
+        "NAME", "STATE", "PHASE", "HEALTHY");
+    ts_console_printf("────────────────────────────────────────────────────────\n");
     
     // 使用服务枚举 API
     ts_service_enumerate(service_list_callback, &ctx);
     
-    if (json_output) {
-        ts_console_printf("]}\n");
-    } else {
-        ts_console_printf("\n");
-    }
+    ts_console_printf("\n");
     
     return 0;
 }
@@ -175,6 +186,30 @@ static int do_service_list(bool json_output)
 
 static int do_service_status(const char *name, bool json_output)
 {
+    /* JSON 模式使用 API */
+    if (json_output) {
+        cJSON *params = cJSON_CreateObject();
+        cJSON_AddStringToObject(params, "name", name);
+        
+        ts_api_result_t result;
+        esp_err_t ret = ts_api_call("service.status", params, &result);
+        cJSON_Delete(params);
+        
+        if (ret == ESP_OK && result.code == TS_API_OK && result.data) {
+            char *json_str = cJSON_PrintUnformatted(result.data);
+            if (json_str) {
+                ts_console_printf("%s\n", json_str);
+                free(json_str);
+            }
+        } else {
+            ts_console_error("API call failed: %s\n", 
+                result.message ? result.message : esp_err_to_name(ret));
+        }
+        ts_api_result_free(&result);
+        return (ret == ESP_OK) ? 0 : 1;
+    }
+    
+    /* 格式化输出模式 */
     ts_service_handle_t handle = ts_service_find(name);
     if (!handle) {
         ts_console_error("Service '%s' not found\n", name);
@@ -188,28 +223,16 @@ static int do_service_status(const char *name, bool json_output)
         return 1;
     }
     
-    if (json_output) {
-        ts_console_printf(
-            "{\"name\":\"%s\",\"state\":\"%s\",\"phase\":\"%s\","
-            "\"healthy\":%s,\"start_time_ms\":%lu,\"start_duration_ms\":%lu}\n",
-            info.name,
-            state_to_str(info.state),
-            phase_to_str(info.phase),
-            info.healthy ? "true" : "false",
-            (unsigned long)info.start_time_ms,
+    ts_console_printf("Service: %s\n", info.name);
+    ts_console_printf("  State:    %s%s\033[0m\n", 
+        state_color(info.state), state_to_str(info.state));
+    ts_console_printf("  Phase:    %s\n", phase_to_str(info.phase));
+    ts_console_printf("  Healthy:  %s\n", info.healthy ? "Yes" : "No");
+    if (info.start_duration_ms > 0) {
+        ts_console_printf("  Started:  %lu ms ago\n", 
+            (unsigned long)info.start_time_ms);
+        ts_console_printf("  Duration: %lu ms\n", 
             (unsigned long)info.start_duration_ms);
-    } else {
-        ts_console_printf("Service: %s\n", info.name);
-        ts_console_printf("  State:    %s%s\033[0m\n", 
-            state_color(info.state), state_to_str(info.state));
-        ts_console_printf("  Phase:    %s\n", phase_to_str(info.phase));
-        ts_console_printf("  Healthy:  %s\n", info.healthy ? "Yes" : "No");
-        if (info.start_duration_ms > 0) {
-            ts_console_printf("  Started:  %lu ms ago\n", 
-                (unsigned long)info.start_time_ms);
-            ts_console_printf("  Duration: %lu ms\n", 
-                (unsigned long)info.start_duration_ms);
-        }
     }
     
     return 0;

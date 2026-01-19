@@ -311,6 +311,21 @@ esp_err_t ts_api_power_register(void);
  */
 esp_err_t ts_api_temp_register(void);
 
+/**
+ * @brief Register service APIs
+ */
+esp_err_t ts_api_service_register(void);
+
+/**
+ * @brief Register storage APIs
+ */
+esp_err_t ts_api_storage_register(void);
+
+/**
+ * @brief Register GPIO APIs
+ */
+esp_err_t ts_api_gpio_register(void);
+
 #ifdef __cplusplus
 }
 #endif

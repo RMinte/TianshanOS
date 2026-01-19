@@ -10,11 +10,14 @@ set(TS_API_SRCS
     "src/ts_api_fan.c"
     "src/ts_api_power.c"
     "src/ts_api_temp.c"
+    "src/ts_api_service.c"
+    "src/ts_api_storage.c"
+    "src/ts_api_gpio.c"
 )
 
 idf_component_register(
     SRCS ${TS_API_SRCS}
     INCLUDE_DIRS "include"
-    REQUIRES ts_core ts_drivers ts_led ts_net json
+    REQUIRES ts_core ts_drivers ts_led ts_net json ts_storage
     PRIV_REQUIRES ts_hal esp_timer esp_app_format spi_flash bootloader_support esp_wifi
 )
