@@ -7,6 +7,8 @@ idf_component_register(
         "src/ts_power_policy.c"
         "src/ts_device_ctrl.c"
         "src/ts_usb_mux.c"
+        "src/ts_temp_source.c"
+        "src/ts_agx_monitor.c"
     INCLUDE_DIRS
         "include"
     REQUIRES
@@ -16,4 +18,7 @@ idf_component_register(
         driver
         esp_adc
         esp_timer
+        esp_websocket_client
+        esp_http_client
+        json
 )

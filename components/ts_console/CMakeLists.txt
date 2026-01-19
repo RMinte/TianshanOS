@@ -27,6 +27,8 @@ set(TS_CONSOLE_SRCS
     "commands/ts_cmd_power.c"
     "commands/ts_cmd_voltprot.c"
     "commands/ts_cmd_gpio.c"
+    "commands/ts_cmd_temp.c"
+    "commands/ts_cmd_agx.c"
     "commands/ts_cmd_register.c"
 )
 

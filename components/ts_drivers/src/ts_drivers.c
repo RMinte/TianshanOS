@@ -8,6 +8,8 @@
 #include "ts_power.h"
 #include "ts_device_ctrl.h"
 #include "ts_usb_mux.h"
+#include "ts_temp_source.h"
+#include "ts_agx_monitor.h"
 #include "ts_log.h"
 #include "sdkconfig.h"
 #include "driver/gpio.h"
@@ -34,9 +36,16 @@ esp_err_t ts_drivers_init(void)
     
     TS_LOGI(TAG, "Initializing device drivers");
     
-    // GPIO3 测试已完成 - 使用 INPUT_OUTPUT 模式可以正确读取输出电平
-    // 现在正式初始化设备驱动，实际控制使用 OUTPUT 模式即可
-    TS_LOGI(TAG, "Initializing device drivers");;
+    /* 1. 初始化温度源管理（供风扇、AGX 监控使用） */
+    ret = ts_temp_source_init();
+    if (ret != ESP_OK) {
+        TS_LOGW(TAG, "Temperature source init failed: %s", esp_err_to_name(ret));
+        /* 非致命错误，继续 */
+    } else {
+        TS_LOGI(TAG, "Temperature source manager initialized");
+    }
+    
+    /* 2. GPIO3 测试已完成 - 正式初始化设备驱动 */
     
 #ifdef CONFIG_TS_DRIVERS_FAN_ENABLE
     ret = ts_fan_init();
@@ -126,12 +135,23 @@ esp_err_t ts_drivers_init(void)
     }
 #endif
 
+    /* 初始化 AGX 监控（仅初始化，不自动启动；通过 CLI 命令启动） */
+    ret = ts_agx_monitor_init(NULL);  /* 使用默认配置 */
+    if (ret != ESP_OK) {
+        TS_LOGW(TAG, "AGX monitor init failed: %s", esp_err_to_name(ret));
+    } else {
+        TS_LOGI(TAG, "AGX monitor initialized (use 'agx --start' to connect)");
+    }
+
     TS_LOGI(TAG, "Device drivers initialized");
     return ESP_OK;
 }
 
 esp_err_t ts_drivers_deinit(void)
 {
+    /* 停止 AGX 监控 */
+    ts_agx_monitor_deinit();
+    
 #ifdef CONFIG_TS_DRIVERS_USB_MUX_ENABLE
     ts_usb_mux_deinit();
 #endif
@@ -144,5 +164,9 @@ esp_err_t ts_drivers_deinit(void)
 #ifdef CONFIG_TS_DRIVERS_FAN_ENABLE
     ts_fan_deinit();
 #endif
+    
+    /* 最后清理温度源 */
+    ts_temp_source_deinit();
+    
     return ESP_OK;
 }

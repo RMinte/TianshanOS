@@ -134,6 +134,18 @@ esp_err_t ts_cmd_voltprot_register(void);
 esp_err_t ts_cmd_gpio_register(void);
 
 /**
+ * @brief 注册 temp 命令（温度源管理）
+ * temp --status/--set/--mode/--providers
+ */
+esp_err_t ts_cmd_temp_register(void);
+
+/**
+ * @brief 注册 agx 命令（AGX 设备监控）
+ * agx --status/--data/--start/--stop/--config
+ */
+esp_err_t ts_cmd_agx_register(void);
+
+/**
  * @brief 注册所有扩展命令
  * 一次性注册所有非内置命令
  */

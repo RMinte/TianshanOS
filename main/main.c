@@ -15,57 +15,73 @@
 #include "esp_chip_info.h"
 #include "esp_log.h"
 #include "driver/gpio.h"
+#include "hal/gpio_ll.h"
+#include "soc/gpio_struct.h"
+#include "esp_private/startup_internal.h"
 #include "ts_core.h"
 #include "ts_services.h"
 
 static const char *TAG = "main";
 
 /*
- * 极早期 GPIO 初始化（在 app_main 之前执行）
+ * 超早期 AGX GPIO 初始化 - 使用 ESP_SYSTEM_INIT_FN
  * 
- * 使用 __attribute__((constructor)) 确保在 main 函数之前执行。
- * 这是确保关键 GPIO 引脚从上电开始就处于正确状态的最早时机。
- * 
- * 关键引脚:
- * - GPIO3 (AGX_FORCE_SHUTDOWN): LOW=允许开机, HIGH=强制关机
- *   必须保持 LOW，否则 AGX 无法启动
- * 
- * - GPIO1 (AGX_RESET): HIGH=复位, LOW=正常
- *   必须保持 LOW，避免意外复位
- * 
- * 注意: 这里只做最小初始化，完整的 GPIO 配置由 ts_hal 处理
+ * 这会在 esp_system_init 阶段执行，比 constructor 更早
+ * 在 SECONDARY 阶段以最高优先级 (100) 执行
+ */
+ESP_SYSTEM_INIT_FN(agx_gpio_early_init, SECONDARY, BIT(0), 100)
+{
+    /*
+     * 直接操作 GPIO 寄存器，避免函数调用开销
+     * GPIO3: AGX_FORCE_SHUTDOWN - 必须为 LOW 允许 AGX 启动
+     * GPIO1: AGX_RESET - 必须为 LOW 让 AGX 正常运行
+     */
+    
+    /* GPIO3 = LOW (允许 AGX 开机) */
+    gpio_ll_output_enable(&GPIO, GPIO_NUM_3);
+    gpio_ll_set_level(&GPIO, GPIO_NUM_3, 0);
+    gpio_ll_pulldown_en(&GPIO, GPIO_NUM_3);
+    gpio_ll_pullup_dis(&GPIO, GPIO_NUM_3);
+    
+    /* GPIO1 = LOW (正常运行) */
+    gpio_ll_output_enable(&GPIO, GPIO_NUM_1);
+    gpio_ll_set_level(&GPIO, GPIO_NUM_1, 0);
+    gpio_ll_pulldown_en(&GPIO, GPIO_NUM_1);
+    gpio_ll_pullup_dis(&GPIO, GPIO_NUM_1);
+    
+    return ESP_OK;
+}
+
+/*
+ * Constructor 作为备份 - 以最高优先级执行
+ * 优先级越小越先执行，101 是最早的合法用户优先级
  */
 __attribute__((constructor(101)))
 static void early_critical_gpio_init(void)
 {
     /*
-     * GPIO3: AGX_FORCE_SHUTDOWN
-     * LOW = 允许 AGX 开机
-     * HIGH = 强制关闭 AGX
-     * 
-     * 先设置电平再配置方向，避免毛刺
+     * 再次确保 AGX GPIO 处于正确状态
+     * 这里使用完整的 gpio_config 以确保配置完整
      */
-    gpio_set_level(GPIO_NUM_3, 0);  // LOW = allow AGX boot
+    
+    /* GPIO3: AGX_FORCE_SHUTDOWN */
+    gpio_set_level(GPIO_NUM_3, 0);  /* 先设置电平 */
     gpio_config_t io_conf_gpio3 = {
         .pin_bit_mask = (1ULL << GPIO_NUM_3),
         .mode = GPIO_MODE_OUTPUT,
         .pull_up_en = GPIO_PULLUP_DISABLE,
-        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_ENABLE,
         .intr_type = GPIO_INTR_DISABLE,
     };
     gpio_config(&io_conf_gpio3);
     
-    /*
-     * GPIO1: AGX_RESET
-     * HIGH = 复位 AGX
-     * LOW = 正常运行
-     */
-    gpio_set_level(GPIO_NUM_1, 0);  // LOW = normal (no reset)
+    /* GPIO1: AGX_RESET */
+    gpio_set_level(GPIO_NUM_1, 0);  /* 先设置电平 */
     gpio_config_t io_conf_gpio1 = {
         .pin_bit_mask = (1ULL << GPIO_NUM_1),
         .mode = GPIO_MODE_OUTPUT,
         .pull_up_en = GPIO_PULLUP_DISABLE,
-        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_ENABLE,
         .intr_type = GPIO_INTR_DISABLE,
     };
     gpio_config(&io_conf_gpio1);

@@ -153,6 +153,12 @@ typedef struct {
 /** 存储事件 */
 #define TS_EVENT_BASE_STORAGE   "ts_storage"
 
+/** 温度事件 */
+#define TS_EVENT_BASE_TEMP      "ts_temp"
+
+/** 设备监控事件 */
+#define TS_EVENT_BASE_DEVICE_MON "ts_device_mon"
+
 /** 用户事件 */
 #define TS_EVENT_BASE_USER      "ts_user"
 
@@ -223,6 +229,30 @@ typedef struct {
 #define TS_EVT_POWER_RECOVERY_START         0x0307
 /** 恢复完成 */
 #define TS_EVT_POWER_RECOVERY_COMPLETE      0x0308
+
+/* ============================================================================
+ * 温度事件 ID
+ * ========================================================================== */
+
+/** 温度值更新 */
+#define TS_EVT_TEMP_UPDATED                 0x0401
+/** 温度源切换 */
+#define TS_EVT_TEMP_SOURCE_CHANGED          0x0402
+/** 温度超过阈值 */
+#define TS_EVT_TEMP_THRESHOLD_EXCEEDED      0x0403
+
+/* ============================================================================
+ * 设备监控事件 ID
+ * ========================================================================== */
+
+/** AGX 连接建立 */
+#define TS_EVT_AGX_CONNECTED                0x0501
+/** AGX 连接断开 */
+#define TS_EVT_AGX_DISCONNECTED             0x0502
+/** AGX 数据更新 */
+#define TS_EVT_AGX_DATA_UPDATED             0x0503
+/** AGX 错误 */
+#define TS_EVT_AGX_ERROR                    0x0504
 
 /* ============================================================================
  * 事件基础别名（兼容旧代码）

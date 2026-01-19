@@ -80,9 +80,13 @@ static esp_err_t ts_hal_early_hw_init(void)
     }
     
     /*
+     * AGX GPIO 初始化 - 必须尽早设置为安全状态
+     * 这些引脚在浮动时会导致 AGX 无法启动
+     */
+    
+    /*
      * AGX 复位引脚 (GPIO1)
      * HIGH = 复位状态，LOW = 正常运行
-     * 确保 AGX 不在复位状态
      */
     int gpio_agx_reset = ts_pin_manager_get_gpio(TS_PIN_FUNC_AGX_RESET);
     if (gpio_agx_reset >= 0) {
@@ -91,20 +95,16 @@ static esp_err_t ts_hal_early_hw_init(void)
             .pin_bit_mask = (1ULL << gpio_agx_reset),
             .mode = GPIO_MODE_OUTPUT,
             .pull_up_en = GPIO_PULLUP_DISABLE,
-            .pull_down_en = GPIO_PULLDOWN_DISABLE,
+            .pull_down_en = GPIO_PULLDOWN_ENABLE,
             .intr_type = GPIO_INTR_DISABLE,
         };
-        gpio_config(&io_conf);  // 再配置为输出
+        gpio_config(&io_conf);
         TS_LOGI(TAG, "AGX_RESET (GPIO%d) = LOW (normal)", gpio_agx_reset);
     }
     
     /*
      * AGX 电源引脚 (GPIO3)
-     * LOW = 允许开机，HIGH = 强制关机（FORCE_SHUTDOWN）
-     * 
-     * 重要：AGX 是上电自启动设计！
-     * 初始化为 LOW（允许开机），不要阻止 AGX 启动。
-     * 只有在需要保护性关机时才设为 HIGH。
+     * LOW = 允许开机，HIGH = 强制关机
      */
     int gpio_agx_power = ts_pin_manager_get_gpio(TS_PIN_FUNC_AGX_POWER);
     if (gpio_agx_power >= 0) {
@@ -113,10 +113,10 @@ static esp_err_t ts_hal_early_hw_init(void)
             .pin_bit_mask = (1ULL << gpio_agx_power),
             .mode = GPIO_MODE_OUTPUT,
             .pull_up_en = GPIO_PULLUP_DISABLE,
-            .pull_down_en = GPIO_PULLDOWN_DISABLE,
+            .pull_down_en = GPIO_PULLDOWN_ENABLE,
             .intr_type = GPIO_INTR_DISABLE,
         };
-        gpio_config(&io_conf);  // 再配置为输出
+        gpio_config(&io_conf);
         TS_LOGI(TAG, "AGX_POWER (GPIO%d) = LOW (allow boot)", gpio_agx_power);
     }
     
