@@ -102,11 +102,13 @@ esp_err_t ts_wifi_deinit(void)
 esp_err_t ts_wifi_set_mode(ts_wifi_mode_t mode)
 {
     wifi_mode_t esp_mode;
+    esp_err_t ret;
     
     switch (mode) {
         case TS_WIFI_MODE_OFF:
             esp_wifi_stop();
             s_mode = mode;
+            TS_LOGI(TAG, "WiFi stopped");
             return ESP_OK;
         case TS_WIFI_MODE_STA:
             esp_mode = WIFI_MODE_STA;
@@ -121,11 +123,25 @@ esp_err_t ts_wifi_set_mode(ts_wifi_mode_t mode)
             return ESP_ERR_INVALID_ARG;
     }
     
-    esp_err_t ret = esp_wifi_set_mode(esp_mode);
-    if (ret == ESP_OK) {
-        s_mode = mode;
+    // 先停止 WiFi（如果已启动）
+    esp_wifi_stop();
+    
+    ret = esp_wifi_set_mode(esp_mode);
+    if (ret != ESP_OK) {
+        TS_LOGE(TAG, "esp_wifi_set_mode failed: %s", esp_err_to_name(ret));
+        return ret;
     }
-    return ret;
+    
+    // 启动 WiFi
+    ret = esp_wifi_start();
+    if (ret != ESP_OK) {
+        TS_LOGE(TAG, "esp_wifi_start failed: %s", esp_err_to_name(ret));
+        return ret;
+    }
+    
+    s_mode = mode;
+    TS_LOGI(TAG, "WiFi mode set to %d and started", mode);
+    return ESP_OK;
 }
 
 ts_wifi_mode_t ts_wifi_get_mode(void)
@@ -237,8 +253,24 @@ esp_err_t ts_wifi_ap_get_sta_list(ts_wifi_sta_info_t *list, uint8_t *count)
 
 esp_err_t ts_wifi_scan_start(bool block)
 {
+    // 检查 WiFi 是否已初始化
+    if (!s_initialized) {
+        TS_LOGE(TAG, "WiFi not initialized");
+        return ESP_ERR_INVALID_STATE;
+    }
+    
+    // 检查当前模式是否支持扫描（需要 STA 或 APSTA 模式）
+    if (s_mode != TS_WIFI_MODE_STA && s_mode != TS_WIFI_MODE_APSTA) {
+        TS_LOGW(TAG, "WiFi scan requires STA or APSTA mode (current: %d)", s_mode);
+        return ESP_ERR_INVALID_STATE;
+    }
+    
     wifi_scan_config_t scan_config = {0};
-    return esp_wifi_scan_start(&scan_config, block);
+    esp_err_t ret = esp_wifi_scan_start(&scan_config, block);
+    if (ret != ESP_OK) {
+        TS_LOGE(TAG, "esp_wifi_scan_start failed: %s", esp_err_to_name(ret));
+    }
+    return ret;
 }
 
 esp_err_t ts_wifi_scan_get_results(ts_wifi_scan_result_t *results, uint16_t *count)

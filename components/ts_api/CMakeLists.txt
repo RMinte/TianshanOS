@@ -21,6 +21,7 @@ set(TS_API_SRCS
     "src/ts_api_key.c"
     "src/ts_api_ssh.c"
     "src/ts_api_sftp.c"
+    "src/ts_api_time.c"
 )
 
 idf_component_register(

@@ -578,7 +578,7 @@ static int do_led_filter(const char *device_name, const char *filter_name, int s
     }
     
     // 记录当前 filter（供保存用）
-    ts_led_preset_set_current_filter(internal_name, filter_name);
+    ts_led_preset_set_current_filter(internal_name, filter_name, speed > 0 ? speed : 50);
     
     if (speed > 0) {
         ts_console_success("Filter '%s' applied on '%s' (speed=%d)\n", filter_name, device_name, speed);
@@ -615,7 +615,7 @@ static int do_led_stop_filter(const char *device_name)
     }
     
     // 清除 filter 记录
-    ts_led_preset_set_current_filter(internal_name, NULL);
+    ts_led_preset_set_current_filter(internal_name, NULL, 0);
     
     ts_console_success("Filter cleared on '%s'\n", device_name);
     return 0;

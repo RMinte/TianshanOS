@@ -43,6 +43,17 @@ static esp_err_t api_key_list(const cJSON *params, ts_api_result_t *result)
     size_t count = TS_KEYSTORE_MAX_KEYS;
     
     esp_err_t ret = ts_keystore_list_keys(keys, &count);
+    
+    // 如果模块未初始化，返回空列表而不是错误
+    if (ret == ESP_ERR_INVALID_STATE) {
+        cJSON *data = cJSON_CreateObject();
+        cJSON_AddNumberToObject(data, "count", 0);
+        cJSON_AddNumberToObject(data, "max_keys", TS_KEYSTORE_MAX_KEYS);
+        cJSON_AddArrayToObject(data, "keys");
+        ts_api_result_ok(result, data);
+        return ESP_OK;
+    }
+    
     if (ret != ESP_OK) {
         ts_api_result_error(result, TS_API_ERR_INTERNAL, "Failed to list keys");
         return ret;
@@ -229,6 +240,119 @@ static esp_err_t api_key_delete(const cJSON *params, ts_api_result_t *result)
     return ESP_OK;
 }
 
+/**
+ * @brief key.export - Export public key
+ * 
+ * @param params { "id": "key_id" }
+ * @return Public key in OpenSSH format
+ */
+static esp_err_t api_key_export(const cJSON *params, ts_api_result_t *result)
+{
+    if (!params) {
+        ts_api_result_error(result, TS_API_ERR_INVALID_ARG, "Missing parameters");
+        return ESP_ERR_INVALID_ARG;
+    }
+    
+    const cJSON *id = cJSON_GetObjectItem(params, "id");
+    if (!id || !cJSON_IsString(id)) {
+        ts_api_result_error(result, TS_API_ERR_INVALID_ARG, "Missing 'id' parameter");
+        return ESP_ERR_INVALID_ARG;
+    }
+    
+    /* 加载公钥 */
+    char *pubkey = NULL;
+    size_t pubkey_len = 0;
+    esp_err_t ret = ts_keystore_load_public_key(id->valuestring, &pubkey, &pubkey_len);
+    
+    if (ret == ESP_ERR_NOT_FOUND) {
+        ts_api_result_error(result, TS_API_ERR_NOT_FOUND, "Key not found");
+        return ESP_ERR_NOT_FOUND;
+    } else if (ret != ESP_OK || !pubkey) {
+        ts_api_result_error(result, TS_API_ERR_INTERNAL, "Failed to export public key");
+        return ret;
+    }
+    
+    /* 获取密钥信息 */
+    ts_keystore_key_info_t info;
+    ts_keystore_get_key_info(id->valuestring, &info);
+    
+    cJSON *data = cJSON_CreateObject();
+    cJSON_AddStringToObject(data, "id", id->valuestring);
+    cJSON_AddStringToObject(data, "type", ts_keystore_type_to_string(info.type));
+    cJSON_AddStringToObject(data, "public_key", pubkey);
+    cJSON_AddStringToObject(data, "comment", info.comment);
+    
+    free(pubkey);
+    
+    ts_api_result_ok(result, data);
+    return ESP_OK;
+}
+
+/**
+ * @brief key.exportPrivate - Export private key (only for exportable keys)
+ * 
+ * @param params { "id": "key_id" }
+ * @return Private key in PEM format
+ */
+static esp_err_t api_key_export_private(const cJSON *params, ts_api_result_t *result)
+{
+    if (!params) {
+        ts_api_result_error(result, TS_API_ERR_INVALID_ARG, "Missing parameters");
+        return ESP_ERR_INVALID_ARG;
+    }
+    
+    const cJSON *id = cJSON_GetObjectItem(params, "id");
+    if (!id || !cJSON_IsString(id)) {
+        ts_api_result_error(result, TS_API_ERR_INVALID_ARG, "Missing 'id' parameter");
+        return ESP_ERR_INVALID_ARG;
+    }
+    
+    /* 获取密钥信息，检查是否可导出 */
+    ts_keystore_key_info_t info;
+    esp_err_t ret = ts_keystore_get_key_info(id->valuestring, &info);
+    if (ret == ESP_ERR_NOT_FOUND) {
+        ts_api_result_error(result, TS_API_ERR_NOT_FOUND, "Key not found");
+        return ESP_ERR_NOT_FOUND;
+    } else if (ret != ESP_OK) {
+        ts_api_result_error(result, TS_API_ERR_INTERNAL, "Failed to get key info");
+        return ret;
+    }
+    
+    /* 安全检查：只有 exportable=true 的密钥才能导出私钥 */
+    if (!info.exportable) {
+        ts_api_result_error(result, TS_API_ERR_NO_PERMISSION, 
+            "Private key is not exportable. Generate key with --exportable flag to allow export.");
+        return ESP_ERR_NOT_ALLOWED;
+    }
+    
+    /* 加载私钥 */
+    char *privkey = NULL;
+    size_t privkey_len = 0;
+    ret = ts_keystore_load_private_key(id->valuestring, &privkey, &privkey_len);
+    
+    if (ret == ESP_ERR_NOT_FOUND) {
+        ts_api_result_error(result, TS_API_ERR_NOT_FOUND, "Private key not found");
+        return ESP_ERR_NOT_FOUND;
+    } else if (ret != ESP_OK || !privkey) {
+        ts_api_result_error(result, TS_API_ERR_INTERNAL, "Failed to export private key");
+        return ret;
+    }
+    
+    cJSON *data = cJSON_CreateObject();
+    cJSON_AddStringToObject(data, "id", id->valuestring);
+    cJSON_AddStringToObject(data, "type", ts_keystore_type_to_string(info.type));
+    cJSON_AddStringToObject(data, "private_key", privkey);
+    cJSON_AddStringToObject(data, "comment", info.comment);
+    
+    /* 安全警告 */
+    cJSON_AddStringToObject(data, "warning", "Keep this private key secure! Never share it publicly.");
+    
+    free(privkey);
+    
+    ts_api_result_ok(result, data);
+    return ESP_OK;
+}
+
 /*===========================================================================*/
 /*                          Registration                                      */
 /*===========================================================================*/
@@ -263,6 +387,20 @@ esp_err_t ts_api_key_register(void)
             .category = TS_API_CAT_SYSTEM,
             .handler = api_key_delete,
             .requires_auth = true,
+        },
+        {
+            .name = "key.export",
+            .description = "Export public key",
+            .category = TS_API_CAT_SYSTEM,
+            .handler = api_key_export,
+            .requires_auth = false,
+        },
+        {
+            .name = "key.exportPrivate",
+            .description = "Export private key (only for exportable keys)",
+            .category = TS_API_CAT_SYSTEM,
+            .handler = api_key_export_private,
+            .requires_auth = true,  /* 导出私钥需要认证 */
         },
     };
     

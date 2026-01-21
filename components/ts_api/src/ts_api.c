@@ -651,6 +651,13 @@ esp_err_t ts_api_register_all(void)
         return ret;
     }
     
+    /* Time APIs */
+    ret = ts_api_time_register();
+    if (ret != ESP_OK) {
+        TS_LOGE(TAG, "Failed to register Time APIs: %s", esp_err_to_name(ret));
+        return ret;
+    }
+    
     TS_LOGI(TAG, "All API modules registered (%zu endpoints)", s_api.endpoint_count);
     
     return ESP_OK;

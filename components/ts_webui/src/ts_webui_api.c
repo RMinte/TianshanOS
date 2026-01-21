@@ -61,9 +61,19 @@ static esp_err_t api_handler(ts_http_request_t *req, void *user_data)
     char api_name[64];
     strncpy(api_name, endpoint, sizeof(api_name) - 1);
     api_name[sizeof(api_name) - 1] = '\0';
+    
+    // Remove query string if present
+    char *query = strchr(api_name, '?');
+    if (query) {
+        *query = '\0';
+    }
+    
+    // Convert slashes to dots
     for (char *p = api_name; *p; p++) {
         if (*p == '/') *p = '.';
     }
+    
+    TS_LOGI(TAG, "API request: uri=%s -> api_name=%s", uri, api_name);
     
     // TODO: 测试阶段暂时禁用认证检查
     // 功能测试完成后需要恢复以下代码：
@@ -98,7 +108,7 @@ static esp_err_t api_handler(ts_http_request_t *req, void *user_data)
     esp_err_t ret = ts_api_call(api_name, request, &result);
     cJSON_Delete(request);
     
-    if (ret == ESP_OK) {
+    if (ret == ESP_OK || result.code == TS_API_OK) {
         // Build response JSON
         cJSON *response = cJSON_CreateObject();
         cJSON_AddNumberToObject(response, "code", result.code);
@@ -121,9 +131,28 @@ static esp_err_t api_handler(ts_http_request_t *req, void *user_data)
             return send_ret;
         }
         return ts_http_send_error(req, 500, "JSON serialization failed");
-    } else if (ret == ESP_ERR_NOT_FOUND) {
+    } else if (ret == ESP_ERR_NOT_FOUND && result.code == TS_API_ERR_NOT_FOUND && 
+               result.message && strcmp(result.message, "API not found") == 0) {
+        // Only report "API not found" if it's actually a missing API endpoint
+        ts_api_result_free(&result);
         return ts_http_send_error(req, 404, "API not found");
     } else {
+        // Return the actual error from the API handler
+        cJSON *response = cJSON_CreateObject();
+        cJSON_AddNumberToObject(response, "code", result.code);
+        cJSON_AddStringToObject(response, "error", result.message ? result.message : "Internal error");
+        
+        char *json = cJSON_PrintUnformatted(response);
+        cJSON_Delete(response);
+        ts_api_result_free(&result);
+        
+        if (json) {
+            int http_status = (ret == ESP_ERR_NOT_FOUND) ? 404 : 
+                              (ret == ESP_ERR_INVALID_ARG) ? 400 : 500;
+            esp_err_t send_ret = ts_http_send_json(req, http_status, json);
+            free(json);
+            return send_ret;
+        }
         return ts_http_send_error(req, 500, "Internal error");
     }
 }
@@ -403,6 +432,7 @@ esp_err_t ts_webui_api_init(void)
     
     // Generic API handler for all other routes
     ts_http_method_t methods[] = {TS_HTTP_GET, TS_HTTP_POST, TS_HTTP_PUT, TS_HTTP_DELETE};
+    const char *method_names[] = {"GET", "POST", "PUT", "DELETE"};
     for (int i = 0; i < 4; i++) {
         ts_http_route_t route = {
             .uri = API_PREFIX "/*",
@@ -411,7 +441,8 @@ esp_err_t ts_webui_api_init(void)
             .requires_auth = true,
             .user_data = NULL
         };
-        ts_http_server_register_route(&route);
+        esp_err_t ret = ts_http_server_register_route(&route);
+        TS_LOGI(TAG, "Register API %s handler: %s", method_names[i], esp_err_to_name(ret));
     }
     
     // CORS preflight handler

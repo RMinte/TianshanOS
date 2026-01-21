@@ -7,6 +7,7 @@
 #include "ts_led.h"
 #include "ts_led_effect.h"
 #include "ts_led_image.h"
+#include "ts_led_qrcode.h"
 #include "ts_pin_manager.h"
 #include "ts_log.h"
 #include "ts_event.h"
@@ -195,9 +196,13 @@ esp_err_t ts_led_bind_event_status(uint32_t event_id, ts_led_status_t status,
 static char s_current_animation[3][32] = {{0}, {0}, {0}};
 static char s_current_filter[3][32] = {{0}, {0}, {0}};
 static uint8_t s_current_speed[3] = {0, 0, 0};
+static uint8_t s_current_filter_speed[3] = {50, 50, 50};
 static ts_led_rgb_t s_current_color[3] = {{0, 0, 0}, {0, 0, 0}, {0, 0, 0}};
 static bool s_current_color_valid[3] = {false, false, false};
 static char s_current_image_path[3][128] = {{0}, {0}, {0}};
+static char s_current_qrcode[3][128] = {{0}, {0}, {0}};
+static char s_current_qrcode_bg[3][128] = {{0}, {0}, {0}};
+static char s_current_text[3][64] = {{0}, {0}, {0}};
 
 /* 延迟加载图像的定时器 */
 static esp_timer_handle_t s_delayed_image_timer = NULL;
@@ -379,14 +384,56 @@ void ts_led_preset_set_current_animation(const char *device_name, const char *an
 }
 
 /* 记录当前运行的后处理效果（供保存用） */
-void ts_led_preset_set_current_filter(const char *device_name, const char *filter)
+void ts_led_preset_set_current_filter(const char *device_name, const char *filter, uint8_t speed)
 {
     int idx = get_device_index(device_name);
     if (idx >= 0) {
         if (filter) {
             strncpy(s_current_filter[idx], filter, sizeof(s_current_filter[idx]) - 1);
+            s_current_filter_speed[idx] = speed > 0 ? speed : 50;
         } else {
             s_current_filter[idx][0] = '\0';
+            s_current_filter_speed[idx] = 50;
+        }
+    }
+}
+
+/* 记录当前显示的 QR 码内容 */
+void ts_led_preset_set_current_qrcode(const char *device_name, const char *text)
+{
+    int idx = get_device_index(device_name);
+    if (idx >= 0) {
+        if (text) {
+            strncpy(s_current_qrcode[idx], text, sizeof(s_current_qrcode[idx]) - 1);
+        } else {
+            s_current_qrcode[idx][0] = '\0';
+            s_current_qrcode_bg[idx][0] = '\0';  // 清除 QR Code 时也清除背景图
+        }
+    }
+}
+
+/* 记录当前 QR 码的背景图 */
+void ts_led_preset_set_current_qrcode_bg(const char *device_name, const char *bg_path)
+{
+    int idx = get_device_index(device_name);
+    if (idx >= 0) {
+        if (bg_path) {
+            strncpy(s_current_qrcode_bg[idx], bg_path, sizeof(s_current_qrcode_bg[idx]) - 1);
+        } else {
+            s_current_qrcode_bg[idx][0] = '\0';
+        }
+    }
+}
+
+/* 记录当前显示的文本内容 */
+void ts_led_preset_set_current_text(const char *device_name, const char *text)
+{
+    int idx = get_device_index(device_name);
+    if (idx >= 0) {
+        if (text) {
+            strncpy(s_current_text[idx], text, sizeof(s_current_text[idx]) - 1);
+        } else {
+            s_current_text[idx][0] = '\0';
         }
     }
 }
@@ -507,6 +554,26 @@ esp_err_t ts_led_save_boot_config(const char *device_name)
         nvs_erase_key(nvs, key);  // 无图像时删除键
     }
     
+    // 保存 QR Code 文本（如果有）
+    snprintf(key, sizeof(key), "%s.qr", nvs_prefix);
+    if (s_current_qrcode[idx][0]) {
+        nvs_set_str(nvs, key, s_current_qrcode[idx]);
+    } else {
+        nvs_erase_key(nvs, key);  // 无 QR Code 时删除键
+    }
+    
+    // 保存 QR Code 背景图路径（如果有）
+    snprintf(key, sizeof(key), "%s.qrbg", nvs_prefix);
+    if (s_current_qrcode_bg[idx][0]) {
+        nvs_set_str(nvs, key, s_current_qrcode_bg[idx]);
+    } else {
+        nvs_erase_key(nvs, key);  // 无背景图时删除键
+    }
+    
+    // 保存滤镜速度
+    snprintf(key, sizeof(key), "%s.fsp", nvs_prefix);
+    nvs_set_u8(nvs, key, s_current_filter_speed[idx]);
+    
     // 提交更改
     ret = nvs_commit(nvs);
     nvs_close(nvs);
@@ -516,7 +583,12 @@ esp_err_t ts_led_save_boot_config(const char *device_name)
         return ret;
     }
     
-    if (s_current_image_path[idx][0]) {
+    if (s_current_qrcode[idx][0]) {
+        TS_LOGI(TAG, "Saved boot config for %s: qrcode='%s', filter=%s, brightness=%d",
+                device_name, s_current_qrcode[idx],
+                s_current_filter[idx][0] ? s_current_filter[idx] : "(none)",
+                ts_led_device_get_brightness(dev));
+    } else if (s_current_image_path[idx][0]) {
         TS_LOGI(TAG, "Saved boot config for %s: image=%s, brightness=%d",
                 device_name, s_current_image_path[idx], ts_led_device_get_brightness(dev));
     } else if (s_current_color_valid[idx]) {
@@ -564,8 +636,13 @@ esp_err_t ts_led_get_current_state(const char *device_name, ts_led_boot_config_t
     // 复制当前图像路径
     strncpy(state->image_path, s_current_image_path[idx], sizeof(state->image_path) - 1);
     
+    // 复制当前 QR Code 文本和背景图
+    strncpy(state->qrcode_text, s_current_qrcode[idx], sizeof(state->qrcode_text) - 1);
+    strncpy(state->qrcode_bg, s_current_qrcode_bg[idx], sizeof(state->qrcode_bg) - 1);
+    
     // 速度
     state->speed = s_current_speed[idx];
+    state->filter_speed = s_current_filter_speed[idx];
     
     // 亮度
     state->brightness = ts_led_device_get_brightness(dev);
@@ -575,8 +652,9 @@ esp_err_t ts_led_get_current_state(const char *device_name, ts_led_boot_config_t
         state->color = s_current_color[idx];
     }
     
-    // 启用状态（有动画或图像表示开启）
-    state->enabled = (state->animation[0] != '\0' || state->image_path[0] != '\0' || state->brightness > 0);
+    // 启用状态（有动画、图像或 QR Code 表示开启）
+    state->enabled = (state->animation[0] != '\0' || state->image_path[0] != '\0' || 
+                      state->qrcode_text[0] != '\0' || state->brightness > 0);
     
     return ESP_OK;
 }
@@ -641,7 +719,81 @@ esp_err_t ts_led_load_boot_config(const char *device_name)
         ts_led_device_set_brightness(dev, brightness);
     }
     
-    // 首先检查图像路径（图像优先于特效）
+    // 首先检查 QR Code（QR Code 优先级最高，仅限 matrix）
+    if (idx == 2) {  // matrix
+        snprintf(key, sizeof(key), "%s.qr", nvs_prefix);
+        char qrcode_text[128] = {0};
+        size_t qr_len = sizeof(qrcode_text);
+        if (nvs_get_str(nvs, key, qrcode_text, &qr_len) == ESP_OK && qrcode_text[0]) {
+            // 读取 QR Code 背景图
+            snprintf(key, sizeof(key), "%s.qrbg", nvs_prefix);
+            char qrcode_bg[128] = {0};
+            size_t qrbg_len = sizeof(qrcode_bg);
+            bool has_bg = (nvs_get_str(nvs, key, qrcode_bg, &qrbg_len) == ESP_OK && qrcode_bg[0]);
+            
+            // 读取 filter
+            snprintf(key, sizeof(key), "%s.flt", nvs_prefix);
+            char filter[32] = {0};
+            size_t flt_len = sizeof(filter);
+            bool has_filter = (nvs_get_str(nvs, key, filter, &flt_len) == ESP_OK && filter[0]);
+            
+            nvs_close(nvs);
+            
+            // 加载背景图（如果有）
+            ts_led_image_t bg_image = NULL;
+            if (has_bg) {
+                esp_err_t img_ret = ts_led_image_load(qrcode_bg, TS_LED_IMG_FMT_AUTO, &bg_image);
+                if (img_ret != ESP_OK) {
+                    TS_LOGW(TAG, "Failed to load QR background image: %s", qrcode_bg);
+                    // 继续，只是没有背景图
+                }
+            }
+            
+            // 生成并显示 QR Code
+            ts_led_qr_config_t qr_cfg = TS_LED_QR_DEFAULT_CONFIG();
+            qr_cfg.text = qrcode_text;
+            qr_cfg.bg_image = bg_image;
+            qr_cfg.version_min = 1;
+            qr_cfg.version_max = 4;
+            qr_cfg.center = true;
+            
+            ts_led_qr_result_t qr_result;
+            esp_err_t qr_ret = ts_led_qrcode_show_on_device(TS_LED_MATRIX_NAME, &qr_cfg, &qr_result);
+            
+            // 释放背景图
+            if (bg_image) {
+                ts_led_image_free(bg_image);
+            }
+            
+            if (qr_ret == ESP_OK) {
+                // 记录当前 QR Code
+                strncpy(s_current_qrcode[idx], qrcode_text, sizeof(s_current_qrcode[idx]) - 1);
+                if (has_bg) {
+                    strncpy(s_current_qrcode_bg[idx], qrcode_bg, sizeof(s_current_qrcode_bg[idx]) - 1);
+                }
+                
+                // 应用 filter（如果有）
+                if (has_filter) {
+                    ts_led_layer_t layer = ts_led_layer_get(dev, 0);
+                    if (layer) {
+                        strncpy(s_current_filter[idx], filter, sizeof(s_current_filter[idx]) - 1);
+                        apply_filter_to_layer(layer, filter);
+                    }
+                }
+                
+                TS_LOGI(TAG, "Restored %s: qrcode='%s', bg=%s, filter=%s, brightness=%d",
+                        device_name, qrcode_text,
+                        has_bg ? qrcode_bg : "(none)",
+                        has_filter ? filter : "(none)", (int)brightness);
+            } else {
+                TS_LOGW(TAG, "Failed to restore QR code for %s: %s", 
+                        device_name, esp_err_to_name(qr_ret));
+            }
+            return ESP_OK;
+        }
+    }
+    
+    // 其次检查图像路径（图像优先于特效）
     snprintf(key, sizeof(key), "%s.img", nvs_prefix);
     char image_path[128] = {0};
     size_t img_len = sizeof(image_path);

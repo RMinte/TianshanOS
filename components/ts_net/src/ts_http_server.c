@@ -87,15 +87,35 @@ static esp_err_t http_handler_wrapper(httpd_req_t *req)
         .body_len = 0
     };
     
-    // Read body if present
+    // Read body if present - must loop to receive all data
     if (req->content_len > 0) {
         ts_req.body = malloc(req->content_len + 1);
         if (ts_req.body) {
-            int ret = httpd_req_recv(req, ts_req.body, req->content_len);
-            if (ret > 0) {
-                ts_req.body[ret] = '\0';
-                ts_req.body_len = ret;
+            size_t total_received = 0;
+            while (total_received < req->content_len) {
+                int ret = httpd_req_recv(req, ts_req.body + total_received, 
+                                         req->content_len - total_received);
+                if (ret <= 0) {
+                    if (ret == HTTPD_SOCK_ERR_TIMEOUT) {
+                        // Timeout, continue trying
+                        continue;
+                    }
+                    // Error or connection closed
+                    TS_LOGW(TAG, "Body recv error at %zu/%zu bytes: %d", 
+                            total_received, (size_t)req->content_len, ret);
+                    break;
+                }
+                total_received += ret;
             }
+            ts_req.body[total_received] = '\0';
+            ts_req.body_len = total_received;
+            
+            if (total_received != req->content_len) {
+                TS_LOGW(TAG, "Incomplete body: got %zu of %zu bytes", 
+                        total_received, (size_t)req->content_len);
+            }
+        } else {
+            TS_LOGE(TAG, "Failed to allocate %zu bytes for body", (size_t)req->content_len);
         }
     }
     

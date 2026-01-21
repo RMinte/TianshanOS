@@ -134,9 +134,13 @@ typedef struct {
     char animation[32];     /**< 动画名称，空字符串表示无动画 */
     char filter[32];        /**< 后处理效果名称，空字符串表示无效果 */
     char image_path[128];   /**< 图像/动画路径，空字符串表示无图像 */
+    char qrcode_text[128];  /**< QR 码内容，空字符串表示无 QR 码 */
+    char qrcode_bg[128];    /**< QR 码背景图路径，空字符串表示无背景图 */
+    char text_content[64];  /**< 文本内容，空字符串表示无文本 */
     uint8_t brightness;     /**< 亮度 0-255 */
     ts_led_rgb_t color;     /**< 静态颜色（当animation为空时使用） */
     uint8_t speed;          /**< 动画速度 1-100，0 使用默认 */
+    uint8_t filter_speed;   /**< 滤镜速度 1-100，0 使用默认 */
     bool enabled;           /**< 是否启用 */
 } ts_led_boot_config_t;
 
@@ -156,8 +160,33 @@ void ts_led_preset_set_current_animation(const char *device_name, const char *an
  * 
  * @param device_name 设备名
  * @param filter 后处理效果名，NULL 表示无效果
+ * @param speed 滤镜速度 1-100
  */
-void ts_led_preset_set_current_filter(const char *device_name, const char *filter);
+void ts_led_preset_set_current_filter(const char *device_name, const char *filter, uint8_t speed);
+
+/**
+ * @brief 记录当前显示的 QR 码内容（内部使用）
+ * 
+ * @param device_name 设备名
+ * @param text QR 码内容，NULL 表示无 QR 码
+ */
+void ts_led_preset_set_current_qrcode(const char *device_name, const char *text);
+
+/**
+ * @brief 记录当前 QR 码的背景图（内部使用）
+ * 
+ * @param device_name 设备名
+ * @param bg_path 背景图路径，NULL 表示无背景图
+ */
+void ts_led_preset_set_current_qrcode_bg(const char *device_name, const char *bg_path);
+
+/**
+ * @brief 记录当前显示的文本内容（内部使用）
+ * 
+ * @param device_name 设备名
+ * @param text 文本内容，NULL 表示无文本
+ */
+void ts_led_preset_set_current_text(const char *device_name, const char *text);
 
 /**
  * @brief 兼容 API - 映射到 ts_led_preset_set_current_animation

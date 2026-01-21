@@ -476,6 +476,15 @@ static esp_err_t config_set_value(const char *key, ts_config_type_t type,
             memset(&node->item.value, 0, sizeof(ts_config_value_t));
             node->item.type = type;
             had_old_value = false;  // 类型变化，不传递旧值
+        } else {
+            // 类型相同，清零指针防止 copy_value 中 double-free
+            // （旧值已保存在 old_value 中，会在最后统一释放）
+            if (type == TS_CONFIG_TYPE_STRING) {
+                node->item.value.val_string = NULL;
+            } else if (type == TS_CONFIG_TYPE_BLOB) {
+                node->item.value.val_blob.data = NULL;
+                node->item.value.val_blob.size = 0;
+            }
         }
     }
 

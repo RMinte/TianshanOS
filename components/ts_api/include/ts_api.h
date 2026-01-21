@@ -369,6 +369,11 @@ esp_err_t ts_api_ssh_register(void);
  */
 esp_err_t ts_api_sftp_register(void);
 
+/**
+ * @brief Register Time APIs
+ */
+esp_err_t ts_api_time_register(void);
+
 #ifdef __cplusplus
 }
 #endif

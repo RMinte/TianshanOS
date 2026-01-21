@@ -28,6 +28,16 @@ static esp_err_t api_hosts_list(const cJSON *params, ts_api_result_t *result)
     size_t count = 0;
     
     esp_err_t ret = ts_known_hosts_list(hosts, 32, &count);
+    
+    // 如果模块未初始化，返回空列表而不是错误
+    if (ret == ESP_ERR_INVALID_STATE) {
+        cJSON *data = cJSON_CreateObject();
+        cJSON_AddNumberToObject(data, "count", 0);
+        cJSON_AddArrayToObject(data, "hosts");
+        ts_api_result_ok(result, data);
+        return ESP_OK;
+    }
+    
     if (ret != ESP_OK) {
         ts_api_result_error(result, TS_API_ERR_INTERNAL, "Failed to list known hosts");
         return ret;

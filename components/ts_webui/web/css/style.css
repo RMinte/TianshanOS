@@ -202,6 +202,132 @@ body {
     max-width: 90%;
 }
 
+/* 文件选择器模态框 */
+.file-picker-modal {
+    min-width: 480px;
+    max-width: 600px;
+}
+
+.file-picker-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 16px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.file-picker-header h3 {
+    margin: 0;
+    flex: 1;
+}
+
+.file-picker-path {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 12px;
+    padding: 8px 12px;
+    background: var(--bg-color);
+    border-radius: 4px;
+    font-family: monospace;
+    font-size: 0.9rem;
+}
+
+.file-picker-path .path-text {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.file-picker-list {
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    max-height: 300px;
+    overflow-y: auto;
+    margin-bottom: 12px;
+}
+
+.file-picker-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 12px;
+    cursor: pointer;
+    transition: background 0.15s;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.file-picker-item:last-child {
+    border-bottom: none;
+}
+
+.file-picker-item:hover {
+    background: var(--bg-color);
+}
+
+.file-picker-item.selected {
+    background: var(--primary-color);
+    color: white;
+}
+
+.file-picker-item .icon {
+    font-size: 1.2rem;
+    width: 24px;
+    text-align: center;
+}
+
+.file-picker-item .name {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.file-picker-item .size {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+}
+
+.file-picker-item.selected .size {
+    color: rgba(255,255,255,0.8);
+}
+
+.file-picker-selected {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 16px;
+    font-size: 0.9rem;
+}
+
+.file-picker-selected .label {
+    color: var(--text-secondary);
+}
+
+.file-picker-selected .value {
+    font-weight: 500;
+}
+
+.file-picker-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+}
+
+.file-picker-list .loading,
+.file-picker-list .empty-state,
+.file-picker-list .error {
+    padding: 40px 20px;
+    text-align: center;
+    color: var(--text-secondary);
+}
+
+.file-picker-list .error {
+    color: var(--danger-color);
+}
+
 .modal-content h2 {
     margin-bottom: 20px;
 }
@@ -852,6 +978,196 @@ body {
     flex: 1;
 }
 
+/* =========== Matrix 专属功能区 =========== */
+.matrix-extras {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 16px;
+    padding: 16px;
+    background: var(--bg-color);
+    border-top: 1px solid var(--border-color);
+}
+
+.matrix-section {
+    background: var(--card-bg);
+    border-radius: 10px;
+    padding: 14px;
+    border: 1px solid var(--border-color);
+}
+
+.matrix-section .section-title {
+    display: block;
+    font-weight: 600;
+    font-size: 0.9rem;
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border-color);
+    color: var(--text-color);
+}
+
+.matrix-controls .control-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 10px;
+    flex-wrap: wrap;
+}
+
+.matrix-controls .control-row:last-child {
+    margin-bottom: 0;
+}
+
+.matrix-controls .input-full {
+    flex: 1;
+    min-width: 120px;
+    padding: 8px 10px;
+    background: var(--bg-color);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    color: var(--text-color);
+    font-size: 0.85rem;
+}
+
+.matrix-controls .input-full:focus {
+    outline: none;
+    border-color: var(--primary-color);
+}
+
+.matrix-controls select {
+    padding: 6px 8px;
+    background: var(--bg-color);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    color: var(--text-color);
+    font-size: 0.8rem;
+    cursor: pointer;
+}
+
+.matrix-controls input[type="color"] {
+    width: 32px;
+    height: 28px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    padding: 0;
+}
+
+.matrix-controls input[type="number"] {
+    width: 50px;
+    padding: 4px 6px;
+    background: var(--bg-color);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    color: var(--text-color);
+    font-size: 0.8rem;
+    text-align: center;
+}
+
+.matrix-controls label {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.matrix-controls input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    cursor: pointer;
+}
+
+.filters-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.filter-btn {
+    padding: 5px 10px;
+    font-size: 0.75rem;
+    background: var(--bg-color);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.filter-btn:hover {
+    background: var(--primary-color);
+    border-color: var(--primary-color);
+    color: white;
+}
+
+.filter-btn.active {
+    background: var(--primary-color);
+    border-color: var(--primary-color);
+    color: white;
+}
+
+.filter-btn.selected {
+    background: var(--card-bg);
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.3);
+}
+
+/* 滤镜分类 */
+.filter-category {
+    margin-bottom: 12px;
+}
+
+.filter-category .filter-label {
+    display: block;
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    margin-bottom: 6px;
+    font-weight: 500;
+}
+
+/* 滤镜参数区域 */
+.filter-params {
+    background: var(--bg-color);
+    padding: 12px;
+    border-radius: 8px;
+    margin-top: 10px;
+}
+
+.filter-param-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.filter-param-row label {
+    min-width: 40px;
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+}
+
+.filter-param-row input[type="range"] {
+    flex: 1;
+    height: 6px;
+    -webkit-appearance: none;
+    background: var(--card-bg);
+    border-radius: 3px;
+}
+
+.filter-param-row input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 16px;
+    height: 16px;
+    background: var(--primary-color);
+    border-radius: 50%;
+    cursor: pointer;
+}
+
+.filter-param-row span {
+    min-width: 30px;
+    text-align: right;
+    font-size: 0.85rem;
+    color: var(--text-color);
+}
+
 /* 小按钮 */
 .btn-sm {
     padding: 6px 12px;
@@ -1119,6 +1435,60 @@ body {
     margin-bottom: 15px;
     flex-wrap: wrap;
     gap: 10px;
+}
+
+/* 批量操作工具栏 */
+.batch-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 15px;
+    background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%);
+    border: 1px solid #90caf9;
+    border-radius: 8px;
+    margin-bottom: 15px;
+    animation: slideDown 0.2s ease-out;
+}
+
+@keyframes slideDown {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.batch-toolbar.hidden {
+    display: none;
+}
+
+.batch-toolbar #selected-count {
+    font-weight: bold;
+    color: var(--primary-dark);
+    margin-right: 10px;
+}
+
+/* 文件复选框样式 */
+.file-checkbox-cell {
+    width: 30px;
+    text-align: center;
+}
+
+.file-checkbox {
+    width: 16px;
+    height: 16px;
+    cursor: pointer;
+    accent-color: var(--primary-color);
+}
+
+#select-all-cb {
+    width: 16px;
+    height: 16px;
+    cursor: pointer;
+    accent-color: var(--primary-color);
 }
 
 .breadcrumb {

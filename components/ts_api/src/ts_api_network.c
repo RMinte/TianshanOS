@@ -189,10 +189,17 @@ static esp_err_t api_network_wifi_mode(const cJSON *params, ts_api_result_t *res
 
 /**
  * @brief network.wifi.scan - Scan for WiFi networks
+ * 
+ * NOTE: WiFi must be in STA or APSTA mode to scan.
  */
 static esp_err_t api_network_wifi_scan(const cJSON *params, ts_api_result_t *result)
 {
     esp_err_t ret = ts_wifi_scan_start(true);
+    if (ret == ESP_ERR_INVALID_STATE) {
+        ts_api_result_error(result, TS_API_ERR_INVALID_ARG, 
+            "WiFi scan requires STA or APSTA mode. Use network.wifi.mode to enable.");
+        return ret;
+    }
     if (ret != ESP_OK) {
         ts_api_result_error(result, TS_API_ERR_HARDWARE, "Scan failed");
         return ret;
@@ -295,6 +302,14 @@ static esp_err_t api_network_wifi_disconnect(const cJSON *params, ts_api_result_
  */
 static esp_err_t api_network_wifi_ap_config(const cJSON *params, ts_api_result_t *result)
 {
+    // 检查 WiFi 模式
+    ts_wifi_mode_t mode = ts_wifi_get_mode();
+    if (mode != TS_WIFI_MODE_AP && mode != TS_WIFI_MODE_APSTA) {
+        ts_api_result_error(result, TS_API_ERR_INVALID_ARG, 
+            "AP config requires AP or APSTA mode. Use network.wifi.mode to enable.");
+        return ESP_ERR_INVALID_STATE;
+    }
+    
     cJSON *ssid_param = cJSON_GetObjectItem(params, "ssid");
     
     if (!ssid_param || !cJSON_IsString(ssid_param)) {
@@ -353,6 +368,14 @@ static esp_err_t api_network_wifi_ap_config(const cJSON *params, ts_api_result_t
  */
 static esp_err_t api_network_wifi_ap_stations(const cJSON *params, ts_api_result_t *result)
 {
+    // 检查 WiFi 模式
+    ts_wifi_mode_t mode = ts_wifi_get_mode();
+    if (mode != TS_WIFI_MODE_AP && mode != TS_WIFI_MODE_APSTA) {
+        ts_api_result_error(result, TS_API_ERR_INVALID_ARG, 
+            "AP stations requires AP or APSTA mode. Use network.wifi.mode to enable.");
+        return ESP_ERR_INVALID_STATE;
+    }
+    
     ts_wifi_sta_info_t stations[8];
     uint8_t count = 8;
     

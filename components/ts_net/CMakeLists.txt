@@ -8,6 +8,7 @@ idf_component_register(
         "src/ts_nat.c"
         "src/ts_http_server.c"
         "src/ts_https_server.c"
+        "src/ts_time_sync.c"
     INCLUDE_DIRS
         "include"
     REQUIRES

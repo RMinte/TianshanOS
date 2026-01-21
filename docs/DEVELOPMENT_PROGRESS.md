@@ -446,6 +446,42 @@
   - 配置保存功能（led --save）
   - 状态实时展示
 
+- **LED WebUI Matrix 功能增强**：
+  - 实现 Matrix 专属功能区域（图像/QR码/文本/滤镜）
+  - **文件选择器组件**
+    - 通用 `openFilePickerFor(inputId, startPath)` 函数
+    - 支持目录导航、文件预览、选择确认
+    - 图像文件类型过滤 (.png/.jpg/.gif/.bmp)
+  - **文本滚动效果修复**
+    - 从 checkbox 改为下拉选择器
+    - 支持方向选择：无/向左/向右/向上/向下
+  - **字体选择器优化**
+    - 移除无效的"默认字体"选项
+    - 只显示 /sdcard/fonts 实际存在的字体文件
+  - **QR Code 背景图支持**
+    - Core API (`led.qrcode`) 添加 `bg_image` 参数
+    - WebUI 添加背景图选择器（复用文件选择器组件）
+    - NVS 保存/恢复支持（新增 `{device}.qrbg` 键）
+    - 修复重启后背景图丢失问题
+  - **后处理滤镜完整实现**
+    - 滤镜分类展示：动态/渐变/静态效果
+    - 速度参数支持（部分滤镜）
+    - API: `led.filter.start`, `led.filter.stop`
+
+- **性能优化**：
+  - CPU 频率从 160 MHz 改为 240 MHz
+  - 修改 sdkconfig.defaults 和 sdkconfig
+
+- **HTTP Server 增强**：
+  - 修复大 body 接收不完整问题
+  - 添加循环接收直到获取完整 content_len
+  - HTTP/HTTPS handler 统一修复
+
+- **WebUI API 增强**：
+  - 添加 query string 解析（`?path=xxx` 参数）
+  - 改进错误处理和状态码返回
+  - 添加 API 请求日志
+
 ### 2026-01-20
 - **WebUI SPA 重构（Phase 10）**：
   - 实现 SPA 路由系统 (router.js)

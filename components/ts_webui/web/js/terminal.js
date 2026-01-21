@@ -584,21 +584,27 @@ class WebTerminal {
      * 写入提示符
      */
     writePrompt() {
-        this.terminal.write(this.prompt);
+        if (this.terminal) {
+            this.terminal.write(this.prompt);
+        }
     }
 
     /**
      * 写入文本
      */
     write(text) {
-        this.terminal.write(text);
+        if (this.terminal) {
+            this.terminal.write(text);
+        }
     }
 
     /**
      * 写入一行
      */
     writeln(text) {
-        this.terminal.writeln(text);
+        if (this.terminal) {
+            this.terminal.writeln(text);
+        }
     }
 
     /**

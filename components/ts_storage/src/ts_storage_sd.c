@@ -11,6 +11,7 @@
 #include "ts_log.h"
 #include "ts_event.h"
 #include "esp_vfs_fat.h"
+#include "esp_vfs.h"       /* for esp_vfs_dump_registered_paths() */
 #include "sdmmc_cmd.h"
 #include "driver/sdmmc_host.h"
 #include "driver/sdspi_host.h"
@@ -18,7 +19,12 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_task_wdt.h"
+#include "esp_heap_caps.h"
+#include "diskio_sdmmc.h"  /* for ff_diskio_get_pdrv_card() */
+#include "diskio_impl.h"   /* for ff_diskio_get_drive() */
+#include "ffconf.h"        /* for FF_VOLUMES */
 #include <string.h>
+#include <stdio.h>         /* for stdout */
 
 #define TAG "storage_sd"
 
@@ -56,6 +62,32 @@ esp_err_t ts_storage_mount_sd(const ts_sd_config_t *config)
         TS_LOGW(TAG, "SD card already mounted");
         return ESP_OK;
     }
+    
+    /* 确保之前的状态已清理干净 */
+    ts_storage_set_sd_mounted(false, NULL);
+    
+    /* 
+     * 关键诊断：检查 FATFS 内部的 s_fat_ctxs[] 是否仍然有 /sdcard 条目
+     * 如果 esp_vfs_fat_info() 成功，说明 s_fat_ctxs[] 中仍然有该路径的条目
+     * 这与 VFS 的 s_vfs[] 是独立的资源！
+     */
+    {
+        uint64_t total = 0, free_bytes = 0;
+        esp_err_t info_ret = esp_vfs_fat_info("/sdcard", &total, &free_bytes);
+        if (info_ret == ESP_OK) {
+            TS_LOGE(TAG, "CRITICAL: /sdcard still exists in FATFS s_fat_ctxs[] (total=%llu)!", 
+                    (unsigned long long)total);
+            TS_LOGE(TAG, "This indicates s_fat_ctxs[] was not properly cleaned during previous unmount");
+        } else {
+            TS_LOGI(TAG, "Good: /sdcard not in FATFS s_fat_ctxs[] (info returned %s)", 
+                    esp_err_to_name(info_ret));
+        }
+    }
+    
+    /* 打印挂载前的堆内存状态，帮助诊断内存问题 */
+    TS_LOGD(TAG, "Pre-mount heap: free=%lu, min_free=%lu",
+            (unsigned long)esp_get_free_heap_size(),
+            (unsigned long)esp_get_minimum_free_heap_size());
     
     ts_sd_config_t cfg;
     
@@ -211,6 +243,27 @@ esp_err_t ts_storage_mount_sd(const ts_sd_config_t *config)
             case ESP_ERR_NOT_SUPPORTED:
                 TS_LOGW(TAG, "SD card format not supported - may need formatting");
                 break;
+            case ESP_ERR_NO_MEM:
+                TS_LOGE(TAG, "Memory allocation failed during mount");
+                TS_LOGE(TAG, "This may be caused by:");
+                TS_LOGE(TAG, "  - Insufficient heap memory");
+                TS_LOGE(TAG, "  - VFS/FATFS resources not properly released from previous unmount");
+                TS_LOGE(TAG, "  - Maximum number of FATFS volumes reached (FF_VOLUMES=%d)", FF_VOLUMES);
+                /* 打印堆内存信息帮助诊断 */
+                TS_LOGE(TAG, "Free heap: %lu bytes, min free: %lu bytes",
+                        (unsigned long)esp_get_free_heap_size(),
+                        (unsigned long)esp_get_minimum_free_heap_size());
+                /* 尝试获取下一个可用的 pdrv */
+                {
+                    BYTE next_pdrv = 0xFF;
+                    esp_err_t pdrv_err = ff_diskio_get_drive(&next_pdrv);
+                    TS_LOGE(TAG, "ff_diskio_get_drive() returned %s, pdrv=%d",
+                            esp_err_to_name(pdrv_err), (int)next_pdrv);
+                }
+                /* 转储当前所有注册的 VFS 路径，帮助诊断 VFS 泄漏 */
+                TS_LOGE(TAG, "=== Registered VFS paths (check for /sdcard leak) ===");
+                esp_vfs_dump_registered_paths(stdout);
+                break;
             case ESP_FAIL:
                 TS_LOGE(TAG, "Failed to mount filesystem");
                 break;
@@ -249,20 +302,74 @@ esp_err_t ts_storage_unmount_sd(void)
         return ESP_OK;
     }
     
+    TS_LOGI(TAG, "Unmounting SD card from %s...", s_mount_point);
+    
+    /* 诊断：打印 unmount 前的状态 */
+    BYTE pdrv_before = ff_diskio_get_pdrv_card(s_card);
+    TS_LOGI(TAG, "Before unmount: card=%p, pdrv=%d, mount_point=%s", 
+            s_card, (int)pdrv_before, s_mount_point);
+    TS_LOGI(TAG, "=== VFS paths BEFORE unmount ===");
+    esp_vfs_dump_registered_paths(stdout);
+    
     esp_err_t ret = esp_vfs_fat_sdcard_unmount(s_mount_point, s_card);
+    
+    /* 
+     * 关键诊断：打印 esp_vfs_fat_sdcard_unmount 的返回值
+     * 根据 ESP-IDF 源码，这个函数内部调用：
+     * 1. unmount_card_core() -> esp_vfs_fat_unregister_path()
+     * 如果 esp_vfs_fat_unregister_path() 失败，VFS 上下文 (s_fat_ctxs[]) 不会被释放
+     */
+    TS_LOGI(TAG, "esp_vfs_fat_sdcard_unmount returned: %s (0x%x)", 
+            esp_err_to_name(ret), ret);
+    
+    /* 无论成功失败都打印 unmount 后的 VFS 状态 */
+    TS_LOGI(TAG, "=== VFS paths AFTER unmount ===");
+    esp_vfs_dump_registered_paths(stdout);
+    
     if (ret != ESP_OK) {
         TS_LOGE(TAG, "Failed to unmount SD card: %s", esp_err_to_name(ret));
+        /* 尝试获取更多诊断信息 */
+        BYTE pdrv_after = ff_diskio_get_pdrv_card(s_card);
+        TS_LOGE(TAG, "After failed unmount: pdrv=%d (0xff means not found)", (int)pdrv_after);
         return ret;
     }
     
-    /* 发布 SD 卡卸载事件 */
+    /* 
+     * 重要：esp_vfs_fat_sdcard_unmount() 内部会：
+     * 1. f_mount(NULL) - 卸载 FAT 文件系统
+     * 2. ff_diskio_unregister() - 取消 diskio 注册
+     * 3. call_host_deinit() - 调用 sdmmc_host_deinit() 释放 SDMMC host
+     * 4. free(card) - 释放 card 结构体内存
+     * 5. esp_vfs_fat_unregister_path() - 取消 VFS 路径注册（释放 s_fat_ctxs[] 槽位）
+     * 
+     * 因此卸载后 s_card 指针已无效，必须设为 NULL
+     */
+    
+    /* 关键诊断：检查 FATFS 内部的 s_fat_ctxs[] 是否被正确清理 */
+    {
+        uint64_t total = 0, free_bytes = 0;
+        esp_err_t info_ret = esp_vfs_fat_info("/sdcard", &total, &free_bytes);
+        if (info_ret == ESP_OK) {
+            TS_LOGE(TAG, "WARNING: /sdcard STILL exists in FATFS s_fat_ctxs[] after unmount!");
+            TS_LOGE(TAG, "This is a resource leak - s_fat_ctxs[] slot not properly released");
+        } else {
+            TS_LOGI(TAG, "Good: /sdcard removed from FATFS s_fat_ctxs[] (info returned %s)", 
+                    esp_err_to_name(info_ret));
+        }
+    }
+    
+    /* 发布 SD 卡卸载事件（在清理 s_card 之前，确保事件处理器能获取信息）*/
     ts_event_post(TS_EVENT_BASE_STORAGE, TS_EVT_STORAGE_SD_UNMOUNTED, 
                   s_mount_point, strlen(s_mount_point) + 1, 0);
     
+    /* 清理状态 - card 内存已由 esp_vfs_fat_sdcard_unmount 释放 */
     s_card = NULL;
     ts_storage_set_sd_mounted(false, NULL);
     
-    TS_LOGI(TAG, "SD card unmounted");
+    /* 给驱动时间完成清理，确保下次挂载不会冲突 */
+    vTaskDelay(pdMS_TO_TICKS(100));
+    
+    TS_LOGI(TAG, "SD card unmounted successfully");
     
     return ESP_OK;
 }

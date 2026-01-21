@@ -100,6 +100,16 @@ class TianShanAPI {
     async reboot(delay = 0) { return this.call('system.reboot', { delay }, 'POST'); }
     
     // =====================================================================
+    //                         时间 API (time.*)
+    // =====================================================================
+    
+    async timeInfo() { return this.call('time.info'); }
+    async timeSync(timestampMs) { return this.call('time.sync', { timestamp_ms: timestampMs }, 'POST'); }
+    async timeSetNtp(server, index = 0) { return this.call('time.set_ntp', { server, index }, 'POST'); }
+    async timeSetTimezone(timezone) { return this.call('time.set_timezone', { timezone }, 'POST'); }
+    async timeForceSync() { return this.call('time.force_sync', null, 'POST'); }
+    
+    // =====================================================================
     //                         配置 API (config.*)
     // =====================================================================
     
@@ -132,21 +142,54 @@ class TianShanAPI {
     async ledEffectStop(device) { return this.call('led.effect.stop', { device }, 'POST'); }
     async ledColorParse(color) { return this.call('led.color.parse', { color }); }
     async ledFilterList() { return this.call('led.filter.list'); }
+    async ledFilterStart(device, filter, speed = 50) { return this.call('led.filter.start', { device, filter, speed }, 'POST'); }
+    async ledFilterStop(device) { return this.call('led.filter.stop', { device }, 'POST'); }
+    async ledSave(device) { return this.call('led.save', { device }, 'POST'); }
+    
+    // Matrix-specific LED APIs
+    async ledImage(path, device = 'matrix', center = 'image') { return this.call('led.image', { device, path, center }, 'POST'); }
+    async ledQrcode(text, options = {}) { return this.call('led.qrcode', { device: 'matrix', text, ...options }, 'POST'); }
+    async ledText(text, options = {}) { return this.call('led.text', { device: 'matrix', text, ...options }, 'POST'); }
+    async ledTextStop(device = 'matrix') { return this.call('led.text.stop', { device }, 'POST'); }
     
     // =====================================================================
-    //                         网络 API (network.*, wifi.*, dhcp.*, nat.*)
+    //                         网络 API (network.*, dhcp.*, nat.*)
     // =====================================================================
     
+    // 综合网络状态 (包含 ethernet, wifi_sta, wifi_ap)
     async networkStatus() { return this.call('network.status'); }
-    async wifiStatus() { return this.call('wifi.status'); }
-    async wifiScan() { return this.call('wifi.scan'); }
-    async wifiConnect(ssid, password) { return this.call('wifi.connect', { ssid, password }, 'POST'); }
-    async wifiDisconnect() { return this.call('wifi.disconnect', null, 'POST'); }
+    
+    // WiFi 相关
+    async wifiMode(mode = null) { 
+        return mode ? this.call('network.wifi.mode', { mode }, 'POST') : this.call('network.wifi.mode'); 
+    }
+    async wifiScan() { return this.call('network.wifi.scan'); }
+    async wifiConnect(ssid, password) { return this.call('network.wifi.connect', { ssid, password }, 'POST'); }
+    async wifiDisconnect() { return this.call('network.wifi.disconnect', null, 'POST'); }
+    async wifiApConfig(ssid, password = '', channel = 6, hidden = false) { 
+        return this.call('network.wifi.ap.config', { ssid, password, channel, hidden }, 'POST'); 
+    }
+    async wifiApStations() { return this.call('network.wifi.ap.stations'); }
+    
+    // 以太网
+    async ethStatus() { return this.call('network.eth.status'); }
+    
+    // 主机名
+    async hostname(name = null) { 
+        return name ? this.call('network.hostname', { hostname: name }, 'POST') : this.call('network.hostname'); 
+    }
+    
+    // DHCP 服务器
     async dhcpStatus(iface = null) { return this.call('dhcp.status', iface ? { interface: iface } : null); }
     async dhcpClients(iface = null) { return this.call('dhcp.clients', iface ? { interface: iface } : null); }
+    async dhcpStart(iface = 'ap') { return this.call('dhcp.start', { interface: iface }, 'POST'); }
+    async dhcpStop(iface = 'ap') { return this.call('dhcp.stop', { interface: iface }, 'POST'); }
+    
+    // NAT 网关
     async natStatus() { return this.call('nat.status'); }
     async natEnable() { return this.call('nat.enable', null, 'POST'); }
     async natDisable() { return this.call('nat.disable', null, 'POST'); }
+    async natSave() { return this.call('nat.save', null, 'POST'); }
     
     // =====================================================================
     //                         设备 API (device.*, agx.*, fan.*)
@@ -226,11 +269,81 @@ class TianShanAPI {
     //                         SSH/SFTP API
     // =====================================================================
     
-    async sshTest(host, user, password, port = 22) { return this.call('ssh.test', { host, user, password, port }, 'POST'); }
-    async sshExec(host, user, password, command, port = 22) { return this.call('ssh.exec', { host, user, password, command, port }, 'POST'); }
+    // SSH 测试连接 - 支持密码或密钥认证
+    // options: { trust_new: bool, accept_changed: bool }
+    async sshTest(host, user, auth, port = 22, options = {}) { 
+        const params = { host, user, port };
+        if (typeof auth === 'string') {
+            params.password = auth;  // 兼容旧调用方式
+        } else if (auth.password) {
+            params.password = auth.password;
+        } else if (auth.keyid) {
+            params.keyid = auth.keyid;
+        }
+        // 主机指纹验证参数
+        params.trust_new = options.trust_new ?? true;      // 新主机自动信任（默认 true）
+        params.accept_changed = options.accept_changed ?? false; // 指纹变化是否接受（默认 false）
+        return this.call('ssh.test', params, 'POST'); 
+    }
+    
+    // SSH 执行命令 - 支持密码或密钥认证
+    // options: { trust_new: bool, accept_changed: bool }
+    async sshExec(host, user, auth, command, port = 22, options = {}) { 
+        const params = { host, user, command, port };
+        if (typeof auth === 'string') {
+            params.password = auth;  // 兼容旧调用方式
+        } else if (auth.password) {
+            params.password = auth.password;
+        } else if (auth.keyid) {
+            params.keyid = auth.keyid;
+        }
+        // 主机指纹验证参数
+        params.trust_new = options.trust_new ?? true;
+        params.accept_changed = options.accept_changed ?? false;
+        return this.call('ssh.exec', params, 'POST'); 
+    }
+    
+    // 部署公钥 - options: { trust_new, accept_changed }
+    async sshCopyid(host, user, password, keyid, port = 22, verify = true, options = {}) { 
+        return this.call('ssh.copyid', { 
+            host, user, password, keyid, port, verify,
+            trust_new: options.trust_new ?? true,
+            accept_changed: options.accept_changed ?? false
+        }, 'POST'); 
+    }
+    
+    // 撤销公钥 - options: { trust_new, accept_changed }
+    async sshRevoke(host, user, password, keyid, port = 22, options = {}) { 
+        return this.call('ssh.revoke', { 
+            host, user, password, keyid, port,
+            trust_new: options.trust_new ?? true,
+            accept_changed: options.accept_changed ?? false
+        }, 'POST'); 
+    }
+    async sshKeygen(id, type = 'ecdsa', comment = '') { return this.call('ssh.keygen', { id, type, comment }, 'POST'); }
     async sftpLs(host, user, password, path, port = 22) { return this.call('sftp.ls', { host, user, password, path, port }, 'POST'); }
+    
+    // =====================================================================
+    //                         Key Management API
+    // =====================================================================
+    
     async keyList() { return this.call('key.list'); }
+    async keyInfo(id) { return this.call('key.info', { id }); }
+    async keyGenerate(id, type = 'rsa2048', comment = '', exportable = false) { 
+        return this.call('key.generate', { id, type, comment, exportable }, 'POST'); 
+    }
+    async keyDelete(id) { return this.call('key.delete', { id }, 'POST'); }
+    async keyExport(id) { return this.call('key.export', { id }); }
+    async keyExportPrivate(id) { return this.call('key.exportPrivate', { id }, 'POST'); }
+    
+    // =====================================================================
+    //                         Known Hosts API
+    // =====================================================================
+    
     async hostsList() { return this.call('hosts.list'); }
+    async hostsInfo(host, port = 22) { return this.call('hosts.info', { host, port }); }
+    async hostsRemove(host, port = 22) { return this.call('hosts.remove', { host, port }, 'POST'); }
+    async hostsClear() { return this.call('hosts.clear', {}, 'POST'); }
 }
 
 // =========================================================================

@@ -23,6 +23,7 @@
 #include "ts_fan.h"
 #include "ts_net_manager.h"
 #include "ts_dhcp_server.h"
+#include "ts_time_sync.h"
 #include "ts_security.h"
 #include "ts_keystore.h"
 #include "ts_api.h"
@@ -376,6 +377,20 @@ static esp_err_t network_service_start(ts_service_handle_t handle, void *user_da
     esp_err_t ret = ts_net_manager_start(TS_NET_IF_ETH);
     if (ret != ESP_OK) {
         ESP_LOGW(TAG, "Failed to start Ethernet: %s", esp_err_to_name(ret));
+        /* 不是致命错误，继续 */
+    }
+    
+    /* 初始化时间同步（NTP） */
+    ts_time_sync_config_t time_config = {
+        .ntp_server1 = "pool.ntp.org",
+        .ntp_server2 = "time.windows.com",
+        .timezone = "CST-8",            /* 中国标准时间 */
+        .sync_interval_ms = 3600000,    /* 每小时同步一次 */
+        .auto_start = true,             /* 自动启动 NTP */
+    };
+    ret = ts_time_sync_init(&time_config);
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to init time sync: %s", esp_err_to_name(ret));
         /* 不是致命错误，继续 */
     }
     
