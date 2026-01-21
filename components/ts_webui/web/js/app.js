@@ -23,6 +23,7 @@ document.addEventListener('DOMContentLoaded', () => {
     router.register('/led', loadLedPage);
     router.register('/network', loadNetworkPage);
     router.register('/device', loadDevicePage);
+    router.register('/files', loadFilesPage);
     router.register('/terminal', loadTerminalPage);
     router.register('/config', loadConfigPage);
     router.register('/security', loadSecurityPage);
@@ -421,7 +422,16 @@ async function serviceAction(name, action) {
 
 function confirmReboot() {
     if (confirm('确定要重启系统吗？')) {
-        api.reboot().then(() => showToast('系统正在重启...', 'info'));
+        showToast('正在发送重启命令...', 'info');
+        api.reboot(500)
+            .then((result) => {
+                console.log('Reboot response:', result);
+                showToast('系统正在重启，请稍候...', 'success');
+            })
+            .catch((err) => {
+                console.error('Reboot failed:', err);
+                showToast('重启失败: ' + err.message, 'error');
+            });
     }
 }
 
@@ -429,27 +439,19 @@ function confirmReboot() {
 //                         LED 页面
 // =========================================================================
 
+// 存储设备信息和特效列表
+let ledDevices = {};
+let ledEffects = [];
+
 async function loadLedPage() {
     clearInterval(refreshInterval);
     
     const content = document.getElementById('page-content');
     content.innerHTML = `
         <div class="page-led">
-            <h1>LED 控制</h1>
-            
-            <div class="led-devices" id="led-devices"></div>
-            
-            <div class="section">
-                <h2>特效列表</h2>
-                <div class="effects-grid" id="effects-list"></div>
-            </div>
-            
-            <div class="section">
-                <h2>颜色选择</h2>
-                <div class="color-picker">
-                    <input type="color" id="led-color" value="#ff0000">
-                    <button class="btn btn-primary" onclick="applyColor()">应用颜色</button>
-                </div>
+            <h1>💡 LED 控制</h1>
+            <div id="led-panels" class="led-panels">
+                <p class="loading">加载设备中...</p>
             </div>
         </div>
     `;
@@ -458,80 +460,435 @@ async function loadLedPage() {
 }
 
 async function refreshLedPage() {
-    const devicesContainer = document.getElementById('led-devices');
+    const panelsContainer = document.getElementById('led-panels');
     
+    // 加载设备列表并渲染每个设备的控制面板
+    // 现在每个设备会带有自己适用的特效列表
     try {
         const result = await api.ledList();
-        if (result.data && result.data.devices) {
-            devicesContainer.innerHTML = result.data.devices.map(dev => `
-                <div class="card led-device-card">
-                    <h3>💡 ${dev.name}</h3>
-                    <div class="card-content">
-                        <p><strong>LED 数量:</strong> ${dev.count}</p>
-                        <p><strong>亮度:</strong> ${dev.brightness}</p>
-                        <div class="control-row">
-                            <label>亮度调节</label>
-                            <input type="range" min="0" max="255" value="${dev.brightness}" 
-                                   onchange="setBrightness('${dev.name}', this.value)">
-                        </div>
-                        <div class="button-group">
-                            <button class="btn" onclick="clearLed('${dev.name}')">清除</button>
+        
+        if (result.data && result.data.devices && result.data.devices.length > 0) {
+            // 存储设备信息（包含特效列表）
+            result.data.devices.forEach(dev => {
+                ledDevices[dev.name] = dev;
+                
+                // 初始化 selectedEffects（如果设备有正在运行的动画）
+                if (dev.current && dev.current.animation) {
+                    selectedEffects[dev.name] = dev.current.animation;
+                }
+            });
+            
+            // 为每个设备生成独立的控制面板
+            panelsContainer.innerHTML = result.data.devices.map(dev => generateDevicePanel(dev)).join('');
+        } else {
+            // 如果 API 返回空，显示提示信息
+            panelsContainer.innerHTML = `
+                <div class="empty-state">
+                    <p>⚠️ 未找到已初始化的 LED 设备</p>
+                    <p class="hint">LED 设备可能尚未启动。请检查：</p>
+                    <ul>
+                        <li>LED 服务是否已启动（<code>service --status</code>）</li>
+                        <li>设备配置是否正确（GPIO 引脚）</li>
+                    </ul>
+                    <p>可用命令：<code>led --status</code></p>
+                </div>
+            `;
+        }
+    } catch (e) {
+        console.error('LED list error:', e);
+        panelsContainer.innerHTML = '<p class="error">加载设备失败: ' + e.message + '</p>';
+    }
+}
+
+function generateDevicePanel(dev) {
+    const icon = getDeviceIcon(dev.name);
+    const description = getDeviceDescription(dev.name);
+    
+    // 获取当前状态
+    const current = dev.current || {};
+    const isOn = current.on || false;
+    const currentAnimation = current.animation || '';
+    const currentSpeed = current.speed || 50;
+    const currentColor = current.color || {r: 255, g: 0, b: 0};
+    
+    // 将 RGB 转为 hex
+    const colorHex = '#' + 
+        currentColor.r.toString(16).padStart(2, '0') +
+        currentColor.g.toString(16).padStart(2, '0') +
+        currentColor.b.toString(16).padStart(2, '0');
+    
+    // 使用设备自带的特效列表（已按设备类型过滤）
+    const deviceEffects = dev.effects || [];
+    const effectsHtml = deviceEffects.length > 0 
+        ? deviceEffects.map(eff => {
+            const isActive = eff === currentAnimation;
+            const activeClass = isActive ? ' active' : '';
+            return `<button class="btn effect-btn${activeClass}" onclick="showEffectConfig('${dev.name}', '${eff}')" title="点击配置并启动">${getEffectIcon(eff)} ${eff}</button>`;
+        }).join('')
+        : '<span class="empty">暂无可用</span>';
+    
+    // 开关按钮状态
+    const toggleClass = isOn ? ' on' : '';
+    const toggleText = isOn ? '关灯' : '开灯';
+    
+    return `
+        <div class="led-panel" data-device="${dev.name}">
+            <div class="panel-header">
+                <span class="device-icon">${icon}</span>
+                <div class="device-title">
+                    <h2>${dev.name}</h2>
+                    <span class="device-desc">${description}</span>
+                </div>
+                <span class="device-layout">${dev.layout || 'strip'}</span>
+                <span class="led-count">${dev.count} LEDs</span>
+                <button class="btn btn-sm btn-header-save" onclick="saveLedConfig('${dev.name}')" title="保存当前状态为开机配置">💾</button>
+            </div>
+            
+            <div class="panel-body two-columns">
+                <!-- 左侧：基础控制 -->
+                <div class="control-column basic-controls">
+                    <label class="column-title">基础控制</label>
+                    
+                    <!-- 电源开关 -->
+                    <div class="control-row">
+                        <button class="btn btn-toggle${toggleClass}" id="toggle-${dev.name}" onclick="toggleLed('${dev.name}')">
+                            <span class="toggle-icon">💡</span>
+                            <span class="toggle-text">${toggleText}</span>
+                        </button>
+                    </div>
+                    
+                    <!-- 亮度控制 -->
+                    <div class="control-row">
+                        <label>亮度 <span id="brightness-val-${dev.name}">${dev.brightness}</span></label>
+                        <input type="range" min="0" max="255" value="${dev.brightness}" 
+                               oninput="updateBrightnessLabel('${dev.name}', this.value)"
+                               onchange="setBrightness('${dev.name}', this.value)"
+                               id="brightness-${dev.name}">
+                    </div>
+                    
+                    <!-- 颜色填充 -->
+                    <div class="control-row color-control">
+                        <input type="color" id="color-${dev.name}" value="${colorHex}">
+                        <button class="btn btn-sm btn-primary" onclick="fillColor('${dev.name}')">填充</button>
+                    </div>
+                    
+                    <div class="preset-colors">
+                        <button class="color-preset" style="background:#ff0000" onclick="quickFill('${dev.name}', '#ff0000')" title="红"></button>
+                        <button class="color-preset" style="background:#00ff00" onclick="quickFill('${dev.name}', '#00ff00')" title="绿"></button>
+                        <button class="color-preset" style="background:#0000ff" onclick="quickFill('${dev.name}', '#0000ff')" title="蓝"></button>
+                        <button class="color-preset" style="background:#ffff00" onclick="quickFill('${dev.name}', '#ffff00')" title="黄"></button>
+                        <button class="color-preset" style="background:#ff00ff" onclick="quickFill('${dev.name}', '#ff00ff')" title="品红"></button>
+                        <button class="color-preset" style="background:#00ffff" onclick="quickFill('${dev.name}', '#00ffff')" title="青"></button>
+                        <button class="color-preset" style="background:#ffffff" onclick="quickFill('${dev.name}', '#ffffff')" title="白"></button>
+                        <button class="color-preset" style="background:#ff8000" onclick="quickFill('${dev.name}', '#ff8000')" title="橙"></button>
+                    </div>
+                </div>
+                
+                <!-- 右侧：程序动画 -->
+                <div class="control-column effects-column">
+                    <label class="column-title">程序动画 <span class="effect-count">(${deviceEffects.length})</span></label>
+                    <div class="effects-grid">
+                        ${effectsHtml}
+                    </div>
+                    <div class="effect-controls" id="effect-controls-${dev.name}" style="display:${currentAnimation ? 'block' : 'none'};">
+                        <div class="effect-config">
+                            <span class="current-effect" id="current-effect-${dev.name}">${currentAnimation || '-'}</span>
+                            <div class="config-row">
+                                <label>速度</label>
+                                <input type="range" min="1" max="100" value="${currentSpeed}" id="effect-speed-${dev.name}">
+                                <span id="speed-val-${dev.name}">${currentSpeed}</span>
+                            </div>
+                            <div class="config-row" id="color-row-${dev.name}" style="display:none;">
+                                <label>颜色</label>
+                                <input type="color" id="effect-color-${dev.name}" value="${colorHex}">
+                            </div>
+                            <div class="config-actions">
+                                <button class="btn btn-sm btn-success" onclick="applyEffect('${dev.name}')">▶ 启动</button>
+                                <button class="btn btn-sm btn-danger" onclick="stopEffect('${dev.name}')">⏹ 停止</button>
+                            </div>
                         </div>
                     </div>
                 </div>
-            `).join('');
-        }
-    } catch (e) {
-        devicesContainer.innerHTML = '<p class="error">无法加载 LED 设备</p>';
+            </div>
+        </div>
+    `;
+}
+
+function getDeviceIcon(name) {
+    const icons = {
+        'touch': '👆',
+        'board': '🔲',
+        'matrix': '🔢'
+    };
+    return icons[name.toLowerCase()] || '💡';
+}
+
+function getDeviceDescription(name) {
+    const descriptions = {
+        'touch': '触摸指示灯 (1颗 WS2812)',
+        'board': '主板状态灯带 (28颗 WS2812)',
+        'matrix': 'LED 矩阵屏 (16x16)'
+    };
+    return descriptions[name.toLowerCase()] || 'LED 设备';
+}
+
+function getEffectIcon(name) {
+    const icons = {
+        // 通用
+        'rainbow': '🌈',
+        'breathing': '💨',
+        'solid': '⬛',
+        'sparkle': '✨',
+        // Touch 专属
+        'pulse': '💓',
+        'color_cycle': '🔄',
+        'heartbeat': '❤️',
+        // Board 专属
+        'chase': '🏃',
+        'comet': '☄️',
+        'spin': '🔄',
+        'breathe_wave': '🌊',
+        // Matrix 专属
+        'fire': '🔥',
+        'rain': '🌧️',
+        'coderain': '💻',
+        'plasma': '🎆',
+        'ripple': '💧',
+        // 其他
+        'wave': '🌊',
+        'gradient': '🎨',
+        'twinkle': '⭐'
+    };
+    return icons[name.toLowerCase()] || '🎯';
+}
+
+// 当前选中的特效
+const selectedEffects = {};
+
+// 支持颜色参数的特效
+const colorSupportedEffects = ['breathing', 'solid', 'rain'];
+
+function showEffectConfig(device, effect) {
+    // 记录选中的特效
+    selectedEffects[device] = effect;
+    
+    // 更新特效名显示
+    const currentEffectEl = document.getElementById(`current-effect-${device}`);
+    if (currentEffectEl) {
+        currentEffectEl.textContent = `${getEffectIcon(effect)} ${effect}`;
     }
     
-    // 加载特效列表
+    // 显示/隐藏颜色配置（只有支持颜色的特效才显示）
+    const colorRow = document.getElementById(`color-row-${device}`);
+    if (colorRow) {
+        colorRow.style.display = colorSupportedEffects.includes(effect) ? 'flex' : 'none';
+    }
+    
+    // 显示配置面板
+    const controlsEl = document.getElementById(`effect-controls-${device}`);
+    if (controlsEl) {
+        controlsEl.style.display = 'block';
+    }
+    
+    // 绑定速度滑块的实时显示
+    const speedSlider = document.getElementById(`effect-speed-${device}`);
+    const speedVal = document.getElementById(`speed-val-${device}`);
+    if (speedSlider && speedVal) {
+        speedSlider.oninput = () => { speedVal.textContent = speedSlider.value; };
+    }
+}
+
+async function applyEffect(device) {
+    const effect = selectedEffects[device];
+    if (!effect) {
+        showToast('请先选择一个特效', 'warning');
+        return;
+    }
+    
+    const speed = parseInt(document.getElementById(`effect-speed-${device}`)?.value || '50');
+    const color = document.getElementById(`effect-color-${device}`)?.value || '#ff0000';
+    
     try {
-        const effects = await api.ledEffectList();
-        const effectsContainer = document.getElementById('effects-list');
-        if (effects.data && effects.data.effects) {
-            effectsContainer.innerHTML = effects.data.effects.map(eff => `
-                <button class="btn effect-btn" onclick="startEffect('${eff.name}')">
-                    ${eff.name}
-                </button>
-            `).join('');
+        const params = { speed };
+        // 只有支持颜色的特效才传递颜色参数
+        if (colorSupportedEffects.includes(effect)) {
+            params.color = color;
         }
-    } catch (e) { console.log('Effects error:', e); }
+        await api.ledEffectStart(device, effect, params);
+        
+        // 更新状态为开启
+        ledStates[device] = true;
+        const btn = document.getElementById(`toggle-${device}`);
+        if (btn) {
+            btn.classList.add('on');
+            btn.querySelector('.toggle-icon').textContent = '⬛';
+            btn.querySelector('.toggle-text').textContent = '关灯';
+        }
+        
+        showToast(`${device}: ${effect} 已启动 (速度: ${speed})`, 'success');
+    } catch (e) {
+        showToast(`启动特效失败: ${e.message}`, 'error');
+    }
+}
+
+function updateBrightnessLabel(device, value) {
+    const label = document.getElementById(`brightness-val-${device}`);
+    if (label) label.textContent = value;
 }
 
 async function setBrightness(device, value) {
     try {
         await api.ledBrightness(device, parseInt(value));
-    } catch (e) { showToast('设置亮度失败', 'error'); }
+        showToast(`${device} 亮度: ${value}`, 'success');
+    } catch (e) { 
+        showToast(`设置 ${device} 亮度失败: ${e.message}`, 'error'); 
+    }
+}
+
+// LED 开关状态记录
+const ledStates = {};
+
+async function toggleLed(device) {
+    const btn = document.getElementById(`toggle-${device}`);
+    const isOn = ledStates[device] || false;
+    
+    try {
+        if (isOn) {
+            // 当前是开启状态，关闭它
+            await api.ledClear(device);
+            ledStates[device] = false;
+            btn.classList.remove('on');
+            btn.querySelector('.toggle-icon').textContent = '💡';
+            btn.querySelector('.toggle-text').textContent = '开灯';
+            showToast(`${device} 已关闭`, 'success');
+        } else {
+            // 当前是关闭状态，开启它（白光）
+            await api.ledFill(device, '#ffffff');
+            ledStates[device] = true;
+            btn.classList.add('on');
+            btn.querySelector('.toggle-icon').textContent = '⬛';
+            btn.querySelector('.toggle-text').textContent = '关灯';
+            showToast(`${device} 已开启`, 'success');
+        }
+    } catch (e) {
+        showToast(`操作失败: ${e.message}`, 'error');
+    }
+}
+
+async function ledOn(device, color = '#ffffff') {
+    try {
+        await api.ledFill(device, color);
+        // 更新状态
+        ledStates[device] = true;
+        const btn = document.getElementById(`toggle-${device}`);
+        if (btn) {
+            btn.classList.add('on');
+            btn.querySelector('.toggle-icon').textContent = '⬛';
+            btn.querySelector('.toggle-text').textContent = '关灯';
+        }
+        showToast(`${device} 已开启`, 'success');
+    } catch (e) {
+        showToast(`开启失败: ${e.message}`, 'error');
+    }
+}
+
+async function fillColor(device) {
+    const color = document.getElementById(`color-${device}`).value;
+    try {
+        await api.ledFill(device, color);
+        // 更新状态为开启
+        ledStates[device] = true;
+        const btn = document.getElementById(`toggle-${device}`);
+        if (btn) {
+            btn.classList.add('on');
+            btn.querySelector('.toggle-icon').textContent = '⬛';
+            btn.querySelector('.toggle-text').textContent = '关灯';
+        }
+        showToast(`${device} 已填充 ${color}`, 'success');
+    } catch (e) {
+        showToast(`${device} 填充失败: ${e.message}`, 'error');
+    }
+}
+
+async function quickFill(device, color) {
+    document.getElementById(`color-${device}`).value = color;
+    try {
+        await api.ledFill(device, color);
+        // 更新状态为开启
+        ledStates[device] = true;
+        const btn = document.getElementById(`toggle-${device}`);
+        if (btn) {
+            btn.classList.add('on');
+            btn.querySelector('.toggle-icon').textContent = '⬛';
+            btn.querySelector('.toggle-text').textContent = '关灯';
+        }
+        showToast(`${device} → ${color}`, 'success');
+    } catch (e) {
+        showToast(`填充失败: ${e.message}`, 'error');
+    }
 }
 
 async function clearLed(device) {
     try {
         await api.ledClear(device);
-        showToast('LED 已清除', 'success');
-    } catch (e) { showToast('清除失败', 'error'); }
+        // 更新状态为关闭
+        ledStates[device] = false;
+        const btn = document.getElementById(`toggle-${device}`);
+        if (btn) {
+            btn.classList.remove('on');
+            btn.querySelector('.toggle-icon').textContent = '💡';
+            btn.querySelector('.toggle-text').textContent = '开灯';
+        }
+        showToast(`${device} 已关闭`, 'success');
+    } catch (e) {
+        showToast(`关闭失败: ${e.message}`, 'error');
+    }
 }
 
-async function startEffect(effect) {
-    // 获取当前选中设备
-    const device = document.querySelector('.led-device-card h3')?.textContent.replace('💡 ', '').trim();
-    if (!device) return;
-    
+async function startEffect(device, effect) {
     try {
         await api.ledEffectStart(device, effect);
-        showToast(`特效 ${effect} 已启动`, 'success');
-    } catch (e) { showToast('启动特效失败', 'error'); }
+        // 更新状态为开启
+        ledStates[device] = true;
+        const btn = document.getElementById(`toggle-${device}`);
+        if (btn) {
+            btn.classList.add('on');
+            btn.querySelector('.toggle-icon').textContent = '⬛';
+            btn.querySelector('.toggle-text').textContent = '关灯';
+        }
+        showToast(`${device}: ${effect} 已启动`, 'success');
+    } catch (e) {
+        showToast(`启动特效失败: ${e.message}`, 'error');
+    }
 }
 
-async function applyColor() {
-    const color = document.getElementById('led-color').value;
-    const device = document.querySelector('.led-device-card h3')?.textContent.replace('💡 ', '').trim();
-    if (!device) return;
-    
+async function stopEffect(device) {
     try {
-        await api.ledFill(device, color);
-        showToast('颜色已应用', 'success');
-    } catch (e) { showToast('应用颜色失败', 'error'); }
+        await api.ledEffectStop(device);
+        // 隐藏配置面板
+        const controlsEl = document.getElementById(`effect-controls-${device}`);
+        if (controlsEl) {
+            controlsEl.style.display = 'none';
+        }
+        // 清除选中状态
+        delete selectedEffects[device];
+        showToast(`${device} 特效已停止`, 'success');
+    } catch (e) {
+        showToast(`停止特效失败: ${e.message}`, 'error');
+    }
+}
+
+async function saveLedConfig(device) {
+    try {
+        const result = await api.call('led.save', { device });
+        if (result.animation) {
+            showToast(`${device} 配置已保存: ${result.animation}`, 'success');
+        } else {
+            showToast(`${device} 配置已保存`, 'success');
+        }
+    } catch (e) {
+        showToast(`保存配置失败: ${e.message}`, 'error');
+    }
 }
 
 // =========================================================================
@@ -832,6 +1189,483 @@ async function setFanSpeed(id, speed) {
     try {
         await api.fanSet(id, parseInt(speed));
     } catch (e) { showToast('设置风扇失败', 'error'); }
+}
+
+// =========================================================================
+//                         文件管理页面
+// =========================================================================
+
+let currentFilePath = '/sdcard';
+
+async function loadFilesPage() {
+    clearInterval(refreshInterval);
+    
+    const content = document.getElementById('page-content');
+    content.innerHTML = `
+        <div class="page-files">
+            <h1>📂 文件管理</h1>
+            
+            <div class="file-toolbar">
+                <div class="breadcrumb" id="breadcrumb"></div>
+                <div class="file-actions">
+                    <button class="btn btn-primary" onclick="showUploadDialog()">📤 上传文件</button>
+                    <button class="btn" onclick="showNewFolderDialog()">📁 新建文件夹</button>
+                    <button class="btn" onclick="refreshFilesPage()">🔄 刷新</button>
+                </div>
+            </div>
+            
+            <div class="storage-tabs">
+                <button class="tab-btn active" onclick="navigateToPath('/sdcard')">💾 SD 卡</button>
+                <button class="tab-btn" onclick="navigateToPath('/spiffs')">💿 SPIFFS</button>
+            </div>
+            
+            <div class="file-list" id="file-list">
+                <div class="loading">加载中...</div>
+            </div>
+            
+            <!-- 存储状态 -->
+            <div class="storage-status" id="storage-status"></div>
+        </div>
+        
+        <!-- 上传对话框 -->
+        <div id="upload-modal" class="modal hidden">
+            <div class="modal-content">
+                <h2>上传文件</h2>
+                <div class="upload-area" id="upload-area">
+                    <p>点击选择文件或拖拽文件到此处</p>
+                    <input type="file" id="file-input" multiple style="display:none" onchange="handleFileSelect(event)">
+                </div>
+                <div id="upload-list"></div>
+                <div class="form-actions">
+                    <button class="btn" onclick="closeUploadDialog()">取消</button>
+                    <button class="btn btn-primary" onclick="uploadFiles()">上传</button>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 新建文件夹对话框 -->
+        <div id="newfolder-modal" class="modal hidden">
+            <div class="modal-content">
+                <h2>新建文件夹</h2>
+                <div class="form-group">
+                    <label>文件夹名称</label>
+                    <input type="text" id="new-folder-name" placeholder="输入文件夹名称">
+                </div>
+                <div class="form-actions">
+                    <button class="btn" onclick="closeNewFolderDialog()">取消</button>
+                    <button class="btn btn-primary" onclick="createNewFolder()">创建</button>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 重命名对话框 -->
+        <div id="rename-modal" class="modal hidden">
+            <div class="modal-content">
+                <h2>重命名</h2>
+                <div class="form-group">
+                    <label>新名称</label>
+                    <input type="text" id="rename-input" placeholder="输入新名称">
+                </div>
+                <input type="hidden" id="rename-original-path">
+                <div class="form-actions">
+                    <button class="btn" onclick="closeRenameDialog()">取消</button>
+                    <button class="btn btn-primary" onclick="doRename()">确定</button>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    // 设置拖拽上传
+    setupDragAndDrop();
+    
+    await refreshFilesPage();
+}
+
+async function refreshFilesPage() {
+    await loadDirectory(currentFilePath);
+    await loadStorageStatus();
+}
+
+async function loadDirectory(path) {
+    currentFilePath = path;
+    const listContainer = document.getElementById('file-list');
+    
+    // 移除旧的事件监听器
+    listContainer.removeEventListener('click', handleFileListClick);
+    
+    console.log('Loading directory:', path);
+    
+    try {
+        const result = await api.storageList(path);
+        console.log('storageList result:', result);
+        const entries = result.data?.entries || [];
+        
+        // 更新面包屑
+        updateBreadcrumb(path);
+        
+        // 更新存储标签页
+        document.querySelectorAll('.storage-tabs .tab-btn').forEach(btn => {
+            btn.classList.remove('active');
+            if (path.startsWith('/sdcard') && btn.textContent.includes('SD')) {
+                btn.classList.add('active');
+            } else if (path.startsWith('/spiffs') && btn.textContent.includes('SPIFFS')) {
+                btn.classList.add('active');
+            }
+        });
+        
+        if (entries.length === 0) {
+            listContainer.innerHTML = '<div class="empty-folder">📂 空文件夹</div>';
+            // 仍然添加事件监听器（虽然没有文件）
+            listContainer.addEventListener('click', handleFileListClick);
+            return;
+        }
+        
+        // 排序：目录在前，文件在后，按名称排序
+        entries.sort((a, b) => {
+            if (a.type === 'dir' && b.type !== 'dir') return -1;
+            if (a.type !== 'dir' && b.type === 'dir') return 1;
+            return a.name.localeCompare(b.name);
+        });
+        
+        listContainer.innerHTML = `
+            <table class="file-table">
+                <thead>
+                    <tr>
+                        <th>名称</th>
+                        <th>大小</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${entries.map(entry => {
+                        const fullPath = path + '/' + entry.name;
+                        const icon = entry.type === 'dir' ? '📁' : getFileIcon(entry.name);
+                        const size = entry.type === 'dir' ? '-' : formatFileSize(entry.size);
+                        const escapedPath = fullPath.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+                        const escapedName = entry.name.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+                        return `
+                            <tr class="file-row" data-path="${escapedPath}" data-type="${entry.type}" data-name="${escapedName}">
+                                <td class="file-name ${entry.type === 'dir' ? 'clickable' : ''}">
+                                    <span class="file-icon">${icon}</span>
+                                    <span>${entry.name}</span>
+                                </td>
+                                <td class="file-size">${size}</td>
+                                <td class="file-actions-cell">
+                                    ${entry.type !== 'dir' ? 
+                                        `<button class="btn btn-sm btn-download" title="下载">📥</button>` : ''}
+                                    <button class="btn btn-sm btn-rename" title="重命名">✏️</button>
+                                    <button class="btn btn-sm btn-danger btn-delete" title="删除">🗑️</button>
+                                </td>
+                            </tr>
+                        `;
+                    }).join('')}
+                </tbody>
+            </table>
+        `;
+        
+        // 使用事件委托处理点击
+        listContainer.addEventListener('click', handleFileListClick);
+    } catch (e) {
+        console.error('loadDirectory error:', e);
+        listContainer.innerHTML = `<div class="error">加载失败: ${e.message}</div>`;
+    }
+}
+
+// 事件委托处理文件列表点击
+function handleFileListClick(e) {
+    const row = e.target.closest('.file-row');
+    if (!row) return;
+    
+    const path = row.dataset.path;
+    const type = row.dataset.type;
+    const name = row.dataset.name;
+    
+    // 点击文件夹名称 - 进入目录
+    if (e.target.closest('.file-name.clickable')) {
+        navigateToPath(path);
+        return;
+    }
+    
+    // 点击下载按钮
+    if (e.target.closest('.btn-download')) {
+        downloadFile(path);
+        return;
+    }
+    
+    // 点击重命名按钮
+    if (e.target.closest('.btn-rename')) {
+        showRenameDialog(path, name);
+        return;
+    }
+    
+    // 点击删除按钮
+    if (e.target.closest('.btn-delete')) {
+        deleteFile(path);
+        return;
+    }
+}
+
+async function loadStorageStatus() {
+    try {
+        const status = await api.storageStatus();
+        const container = document.getElementById('storage-status');
+        
+        const formatStorage = (type, data) => {
+            if (!data?.mounted) return `<span class="unmounted">未挂载</span>`;
+            return `<span class="mounted">已挂载</span>`;
+        };
+        
+        container.innerHTML = `
+            <div class="storage-info">
+                <span>💾 SD: ${formatStorage('sd', status.data?.sd)}</span>
+                <span>💿 SPIFFS: ${formatStorage('spiffs', status.data?.spiffs)}</span>
+            </div>
+        `;
+    } catch (e) {
+        console.log('Storage status error:', e);
+    }
+}
+
+function updateBreadcrumb(path) {
+    const container = document.getElementById('breadcrumb');
+    const parts = path.split('/').filter(p => p);
+    
+    let html = '<span class="breadcrumb-item" onclick="navigateToPath(\'/\')">🏠</span>';
+    let currentPath = '';
+    
+    parts.forEach((part, i) => {
+        currentPath += '/' + part;
+        const isLast = i === parts.length - 1;
+        html += ` / <span class="breadcrumb-item${isLast ? ' current' : ''}" 
+                        onclick="navigateToPath('${currentPath}')">${part}</span>`;
+    });
+    
+    container.innerHTML = html;
+}
+
+function navigateToPath(path) {
+    loadDirectory(path);
+}
+
+function getFileIcon(name) {
+    const ext = name.split('.').pop().toLowerCase();
+    const icons = {
+        'txt': '📄', 'json': '📋', 'xml': '📋', 'csv': '📊',
+        'jpg': '🖼️', 'jpeg': '🖼️', 'png': '🖼️', 'gif': '🖼️', 'bmp': '🖼️',
+        'mp3': '🎵', 'wav': '🎵', 'ogg': '🎵',
+        'mp4': '🎬', 'avi': '🎬', 'mkv': '🎬',
+        'zip': '📦', 'rar': '📦', 'tar': '📦', 'gz': '📦',
+        'bin': '💾', 'hex': '💾', 'elf': '💾',
+        'c': '📝', 'h': '📝', 'cpp': '📝', 'py': '📝', 'js': '📝',
+        'fnt': '🔤', 'ttf': '🔤'
+    };
+    return icons[ext] || '📄';
+}
+
+function formatFileSize(bytes) {
+    if (bytes === 0) return '0 B';
+    if (bytes === undefined) return '-';
+    const units = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(1024));
+    return (bytes / Math.pow(1024, i)).toFixed(i > 0 ? 1 : 0) + ' ' + units[i];
+}
+
+// 上传相关
+let filesToUpload = [];
+
+function showUploadDialog() {
+    filesToUpload = [];
+    document.getElementById('upload-list').innerHTML = '';
+    document.getElementById('upload-modal').classList.remove('hidden');
+}
+
+function closeUploadDialog() {
+    document.getElementById('upload-modal').classList.add('hidden');
+}
+
+function setupDragAndDrop() {
+    const uploadArea = document.getElementById('upload-area');
+    if (!uploadArea) return;
+    
+    uploadArea.onclick = () => document.getElementById('file-input').click();
+    
+    uploadArea.ondragover = (e) => {
+        e.preventDefault();
+        uploadArea.classList.add('drag-over');
+    };
+    
+    uploadArea.ondragleave = () => {
+        uploadArea.classList.remove('drag-over');
+    };
+    
+    uploadArea.ondrop = (e) => {
+        e.preventDefault();
+        uploadArea.classList.remove('drag-over');
+        handleFileSelect({ target: { files: e.dataTransfer.files } });
+    };
+}
+
+function handleFileSelect(event) {
+    const files = Array.from(event.target.files);
+    filesToUpload = filesToUpload.concat(files);
+    
+    const listContainer = document.getElementById('upload-list');
+    listContainer.innerHTML = filesToUpload.map((f, i) => `
+        <div class="upload-item">
+            <span>${f.name}</span>
+            <span class="file-size">${formatFileSize(f.size)}</span>
+            <button class="btn btn-sm" onclick="removeUploadFile(${i})">✕</button>
+        </div>
+    `).join('');
+}
+
+function removeUploadFile(index) {
+    filesToUpload.splice(index, 1);
+    handleFileSelect({ target: { files: [] } });
+}
+
+async function uploadFiles() {
+    if (filesToUpload.length === 0) {
+        showToast('请选择要上传的文件', 'warning');
+        return;
+    }
+    
+    const listContainer = document.getElementById('upload-list');
+    
+    for (let i = 0; i < filesToUpload.length; i++) {
+        const file = filesToUpload[i];
+        const targetPath = currentFilePath + '/' + file.name;
+        
+        // 更新状态
+        const items = listContainer.querySelectorAll('.upload-item');
+        if (items[i]) {
+            items[i].innerHTML = `<span>${file.name}</span><span class="uploading">上传中...</span>`;
+        }
+        
+        try {
+            console.log('Uploading file:', targetPath);
+            const result = await api.fileUpload(targetPath, file);
+            console.log('Upload result:', result);
+            if (items[i]) {
+                items[i].innerHTML = `<span>${file.name}</span><span class="success">✓ 完成</span>`;
+            }
+        } catch (e) {
+            console.error('Upload error:', e);
+            if (items[i]) {
+                items[i].innerHTML = `<span>${file.name}</span><span class="error">✕ 失败: ${e.message}</span>`;
+            }
+        }
+    }
+    
+    showToast('上传完成', 'success');
+    setTimeout(() => {
+        closeUploadDialog();
+        refreshFilesPage();
+    }, 1000);
+}
+
+// 新建文件夹
+function showNewFolderDialog() {
+    document.getElementById('new-folder-name').value = '';
+    document.getElementById('newfolder-modal').classList.remove('hidden');
+}
+
+function closeNewFolderDialog() {
+    document.getElementById('newfolder-modal').classList.add('hidden');
+}
+
+async function createNewFolder() {
+    const name = document.getElementById('new-folder-name').value.trim();
+    if (!name) {
+        showToast('请输入文件夹名称', 'warning');
+        return;
+    }
+    
+    const path = currentFilePath + '/' + name;
+    try {
+        await api.storageMkdir(path);
+        showToast('文件夹创建成功', 'success');
+        closeNewFolderDialog();
+        refreshFilesPage();
+    } catch (e) {
+        showToast('创建失败: ' + e.message, 'error');
+    }
+}
+
+// 重命名
+function showRenameDialog(path, currentName) {
+    document.getElementById('rename-input').value = currentName;
+    document.getElementById('rename-original-path').value = path;
+    document.getElementById('rename-modal').classList.remove('hidden');
+}
+
+function closeRenameDialog() {
+    document.getElementById('rename-modal').classList.add('hidden');
+}
+
+async function doRename() {
+    const newName = document.getElementById('rename-input').value.trim();
+    const originalPath = document.getElementById('rename-original-path').value;
+    
+    if (!newName) {
+        showToast('请输入新名称', 'warning');
+        return;
+    }
+    
+    // 构建新路径
+    const pathParts = originalPath.split('/');
+    pathParts.pop();
+    const newPath = pathParts.join('/') + '/' + newName;
+    
+    try {
+        await api.storageRename(originalPath, newPath);
+        showToast('重命名成功', 'success');
+        closeRenameDialog();
+        refreshFilesPage();
+    } catch (e) {
+        showToast('重命名失败: ' + e.message, 'error');
+    }
+}
+
+// 下载文件
+async function downloadFile(path) {
+    console.log('Downloading file:', path);
+    try {
+        const blob = await api.fileDownload(path);
+        console.log('Download blob:', blob);
+        const filename = path.split('/').pop();
+        
+        // 创建下载链接
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        
+        showToast('下载开始', 'success');
+    } catch (e) {
+        console.error('Download error:', e);
+        showToast('下载失败: ' + e.message, 'error');
+    }
+}
+
+// 删除文件
+async function deleteFile(path) {
+    const name = path.split('/').pop();
+    if (!confirm(`确定要删除 "${name}" 吗？`)) {
+        return;
+    }
+    
+    try {
+        await api.storageDelete(path);
+        showToast('删除成功', 'success');
+        refreshFilesPage();
+    } catch (e) {
+        showToast('删除失败: ' + e.message, 'error');
+    }
 }
 
 // =========================================================================
@@ -1222,9 +2056,15 @@ window.closeLoginModal = closeLoginModal;
 window.confirmReboot = confirmReboot;
 window.serviceAction = serviceAction;
 window.setBrightness = setBrightness;
+window.toggleLed = toggleLed;
 window.clearLed = clearLed;
+window.fillColor = fillColor;
+window.quickFill = quickFill;
 window.startEffect = startEffect;
-window.applyColor = applyColor;
+window.stopEffect = stopEffect;
+window.showEffectConfig = showEffectConfig;
+window.applyEffect = applyEffect;
+window.updateBrightnessLabel = updateBrightnessLabel;
 window.showWifiScan = showWifiScan;
 window.connectWifi = connectWifi;
 window.toggleNat = toggleNat;
@@ -1241,3 +2081,19 @@ window.deleteKey = deleteKey;
 window.removeHost = removeHost;
 window.terminalClear = terminalClear;
 window.terminalDisconnect = terminalDisconnect;
+// 文件管理
+window.navigateToPath = navigateToPath;
+window.showUploadDialog = showUploadDialog;
+window.closeUploadDialog = closeUploadDialog;
+window.showNewFolderDialog = showNewFolderDialog;
+window.closeNewFolderDialog = closeNewFolderDialog;
+window.createNewFolder = createNewFolder;
+window.showRenameDialog = showRenameDialog;
+window.closeRenameDialog = closeRenameDialog;
+window.doRename = doRename;
+window.downloadFile = downloadFile;
+window.deleteFile = deleteFile;
+window.uploadFiles = uploadFiles;
+window.handleFileSelect = handleFileSelect;
+window.removeUploadFile = removeUploadFile;
+window.refreshFilesPage = refreshFilesPage;

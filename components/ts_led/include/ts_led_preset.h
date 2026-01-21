@@ -246,6 +246,17 @@ esp_err_t ts_led_clear_boot_config(const char *device_name);
  */
 esp_err_t ts_led_get_boot_config(const char *device_name, ts_led_boot_config_t *config);
 
+/**
+ * @brief 获取当前 LED 设备的运行时状态
+ * 
+ * 返回设备当前正在运行的动画、颜色、亮度等信息。
+ * 
+ * @param device_name 设备名（touch, board, matrix）
+ * @param[out] state 输出状态（使用 ts_led_boot_config_t 结构）
+ * @return ESP_OK 成功
+ */
+esp_err_t ts_led_get_current_state(const char *device_name, ts_led_boot_config_t *state);
+
 #ifdef __cplusplus
 }
 #endif

@@ -206,6 +206,11 @@ uint16_t ts_led_device_get_count(ts_led_device_t device)
     return device ? ((ts_led_device_impl_t *)device)->config.led_count : 0;
 }
 
+ts_led_layout_t ts_led_device_get_layout(ts_led_device_t device)
+{
+    return device ? ((ts_led_device_impl_t *)device)->config.layout : TS_LED_LAYOUT_STRIP;
+}
+
 esp_err_t ts_led_device_refresh(ts_led_device_t device)
 {
     if (!device) return ESP_ERR_INVALID_ARG;

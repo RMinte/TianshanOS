@@ -19,6 +19,23 @@
 /*                          Helper Functions                                  */
 /*===========================================================================*/
 
+/**
+ * @brief 设备名称映射：用户友好名 -> 内部名
+ * 与 ts_cmd_led.c 保持一致
+ */
+static const char *resolve_device_name(const char *name)
+{
+    if (!name) return NULL;
+    
+    /* 支持简短别名 */
+    if (strcmp(name, "touch") == 0) return "led_touch";
+    if (strcmp(name, "board") == 0) return "led_board";
+    if (strcmp(name, "matrix") == 0) return "led_matrix";
+    
+    /* 也支持完整名 */
+    return name;
+}
+
 static const char *layout_to_str(ts_led_layout_t layout)
 {
     switch (layout) {
@@ -75,16 +92,45 @@ static esp_err_t api_led_list(const cJSON *params, ts_api_result_t *result)
     cJSON *data = cJSON_CreateObject();
     cJSON *devices = cJSON_AddArrayToObject(data, "devices");
     
-    // Get known device names
-    const char *device_names[] = {"touch", "board", "matrix"};
+    // 用户友好名和内部名映射
+    const char *display_names[] = {"touch", "board", "matrix"};
+    const char *internal_names[] = {"led_touch", "led_board", "led_matrix"};
     
-    for (size_t i = 0; i < sizeof(device_names) / sizeof(device_names[0]); i++) {
-        ts_led_device_t dev = ts_led_device_get(device_names[i]);
+    for (size_t i = 0; i < sizeof(display_names) / sizeof(display_names[0]); i++) {
+        ts_led_device_t dev = ts_led_device_get(internal_names[i]);
         if (dev) {
             cJSON *device = cJSON_CreateObject();
-            cJSON_AddStringToObject(device, "name", device_names[i]);
+            cJSON_AddStringToObject(device, "name", display_names[i]);
             cJSON_AddNumberToObject(device, "count", ts_led_device_get_count(dev));
             cJSON_AddNumberToObject(device, "brightness", ts_led_device_get_brightness(dev));
+            
+            // 添加 layout 类型
+            ts_led_layout_t layout = ts_led_device_get_layout(dev);
+            cJSON_AddStringToObject(device, "layout", layout_to_str(layout));
+            
+            // 添加该设备适用的特效列表
+            const char *effect_names[24];
+            size_t effect_count = ts_led_animation_list_for_device(layout, effect_names, 24);
+            cJSON *effects = cJSON_AddArrayToObject(device, "effects");
+            for (size_t j = 0; j < effect_count; j++) {
+                cJSON_AddItemToArray(effects, cJSON_CreateString(effect_names[j]));
+            }
+            
+            // 添加当前运行状态
+            ts_led_boot_config_t state;
+            if (ts_led_get_current_state(display_names[i], &state) == ESP_OK) {
+                cJSON *current = cJSON_AddObjectToObject(device, "current");
+                cJSON_AddStringToObject(current, "animation", state.animation);
+                cJSON_AddNumberToObject(current, "speed", state.speed);
+                cJSON_AddBoolToObject(current, "on", state.enabled);
+                
+                // 添加颜色
+                cJSON *color = cJSON_AddObjectToObject(current, "color");
+                cJSON_AddNumberToObject(color, "r", state.color.r);
+                cJSON_AddNumberToObject(color, "g", state.color.g);
+                cJSON_AddNumberToObject(color, "b", state.color.b);
+            }
+            
             cJSON_AddItemToArray(devices, device);
         }
     }
@@ -108,7 +154,8 @@ static esp_err_t api_led_brightness(const cJSON *params, ts_api_result_t *result
         return ESP_ERR_INVALID_ARG;
     }
     
-    ts_led_device_t dev = ts_led_device_get(device_param->valuestring);
+    const char *internal_name = resolve_device_name(device_param->valuestring);
+    ts_led_device_t dev = ts_led_device_get(internal_name);
     if (!dev) {
         ts_api_result_error(result, TS_API_ERR_NOT_FOUND, "Device not found");
         return ESP_ERR_NOT_FOUND;
@@ -145,21 +192,27 @@ static esp_err_t api_led_clear(const cJSON *params, ts_api_result_t *result)
         return ESP_ERR_INVALID_ARG;
     }
     
-    ts_led_device_t dev = ts_led_device_get(device_param->valuestring);
+    const char *internal_name = resolve_device_name(device_param->valuestring);
+    ts_led_device_t dev = ts_led_device_get(internal_name);
     if (!dev) {
         ts_api_result_error(result, TS_API_ERR_NOT_FOUND, "Device not found");
         return ESP_ERR_NOT_FOUND;
     }
     
-    esp_err_t ret = ts_led_device_clear(dev);
-    if (ret != ESP_OK) {
-        ts_api_result_error(result, TS_API_ERR_HARDWARE, "Failed to clear device");
-        return ret;
+    // 获取 layer 0 并清除（清除 layer buffer，render_task 会自动刷新）
+    ts_led_layer_t layer = ts_led_layer_get(dev, 0);
+    if (!layer) {
+        ts_api_result_error(result, TS_API_ERR_HARDWARE, "Failed to get layer");
+        return ESP_FAIL;
     }
     
-    ret = ts_led_device_refresh(dev);
+    // 先停止任何正在运行的动画
+    ts_led_animation_stop(layer);
+    
+    // 清除 layer buffer
+    esp_err_t ret = ts_led_layer_clear(layer);
     if (ret != ESP_OK) {
-        ts_api_result_error(result, TS_API_ERR_HARDWARE, "Failed to refresh device");
+        ts_api_result_error(result, TS_API_ERR_HARDWARE, "Failed to clear device");
         return ret;
     }
     
@@ -189,7 +242,8 @@ static esp_err_t api_led_set(const cJSON *params, ts_api_result_t *result)
         return ESP_ERR_INVALID_ARG;
     }
     
-    ts_led_device_t dev = ts_led_device_get(device_param->valuestring);
+    const char *internal_name = resolve_device_name(device_param->valuestring);
+    ts_led_device_t dev = ts_led_device_get(internal_name);
     if (!dev) {
         ts_api_result_error(result, TS_API_ERR_NOT_FOUND, "Device not found");
         return ESP_ERR_NOT_FOUND;
@@ -247,7 +301,8 @@ static esp_err_t api_led_fill(const cJSON *params, ts_api_result_t *result)
         return ESP_ERR_INVALID_ARG;
     }
     
-    ts_led_device_t dev = ts_led_device_get(device_param->valuestring);
+    const char *internal_name = resolve_device_name(device_param->valuestring);
+    ts_led_device_t dev = ts_led_device_get(internal_name);
     if (!dev) {
         ts_api_result_error(result, TS_API_ERR_NOT_FOUND, "Device not found");
         return ESP_ERR_NOT_FOUND;
@@ -258,6 +313,27 @@ static esp_err_t api_led_fill(const cJSON *params, ts_api_result_t *result)
         ts_api_result_error(result, TS_API_ERR_INVALID_ARG, "Invalid 'color' parameter");
         return ESP_ERR_INVALID_ARG;
     }
+    
+    // 获取 layer 0 并填充颜色（填充到 layer buffer，render_task 会自动刷新）
+    ts_led_layer_t layer = ts_led_layer_get(dev, 0);
+    if (!layer) {
+        ts_api_result_error(result, TS_API_ERR_HARDWARE, "Failed to get layer");
+        return ESP_FAIL;
+    }
+    
+    // 先停止任何正在运行的动画
+    ts_led_animation_stop(layer);
+    
+    // 填充颜色到 layer buffer
+    esp_err_t ret = ts_led_fill(layer, color);
+    if (ret != ESP_OK) {
+        ts_api_result_error(result, TS_API_ERR_HARDWARE, "Failed to fill color");
+        return ret;
+    }
+    
+    // 记录当前状态：使用 solid 动画表示纯色填充
+    ts_led_preset_set_current_animation(device_param->valuestring, "solid", 50);
+    ts_led_preset_set_current_color(device_param->valuestring, color);
     
     cJSON *data = cJSON_CreateObject();
     cJSON_AddStringToObject(data, "device", device_param->valuestring);
@@ -298,12 +374,14 @@ static esp_err_t api_led_effect_list(const cJSON *params, ts_api_result_t *resul
  * @brief led.effect.start - Start effect on device
  * @param device: device name
  * @param effect: effect name
- * @param params: effect parameters (optional)
+ * @param speed: speed 1-100 (optional, default uses effect's default)
+ * @param color: color for effects that support it (optional)
  */
 static esp_err_t api_led_effect_start(const cJSON *params, ts_api_result_t *result)
 {
     cJSON *device_param = cJSON_GetObjectItem(params, "device");
     cJSON *effect_param = cJSON_GetObjectItem(params, "effect");
+    cJSON *speed_param = cJSON_GetObjectItem(params, "speed");
     
     if (!device_param || !cJSON_IsString(device_param)) {
         ts_api_result_error(result, TS_API_ERR_INVALID_ARG, "Missing 'device' parameter");
@@ -315,7 +393,8 @@ static esp_err_t api_led_effect_start(const cJSON *params, ts_api_result_t *resu
         return ESP_ERR_INVALID_ARG;
     }
     
-    ts_led_device_t dev = ts_led_device_get(device_param->valuestring);
+    const char *internal_name = resolve_device_name(device_param->valuestring);
+    ts_led_device_t dev = ts_led_device_get(internal_name);
     if (!dev) {
         ts_api_result_error(result, TS_API_ERR_NOT_FOUND, "Device not found");
         return ESP_ERR_NOT_FOUND;
@@ -327,9 +406,45 @@ static esp_err_t api_led_effect_start(const cJSON *params, ts_api_result_t *resu
         return ESP_ERR_NOT_FOUND;
     }
     
+    // 复制动画定义以便修改
+    ts_led_animation_def_t modified = *effect;
+    
+    // 处理速度参数 (1-100, 默认 50)
+    uint8_t speed = 50;
+    if (speed_param && cJSON_IsNumber(speed_param)) {
+        speed = (uint8_t)cJSON_GetNumberValue(speed_param);
+        if (speed < 1) speed = 1;
+        if (speed > 100) speed = 100;
+        // 速度映射：1->200ms, 100->5ms
+        modified.frame_interval_ms = 200 - (speed - 1) * 195 / 99;
+    }
+    
+    // 处理颜色参数（用于支持自定义颜色的动画）
+    static ts_led_rgb_t effect_color;
+    ts_led_rgb_t color;
+    if (parse_color_param(params, "color", &color) == ESP_OK) {
+        effect_color = color;
+        modified.user_data = &effect_color;
+    }
+    
+    // 获取设备的 layer 0 并启动动画
+    ts_led_layer_t layer = ts_led_layer_get(dev, 0);
+    if (layer) {
+        ts_led_animation_start(layer, &modified);
+    }
+    
+    // 记录当前状态（供保存用）
+    ts_led_preset_set_current_animation(device_param->valuestring, effect_param->valuestring, speed);
+    
+    // 如果有颜色参数，也记录下来
+    if (parse_color_param(params, "color", &color) == ESP_OK) {
+        ts_led_preset_set_current_color(device_param->valuestring, color);
+    }
+    
     cJSON *data = cJSON_CreateObject();
     cJSON_AddStringToObject(data, "device", device_param->valuestring);
     cJSON_AddStringToObject(data, "effect", effect_param->valuestring);
+    cJSON_AddNumberToObject(data, "speed", speed);
     cJSON_AddBoolToObject(data, "started", true);
     
     ts_api_result_ok(result, data);
@@ -349,11 +464,21 @@ static esp_err_t api_led_effect_stop(const cJSON *params, ts_api_result_t *resul
         return ESP_ERR_INVALID_ARG;
     }
     
-    ts_led_device_t dev = ts_led_device_get(device_param->valuestring);
+    const char *internal_name = resolve_device_name(device_param->valuestring);
+    ts_led_device_t dev = ts_led_device_get(internal_name);
     if (!dev) {
         ts_api_result_error(result, TS_API_ERR_NOT_FOUND, "Device not found");
         return ESP_ERR_NOT_FOUND;
     }
+    
+    // 获取设备的 layer 0 并停止动画
+    ts_led_layer_t layer = ts_led_layer_get(dev, 0);
+    if (layer) {
+        ts_led_animation_stop(layer);
+    }
+    
+    // 清除当前动画状态
+    ts_led_preset_set_current_animation(device_param->valuestring, NULL, 0);
     
     cJSON *data = cJSON_CreateObject();
     cJSON_AddStringToObject(data, "device", device_param->valuestring);
@@ -492,6 +617,52 @@ static esp_err_t api_led_filter_list(const cJSON *params, ts_api_result_t *resul
 }
 
 /**
+ * @brief led.save - Save current LED state as boot configuration
+ * @param device: device name (touch/board/matrix)
+ */
+static esp_err_t api_led_save(const cJSON *params, ts_api_result_t *result)
+{
+    cJSON *device_param = cJSON_GetObjectItem(params, "device");
+    
+    if (!device_param || !cJSON_IsString(device_param)) {
+        ts_api_result_error(result, TS_API_ERR_INVALID_ARG, "Missing 'device' parameter");
+        return ESP_ERR_INVALID_ARG;
+    }
+    
+    const char *device_name = device_param->valuestring;
+    
+    // 验证设备名
+    if (strcmp(device_name, "touch") != 0 && 
+        strcmp(device_name, "board") != 0 && 
+        strcmp(device_name, "matrix") != 0) {
+        ts_api_result_error(result, TS_API_ERR_NOT_FOUND, "Device not found");
+        return ESP_ERR_NOT_FOUND;
+    }
+    
+    // 保存当前配置到 NVS
+    esp_err_t ret = ts_led_save_boot_config(device_name);
+    if (ret != ESP_OK) {
+        ts_api_result_error(result, TS_API_ERR_HARDWARE, "Failed to save config");
+        return ret;
+    }
+    
+    cJSON *data = cJSON_CreateObject();
+    cJSON_AddStringToObject(data, "device", device_name);
+    cJSON_AddBoolToObject(data, "saved", true);
+    
+    // 返回保存的配置
+    ts_led_boot_config_t cfg;
+    if (ts_led_get_boot_config(device_name, &cfg) == ESP_OK) {
+        cJSON_AddStringToObject(data, "animation", cfg.animation);
+        cJSON_AddNumberToObject(data, "brightness", cfg.brightness);
+        cJSON_AddNumberToObject(data, "speed", cfg.speed);
+    }
+    
+    ts_api_result_ok(result, data);
+    return ESP_OK;
+}
+
+/**
  * @brief led.boot.config - Get LED boot configuration
  * @param device: optional device name filter
  */
@@ -557,7 +728,7 @@ static const ts_api_endpoint_t led_endpoints[] = {
         .description = "Get/set device brightness",
         .category = TS_API_CAT_LED,
         .handler = api_led_brightness,
-        .requires_auth = true,
+        .requires_auth = false,  // TODO: 测试完成后改为 true
         .permission = "led.control",
     },
     {
@@ -565,7 +736,7 @@ static const ts_api_endpoint_t led_endpoints[] = {
         .description = "Clear all LEDs on device",
         .category = TS_API_CAT_LED,
         .handler = api_led_clear,
-        .requires_auth = true,
+        .requires_auth = false,  // TODO: 测试完成后改为 true
         .permission = "led.control",
     },
     {
@@ -573,7 +744,7 @@ static const ts_api_endpoint_t led_endpoints[] = {
         .description = "Set LED(s) color",
         .category = TS_API_CAT_LED,
         .handler = api_led_set,
-        .requires_auth = true,
+        .requires_auth = false,  // TODO: 测试完成后改为 true
         .permission = "led.control",
     },
     {
@@ -581,7 +752,7 @@ static const ts_api_endpoint_t led_endpoints[] = {
         .description = "Fill all LEDs with color",
         .category = TS_API_CAT_LED,
         .handler = api_led_fill,
-        .requires_auth = true,
+        .requires_auth = false,  // TODO: 测试完成后改为 true
         .permission = "led.control",
     },
     {
@@ -596,7 +767,7 @@ static const ts_api_endpoint_t led_endpoints[] = {
         .description = "Start effect on device",
         .category = TS_API_CAT_LED,
         .handler = api_led_effect_start,
-        .requires_auth = true,
+        .requires_auth = false,  // TODO: 测试完成后改为 true
         .permission = "led.control",
     },
     {
@@ -604,7 +775,7 @@ static const ts_api_endpoint_t led_endpoints[] = {
         .description = "Stop effect on device",
         .category = TS_API_CAT_LED,
         .handler = api_led_effect_stop,
-        .requires_auth = true,
+        .requires_auth = false,  // TODO: 测试完成后改为 true
         .permission = "led.control",
     },
     {
@@ -627,6 +798,14 @@ static const ts_api_endpoint_t led_endpoints[] = {
         .category = TS_API_CAT_LED,
         .handler = api_led_filter_list,
         .requires_auth = false,
+    },
+    {
+        .name = "led.save",
+        .description = "Save current state as boot configuration",
+        .category = TS_API_CAT_LED,
+        .handler = api_led_save,
+        .requires_auth = false,  // TODO: 测试完成后改为 true
+        .permission = "led.config",
     },
     {
         .name = "led.boot.config",

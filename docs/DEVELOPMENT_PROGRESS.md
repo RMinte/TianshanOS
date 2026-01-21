@@ -263,12 +263,13 @@
 - [x] 完整的 7 个页面：
   - 仪表盘（系统/内存/网络/电源/设备/温度）
   - 系统管理（服务列表、重启）
-  - LED 控制（设备/亮度/颜色/特效）
+  - LED 控制（设备/亮度/颜色/特效/图像）
   - 网络配置（以太网/WiFi/DHCP/NAT）
   - 设备控制（AGX/LPMU 电源、风扇调速）
   - 终端（Web CLI + SSH Shell）
   - 安全（SSH 测试、密钥管理、已知主机）
   - 配置（配置列表/编辑/删除）
+  - 文件管理（SD卡/SPIFFS 浏览、上传/下载、新建/删除/重命名）
 
 ---
 
@@ -367,6 +368,29 @@
 - [x] 电压保护策略启动
 - [x] WebSocket 电压保护事件广播
 
+### 文件管理系统
+- [x] Storage API 扩展 (ts_api_storage.c)
+  - storage.status - 存储状态查询
+  - storage.list - 目录列表
+  - storage.delete - 文件/目录删除
+  - storage.mkdir - 创建目录
+  - storage.rename - 重命名
+  - storage.info - 文件信息
+- [x] 文件传输端点 (ts_webui_api.c)
+  - GET /api/v1/file/download?path=xxx - 文件下载
+  - POST /api/v1/file/upload?path=xxx - 文件上传
+  - URL 解码支持 (%XX 编码路径)
+  - 安全检查 (上传仅限 /sdcard)
+- [x] WebUI 文件管理页面
+  - 分区切换 (SD卡 / SPIFFS)
+  - 目录导航 (面包屑路径)
+  - 文件列表 (名称/大小/类型)
+  - 文件上传 (多文件支持)
+  - 文件下载
+  - 新建文件夹
+  - 重命名
+  - 删除
+
 ### 配置优化
 - [x] CONFIG_LWIP_MAX_SOCKETS=16（解决 socket 用尽问题）
 - [x] ssh_poll 任务栈 8192 字节（解决栈溢出问题）
@@ -376,6 +400,31 @@
 ## 📝 开发日志
 
 ### 2026-01-21
+- **WebUI 文件管理功能**：
+  - 实现 Storage API 扩展
+    - storage.delete - 删除文件/目录
+    - storage.mkdir - 创建目录
+    - storage.rename - 重命名文件/目录
+    - storage.info - 获取文件详细信息
+  - 实现文件传输端点
+    - GET /api/v1/file/download?path=xxx - 文件下载
+    - POST /api/v1/file/upload?path=xxx - 文件上传
+    - 添加 url_decode() 函数处理 URL 编码路径
+    - 安全检查：上传仅限 /sdcard 目录
+  - 实现 WebUI 文件管理页面
+    - 分区切换（SD卡 / SPIFFS）
+    - 目录导航（面包屑路径）
+    - 文件列表（名称/大小/类型/图标）
+    - 文件上传（多文件支持）
+    - 文件下载
+    - 新建文件夹
+    - 重命名
+    - 删除
+  - 调试修复：
+    - 修复 storageList API 使用 GET 无法发送 body 问题（改为 POST）
+    - 修复 applyColor 未定义导致 JS 执行中断
+    - 修复 URL 编码路径导致 403 Forbidden（添加 url_decode）
+
 - **SSH Shell WebSocket 修复**：
   - 修复 "Too many open files in system" 错误
     - 原因：CONFIG_LWIP_MAX_SOCKETS=10 太小
@@ -386,6 +435,16 @@
   - 修复 ssh_poll_task 资源泄漏
     - 原因：远程关闭时未清理 shell/session
     - 解决：添加 need_cleanup 标记和完整清理逻辑
+
+- **LED WebUI 增强**：
+  - LED 页面完整实现
+    - 设备列表（touch/board/matrix）
+    - 亮度滑块控制
+    - 颜色选择器（预设颜色 + 自定义）
+    - 特效选择和速度调节
+    - 图像上传和显示
+  - 配置保存功能（led --save）
+  - 状态实时展示
 
 ### 2026-01-20
 - **WebUI SPA 重构（Phase 10）**：

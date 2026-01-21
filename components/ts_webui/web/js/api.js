@@ -175,7 +175,49 @@ class TianShanAPI {
     // =====================================================================
     
     async storageStatus() { return this.call('storage.status'); }
-    async storageList(path = '/') { return this.call('storage.list', { path }); }
+    async storageList(path = '/sdcard') { return this.call('storage.list', { path }, 'POST'); }
+    async storageDelete(path) { return this.call('storage.delete', { path }, 'POST'); }
+    async storageMkdir(path) { return this.call('storage.mkdir', { path }, 'POST'); }
+    async storageRename(from, to) { return this.call('storage.rename', { from, to }, 'POST'); }
+    async storageInfo(path) { return this.call('storage.info', { path }, 'POST'); }
+    
+    /**
+     * 下载文件
+     * @param {string} path - 文件路径 (如 /sdcard/test.txt)
+     * @returns {Promise<Blob>} 文件内容
+     */
+    async fileDownload(path) {
+        const url = `${API_BASE}/file/download?path=${encodeURIComponent(path)}`;
+        const response = await fetch(url, {
+            headers: this.token ? { 'Authorization': `Bearer ${this.token}` } : {}
+        });
+        if (!response.ok) {
+            const error = await response.json().catch(() => ({ message: 'Download failed' }));
+            throw new Error(error.message);
+        }
+        return response.blob();
+    }
+    
+    /**
+     * 上传文件
+     * @param {string} path - 目标路径 (如 /sdcard/uploads/file.txt)
+     * @param {File|Blob|ArrayBuffer} content - 文件内容
+     * @returns {Promise<Object>} 上传结果
+     */
+    async fileUpload(path, content) {
+        const url = `${API_BASE}/file/upload?path=${encodeURIComponent(path)}`;
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: this.token ? { 'Authorization': `Bearer ${this.token}` } : {},
+            body: content
+        });
+        const json = await response.json();
+        if (!response.ok) {
+            throw new Error(json.message || 'Upload failed');
+        }
+        return json;
+    }
+    
     async gpioList() { return this.call('gpio.list'); }
     async gpioInfo(pin) { return this.call('gpio.info', { pin }); }
     async tempStatus() { return this.call('temp.status'); }

@@ -314,6 +314,14 @@ uint8_t ts_led_device_get_brightness(ts_led_device_t device);
 uint16_t ts_led_device_get_count(ts_led_device_t device);
 
 /**
+ * @brief Get device layout type
+ * 
+ * @param device Device handle
+ * @return Layout type (STRIP, RING, MATRIX)
+ */
+ts_led_layout_t ts_led_device_get_layout(ts_led_device_t device);
+
+/**
  * @brief Refresh device (send data to LEDs)
  * 
  * @param device Device handle

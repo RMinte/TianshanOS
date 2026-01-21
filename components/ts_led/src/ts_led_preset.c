@@ -539,6 +539,48 @@ esp_err_t ts_led_save_boot_config(const char *device_name)
     return ESP_OK;
 }
 
+esp_err_t ts_led_get_current_state(const char *device_name, ts_led_boot_config_t *state)
+{
+    if (!state) return ESP_ERR_INVALID_ARG;
+    
+    int idx = get_device_index(device_name);
+    if (idx < 0) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    
+    ts_led_device_t dev = get_device_by_index(idx);
+    if (!dev) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    
+    memset(state, 0, sizeof(*state));
+    
+    // 复制当前动画名
+    strncpy(state->animation, s_current_animation[idx], sizeof(state->animation) - 1);
+    
+    // 复制当前 filter
+    strncpy(state->filter, s_current_filter[idx], sizeof(state->filter) - 1);
+    
+    // 复制当前图像路径
+    strncpy(state->image_path, s_current_image_path[idx], sizeof(state->image_path) - 1);
+    
+    // 速度
+    state->speed = s_current_speed[idx];
+    
+    // 亮度
+    state->brightness = ts_led_device_get_brightness(dev);
+    
+    // 颜色
+    if (s_current_color_valid[idx]) {
+        state->color = s_current_color[idx];
+    }
+    
+    // 启用状态（有动画或图像表示开启）
+    state->enabled = (state->animation[0] != '\0' || state->image_path[0] != '\0' || state->brightness > 0);
+    
+    return ESP_OK;
+}
+
 esp_err_t ts_led_save_all_boot_config(void)
 {
     esp_err_t ret = ESP_OK;

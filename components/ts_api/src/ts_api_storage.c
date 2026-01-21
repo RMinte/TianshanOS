@@ -162,6 +162,165 @@ static esp_err_t api_storage_list(const cJSON *params, ts_api_result_t *result)
     return ESP_OK;
 }
 
+/**
+ * @brief storage.delete - Delete file or directory
+ * @param params { "path": "/sdcard/file.txt" }
+ */
+static esp_err_t api_storage_delete(const cJSON *params, ts_api_result_t *result)
+{
+    if (!params) {
+        ts_api_result_error(result, TS_API_ERR_INVALID_ARG, "Missing parameters");
+        return ESP_ERR_INVALID_ARG;
+    }
+    
+    const cJSON *path_param = cJSON_GetObjectItem(params, "path");
+    if (!path_param || !cJSON_IsString(path_param)) {
+        ts_api_result_error(result, TS_API_ERR_INVALID_ARG, "Missing 'path' parameter");
+        return ESP_ERR_INVALID_ARG;
+    }
+    
+    const char *path = path_param->valuestring;
+    
+    // 安全检查：不允许删除根目录
+    if (strcmp(path, "/sdcard") == 0 || strcmp(path, "/spiffs") == 0 || strcmp(path, "/") == 0) {
+        ts_api_result_error(result, TS_API_ERR_INVALID_ARG, "Cannot delete root directory");
+        return ESP_ERR_INVALID_ARG;
+    }
+    
+    if (!ts_storage_exists(path)) {
+        ts_api_result_error(result, TS_API_ERR_NOT_FOUND, "File not found");
+        return ESP_ERR_NOT_FOUND;
+    }
+    
+    esp_err_t ret;
+    if (ts_storage_is_dir(path)) {
+        ret = ts_storage_rmdir_r(path);
+    } else {
+        ret = ts_storage_delete(path);
+    }
+    
+    if (ret != ESP_OK) {
+        ts_api_result_error(result, TS_API_ERR_INTERNAL, "Failed to delete");
+        return ret;
+    }
+    
+    cJSON *data = cJSON_CreateObject();
+    cJSON_AddStringToObject(data, "deleted", path);
+    
+    ts_api_result_ok(result, data);
+    return ESP_OK;
+}
+
+/**
+ * @brief storage.mkdir - Create directory
+ * @param params { "path": "/sdcard/newdir" }
+ */
+static esp_err_t api_storage_mkdir(const cJSON *params, ts_api_result_t *result)
+{
+    if (!params) {
+        ts_api_result_error(result, TS_API_ERR_INVALID_ARG, "Missing parameters");
+        return ESP_ERR_INVALID_ARG;
+    }
+    
+    const cJSON *path_param = cJSON_GetObjectItem(params, "path");
+    if (!path_param || !cJSON_IsString(path_param)) {
+        ts_api_result_error(result, TS_API_ERR_INVALID_ARG, "Missing 'path' parameter");
+        return ESP_ERR_INVALID_ARG;
+    }
+    
+    const char *path = path_param->valuestring;
+    
+    esp_err_t ret = ts_storage_mkdir_p(path);
+    if (ret != ESP_OK) {
+        ts_api_result_error(result, TS_API_ERR_INTERNAL, "Failed to create directory");
+        return ret;
+    }
+    
+    cJSON *data = cJSON_CreateObject();
+    cJSON_AddStringToObject(data, "created", path);
+    
+    ts_api_result_ok(result, data);
+    return ESP_OK;
+}
+
+/**
+ * @brief storage.rename - Rename/move file
+ * @param params { "from": "/sdcard/old.txt", "to": "/sdcard/new.txt" }
+ */
+static esp_err_t api_storage_rename(const cJSON *params, ts_api_result_t *result)
+{
+    if (!params) {
+        ts_api_result_error(result, TS_API_ERR_INVALID_ARG, "Missing parameters");
+        return ESP_ERR_INVALID_ARG;
+    }
+    
+    const cJSON *from_param = cJSON_GetObjectItem(params, "from");
+    const cJSON *to_param = cJSON_GetObjectItem(params, "to");
+    
+    if (!from_param || !cJSON_IsString(from_param) || !to_param || !cJSON_IsString(to_param)) {
+        ts_api_result_error(result, TS_API_ERR_INVALID_ARG, "Missing 'from' or 'to' parameter");
+        return ESP_ERR_INVALID_ARG;
+    }
+    
+    const char *from = from_param->valuestring;
+    const char *to = to_param->valuestring;
+    
+    if (!ts_storage_exists(from)) {
+        ts_api_result_error(result, TS_API_ERR_NOT_FOUND, "Source file not found");
+        return ESP_ERR_NOT_FOUND;
+    }
+    
+    esp_err_t ret = ts_storage_rename(from, to);
+    if (ret != ESP_OK) {
+        ts_api_result_error(result, TS_API_ERR_INTERNAL, "Failed to rename");
+        return ret;
+    }
+    
+    cJSON *data = cJSON_CreateObject();
+    cJSON_AddStringToObject(data, "from", from);
+    cJSON_AddStringToObject(data, "to", to);
+    
+    ts_api_result_ok(result, data);
+    return ESP_OK;
+}
+
+/**
+ * @brief storage.info - Get file/directory info
+ * @param params { "path": "/sdcard/file.txt" }
+ */
+static esp_err_t api_storage_info(const cJSON *params, ts_api_result_t *result)
+{
+    if (!params) {
+        ts_api_result_error(result, TS_API_ERR_INVALID_ARG, "Missing parameters");
+        return ESP_ERR_INVALID_ARG;
+    }
+    
+    const cJSON *path_param = cJSON_GetObjectItem(params, "path");
+    if (!path_param || !cJSON_IsString(path_param)) {
+        ts_api_result_error(result, TS_API_ERR_INVALID_ARG, "Missing 'path' parameter");
+        return ESP_ERR_INVALID_ARG;
+    }
+    
+    const char *path = path_param->valuestring;
+    
+    ts_file_info_t info;
+    esp_err_t ret = ts_storage_stat(path, &info);
+    if (ret != ESP_OK) {
+        ts_api_result_error(result, TS_API_ERR_NOT_FOUND, "File not found");
+        return ret;
+    }
+    
+    cJSON *data = cJSON_CreateObject();
+    cJSON_AddStringToObject(data, "path", path);
+    cJSON_AddStringToObject(data, "name", info.name);
+    cJSON_AddStringToObject(data, "type", info.is_directory ? "dir" : "file");
+    cJSON_AddNumberToObject(data, "size", info.size);
+    cJSON_AddNumberToObject(data, "modified", info.modified);
+    
+    ts_api_result_ok(result, data);
+    return ESP_OK;
+}
+
 /*===========================================================================*/
 /*                          Registration                                      */
 /*===========================================================================*/
@@ -193,6 +352,34 @@ static const ts_api_endpoint_t s_storage_endpoints[] = {
         .description = "List directory contents",
         .category = TS_API_CAT_STORAGE,
         .handler = api_storage_list,
+        .requires_auth = false
+    },
+    {
+        .name = "storage.delete",
+        .description = "Delete file or directory",
+        .category = TS_API_CAT_STORAGE,
+        .handler = api_storage_delete,
+        .requires_auth = false
+    },
+    {
+        .name = "storage.mkdir",
+        .description = "Create directory",
+        .category = TS_API_CAT_STORAGE,
+        .handler = api_storage_mkdir,
+        .requires_auth = false
+    },
+    {
+        .name = "storage.rename",
+        .description = "Rename/move file",
+        .category = TS_API_CAT_STORAGE,
+        .handler = api_storage_rename,
+        .requires_auth = false
+    },
+    {
+        .name = "storage.info",
+        .description = "Get file info",
+        .category = TS_API_CAT_STORAGE,
+        .handler = api_storage_info,
         .requires_auth = false
     }
 };
