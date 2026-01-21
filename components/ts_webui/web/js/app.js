@@ -552,9 +552,15 @@ async function loadLedPage() {
     const content = document.getElementById('page-content');
     content.innerHTML = `
         <div class="page-led">
-            <h1>💡 LED 控制</h1>
-            <div id="led-panels" class="led-panels">
-                <p class="loading">加载设备中...</p>
+            <div class="led-page-header">
+                <h1>💡 LED 控制</h1>
+                <div class="led-quick-actions">
+                    <button class="btn btn-sm" onclick="refreshLedPage()">🔄 刷新</button>
+                    <button class="btn btn-sm" onclick="allLedsOff()">⏹ 全部关闭</button>
+                </div>
+            </div>
+            <div id="led-devices-grid" class="led-devices-grid">
+                <div class="loading-inline">加载设备中...</div>
             </div>
         </div>
     `;
@@ -563,114 +569,280 @@ async function loadLedPage() {
 }
 
 async function refreshLedPage() {
-    const panelsContainer = document.getElementById('led-panels');
+    const container = document.getElementById('led-devices-grid');
     
-    // 加载设备列表并渲染每个设备的控制面板
-    // 现在每个设备会带有自己适用的特效列表
     try {
         const result = await api.ledList();
         
         if (result.data && result.data.devices && result.data.devices.length > 0) {
-            // 存储设备信息（包含特效列表）
+            // 存储设备信息
             result.data.devices.forEach(dev => {
                 ledDevices[dev.name] = dev;
-                
-                // 初始化 selectedEffects（如果设备有正在运行的动画）
                 if (dev.current && dev.current.animation) {
                     selectedEffects[dev.name] = dev.current.animation;
                 }
+                // 初始化 LED 状态
+                if (dev.current) {
+                    ledStates[dev.name] = dev.current.on || false;
+                }
             });
             
-            // 缓存设备数据供模态框使用
             window.ledDevicesCache = result.data.devices;
             
-            // 为每个设备生成独立的控制面板
-            panelsContainer.innerHTML = result.data.devices.map(dev => generateDevicePanel(dev)).join('');
+            // 渲染设备卡片
+            container.innerHTML = result.data.devices.map(dev => generateLedDeviceCard(dev)).join('');
             
-            // 如果有 matrix 设备，加载字体列表
+            // 加载字体列表
             if (result.data.devices.some(d => d.name === 'matrix' || d.layout === 'matrix')) {
                 loadFontList();
             }
         } else {
-            // 如果 API 返回空，显示提示信息
-            panelsContainer.innerHTML = `
-                <div class="empty-state">
-                    <p>⚠️ 未找到已初始化的 LED 设备</p>
-                    <p class="hint">LED 设备可能尚未启动。请检查：</p>
+            container.innerHTML = `
+                <div class="led-empty-state">
+                    <div class="empty-icon">⚠️</div>
+                    <h3>未找到 LED 设备</h3>
+                    <p>LED 设备可能尚未启动，请检查：</p>
                     <ul>
-                        <li>LED 服务是否已启动（<code>service --status</code>）</li>
-                        <li>设备配置是否正确（GPIO 引脚）</li>
+                        <li>LED 服务状态 (<code>service --status</code>)</li>
+                        <li>GPIO 引脚配置</li>
                     </ul>
-                    <p>可用命令：<code>led --status</code></p>
                 </div>
             `;
         }
     } catch (e) {
         console.error('LED list error:', e);
-        panelsContainer.innerHTML = '<p class="error">加载设备失败: ' + e.message + '</p>';
+        container.innerHTML = `<div class="error-state">加载失败: ${e.message}</div>`;
     }
 }
 
-function generateDevicePanel(dev) {
+function generateLedDeviceCard(dev) {
     const icon = getDeviceIcon(dev.name);
     const description = getDeviceDescription(dev.name);
-    
-    // 获取当前状态
     const current = dev.current || {};
     const isOn = current.on || false;
     const currentAnimation = current.animation || '';
     const currentSpeed = current.speed || 50;
-    const currentColor = current.color || {r: 255, g: 0, b: 0};
-    
-    // 将 RGB 转为 hex
-    const colorHex = '#' + 
-        currentColor.r.toString(16).padStart(2, '0') +
-        currentColor.g.toString(16).padStart(2, '0') +
-        currentColor.b.toString(16).padStart(2, '0');
-    
-    // 使用设备自带的特效列表（已按设备类型过滤）
+    const currentColor = current.color || {r: 255, g: 255, b: 255};
+    const colorHex = rgbToHex(currentColor);
+    const isMatrix = dev.name === 'matrix' || dev.layout === 'matrix';
     const deviceEffects = dev.effects || [];
     
-    // 开关按钮状态
-    const toggleClass = isOn ? ' on' : '';
-    const toggleText = isOn ? '🔆 已开启' : '💡 已关闭';
+    // 状态文本
+    let statusText = '已关闭';
+    let statusClass = 'off';
+    if (isOn) {
+        if (currentAnimation) {
+            statusText = `▶ ${currentAnimation}`;
+            statusClass = 'effect';
+        } else {
+            statusText = '常亮';
+            statusClass = 'on';
+        }
+    }
     
-    // Matrix 设备使用不同的按钮布局
-    const isMatrix = dev.name === 'matrix' || dev.layout === 'matrix';
-    const actionButtons = isMatrix ? `
-                <button class="btn btn-action btn-toggle${toggleClass}" id="toggle-${dev.name}" onclick="toggleLed('${dev.name}')">${toggleText}</button>
-                <button class="btn btn-action" onclick="openColorModal('${dev.name}')">🎨 颜色</button>
-                <button class="btn btn-action" onclick="openLedModal('${dev.name}', 'content')">🎬 内容</button>
-                <button class="btn btn-action" onclick="openLedModal('${dev.name}', 'text')">📝 文本</button>
-                <button class="btn btn-action" onclick="openLedModal('${dev.name}', 'filter')">🌈 滤镜</button>
-                <button class="btn btn-action btn-save" onclick="saveLedConfig('${dev.name}')">💾 保存</button>` : `
-                <button class="btn btn-action btn-toggle${toggleClass}" id="toggle-${dev.name}" onclick="toggleLed('${dev.name}')">${toggleText}</button>
-                <button class="btn btn-action" onclick="openColorModal('${dev.name}')">🎨 颜色</button>
-                <button class="btn btn-action" onclick="openLedModal('${dev.name}', 'effect')">🎬 动画</button>
-                <button class="btn btn-action btn-save" onclick="saveLedConfig('${dev.name}')">💾 保存</button>`;
+    // 快捷特效按钮（显示前4个）
+    const quickEffects = deviceEffects.slice(0, 4);
+    const quickEffectsHtml = quickEffects.map(eff => 
+        `<button class="led-quick-effect ${eff === currentAnimation ? 'active' : ''}" 
+                 onclick="quickStartEffect('${dev.name}', '${eff}')" 
+                 title="${eff}">${getEffectIcon(eff)}</button>`
+    ).join('');
+    
+    // Matrix 设备额外按钮
+    const matrixButtons = isMatrix ? `
+        <button class="led-func-btn" onclick="openLedModal('${dev.name}', 'content')" title="图像/QR码">
+            <span class="func-icon">📷</span>
+        </button>
+        <button class="led-func-btn" onclick="openLedModal('${dev.name}', 'text')" title="文本显示">
+            <span class="func-icon">📝</span>
+        </button>
+        <button class="led-func-btn" onclick="openLedModal('${dev.name}', 'filter')" title="滤镜效果">
+            <span class="func-icon">🎨</span>
+        </button>
+    ` : '';
     
     return `
-        <div class="led-panel compact" data-device="${dev.name}">
-            <div class="panel-header">
-                <span class="device-icon">${icon}</span>
-                <div class="device-info">
-                    <strong>${dev.name}</strong>
-                    <span class="device-meta">${description} · ${dev.count} LEDs</span>
+        <div class="led-device-card ${isOn ? 'is-on' : ''}" data-device="${dev.name}">
+            <!-- 设备头部 -->
+            <div class="led-card-header">
+                <div class="led-device-icon">${icon}</div>
+                <div class="led-device-info">
+                    <span class="led-device-name">${dev.name}</span>
+                    <span class="led-device-desc">${description}</span>
                 </div>
-                <!-- 亮度控制 -->
-                <div class="brightness-compact">
-                    <span class="brightness-icon">☀️</span>
+                <div class="led-device-status ${statusClass}">${statusText}</div>
+            </div>
+            
+            <!-- 控制区域 -->
+            <div class="led-card-controls">
+                <!-- 亮度滑块 -->
+                <div class="led-brightness-row">
+                    <span class="brightness-label">☀️</span>
                     <input type="range" min="0" max="255" value="${dev.brightness}" 
-                           oninput="updateBrightnessLabel('${dev.name}', this.value)"
+                           class="led-brightness-slider"
+                           oninput="updateBrightnessDisplay('${dev.name}', this.value)"
                            onchange="setBrightness('${dev.name}', this.value)"
-                           id="brightness-${dev.name}" title="亮度">
-                    <span class="brightness-val" id="brightness-val-${dev.name}">${dev.brightness}</span>
+                           id="brightness-${dev.name}">
+                    <span class="brightness-value" id="brightness-val-${dev.name}">${dev.brightness}</span>
                 </div>
-                <!-- 操作按钮 -->
-                ${actionButtons}
+                
+                <!-- 颜色选择 -->
+                <div class="led-color-row">
+                    <input type="color" value="${colorHex}" id="color-picker-${dev.name}" 
+                           onchange="fillColorFromPicker('${dev.name}', this.value)"
+                           class="led-color-picker">
+                    <div class="led-color-presets">
+                        <button class="color-dot" style="background:#ff0000" onclick="quickFillColor('${dev.name}', '#ff0000')"></button>
+                        <button class="color-dot" style="background:#ff6600" onclick="quickFillColor('${dev.name}', '#ff6600')"></button>
+                        <button class="color-dot" style="background:#ffff00" onclick="quickFillColor('${dev.name}', '#ffff00')"></button>
+                        <button class="color-dot" style="background:#00ff00" onclick="quickFillColor('${dev.name}', '#00ff00')"></button>
+                        <button class="color-dot" style="background:#00ffff" onclick="quickFillColor('${dev.name}', '#00ffff')"></button>
+                        <button class="color-dot" style="background:#0066ff" onclick="quickFillColor('${dev.name}', '#0066ff')"></button>
+                        <button class="color-dot" style="background:#ff00ff" onclick="quickFillColor('${dev.name}', '#ff00ff')"></button>
+                        <button class="color-dot" style="background:#ffffff" onclick="quickFillColor('${dev.name}', '#ffffff')"></button>
+                    </div>
+                </div>
+                
+                <!-- 快捷特效 -->
+                <div class="led-effects-row">
+                    <div class="led-quick-effects">
+                        ${quickEffectsHtml}
+                        ${deviceEffects.length > 4 ? `<button class="led-quick-effect more" onclick="openLedModal('${dev.name}', 'effect')" title="更多特效">+${deviceEffects.length - 4}</button>` : ''}
+                    </div>
+                    <button class="led-stop-btn" onclick="stopEffect('${dev.name}')" title="停止特效">⏹</button>
+                </div>
+            </div>
+            
+            <!-- 底部操作栏 -->
+            <div class="led-card-footer">
+                <button class="led-power-btn ${isOn ? 'on' : ''}" id="toggle-${dev.name}" onclick="toggleLed('${dev.name}')">
+                    <span class="power-icon">${isOn ? '🔆' : '💡'}</span>
+                    <span class="power-text">${isOn ? '关闭' : '开启'}</span>
+                </button>
+                ${matrixButtons}
+                <button class="led-func-btn" onclick="openLedModal('${dev.name}', 'effect')" title="全部特效">
+                    <span class="func-icon">🎬</span>
+                </button>
+                <button class="led-save-btn" onclick="saveLedConfig('${dev.name}')" title="保存配置">
+                    💾
+                </button>
             </div>
         </div>
     `;
+}
+
+// 辅助函数
+function rgbToHex(color) {
+    const r = (color.r || 0).toString(16).padStart(2, '0');
+    const g = (color.g || 0).toString(16).padStart(2, '0');
+    const b = (color.b || 0).toString(16).padStart(2, '0');
+    return '#' + r + g + b;
+}
+
+function updateBrightnessDisplay(device, value) {
+    const label = document.getElementById(`brightness-val-${device}`);
+    if (label) label.textContent = value;
+}
+
+async function fillColorFromPicker(device, color) {
+    try {
+        await api.ledFill(device, color);
+        ledStates[device] = true;
+        updateLedCardState(device, true);
+        showToast(`${device} 已填充 ${color}`, 'success');
+    } catch (e) {
+        showToast(`填充失败: ${e.message}`, 'error');
+    }
+}
+
+async function quickFillColor(device, color) {
+    const picker = document.getElementById(`color-picker-${device}`);
+    if (picker) picker.value = color;
+    try {
+        await api.ledFill(device, color);
+        ledStates[device] = true;
+        updateLedCardState(device, true, null);
+        showToast(`${device} → ${color}`, 'success');
+    } catch (e) {
+        showToast(`填充失败: ${e.message}`, 'error');
+    }
+}
+
+async function quickStartEffect(device, effect) {
+    try {
+        await api.ledEffectStart(device, effect, { speed: 50 });
+        selectedEffects[device] = effect;
+        ledStates[device] = true;
+        updateLedCardState(device, true, effect);
+        showToast(`${device}: ${effect}`, 'success');
+    } catch (e) {
+        showToast(`启动失败: ${e.message}`, 'error');
+    }
+}
+
+async function allLedsOff() {
+    const devices = window.ledDevicesCache || [];
+    for (const dev of devices) {
+        try {
+            await api.ledClear(dev.name);
+            ledStates[dev.name] = false;
+            updateLedCardState(dev.name, false);
+        } catch (e) {
+            console.error(`关闭 ${dev.name} 失败:`, e);
+        }
+    }
+    showToast('全部 LED 已关闭', 'success');
+}
+
+function updateLedCardState(device, isOn, effect = undefined) {
+    const card = document.querySelector(`.led-device-card[data-device="${device}"]`);
+    if (!card) return;
+    
+    // 更新卡片状态
+    if (isOn) {
+        card.classList.add('is-on');
+    } else {
+        card.classList.remove('is-on');
+    }
+    
+    // 更新状态显示
+    const statusEl = card.querySelector('.led-device-status');
+    if (statusEl) {
+        if (!isOn) {
+            statusEl.textContent = '已关闭';
+            statusEl.className = 'led-device-status off';
+        } else if (effect) {
+            statusEl.textContent = `▶ ${effect}`;
+            statusEl.className = 'led-device-status effect';
+        } else {
+            statusEl.textContent = '常亮';
+            statusEl.className = 'led-device-status on';
+        }
+    }
+    
+    // 更新电源按钮
+    const powerBtn = card.querySelector('.led-power-btn');
+    if (powerBtn) {
+        if (isOn) {
+            powerBtn.classList.add('on');
+            powerBtn.querySelector('.power-icon').textContent = '🔆';
+            powerBtn.querySelector('.power-text').textContent = '关闭';
+        } else {
+            powerBtn.classList.remove('on');
+            powerBtn.querySelector('.power-icon').textContent = '💡';
+            powerBtn.querySelector('.power-text').textContent = '开启';
+        }
+    }
+    
+    // 更新快捷特效按钮状态
+    card.querySelectorAll('.led-quick-effect').forEach(btn => {
+        const btnEffect = btn.getAttribute('title');
+        if (effect && btnEffect === effect) {
+            btn.classList.add('active');
+        } else {
+            btn.classList.remove('active');
+        }
+    });
 }
 
 // 颜色选择模态框
@@ -741,8 +913,12 @@ async function quickFillFromModal(device, color) {
 
 // 更新开关按钮状态
 function updateToggleButton(device, isOn) {
+    // 更新新版卡片
+    updateLedCardState(device, isOn);
+    
+    // 旧版兼容
     const btn = document.getElementById(`toggle-${device}`);
-    if (btn) {
+    if (btn && !btn.classList.contains('led-power-btn')) {
         if (isOn) {
             btn.classList.add('on');
             btn.innerHTML = '🔆 已开启';
@@ -1065,12 +1241,7 @@ async function applyEffectFromModal(device) {
         await api.ledEffectStart(device, effect, params);
         
         ledStates[device] = true;
-        const btn = document.getElementById(`toggle-${device}`);
-        if (btn) {
-            btn.classList.add('on');
-            const icon = btn.querySelector('.power-icon');
-            if (icon) icon.textContent = '🔆';
-        }
+        updateLedCardState(device, true, effect);
         
         showToast(`${device}: ${effect} 已启动`, 'success');
     } catch (e) {
@@ -1083,6 +1254,7 @@ async function stopEffectFromModal(device) {
     try {
         await api.ledEffectStop(device);
         delete selectedEffects[device];
+        updateLedCardState(device, ledStates[device], null);
         showToast(`${device} 特效已停止`, 'success');
     } catch (e) {
         showToast(`停止特效失败: ${e.message}`, 'error');
@@ -1367,13 +1539,13 @@ async function toggleLed(device) {
             // 当前是开启状态，关闭它
             await api.ledClear(device);
             ledStates[device] = false;
-            updateToggleButton(device, false);
+            updateLedCardState(device, false);
             showToast(`${device} 已关闭`, 'success');
         } else {
             // 当前是关闭状态，开启它（白光）
             await api.ledFill(device, '#ffffff');
             ledStates[device] = true;
-            updateToggleButton(device, true);
+            updateLedCardState(device, true, null);
             showToast(`${device} 已开启`, 'success');
         }
     } catch (e) {

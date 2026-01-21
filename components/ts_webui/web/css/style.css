@@ -866,7 +866,412 @@ body {
 }
 
 /* =========================================================================
-   LED 控制页面 - 紧凑型设备面板
+   LED 控制页面 - 新版设备卡片布局
+   ========================================================================= */
+
+.page-led {
+    max-width: 1400px;
+    margin: 0 auto;
+}
+
+.led-page-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 24px;
+    flex-wrap: wrap;
+    gap: 12px;
+}
+
+.led-page-header h1 {
+    margin: 0;
+    font-size: 1.5rem;
+}
+
+.led-quick-actions {
+    display: flex;
+    gap: 8px;
+}
+
+/* LED 设备网格 */
+.led-devices-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+    gap: 20px;
+}
+
+/* LED 设备卡片 */
+.led-device-card {
+    background: var(--card-bg);
+    border-radius: 16px;
+    border: 2px solid var(--border-color);
+    overflow: hidden;
+    transition: all 0.3s ease;
+}
+
+.led-device-card:hover {
+    border-color: var(--primary-color);
+    box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+}
+
+.led-device-card.is-on {
+    border-color: #48bb78;
+    box-shadow: 0 0 20px rgba(72, 187, 120, 0.2);
+}
+
+/* 卡片头部 */
+.led-card-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 16px 20px;
+    background: linear-gradient(135deg, var(--bg-color) 0%, var(--card-bg) 100%);
+    border-bottom: 1px solid var(--border-color);
+}
+
+.led-device-icon {
+    font-size: 2rem;
+    width: 48px;
+    height: 48px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--card-bg);
+    border-radius: 12px;
+    border: 1px solid var(--border-color);
+}
+
+.led-device-info {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.led-device-name {
+    font-size: 1.1rem;
+    font-weight: 600;
+    text-transform: capitalize;
+}
+
+.led-device-desc {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+}
+
+.led-device-status {
+    font-size: 0.8rem;
+    padding: 4px 12px;
+    border-radius: 12px;
+    font-weight: 500;
+    white-space: nowrap;
+}
+
+.led-device-status.off {
+    background: var(--bg-color);
+    color: var(--text-secondary);
+}
+
+.led-device-status.on {
+    background: rgba(72, 187, 120, 0.2);
+    color: #48bb78;
+}
+
+.led-device-status.effect {
+    background: rgba(90, 103, 216, 0.2);
+    color: var(--primary-color);
+}
+
+/* 卡片控制区域 */
+.led-card-controls {
+    padding: 16px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+/* 亮度控制行 */
+.led-brightness-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: var(--bg-color);
+    padding: 10px 14px;
+    border-radius: 10px;
+}
+
+.led-brightness-row .brightness-label {
+    font-size: 1rem;
+}
+
+.led-brightness-slider {
+    flex: 1;
+    height: 6px;
+    -webkit-appearance: none;
+    appearance: none;
+    background: var(--card-bg);
+    border-radius: 3px;
+    outline: none;
+}
+
+.led-brightness-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 18px;
+    height: 18px;
+    background: linear-gradient(135deg, var(--primary-color) 0%, #4361ee 100%);
+    border-radius: 50%;
+    cursor: pointer;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+}
+
+.led-brightness-row .brightness-value {
+    min-width: 32px;
+    text-align: center;
+    font-size: 0.85rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+}
+
+/* 颜色控制行 */
+.led-color-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.led-color-picker {
+    width: 44px;
+    height: 44px;
+    border: none;
+    border-radius: 10px;
+    cursor: pointer;
+    padding: 0;
+    background: transparent;
+}
+
+.led-color-picker::-webkit-color-swatch-wrapper {
+    padding: 0;
+}
+
+.led-color-picker::-webkit-color-swatch {
+    border: 2px solid var(--border-color);
+    border-radius: 10px;
+}
+
+.led-color-presets {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    flex: 1;
+}
+
+.color-dot {
+    width: 28px;
+    height: 28px;
+    border: 2px solid var(--border-color);
+    border-radius: 50%;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    padding: 0;
+}
+
+.color-dot:hover {
+    transform: scale(1.15);
+    border-color: white;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+}
+
+/* 特效控制行 */
+.led-effects-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.led-quick-effects {
+    display: flex;
+    gap: 6px;
+    flex: 1;
+    flex-wrap: wrap;
+}
+
+.led-quick-effect {
+    width: 36px;
+    height: 36px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background: var(--bg-color);
+    cursor: pointer;
+    font-size: 1rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.15s ease;
+}
+
+.led-quick-effect:hover {
+    background: var(--primary-color);
+    border-color: var(--primary-color);
+    color: white;
+    transform: translateY(-2px);
+}
+
+.led-quick-effect.active {
+    background: var(--primary-color);
+    border-color: var(--primary-color);
+    color: white;
+}
+
+.led-quick-effect.more {
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+
+.led-stop-btn {
+    width: 36px;
+    height: 36px;
+    border: 1px solid #e74c3c;
+    border-radius: 8px;
+    background: rgba(231, 76, 60, 0.1);
+    color: #e74c3c;
+    cursor: pointer;
+    font-size: 0.9rem;
+    transition: all 0.15s ease;
+}
+
+.led-stop-btn:hover {
+    background: #e74c3c;
+    color: white;
+}
+
+/* 卡片底部操作栏 */
+.led-card-footer {
+    display: flex;
+    gap: 8px;
+    padding: 12px 20px 16px;
+    background: var(--bg-color);
+    border-top: 1px solid var(--border-color);
+    flex-wrap: wrap;
+}
+
+.led-power-btn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 16px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background: var(--card-bg);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-size: 0.85rem;
+}
+
+.led-power-btn:hover {
+    background: var(--primary-color);
+    border-color: var(--primary-color);
+    color: white;
+}
+
+.led-power-btn.on {
+    background: linear-gradient(135deg, #48bb78 0%, #38a169 100%);
+    border-color: #38a169;
+    color: white;
+}
+
+.led-power-btn .power-icon {
+    font-size: 1rem;
+}
+
+.led-power-btn .power-text {
+    font-weight: 500;
+}
+
+.led-func-btn {
+    width: 40px;
+    height: 40px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background: var(--card-bg);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+}
+
+.led-func-btn:hover {
+    background: var(--primary-color);
+    border-color: var(--primary-color);
+    color: white;
+    transform: translateY(-1px);
+}
+
+.led-func-btn .func-icon {
+    font-size: 1.1rem;
+}
+
+.led-save-btn {
+    margin-left: auto;
+    width: 40px;
+    height: 40px;
+    border: 1px solid var(--secondary-color);
+    border-radius: 8px;
+    background: var(--secondary-color);
+    color: white;
+    cursor: pointer;
+    font-size: 1rem;
+    transition: all 0.2s ease;
+}
+
+.led-save-btn:hover {
+    background: #27ae60;
+    border-color: #27ae60;
+    transform: translateY(-1px);
+}
+
+/* LED 空状态 */
+.led-empty-state {
+    grid-column: 1 / -1;
+    text-align: center;
+    padding: 60px 20px;
+    background: var(--card-bg);
+    border-radius: 16px;
+    border: 2px dashed var(--border-color);
+}
+
+.led-empty-state .empty-icon {
+    font-size: 3rem;
+    margin-bottom: 16px;
+}
+
+.led-empty-state h3 {
+    margin: 0 0 12px;
+}
+
+.led-empty-state p {
+    color: var(--text-secondary);
+    margin: 0 0 8px;
+}
+
+.led-empty-state ul {
+    text-align: left;
+    display: inline-block;
+    margin: 12px 0;
+    color: var(--text-secondary);
+}
+
+/* 加载内联状态 */
+.loading-inline {
+    grid-column: 1 / -1;
+    text-align: center;
+    padding: 40px;
+    color: var(--text-secondary);
+}
+
+/* =========================================================================
+   LED 控制页面 - 旧版紧凑型设备面板（保留兼容）
    ========================================================================= */
 
 .led-panels {
@@ -2883,4 +3288,63 @@ body {
 .checkbox-label input[type="checkbox"] {
     width: 16px;
     height: 16px;
+}
+/* =========================================================================
+   LED 页面响应式布局
+   ========================================================================= */
+@media (max-width: 768px) {
+    .led-devices-grid {
+        grid-template-columns: 1fr;
+    }
+    
+    .led-page-header {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+    
+    .led-card-footer {
+        justify-content: center;
+    }
+    
+    .led-save-btn {
+        margin-left: 0;
+    }
+    
+    .led-color-presets {
+        justify-content: center;
+    }
+    
+    .led-modal {
+        min-width: 95%;
+        max-width: 95%;
+    }
+}
+
+@media (max-width: 400px) {
+    .led-card-controls {
+        padding: 12px 14px;
+    }
+    
+    .led-card-header {
+        padding: 12px 14px;
+    }
+    
+    .led-card-footer {
+        padding: 10px 14px;
+    }
+    
+    .led-func-btn {
+        width: 36px;
+        height: 36px;
+    }
+    
+    .led-power-btn {
+        padding: 6px 12px;
+        font-size: 0.8rem;
+    }
+    
+    .color-dot {
+        width: 24px;
+        height: 24px;
+    }
 }
