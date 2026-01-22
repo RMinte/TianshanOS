@@ -62,6 +62,11 @@ extern "C" {
 #define TS_KEYSTORE_COMMENT_MAX_LEN 64
 
 /**
+ * @brief Maximum length of a key alias (display name)
+ */
+#define TS_KEYSTORE_ALIAS_MAX_LEN 64
+
+/**
  * @brief Maximum number of keys that can be stored
  */
 #define TS_KEYSTORE_MAX_KEYS        8
@@ -91,13 +96,15 @@ typedef enum {
  * @brief Key metadata structure
  */
 typedef struct {
-    char id[TS_KEYSTORE_ID_MAX_LEN];         /**< Unique key identifier */
-    ts_keystore_key_type_t type;              /**< Key type */
+    char id[TS_KEYSTORE_ID_MAX_LEN];          /**< Unique key identifier */
+    ts_keystore_key_type_t type;               /**< Key type */
     char comment[TS_KEYSTORE_COMMENT_MAX_LEN]; /**< Key comment */
-    uint32_t created_at;                       /**< Creation timestamp (Unix epoch) */
-    uint32_t last_used;                        /**< Last used timestamp */
-    bool has_public_key;                       /**< Whether public key is stored */
-    bool exportable;                           /**< Whether private key can be exported */
+    char alias[TS_KEYSTORE_ALIAS_MAX_LEN];     /**< Display alias (optional, for hidden keys) */
+    uint32_t created_at;                        /**< Creation timestamp (Unix epoch) */
+    uint32_t last_used;                         /**< Last used timestamp */
+    bool has_public_key;                        /**< Whether public key is stored */
+    bool exportable;                            /**< Whether private key can be exported */
+    bool hidden;                                /**< Whether key ID is hidden from unauthenticated users */
 } ts_keystore_key_info_t;
 
 /**
@@ -106,12 +113,14 @@ typedef struct {
 typedef struct {
     bool exportable;                /**< Allow private key export (default: false) */
     const char *comment;            /**< Key comment (optional) */
+    const char *alias;              /**< Display alias (optional, recommended for hidden keys) */
+    bool hidden;                    /**< Hide key ID from unauthenticated users (default: false) */
 } ts_keystore_gen_opts_t;
 
 /**
- * @brief Default generation options (not exportable)
+ * @brief Default generation options (not exportable, not hidden)
  */
-#define TS_KEYSTORE_GEN_OPTS_DEFAULT { .exportable = false, .comment = NULL }
+#define TS_KEYSTORE_GEN_OPTS_DEFAULT { .exportable = false, .comment = NULL, .alias = NULL, .hidden = false }
 
 /**
  * @brief Key pair structure for import/export
@@ -268,6 +277,22 @@ esp_err_t ts_keystore_get_key_info(const char *id, ts_keystore_key_info_t *info)
  *      - ESP_ERR_INVALID_STATE if keystore not initialized
  */
 esp_err_t ts_keystore_list_keys(ts_keystore_key_info_t *keys, size_t *count);
+
+/**
+ * @brief List all keys with filtering options
+ * 
+ * Extended version of ts_keystore_list_keys with filtering support.
+ * 
+ * @param[out] keys           Array to receive key info
+ * @param[out] count          Pointer to receive actual number of keys
+ * @param[in]  show_hidden    If true, include hidden keys; if false, exclude them
+ * 
+ * @return
+ *      - ESP_OK on success
+ *      - ESP_ERR_INVALID_ARG if keys or count is NULL
+ *      - ESP_ERR_INVALID_STATE if keystore not initialized
+ */
+esp_err_t ts_keystore_list_keys_ex(ts_keystore_key_info_t *keys, size_t *count, bool show_hidden);
 
 /**
  * @brief Update last used timestamp

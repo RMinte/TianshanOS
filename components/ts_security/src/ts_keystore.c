@@ -170,10 +170,12 @@ static esp_err_t store_metadata(const char *id, const ts_keystore_key_info_t *in
     
     cJSON_AddStringToObject(json, "type", ts_keystore_type_to_string(info->type));
     cJSON_AddStringToObject(json, "comment", info->comment);
+    cJSON_AddStringToObject(json, "alias", info->alias);
     cJSON_AddNumberToObject(json, "created_at", info->created_at);
     cJSON_AddNumberToObject(json, "last_used", info->last_used);
     cJSON_AddBoolToObject(json, "has_pubkey", info->has_public_key);
     cJSON_AddBoolToObject(json, "exportable", info->exportable);
+    cJSON_AddBoolToObject(json, "hidden", info->hidden);
     
     char *str = cJSON_PrintUnformatted(json);
     cJSON_Delete(json);
@@ -227,6 +229,9 @@ static esp_err_t load_metadata(const char *id, ts_keystore_key_info_t *info)
     if ((item = cJSON_GetObjectItem(json, "comment"))) {
         strncpy(info->comment, item->valuestring, sizeof(info->comment) - 1);
     }
+    if ((item = cJSON_GetObjectItem(json, "alias"))) {
+        strncpy(info->alias, item->valuestring, sizeof(info->alias) - 1);
+    }
     if ((item = cJSON_GetObjectItem(json, "created_at"))) {
         info->created_at = (uint32_t)item->valuedouble;
     }
@@ -240,6 +245,11 @@ static esp_err_t load_metadata(const char *id, ts_keystore_key_info_t *info)
         info->exportable = cJSON_IsTrue(item);
     } else {
         info->exportable = false;  /* 旧密钥默认不可导出 */
+    }
+    if ((item = cJSON_GetObjectItem(json, "hidden"))) {
+        info->hidden = cJSON_IsTrue(item);
+    } else {
+        info->hidden = false;  /* 旧密钥默认不隐藏 */
     }
     
     cJSON_Delete(json);
@@ -270,9 +280,11 @@ static esp_err_t ts_keystore_store_key_ex(const char *id,
     
     bool exportable = opts ? opts->exportable : false;
     const char *comment = opts ? opts->comment : NULL;
+    const char *alias = opts ? opts->alias : NULL;
+    bool hidden = opts ? opts->hidden : false;
     
-    ESP_LOGI(TAG, "Storing key '%s' (type=%s, privkey_len=%zu, exportable=%d)", 
-             id, ts_keystore_type_to_string(type), keypair->private_key_len, exportable);
+    ESP_LOGI(TAG, "Storing key '%s' (type=%s, privkey_len=%zu, exportable=%d, hidden=%d)", 
+             id, ts_keystore_type_to_string(type), keypair->private_key_len, exportable, hidden);
     
     char nvs_key[TS_KEYSTORE_ID_MAX_LEN + 8];
     esp_err_t ret;
@@ -307,10 +319,14 @@ static esp_err_t ts_keystore_store_key_ex(const char *id,
         .last_used = 0,
         .has_public_key = has_pubkey,
         .exportable = exportable,
+        .hidden = hidden,
     };
     strncpy(info.id, id, sizeof(info.id) - 1);
     if (comment) {
         strncpy(info.comment, comment, sizeof(info.comment) - 1);
+    }
+    if (alias) {
+        strncpy(info.alias, alias, sizeof(info.alias) - 1);
     }
     
     ret = store_metadata(id, &info);
@@ -552,11 +568,15 @@ esp_err_t ts_keystore_list_keys(ts_keystore_key_info_t *keys, size_t *count)
         return ESP_ERR_INVALID_ARG;
     }
     
+    ESP_LOGI(TAG, "Listing keys, max_count=%zu", *count);
+    
     /* 读取索引 */
     char index_str[MAX_INDEX_LEN] = {0};
     size_t len = sizeof(index_str);
     
     esp_err_t ret = nvs_get_str(s_keystore.nvs_handle, KEYSTORE_INDEX_KEY, index_str, &len);
+    
+    ESP_LOGI(TAG, "NVS read index: ret=%s, index='%s'", esp_err_to_name(ret), index_str);
     if (ret == ESP_ERR_NVS_NOT_FOUND) {
         *count = 0;
         return ESP_OK;
@@ -568,14 +588,73 @@ esp_err_t ts_keystore_list_keys(ts_keystore_key_info_t *keys, size_t *count)
     char ids[TS_KEYSTORE_MAX_KEYS][TS_KEYSTORE_ID_MAX_LEN];
     int num_keys = parse_index(index_str, ids, TS_KEYSTORE_MAX_KEYS);
     
+    ESP_LOGI(TAG, "Parsed %d keys from index", num_keys);
+    
     /* 加载每个密钥的元数据 */
     size_t valid_count = 0;
     for (int i = 0; i < num_keys && valid_count < TS_KEYSTORE_MAX_KEYS; i++) {
+        ESP_LOGI(TAG, "Loading metadata for key[%d]: '%s'", i, ids[i]);
         if (load_metadata(ids[i], &keys[valid_count]) == ESP_OK) {
             valid_count++;
+        } else {
+            ESP_LOGW(TAG, "Failed to load metadata for key '%s'", ids[i]);
         }
     }
     
+    ESP_LOGI(TAG, "Returning %zu valid keys", valid_count);
+    *count = valid_count;
+    return ESP_OK;
+}
+
+esp_err_t ts_keystore_list_keys_ex(ts_keystore_key_info_t *keys, size_t *count, bool show_hidden)
+{
+    if (!s_keystore.initialized) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    
+    if (!keys || !count) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    
+    ESP_LOGI(TAG, "Listing keys (show_hidden=%d), max_count=%zu", show_hidden, *count);
+    
+    /* 读取索引 */
+    char index_str[MAX_INDEX_LEN] = {0};
+    size_t len = sizeof(index_str);
+    
+    esp_err_t ret = nvs_get_str(s_keystore.nvs_handle, KEYSTORE_INDEX_KEY, index_str, &len);
+    
+    if (ret == ESP_ERR_NVS_NOT_FOUND) {
+        *count = 0;
+        return ESP_OK;
+    } else if (ret != ESP_OK) {
+        return ret;
+    }
+    
+    /* 解析索引 */
+    char ids[TS_KEYSTORE_MAX_KEYS][TS_KEYSTORE_ID_MAX_LEN];
+    int num_keys = parse_index(index_str, ids, TS_KEYSTORE_MAX_KEYS);
+    
+    ESP_LOGI(TAG, "Parsed %d keys from index", num_keys);
+    
+    /* 加载每个密钥的元数据，根据 show_hidden 过滤 */
+    size_t valid_count = 0;
+    for (int i = 0; i < num_keys && valid_count < TS_KEYSTORE_MAX_KEYS; i++) {
+        ts_keystore_key_info_t temp_info;
+        if (load_metadata(ids[i], &temp_info) == ESP_OK) {
+            /* 如果不显示隐藏密钥，则跳过隐藏的密钥 */
+            if (!show_hidden && temp_info.hidden) {
+                ESP_LOGD(TAG, "Skipping hidden key '%s'", ids[i]);
+                continue;
+            }
+            keys[valid_count] = temp_info;
+            valid_count++;
+        } else {
+            ESP_LOGW(TAG, "Failed to load metadata for key '%s'", ids[i]);
+        }
+    }
+    
+    ESP_LOGI(TAG, "Returning %zu valid keys (filtered)", valid_count);
     *count = valid_count;
     return ESP_OK;
 }

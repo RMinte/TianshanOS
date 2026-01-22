@@ -427,11 +427,21 @@ static esp_err_t api_ssh_test(const cJSON *params, ts_api_result_t *result)
     ts_known_host_t host_info = {0};
     ret = verify_host_fingerprint(session, params, result, &host_info);
     if (ret != ESP_OK) {
-        /* result 已在 verify_host_fingerprint 中设置 */
+        /* 主机验证失败（新主机或密钥不匹配）
+         * result 中已包含详细信息，直接返回成功（HTTP 200）
+         * 前端通过 result.code 和 result.data.status 判断实际状态
+         */
         ts_ssh_disconnect(session);
         ts_ssh_session_destroy(session);
         cleanup_key_buffer();
-        return ret;
+        
+        /* 如果是 MISMATCH 或 NEW_HOST，返回 ESP_OK 让 HTTP 层返回 200
+         * 实际错误信息已在 result 中设置 */
+        if (result->code == TS_API_ERR_HOST_MISMATCH || 
+            result->code == TS_API_ERR_HOST_NEW) {
+            return ESP_OK;  // HTTP 200，但 result.code 指示实际问题
+        }
+        return ret;  // 其他错误继续返回错误码
     }
     
     /* 连接成功 */

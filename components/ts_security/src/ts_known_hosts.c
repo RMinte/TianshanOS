@@ -483,9 +483,12 @@ esp_err_t ts_known_hosts_list(ts_known_host_t *hosts, size_t max_hosts,
     }
     
     if (!s_state.initialized) {
+        ESP_LOGW(TAG, "Module not initialized");
         *count = 0;
         return ESP_ERR_INVALID_STATE;
     }
+    
+    ESP_LOGI(TAG, "Listing known hosts, max_hosts=%zu", max_hosts);
     
     *count = 0;
     
@@ -494,16 +497,23 @@ esp_err_t ts_known_hosts_list(ts_known_host_t *hosts, size_t max_hosts,
     nvs_iterator_t iter = NULL;
     esp_err_t ret = nvs_entry_find_in_handle(s_state.nvs, NVS_TYPE_BLOB, &iter);
     
+    ESP_LOGI(TAG, "NVS iterator result: %s", esp_err_to_name(ret));
+    
     while (ret == ESP_OK && *count < max_hosts) {
         nvs_entry_info_t info;
         nvs_entry_info(iter, &info);
+        
+        ESP_LOGI(TAG, "Found NVS entry: key='%s', type=%d", info.key, info.type);
         
         /* 检查是否是主机密钥条目（键名以 "h_" 开头） */
         if (strncmp(info.key, "h_", 2) == 0) {
             stored_host_t stored;
             size_t len = sizeof(stored);
             
-            if (nvs_get_blob(s_state.nvs, info.key, &stored, &len) == ESP_OK) {
+            esp_err_t get_ret = nvs_get_blob(s_state.nvs, info.key, &stored, &len);
+            ESP_LOGI(TAG, "Reading key '%s': %s, len=%zu", info.key, esp_err_to_name(get_ret), len);
+            
+            if (get_ret == ESP_OK) {
                 /* 从存储的数据中读取主机信息 */
                 strncpy(hosts[*count].host, stored.host, sizeof(hosts[*count].host) - 1);
                 hosts[*count].host[sizeof(hosts[*count].host) - 1] = '\0';
@@ -514,6 +524,7 @@ esp_err_t ts_known_hosts_list(ts_known_host_t *hosts, size_t max_hosts,
                 hosts[*count].fingerprint[sizeof(hosts[*count].fingerprint) - 1] = '\0';
                 hosts[*count].added_time = stored.added_time;
                 
+                ESP_LOGI(TAG, "Added host[%zu]: %s:%u", *count, stored.host, stored.port);
                 (*count)++;
             }
         }
@@ -526,6 +537,8 @@ esp_err_t ts_known_hosts_list(ts_known_host_t *hosts, size_t max_hosts,
     }
     
     xSemaphoreGive(s_state.mutex);
+    
+    ESP_LOGI(TAG, "Returning %zu known hosts", *count);
     
     return ESP_OK;
 }

@@ -39,10 +39,17 @@ static esp_err_t api_key_list(const cJSON *params, ts_api_result_t *result)
 {
     (void)params;
     
+    TS_LOGI(TAG, "API: key.list called");
+    
+    /* 检查是否显示隐藏密钥（TODO: 从认证状态判断） */
+    bool show_hidden = true;  // 暂时默认显示全部，后续接入认证系统
+    
     ts_keystore_key_info_t keys[TS_KEYSTORE_MAX_KEYS];
     size_t count = TS_KEYSTORE_MAX_KEYS;
     
-    esp_err_t ret = ts_keystore_list_keys(keys, &count);
+    esp_err_t ret = ts_keystore_list_keys_ex(keys, &count, show_hidden);
+    
+    TS_LOGI(TAG, "API: ts_keystore_list_keys_ex returned %s, count=%zu", esp_err_to_name(ret), count);
     
     // 如果模块未初始化，返回空列表而不是错误
     if (ret == ESP_ERR_INVALID_STATE) {
@@ -71,14 +78,27 @@ static esp_err_t api_key_list(const cJSON *params, ts_api_result_t *result)
     cJSON *keys_array = cJSON_AddArrayToObject(data, "keys");
     for (size_t i = 0; i < count; i++) {
         cJSON *item = cJSON_CreateObject();
-        cJSON_AddStringToObject(item, "id", keys[i].id);
+        
+        /* 如果是隐藏密钥且未授权，则掩码 ID */
+        if (keys[i].hidden && !show_hidden) {
+            /* 掩码格式：🔒 <alias> 或 🔒 Hidden Key */
+            const char *display_id = (strlen(keys[i].alias) > 0) ? keys[i].alias : "Hidden Key";
+            char masked_id[TS_KEYSTORE_ALIAS_MAX_LEN + 8];
+            snprintf(masked_id, sizeof(masked_id), "🔒 %s", display_id);
+            cJSON_AddStringToObject(item, "id", masked_id);
+        } else {
+            cJSON_AddStringToObject(item, "id", keys[i].id);
+        }
+        
         cJSON_AddStringToObject(item, "type", ts_keystore_type_to_string(keys[i].type));
         cJSON_AddStringToObject(item, "type_desc", key_type_desc(keys[i].type));
         cJSON_AddStringToObject(item, "comment", keys[i].comment);
+        cJSON_AddStringToObject(item, "alias", keys[i].alias);
         cJSON_AddNumberToObject(item, "created", keys[i].created_at);
         cJSON_AddNumberToObject(item, "last_used", keys[i].last_used);
         cJSON_AddBoolToObject(item, "has_pubkey", keys[i].has_public_key);
         cJSON_AddBoolToObject(item, "exportable", keys[i].exportable);
+        cJSON_AddBoolToObject(item, "hidden", keys[i].hidden);
         cJSON_AddItemToArray(keys_array, item);
     }
     
@@ -125,10 +145,12 @@ static esp_err_t api_key_info(const cJSON *params, ts_api_result_t *result)
     cJSON_AddStringToObject(data, "type", ts_keystore_type_to_string(info.type));
     cJSON_AddStringToObject(data, "type_desc", key_type_desc(info.type));
     cJSON_AddStringToObject(data, "comment", info.comment);
+    cJSON_AddStringToObject(data, "alias", info.alias);
     cJSON_AddNumberToObject(data, "created", info.created_at);
     cJSON_AddNumberToObject(data, "last_used", info.last_used);
     cJSON_AddBoolToObject(data, "has_public_key", info.has_public_key);
     cJSON_AddBoolToObject(data, "exportable", info.exportable);
+    cJSON_AddBoolToObject(data, "hidden", info.hidden);
     
     ts_api_result_ok(result, data);
     return ESP_OK;
@@ -180,10 +202,26 @@ static esp_err_t api_key_generate(const cJSON *params, ts_api_result_t *result)
         exportable = cJSON_IsTrue(exportable_json);
     }
     
+    /* Parse alias */
+    const char *alias = NULL;
+    const cJSON *alias_json = cJSON_GetObjectItem(params, "alias");
+    if (alias_json && cJSON_IsString(alias_json)) {
+        alias = alias_json->valuestring;
+    }
+    
+    /* Parse hidden flag */
+    bool hidden = false;
+    const cJSON *hidden_json = cJSON_GetObjectItem(params, "hidden");
+    if (hidden_json && cJSON_IsBool(hidden_json)) {
+        hidden = cJSON_IsTrue(hidden_json);
+    }
+    
     /* Generate key using extended API with options */
     ts_keystore_gen_opts_t opts = {
         .exportable = exportable,
         .comment = comment,
+        .alias = alias,
+        .hidden = hidden,
     };
     
     esp_err_t ret = ts_keystore_generate_key_ex(id->valuestring, type, &opts);

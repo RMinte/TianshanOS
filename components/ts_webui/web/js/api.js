@@ -363,8 +363,8 @@ class TianShanAPI {
     
     async keyList() { return this.call('key.list'); }
     async keyInfo(id) { return this.call('key.info', { id }); }
-    async keyGenerate(id, type = 'rsa2048', comment = '', exportable = false) { 
-        return this.call('key.generate', { id, type, comment, exportable }, 'POST'); 
+    async keyGenerate(id, type = 'rsa2048', comment = '', exportable = false, alias = '', hidden = false) { 
+        return this.call('key.generate', { id, type, comment, exportable, alias, hidden }, 'POST'); 
     }
     async keyDelete(id) { return this.call('key.delete', { id }, 'POST'); }
     async keyExport(id) { return this.call('key.export', { id }); }
@@ -377,6 +377,7 @@ class TianShanAPI {
     async hostsList() { return this.call('hosts.list'); }
     async hostsInfo(host, port = 22) { return this.call('hosts.info', { host, port }); }
     async hostsRemove(host, port = 22) { return this.call('hosts.remove', { host, port }, 'POST'); }
+    async hostsUpdate(host, port = 22) { return this.call('hosts.update', { host, port }, 'POST'); }
     async hostsClear() { return this.call('hosts.clear', {}, 'POST'); }
 }
 

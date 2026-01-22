@@ -4164,7 +4164,16 @@ async function loadSecurityPage() {
                         <input type="text" id="keygen-comment" placeholder="如: TianShanOS@device">
                     </div>
                     <div class="form-group">
+                        <label>别名 (可选)</label>
+                        <input type="text" id="keygen-alias" placeholder="用于替代密钥 ID 显示">
+                        <div style="font-size:0.85em;color:#666;margin-top:4px">💡 启用「隐藏密钥」时建议填写，用于显示</div>
+                    </div>
+                    <div class="form-group">
                         <label><input type="checkbox" id="keygen-exportable"> 允许导出私钥</label>
+                    </div>
+                    <div class="form-group">
+                        <label><input type="checkbox" id="keygen-hidden"> 隐藏密钥 ID</label>
+                        <div style="font-size:0.85em;color:#666;margin-top:4px">🔒 启用后，低权限用户无法看到真实的密钥 ID</div>
                     </div>
                     <div class="form-actions">
                         <button class="btn" onclick="hideGenerateKeyModal()">取消</button>
@@ -4266,11 +4275,11 @@ async function loadSecurityPage() {
                         <input type="text" id="mismatch-current-fp" readonly style="background:#fff3cd;font-family:monospace;font-size:12px">
                     </div>
                     <p style="color:#856404;background:#fff3cd;padding:10px;border-radius:4px">
-                        <strong>建议</strong>：如果您确认服务器已重装或密钥已更新，可以先删除旧的主机记录后重新连接。
+                        <strong>建议</strong>：如果您确认服务器已重装或密钥已更新，可以点击"更新主机密钥"移除旧记录，然后重新连接以信任新密钥。
                     </p>
                     <div class="form-actions">
-                        <button class="btn" onclick="hideHostMismatchModal()">关闭</button>
-                        <button class="btn btn-warning" onclick="removeAndRetry()">删除旧记录并重试</button>
+                        <button class="btn" onclick="hideHostMismatchModal()">取消</button>
+                        <button class="btn btn-warning" onclick="removeAndRetry()">🔄 更新主机密钥</button>
                     </div>
                 </div>
             </div>
@@ -4294,16 +4303,26 @@ async function refreshSecurityPage() {
                 keys.data.keys.forEach(key => {
                     const option = document.createElement('option');
                     option.value = key.id;
-                    option.textContent = `${key.id} (${key.type_desc || key.type})`;
+                    // 隐藏密钥显示别名或掩码 ID，否则显示真实 ID
+                    const displayName = (key.hidden && key.alias) ? key.alias : key.id;
+                    option.textContent = `${key.hidden ? '🔒 ' : ''}${displayName} (${key.type_desc || key.type})`;
                     sshKeySelect.appendChild(option);
                 });
             }
         }
         
         if (keys.data?.keys && keys.data.keys.length > 0) {
-            tbody.innerHTML = keys.data.keys.map(key => `
+            tbody.innerHTML = keys.data.keys.map(key => {
+                // 隐藏密钥显示别名，否则显示真实 ID
+                const displayId = (key.hidden && key.alias) ? key.alias : key.id;
+                const hiddenIcon = key.hidden ? '🔒 ' : '';
+                
+                return `
                 <tr>
-                    <td><code>${escapeHtml(key.id)}</code></td>
+                    <td>
+                        <code>${hiddenIcon}${escapeHtml(displayId)}</code>
+                        ${key.alias && !key.hidden ? `<div style="font-size:0.85em;color:#666;margin-top:2px">${escapeHtml(key.alias)}</div>` : ''}
+                    </td>
                     <td>${escapeHtml(key.type_desc || key.type)}</td>
                     <td>${escapeHtml(key.comment) || '-'}</td>
                     <td>${formatTimestamp(key.created)}</td>
@@ -4316,7 +4335,8 @@ async function refreshSecurityPage() {
                         <button class="btn btn-small btn-danger" onclick="deleteKey('${escapeHtml(key.id)}')">🗑️ 删除</button>
                     </td>
                 </tr>
-            `).join('');
+                `;
+            }).join('');
         } else {
             tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#888">暂无密钥，点击上方按钮生成新密钥</td></tr>';
         }
@@ -4392,6 +4412,29 @@ async function testSsh(e) {
     
     try {
         const result = await api.sshTest(host, user, auth, port);
+        
+        // 检查 API 返回的 code（非 HTTP 状态码）
+        if (result.code === 1001) {
+            // 主机指纹不匹配 - 显示警告模态框
+            showHostMismatchModal(result.data || {
+                host,
+                port,
+                current_fingerprint: result.data?.current_fingerprint || '未知',
+                stored_fingerprint: result.data?.stored_fingerprint || '未知'
+            });
+            resultBox.textContent = '⚠️ 主机指纹不匹配! 可能存在中间人攻击风险';
+            resultBox.classList.add('error');
+            return;
+        }
+        
+        if (result.code === 1002) {
+            // 新主机需要确认（trust_new=false 时）
+            resultBox.textContent = '🆕 新主机: ' + (result.data?.fingerprint || '');
+            resultBox.classList.add('warning');
+            return;
+        }
+        
+        // 检查连接结果
         if (result.data?.success) {
             // 显示指纹信息
             let msg = `✅ 连接成功! (${authType === 'password' ? '密码' : '密钥'}认证)`;
@@ -4404,29 +4447,14 @@ async function testSsh(e) {
             resultBox.textContent = msg;
             resultBox.classList.add('success');
         } else {
-            resultBox.textContent = '❌ 连接失败: ' + (result.data?.error || '未知错误');
+            resultBox.textContent = '❌ 连接失败: ' + (result.data?.error || result.message || '未知错误');
             resultBox.classList.add('error');
         }
     } catch (e) {
-        // 检查是否是主机指纹问题
-        if (e.code === 1001) {
-            // 主机指纹不匹配 - 警告用户
-            showHostMismatchModal(e.data || {
-                host,
-                port,
-                current_fingerprint: e.data?.current_fingerprint || '未知',
-                stored_fingerprint: e.data?.stored_fingerprint || '未知'
-            });
-            resultBox.textContent = '⚠️ 主机指纹不匹配! 可能存在中间人攻击风险';
-            resultBox.classList.add('error');
-        } else if (e.code === 1002) {
-            // 新主机需要确认（trust_new=false 时）
-            resultBox.textContent = '🆕 新主机: ' + (e.data?.fingerprint || '');
-            resultBox.classList.add('warning');
-        } else {
-            resultBox.textContent = '❌ 连接失败: ' + e.message;
-            resultBox.classList.add('error');
-        }
+        // 网络错误或其他异常
+        console.error('SSH test error:', e);
+        resultBox.textContent = '❌ 连接失败: ' + e.message;
+        resultBox.classList.add('error');
     }
 }
 
@@ -4759,12 +4787,13 @@ async function removeAndRetry() {
     if (!currentMismatchInfo) return;
     
     try {
-        await api.hostsRemove(currentMismatchInfo.host, currentMismatchInfo.port || 22);
-        showToast('已删除旧的主机记录，请重新连接', 'success');
+        // 使用新的 hosts.update API 更新主机密钥
+        await api.hostsUpdate(currentMismatchInfo.host, currentMismatchInfo.port || 22);
+        showToast('旧主机密钥已移除，请重新连接以信任新密钥', 'success');
         hideHostMismatchModal();
         await refreshSecurityPage();
     } catch (e) {
-        showToast('删除失败: ' + e.message, 'error');
+        showToast('更新失败: ' + e.message, 'error');
     }
 }
 
@@ -4808,7 +4837,9 @@ async function generateKey() {
     const id = document.getElementById('keygen-id').value.trim();
     const type = document.getElementById('keygen-type').value;
     const comment = document.getElementById('keygen-comment').value.trim();
+    const alias = document.getElementById('keygen-alias').value.trim();
     const exportable = document.getElementById('keygen-exportable').checked;
+    const hidden = document.getElementById('keygen-hidden').checked;
     
     if (!id) {
         showToast('请输入密钥 ID', 'error');
@@ -4817,9 +4848,9 @@ async function generateKey() {
     
     try {
         showToast('正在生成密钥...', 'info');
-        await api.keyGenerate(id, type, comment, exportable);
+        await api.keyGenerate(id, type, comment, exportable, alias, hidden);
         hideGenerateKeyModal();
-        showToast(`密钥 "${id}" 生成成功`, 'success');
+        showToast(`密钥 "${alias || id}" 生成成功`, 'success');
         await refreshSecurityPage();
     } catch (e) {
         showToast('生成失败: ' + e.message, 'error');

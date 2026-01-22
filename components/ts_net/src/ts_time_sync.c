@@ -124,17 +124,24 @@ esp_err_t ts_time_sync_start_ntp(void)
         return ESP_ERR_INVALID_ARG;
     }
     
-    ESP_LOGI(TAG, "Starting NTP sync with %s", s_time_sync.ntp_server1);
+    ESP_LOGI(TAG, "Starting NTP sync with primary: %s, secondary: %s", 
+             s_time_sync.ntp_server1, 
+             s_time_sync.ntp_server2[0] ? s_time_sync.ntp_server2 : "none");
     
     /* 配置 SNTP */
     esp_sntp_config_t sntp_config = ESP_NETIF_SNTP_DEFAULT_CONFIG(s_time_sync.ntp_server1);
     sntp_config.sync_cb = time_sync_notification_cb;
     
-    /* 如果有第二个服务器 */
+    /* 配置第二个服务器（如果有）*/
     if (s_time_sync.ntp_server2[0]) {
         sntp_config.num_of_servers = 2;
-        /* 注意：ESP-IDF SNTP 配置需要特殊处理多服务器 */
+        sntp_config.servers[0] = s_time_sync.ntp_server1;
+        sntp_config.servers[1] = s_time_sync.ntp_server2;
     }
+    
+    /* 不阻塞等待同步，服务器可能在启动初期不可用 */
+    sntp_config.start = true;
+    sntp_config.wait_for_sync = false;
     
     esp_err_t ret = esp_netif_sntp_init(&sntp_config);
     if (ret != ESP_OK) {
@@ -145,7 +152,7 @@ esp_err_t ts_time_sync_start_ntp(void)
     s_time_sync.ntp_started = true;
     s_time_sync.info.status = TS_TIME_SYNC_IN_PROGRESS;
     
-    ESP_LOGI(TAG, "NTP synchronization started");
+    ESP_LOGI(TAG, "NTP synchronization started (retry enabled for unreliable servers)");
     return ESP_OK;
 }
 

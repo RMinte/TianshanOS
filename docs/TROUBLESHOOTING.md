@@ -900,3 +900,366 @@ function uploadOta() {
 1. **定时器 ID 必须正确保存和清除**：避免内存泄漏和逻辑错误
 2. **长时间操作需要 keepalive**：HTTP 连接可能超时，需要定期发送请求保活
 3. **前端状态管理要清晰**：使用明确的变量跟踪 OTA 阶段（idle/app/www）
+
+---
+
+## 9. SSH 功能问题与调试
+
+### 9.1 已知主机列表初始为空
+
+**症状**：
+- WebUI "安全管理"页面打开时，"已知主机"列表为空
+- SSH 连接失败后刷新页面，列表突然显示出主机记录
+- 日志显示 NVS 中确实存储了主机密钥
+
+**根本原因**：
+
+`ts_known_hosts` 模块采用**延迟初始化**策略：
+- 只在第一次调用 `ts_known_hosts_verify()` 时初始化
+- 安全服务启动时未主动初始化
+- 导致 `ts_known_hosts_list()` 返回 `ESP_ERR_INVALID_STATE`
+
+**解决方案**：
+
+在安全服务初始化时主动调用 `ts_known_hosts_init()`：
+
+**文件**：[main/ts_services.c](../main/ts_services.c)
+```c
+static esp_err_t security_service_init(ts_service_handle_t handle, void *user_data)
+{
+    // ... 其他初始化 ...
+    
+    /* 初始化已知主机管理 */
+    ret = ts_known_hosts_init();
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to init known hosts: %s", esp_err_to_name(ret));
+    }
+    
+    return ESP_OK;
+}
+```
+
+**调试日志**：
+```c
+// ts_known_hosts.c
+ESP_LOGI(TAG, "Listing known hosts, max_hosts=%zu", max_hosts);
+ESP_LOGI(TAG, "NVS iterator result: %s", esp_err_to_name(ret));
+ESP_LOGI(TAG, "Found NVS entry: key='%s', type=%d", info.key, info.type);
+ESP_LOGI(TAG, "Returning %zu known hosts", *count);
+
+// ts_api_hosts.c
+TS_LOGI(TAG, "API: hosts.list called");
+TS_LOGI(TAG, "API: ts_known_hosts_list returned %s, count=%zu", esp_err_to_name(ret), count);
+```
+
+---
+
+### 9.2 SSH 测试密钥不匹配时显示"未知错误"
+
+**症状**：
+- SSH 连接到主机密钥已变化的服务器
+- 后端正确检测到 HOST KEY MISMATCH
+- WebUI 显示"❌ 连接失败: 未知错误"，未弹出警告模态框
+
+**根本原因**：
+
+前端代码逻辑错误，未检查应用层错误码：
+```javascript
+// ❌ 错误的逻辑
+try {
+    const result = await api.sshTest(...);
+    if (result.data?.success) {
+        // 成功
+    } else {
+        // ❌ 进入这里，显示"未知错误"
+        resultBox.textContent = '❌ 连接失败: ' + (result.data?.error || '未知错误');
+    }
+} catch (e) {
+    // ❌ 期望在这里检查 e.code === 1001，但实际没有抛出异常
+    if (e.code === 1001) {
+        showHostMismatchModal(...);
+    }
+}
+```
+
+**问题分析**：
+- 后端返回 HTTP 200（成功），`result.code = 1001`（应用层错误码）
+- 前端没有检查 `result.code`，直接进入 `else` 分支
+- `catch` 块只处理真正的网络异常，不会执行
+
+**解决方案**：
+
+修改前端逻辑，先检查 `result.code`：
+
+**文件**：[components/ts_webui/web/js/app.js](../components/ts_webui/web/js/app.js)
+```javascript
+try {
+    const result = await api.sshTest(host, user, auth, port);
+    
+    // ✅ 先检查应用层错误码
+    if (result.code === 1001) {
+        // 主机指纹不匹配
+        showHostMismatchModal(result.data || { ... });
+        resultBox.textContent = '⚠️ 主机指纹不匹配! 可能存在中间人攻击风险';
+        resultBox.classList.add('error');
+        return;
+    }
+    
+    if (result.code === 1002) {
+        // 新主机需要确认
+        resultBox.textContent = '🆕 新主机: ' + (result.data?.fingerprint || '');
+        resultBox.classList.add('warning');
+        return;
+    }
+    
+    // 检查连接结果
+    if (result.data?.success) {
+        // 成功
+    } else {
+        resultBox.textContent = '❌ 连接失败: ' + (result.data?.error || result.message || '未知错误');
+    }
+} catch (e) {
+    // 只处理真正的网络错误
+    console.error('SSH test error:', e);
+    resultBox.textContent = '❌ 连接失败: ' + e.message;
+}
+```
+
+**后端错误处理**：
+
+确保密钥不匹配时返回 HTTP 200（而非 500）：
+
+**文件**：[components/ts_api/src/ts_api_ssh.c](../components/ts_api/src/ts_api_ssh.c)
+```c
+ret = verify_host_fingerprint(session, params, result, &host_info);
+if (ret != ESP_OK) {
+    ts_ssh_disconnect(session);
+    ts_ssh_session_destroy(session);
+    cleanup_key_buffer();
+    
+    // 如果是 MISMATCH 或 NEW_HOST，返回 ESP_OK 让 HTTP 层返回 200
+    // 实际错误信息已在 result 中设置
+    if (result->code == TS_API_ERR_HOST_MISMATCH || 
+        result->code == TS_API_ERR_HOST_NEW) {
+        return ESP_OK;  // HTTP 200，但 result.code 指示实际问题
+    }
+    return ret;
+}
+```
+
+---
+
+### 9.3 主机指纹更新功能
+
+当检测到 SSH 主机密钥不匹配时，允许用户通过 WebUI 一键更新主机密钥。
+
+#### 后端实现
+
+**文件**：[components/ts_api/src/ts_api_hosts.c](../components/ts_api/src/ts_api_hosts.c)
+```c
+/**
+ * @brief hosts.update - Force update a host fingerprint
+ * 
+ * 强制更新已知主机的指纹。用于当服务器重装导致指纹变化时。
+ * 
+ * Params: { "host": "192.168.1.100", "port": 22 }
+ */
+static esp_err_t api_hosts_update(const cJSON *params, ts_api_result_t *result)
+{
+    // ... 参数检查 ...
+    
+    /* 先删除旧的 */
+    esp_err_t ret = ts_known_hosts_remove(host->valuestring, port);
+    if (ret != ESP_OK && ret != ESP_ERR_NOT_FOUND) {
+        ts_api_result_error(result, TS_API_ERR_INTERNAL, "Failed to remove old host key");
+        return ret;
+    }
+    
+    cJSON *data = cJSON_CreateObject();
+    cJSON_AddBoolToObject(data, "updated", true);
+    cJSON_AddStringToObject(data, "message", "Old host key removed. Reconnect to trust the new key.");
+    
+    ts_api_result_ok(result, data);
+    return ESP_OK;
+}
+```
+
+#### 前端实现
+
+**API 客户端**：[components/ts_webui/web/js/api.js](../components/ts_webui/web/js/api.js)
+```javascript
+async hostsUpdate(host, port = 22) { 
+    return this.call('hosts.update', { host, port }, 'POST'); 
+}
+```
+
+**WebUI 交互流程**：
+```javascript
+async function removeAndRetry() {
+    if (!currentMismatchInfo) return;
+    
+    try {
+        // 使用新的 hosts.update API
+        await api.hostsUpdate(currentMismatchInfo.host, currentMismatchInfo.port || 22);
+        showToast('旧主机密钥已移除，请重新连接以信任新密钥', 'success');
+        hideHostMismatchModal();
+        await refreshSecurityPage();
+    } catch (e) {
+        showToast('更新失败: ' + e.message, 'error');
+    }
+}
+```
+
+**使用流程**：
+1. SSH 测试连接到指纹已变化的服务器
+2. 自动弹出警告模态框，显示新旧指纹对比
+3. 点击"🔄 更新主机密钥"按钮
+4. 系统删除旧记录
+5. 重新连接，自动信任新密钥
+
+---
+
+### 9.4 SSH 调试技巧
+
+#### 分层日志追踪
+```
+用户操作 → 前端 API 调用 → 后端 API 处理 → 核心服务 → NVS 存储
+```
+在每一层添加日志，明确数据流向。
+
+#### 错误码设计原则
+- **HTTP 状态码**：传输层错误（200/404/500）
+- **`result.code`**：应用层错误码（0=成功，1001=MISMATCH，1002=NEW_HOST）
+- **前端优先检查应用层错误码**
+
+#### 初始化时机权衡
+- **延迟初始化**：节省资源，但需要处理未初始化状态
+- **主动初始化**：更可靠，适合系统服务
+- **建议**：频繁使用的模块（如 known hosts）采用主动初始化
+
+#### WebUI 调试工具
+- 浏览器开发者工具 Console 查看 API 请求/响应
+- ESP32 串口日志查看后端处理流程
+- WebUI 日志页面实时查看系统日志
+
+---
+
+## 10. SNTP 时钟同步配置问题
+
+### 10.1 SNTP 服务器数量超限错误
+
+**症状**：
+```
+E (2826) esp_netif_sntp: sntp_init_api(48): Tried to configure more servers than enabled in lwip. Please update CONFIG_SNTP_MAX_SERVERS
+E (2838) esp_netif_sntp: esp_netif_sntp_init(119): Failed initialize SNTP service
+E (2845) ts_time_sync: Failed to init SNTP: ESP_ERR_INVALID_ARG
+```
+
+**根本原因**：
+
+ESP-IDF 的 LWIP 配置默认只支持 1 个 SNTP 服务器（`CONFIG_LWIP_SNTP_MAX_SERVERS=1`），但代码尝试配置 2 个服务器。
+
+**解决方案**：
+
+1. **增加 SNTP 服务器配置数量**
+
+**文件**：[sdkconfig.defaults](../sdkconfig.defaults)
+```plaintext
+# SNTP 配置
+CONFIG_LWIP_SNTP_MAX_SERVERS=2
+```
+
+2. **正确配置双服务器**
+
+**文件**：[components/ts_net/src/ts_time_sync.c](../components/ts_net/src/ts_time_sync.c)
+```c
+esp_err_t ts_time_sync_start_ntp(void)
+{
+    // ... 参数检查 ...
+    
+    ESP_LOGI(TAG, "Starting NTP sync with primary: %s, secondary: %s", 
+             s_time_sync.ntp_server1, 
+             s_time_sync.ntp_server2[0] ? s_time_sync.ntp_server2 : "none");
+    
+    /* 配置 SNTP */
+    esp_sntp_config_t sntp_config = ESP_NETIF_SNTP_DEFAULT_CONFIG(s_time_sync.ntp_server1);
+    sntp_config.sync_cb = time_sync_notification_cb;
+    
+    /* 配置第二个服务器（如果有）*/
+    if (s_time_sync.ntp_server2[0]) {
+        sntp_config.num_of_servers = 2;
+        sntp_config.servers[0] = s_time_sync.ntp_server1;
+        sntp_config.servers[1] = s_time_sync.ntp_server2;
+    }
+    
+    /* 配置重试策略：服务器可能在启动初期不可用 */
+    sntp_config.start = true;
+    sntp_config.sync_mode = SNTP_SYNC_MODE_SMOOTH;
+    sntp_config.wait_for_sync = false;  // 不阻塞等待
+    
+    esp_err_t ret = esp_netif_sntp_init(&sntp_config);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to init SNTP: %s", esp_err_to_name(ret));
+        return ret;
+    }
+    
+    s_time_sync.ntp_started = true;
+    s_time_sync.info.status = TS_TIME_SYNC_IN_PROGRESS;
+    
+    ESP_LOGI(TAG, "NTP synchronization started (retry enabled for unreliable servers)");
+    return ESP_OK;
+}
+```
+
+---
+
+### 10.2 SNTP 服务器不可用处理
+
+**场景**：
+- 内网时钟服务器（10.10.99.99、10.10.99.98）可能在启动前 100 秒内不在线
+- 服务器可能长期不可用
+
+**处理策略**：
+
+1. **不阻塞启动**：`wait_for_sync = false`，允许系统在时间未同步时继续运行
+2. **平滑同步模式**：`SNTP_SYNC_MODE_SMOOTH`，时间调整更平滑
+3. **自动重试**：SNTP 库会自动重试连接不可用的服务器
+4. **双服务器冗余**：配置两个服务器，提高可用性
+
+**用户操作**：
+- 通过 WebUI "系统时间"功能手动设置时间
+- 或使用"浏览器同步"功能从客户端获取时间
+- 时钟服务器恢复后会自动同步
+
+**日志示例**：
+```
+I (2820) ts_time_sync: Starting NTP sync with primary: 10.10.99.99, secondary: 10.10.99.98
+I (2825) ts_time_sync: NTP synchronization started (retry enabled for unreliable servers)
+W (5000) ts_time_sync: NTP sync timeout, will retry...
+I (65000) ts_time_sync: Time synchronized from 10.10.99.99
+```
+
+---
+
+### 10.3 时间同步最佳实践
+
+| 场景 | 推荐方案 | 说明 |
+|------|---------|------|
+| 内网环境 | 双 NTP 服务器 | 10.10.99.99 + 10.10.99.98 |
+| 互联网环境 | pool.ntp.org | 使用公共 NTP 池 |
+| 离线环境 | 浏览器同步 | WebUI 手动同步时间 |
+| 开发调试 | 禁用 NTP | 避免启动延迟 |
+
+**配置示例**：
+
+```bash
+# CLI 配置 NTP 服务器
+config --set time.ntp1 --value 10.10.99.99 --persist
+config --set time.ntp2 --value 10.10.99.98 --persist
+
+# 启动 NTP 同步
+system --time --sync-ntp
+
+# 手动设置时间（UTC）
+system --time --set "2026-01-23T15:30:00Z"
+```

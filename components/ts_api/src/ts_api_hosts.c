@@ -24,10 +24,14 @@ static esp_err_t api_hosts_list(const cJSON *params, ts_api_result_t *result)
 {
     (void)params;
     
+    TS_LOGI(TAG, "API: hosts.list called");
+    
     ts_known_host_t hosts[32];
     size_t count = 0;
     
     esp_err_t ret = ts_known_hosts_list(hosts, 32, &count);
+    
+    TS_LOGI(TAG, "API: ts_known_hosts_list returned %s, count=%zu", esp_err_to_name(ret), count);
     
     // 如果模块未初始化，返回空列表而不是错误
     if (ret == ESP_ERR_INVALID_STATE) {
@@ -157,6 +161,49 @@ static esp_err_t api_hosts_remove(const cJSON *params, ts_api_result_t *result)
 }
 
 /**
+ * @brief hosts.update - Force update a host fingerprint
+ * 
+ * 强制更新已知主机的指纹。用于当服务器重装导致指纹变化时。
+ * 
+ * Params: { "host": "192.168.1.100", "port": 22, "fingerprint": "abc123..." }
+ */
+static esp_err_t api_hosts_update(const cJSON *params, ts_api_result_t *result)
+{
+    if (!params) {
+        ts_api_result_error(result, TS_API_ERR_INVALID_ARG, "Missing parameters");
+        return ESP_ERR_INVALID_ARG;
+    }
+    
+    const cJSON *host = cJSON_GetObjectItem(params, "host");
+    if (!host || !cJSON_IsString(host)) {
+        ts_api_result_error(result, TS_API_ERR_INVALID_ARG, "Missing host parameter");
+        return ESP_ERR_INVALID_ARG;
+    }
+    
+    int port = 22;
+    const cJSON *port_json = cJSON_GetObjectItem(params, "port");
+    if (port_json && cJSON_IsNumber(port_json)) {
+        port = port_json->valueint;
+    }
+    
+    /* 先删除旧的 */
+    esp_err_t ret = ts_known_hosts_remove(host->valuestring, port);
+    if (ret != ESP_OK && ret != ESP_ERR_NOT_FOUND) {
+        ts_api_result_error(result, TS_API_ERR_INTERNAL, "Failed to remove old host key");
+        return ret;
+    }
+    
+    cJSON *data = cJSON_CreateObject();
+    cJSON_AddBoolToObject(data, "updated", true);
+    cJSON_AddStringToObject(data, "host", host->valuestring);
+    cJSON_AddNumberToObject(data, "port", port);
+    cJSON_AddStringToObject(data, "message", "Old host key removed. Reconnect to trust the new key.");
+    
+    ts_api_result_ok(result, data);
+    return ESP_OK;
+}
+
+/**
  * @brief hosts.clear - Clear all known hosts
  */
 static esp_err_t api_hosts_clear(const cJSON *params, ts_api_result_t *result)
@@ -202,6 +249,13 @@ esp_err_t ts_api_hosts_register(void)
             .description = "Remove a known host",
             .category = TS_API_CAT_NETWORK,
             .handler = api_hosts_remove,
+            .requires_auth = true,
+        },
+        {
+            .name = "hosts.update",
+            .description = "Force update a host fingerprint",
+            .category = TS_API_CAT_NETWORK,
+            .handler = api_hosts_update,
             .requires_auth = true,
         },
         {
