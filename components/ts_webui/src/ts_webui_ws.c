@@ -579,22 +579,39 @@ static void start_terminal_session(httpd_req_t *req)
     
     // 检查是否有其他终端会话
     if (s_terminal_client_fd >= 0 && s_terminal_client_fd != fd) {
-        cJSON *err = cJSON_CreateObject();
-        cJSON_AddStringToObject(err, "type", "error");
-        cJSON_AddStringToObject(err, "message", "Another terminal session is active");
-        char *json = cJSON_PrintUnformatted(err);
-        cJSON_Delete(err);
-        
-        if (json) {
-            httpd_ws_frame_t ws_pkt = {
-                .type = HTTPD_WS_TYPE_TEXT,
-                .payload = (uint8_t *)json,
-                .len = strlen(json)
-            };
-            httpd_ws_send_frame(req, &ws_pkt);
-            free(json);
+        // 检查旧的终端 fd 是否还在活跃客户端列表中
+        bool old_fd_active = false;
+        for (int i = 0; i < MAX_WS_CLIENTS; i++) {
+            if (s_clients[i].active && s_clients[i].fd == s_terminal_client_fd) {
+                old_fd_active = true;
+                break;
+            }
         }
-        return;
+        
+        // 如果旧的 fd 已经不活跃（例如页面刷新），强制清理
+        if (!old_fd_active) {
+            TS_LOGW(TAG, "Terminal session orphaned (fd=%d), cleaning up", s_terminal_client_fd);
+            ts_console_clear_output_cb();
+            s_terminal_client_fd = -1;
+        } else {
+            // 旧的会话仍然活跃，拒绝新会话
+            cJSON *err = cJSON_CreateObject();
+            cJSON_AddStringToObject(err, "type", "error");
+            cJSON_AddStringToObject(err, "message", "Another terminal session is active");
+            char *json = cJSON_PrintUnformatted(err);
+            cJSON_Delete(err);
+            
+            if (json) {
+                httpd_ws_frame_t ws_pkt = {
+                    .type = HTTPD_WS_TYPE_TEXT,
+                    .payload = (uint8_t *)json,
+                    .len = strlen(json)
+                };
+                httpd_ws_send_frame(req, &ws_pkt);
+                free(json);
+            }
+            return;
+        }
     }
     
     // 设置为终端客户端
