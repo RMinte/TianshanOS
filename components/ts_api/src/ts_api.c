@@ -279,6 +279,7 @@ esp_err_t ts_api_call(const char *name, const cJSON *params, ts_api_result_t *re
     api_entry_t *entry = find_endpoint(name);
     if (entry == NULL) {
         xSemaphoreGive(s_api.mutex);
+        TS_LOGW(TAG, "API not found: %s (total registered: %d)", name, (int)s_api.endpoint_count);
         ts_api_result_error(result, TS_API_ERR_NOT_FOUND, "API not found");
         return ESP_ERR_NOT_FOUND;
     }

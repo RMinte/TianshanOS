@@ -204,6 +204,9 @@ static char s_current_qrcode[3][128] = {{0}, {0}, {0}};
 static char s_current_qrcode_bg[3][128] = {{0}, {0}, {0}};
 static char s_current_text[3][64] = {{0}, {0}, {0}};
 
+/* 滤镜配置存储（每设备一个） */
+static ts_led_effect_config_t s_current_filter_config[3] = {0};
+
 /* 延迟加载图像的定时器 */
 static esp_timer_handle_t s_delayed_image_timer = NULL;
 static char s_delayed_image_path[128] = {0};
@@ -211,13 +214,14 @@ static int s_delayed_device_idx = -1;
 static uint8_t s_delayed_brightness = 128;
 
 /**
- * @brief 根据 filter 名称应用后处理效果到 layer
+ * @brief 根据 filter 名称和保存的参数应用后处理效果到 layer
  */
-static void apply_filter_to_layer(ts_led_layer_t layer, const char *filter)
+static void apply_filter_to_layer_with_params(ts_led_layer_t layer, const char *filter, int dev_idx)
 {
-    if (!layer || !filter || !filter[0]) return;
+    if (!layer || !filter || !filter[0] || dev_idx < 0 || dev_idx >= 3) return;
     
-    ts_led_effect_config_t cfg = {0};
+    ts_led_effect_config_t cfg = s_current_filter_config[dev_idx];  // 使用保存的配置
+    cfg.type = TS_LED_EFFECT_NONE;  // 先重置 type
     
     if (strcmp(filter, "pulse") == 0) {
         cfg.type = TS_LED_EFFECT_PULSE;
@@ -238,24 +242,43 @@ static void apply_filter_to_layer(ts_led_layer_t layer, const char *filter)
         cfg.params.color_shift.speed = 90.0f;
     } else if (strcmp(filter, "scanline") == 0) {
         cfg.type = TS_LED_EFFECT_SCANLINE;
-        cfg.params.scanline.speed = 50.0f;
-        cfg.params.scanline.width = 3;
-        cfg.params.scanline.direction = TS_LED_EFFECT_DIR_HORIZONTAL;
-        cfg.params.scanline.intensity = 200;
+        // 使用保存的参数，如果参数为0则使用默认值
+        if (cfg.params.scanline.speed == 0) cfg.params.scanline.speed = 50.0f;
+        if (cfg.params.scanline.width == 0) cfg.params.scanline.width = 3;
+        if (cfg.params.scanline.intensity == 0) cfg.params.scanline.intensity = 200;
     } else if (strcmp(filter, "wave") == 0) {
         cfg.type = TS_LED_EFFECT_WAVE;
-        cfg.params.wave.speed = 50.0f;
-        cfg.params.wave.wavelength = 8.0f;
-        cfg.params.wave.amplitude = 128;
-        cfg.params.wave.direction = TS_LED_EFFECT_DIR_HORIZONTAL;
+        if (cfg.params.wave.speed == 0) cfg.params.wave.speed = 50.0f;
+        if (cfg.params.wave.wavelength == 0) cfg.params.wave.wavelength = 8.0f;
+        if (cfg.params.wave.amplitude == 0) cfg.params.wave.amplitude = 128;
     } else if (strcmp(filter, "glitch") == 0) {
         cfg.type = TS_LED_EFFECT_GLITCH;
-        cfg.params.glitch.intensity = 50;
-        cfg.params.glitch.frequency = 10;
+        if (cfg.params.glitch.intensity == 0) cfg.params.glitch.intensity = 50;
+        if (cfg.params.glitch.frequency == 0) cfg.params.glitch.frequency = 10;
     } else if (strcmp(filter, "grayscale") == 0) {
         cfg.type = TS_LED_EFFECT_GRAYSCALE;
     } else if (strcmp(filter, "invert") == 0) {
         cfg.type = TS_LED_EFFECT_INVERT;
+    } else if (strcmp(filter, "rainbow") == 0) {
+        cfg.type = TS_LED_EFFECT_RAINBOW;
+        if (cfg.params.rainbow.speed == 0) cfg.params.rainbow.speed = 50.0f;
+        if (cfg.params.rainbow.saturation == 0) cfg.params.rainbow.saturation = 255;
+    } else if (strcmp(filter, "sparkle") == 0) {
+        cfg.type = TS_LED_EFFECT_SPARKLE;
+        if (cfg.params.sparkle.density == 0) cfg.params.sparkle.density = 50;
+        if (cfg.params.sparkle.decay == 0) cfg.params.sparkle.decay = 230;
+    } else if (strcmp(filter, "plasma") == 0) {
+        cfg.type = TS_LED_EFFECT_PLASMA;
+        if (cfg.params.plasma.speed == 0) cfg.params.plasma.speed = 5.0f;
+        if (cfg.params.plasma.scale == 0) cfg.params.plasma.scale = 20;
+    } else if (strcmp(filter, "sepia") == 0) {
+        cfg.type = TS_LED_EFFECT_SEPIA;
+    } else if (strcmp(filter, "posterize") == 0) {
+        cfg.type = TS_LED_EFFECT_POSTERIZE;
+        if (cfg.params.posterize.levels == 0) cfg.params.posterize.levels = 4;
+    } else if (strcmp(filter, "contrast") == 0) {
+        cfg.type = TS_LED_EFFECT_CONTRAST;
+        if (cfg.params.contrast.amount == 0) cfg.params.contrast.amount = 50;
     }
     
     if (cfg.type != TS_LED_EFFECT_NONE) {
@@ -319,7 +342,7 @@ static void delayed_image_load_callback(void *arg)
             
             // 应用之前保存的 filter（如果有）
             if (s_current_filter[s_delayed_device_idx][0]) {
-                apply_filter_to_layer(layer, s_current_filter[s_delayed_device_idx]);
+                apply_filter_to_layer_with_params(layer, s_current_filter[s_delayed_device_idx], s_delayed_device_idx);
                 TS_LOGI(TAG, "Applied filter '%s' to %s", 
                         s_current_filter[s_delayed_device_idx], device_name);
             }
@@ -394,7 +417,18 @@ void ts_led_preset_set_current_filter(const char *device_name, const char *filte
         } else {
             s_current_filter[idx][0] = '\0';
             s_current_filter_speed[idx] = 50;
+            memset(&s_current_filter_config[idx], 0, sizeof(s_current_filter_config[idx]));
         }
+    }
+}
+
+/* 设置当前滤镜的完整配置（供API调用） */
+void ts_led_preset_set_current_filter_config(const char *device_name, const ts_led_effect_config_t *config)
+{
+    int idx = get_device_index(device_name);
+    if (idx >= 0 && config) {
+        s_current_filter_config[idx] = *config;
+        TS_LOGI(TAG, "Updated filter config for %s: type=%d", device_name, config->type);
     }
 }
 
@@ -574,6 +608,16 @@ esp_err_t ts_led_save_boot_config(const char *device_name)
     snprintf(key, sizeof(key), "%s.fsp", nvs_prefix);
     nvs_set_u8(nvs, key, s_current_filter_speed[idx]);
     
+    // 保存滤镜配置（作为 blob）
+    snprintf(key, sizeof(key), "%s.fpm", nvs_prefix);
+    if (s_current_filter[idx][0]) {
+        esp_err_t blob_ret = nvs_set_blob(nvs, key, &s_current_filter_config[idx], sizeof(ts_led_effect_config_t));
+        TS_LOGI(TAG, "Saving filter config for %s: filter='%s', type=%d, ret=%s",
+                device_name, s_current_filter[idx], s_current_filter_config[idx].type, esp_err_to_name(blob_ret));
+    } else {
+        nvs_erase_key(nvs, key);  // 无滤镜时删除参数
+    }
+    
     // 提交更改
     ret = nvs_commit(nvs);
     nvs_close(nvs);
@@ -737,6 +781,20 @@ esp_err_t ts_led_load_boot_config(const char *device_name)
             size_t flt_len = sizeof(filter);
             bool has_filter = (nvs_get_str(nvs, key, filter, &flt_len) == ESP_OK && filter[0]);
             
+            // 读取滤镜配置（如果有）
+            if (has_filter) {
+                snprintf(key, sizeof(key), "%s.fpm", nvs_prefix);
+                size_t config_len = sizeof(ts_led_effect_config_t);
+                esp_err_t blob_ret = nvs_get_blob(nvs, key, &s_current_filter_config[idx], &config_len);
+                if (blob_ret == ESP_OK) {
+                    TS_LOGI(TAG, "Loaded filter config for %s: filter='%s', type=%d, config_len=%d",
+                            device_name, filter, s_current_filter_config[idx].type, config_len);
+                } else {
+                    TS_LOGW(TAG, "Failed to load filter config for %s: %s", device_name, esp_err_to_name(blob_ret));
+                    memset(&s_current_filter_config[idx], 0, sizeof(ts_led_effect_config_t));
+                }
+            }
+            
             nvs_close(nvs);
             
             // 加载背景图（如果有）
@@ -777,7 +835,7 @@ esp_err_t ts_led_load_boot_config(const char *device_name)
                     ts_led_layer_t layer = ts_led_layer_get(dev, 0);
                     if (layer) {
                         strncpy(s_current_filter[idx], filter, sizeof(s_current_filter[idx]) - 1);
-                        apply_filter_to_layer(layer, filter);
+                        apply_filter_to_layer_with_params(layer, filter, idx);
                     }
                 }
                 
@@ -803,6 +861,15 @@ esp_err_t ts_led_load_boot_config(const char *device_name)
         char filter[32] = {0};
         size_t flt_len = sizeof(filter);
         bool has_filter = (nvs_get_str(nvs, key, filter, &flt_len) == ESP_OK && filter[0]);
+        
+        // 读取滤镜配置（如果有）
+        if (has_filter) {
+            snprintf(key, sizeof(key), "%s.fpm", nvs_prefix);
+            size_t config_len = sizeof(ts_led_effect_config_t);
+            if (nvs_get_blob(nvs, key, &s_current_filter_config[idx], &config_len) != ESP_OK) {
+                memset(&s_current_filter_config[idx], 0, sizeof(ts_led_effect_config_t));
+            }
+        }
         
         nvs_close(nvs);
         
@@ -864,7 +931,7 @@ esp_err_t ts_led_load_boot_config(const char *device_name)
                 // 应用 filter（如果有）
                 if (has_filter) {
                     strncpy(s_current_filter[idx], filter, sizeof(s_current_filter[idx]) - 1);
-                    apply_filter_to_layer(layer, filter);
+                    apply_filter_to_layer_with_params(layer, filter, idx);
                     TS_LOGI(TAG, "Applied filter '%s' to %s", filter, device_name);
                 }
             } else {
@@ -905,6 +972,15 @@ esp_err_t ts_led_load_boot_config(const char *device_name)
         size_t flt_len = sizeof(filter);
         bool has_filter = (nvs_get_str(nvs, key, filter, &flt_len) == ESP_OK && filter[0]);
         
+        // 读取滤镜配置（如果有）
+        if (has_filter) {
+            snprintf(key, sizeof(key), "%s.fpm", nvs_prefix);
+            size_t config_len = sizeof(ts_led_effect_config_t);
+            if (nvs_get_blob(nvs, key, &s_current_filter_config[idx], &config_len) != ESP_OK) {
+                memset(&s_current_filter_config[idx], 0, sizeof(ts_led_effect_config_t));
+            }
+        }
+        
         nvs_close(nvs);
         
         // 启动动画
@@ -930,7 +1006,7 @@ esp_err_t ts_led_load_boot_config(const char *device_name)
                 // 应用后处理效果（如果有）
                 if (has_filter) {
                     strncpy(s_current_filter[idx], filter, sizeof(s_current_filter[idx]) - 1);
-                    apply_filter_to_layer(layer, filter);
+                    apply_filter_to_layer_with_params(layer, filter, idx);
                     TS_LOGI(TAG, "Restored %s: animation=%s, filter=%s, speed=%d, brightness=%d",
                             device_name, animation, filter, (int)speed, (int)brightness);
                 } else if (has_color) {

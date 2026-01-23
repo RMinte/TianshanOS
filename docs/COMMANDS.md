@@ -222,6 +222,14 @@ led [options]
 | `--stop-filter` | | 停止后处理效果 |
 | `--list-filters` | | 列出可用后处理效果 |
 | `--filter-name <name>` | | 后处理效果名称 |
+| `--speed <1-100>` | | 速度参数（适用于大部分 filter） |
+| `--intensity <0-255>` | | 强度参数（scanline, glitch） |
+| `--width <1-16>` | | 宽度参数（scanline） |
+| `--angle <0-360>` | | 角度参数（scanline, wave），0°=水平，90°=垂直 |
+| `--wavelength <1-32>` | | 波长参数（wave） |
+| `--amplitude <0-255>` | | 振幅参数（wave） |
+| `--density <0-255>` | | 密度参数（sparkle） |
+| `--decay <0-255>` | | 衰减参数（sparkle） |
 | `--image` | | 显示图像/动画（仅 matrix） |
 | `--draw-text` | | 绘制文本到 matrix（仅 matrix） |
 | `--stop-text` | | 停止文本覆盖层 |
@@ -315,20 +323,27 @@ TianShanOS LED 系统区分两类效果：
 
 Filter 是叠加在内容之上的后处理效果，可与 Animation 或 Image 组合使用：
 
-| 效果名 | 说明 |
-|--------|------|
-| `pulse` | 脉冲亮度（正弦波调节） |
-| `blink` | 开关闪烁 |
-| `breathing` | 平滑呼吸效果 |
-| `fade-in` | 淡入（一次性） |
-| `fade-out` | 淡出（一次性） |
-| `color-shift` | 色相旋转 |
-| `saturation` | 饱和度调整 |
-| `invert` | 反色 |
-| `grayscale` | 灰度转换 |
-| `scanline` | 扫描线效果 |
-| `wave` | 亮度波浪 |
-| `glitch` | 随机故障效果 |
+| 效果名 | 说明 | 主要参数 |
+|--------|------|----------|
+| `pulse` | 脉冲亮度（正弦波调节） | `--speed` |
+| `blink` | 开关闪烁 | `--speed` |
+| `breathing` | 平滑呼吸效果 | `--speed` |
+| `fade-in` | 淡入（一次性） | `--speed` |
+| `fade-out` | 淡出（一次性） | `--speed` |
+| `color-shift` | 色相旋转 | `--speed` |
+| `saturation` | 饱和度调整 | - |
+| `invert` | 反色 | - |
+| `grayscale` | 灰度转换 | - |
+| `scanline` | 扫描线效果 | `--speed`, `--angle` (0-360°), `--width` (1-16), `--intensity` (0-255) |
+| `wave` | 亮度波浪 | `--speed`, `--angle` (0-360°), `--wavelength` (1-32), `--amplitude` (0-255) |
+| `sparkle` | 闪耀效果 | `--speed` (0.1-100，推荐1-10), `--density` (0-255), `--decay` (0-255) |
+| `glitch` | 随机故障效果 | `--intensity`, `--frequency` |
+
+**参数说明**：
+- **angle**：0°=水平向右，90°=垂直向上，支持0-360°任意角度
+- **amplitude**：波浪亮度变化幅度，推荐50-200
+- **density**：同时闪烁的像素数量，推荐50-150
+- **decay**：余晖衰减速度，值越大衰减越快，推荐100-200
 
 ### 颜色格式
 
@@ -431,6 +446,21 @@ led --filter --device matrix --filter-name pulse           # 应用脉冲效果
 led --filter --device matrix --filter-name pulse --speed 80  # 带速度参数
 led --filter --device matrix --filter-name breathing       # 呼吸效果
 led --filter --device matrix --filter-name color-shift     # 色相旋转
+
+# 扫描线效果（支持0-360°角度）
+led --filter --device matrix --filter-name scanline --angle 0    # 水平
+led --filter --device matrix --filter-name scanline --angle 45   # 45°斜向
+led --filter --device matrix --filter-name scanline --angle 90   # 垂直
+led --filter --device matrix --filter-name scanline --angle 0 --width 5 --intensity 200
+
+# 波浪效果（支持任意角度）
+led --filter --device matrix --filter-name wave --angle 0 --amplitude 128
+led --filter --device matrix --filter-name wave --angle 90 --wavelength 10 --amplitude 200
+
+# 闪耀效果（优化后的参数控制）
+led --filter --device matrix --filter-name sparkle --speed 1 --density 100 --decay 100   # 极慢
+led --filter --device matrix --filter-name sparkle --speed 5 --density 150 --decay 150   # 推荐值
+led --filter --device matrix --filter-name sparkle --speed 10 --density 200 --decay 200  # 快速
 
 # 组合使用：先启动动画，再叠加后处理效果
 led --effect --device matrix --name fire

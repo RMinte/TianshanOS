@@ -75,7 +75,8 @@ static esp_err_t api_handler(ts_http_request_t *req, void *user_data)
     
     // 日志相关 API 不输出调试日志，避免日志风暴
     if (strncmp(api_name, "log.", 4) != 0) {
-        TS_LOGD(TAG, "API request: uri=%s -> api_name=%s", uri, api_name);
+        TS_LOGI(TAG, "API request: method=%d uri=%s -> api_name=%s", 
+                req->method, uri, api_name);
     }
     
     // TODO: 测试阶段暂时禁用认证检查
@@ -145,6 +146,13 @@ static esp_err_t api_handler(ts_http_request_t *req, void *user_data)
     // Call API
     ts_api_result_t result = {0};
     esp_err_t ret = ts_api_call(api_name, request, &result);
+    
+    // 日志相关 API 不输出调试日志
+    if (strncmp(api_name, "log.", 4) != 0) {
+        TS_LOGI(TAG, "API call result: api=%s ret=%d code=%d msg=%s", 
+                api_name, ret, result.code, result.message ? result.message : "null");
+    }
+    
     cJSON_Delete(request);
     
     if (ret == ESP_OK || result.code == TS_API_OK) {

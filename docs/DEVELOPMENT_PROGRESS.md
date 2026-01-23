@@ -25,6 +25,135 @@
 | Phase 11: OTA 固件升级 | ✅ 完成 | 100% | 2026-01-22 |
 | Phase 12: OTA 增强 & Bug修复 | ✅ 完成 | 100% | 2026-01-23 |
 | Phase 13: 日志系统增强 | ✅ 完成 | 100% | 2026-01-23 |
+| Phase 14: LED 滤镜系统优化 | ✅ 完成 | 100% | 2026-01-23 |
+
+---
+
+## 📋 Phase 14: LED 滤镜系统优化 ✅
+
+**时间**：2026年1月23日  
+**目标**：优化 LED 后处理滤镜系统，增强用户体验
+
+### 已完成功能
+
+#### 1. 滤镜参数持久化 🎯
+- [x] 实现 `ts_led_effect_config_t` 完整参数保存
+- [x] NVS blob 存储（368 bytes per device）
+- [x] 启动自动加载并应用滤镜配置
+- [x] 调试日志完善（save/load 追踪）
+
+**技术细节**：
+```c
+// 全局配置存储
+static ts_led_effect_config_t s_current_filter_config[3];  // touch, board, matrix
+
+// NVS 存储键
+// led.tou.fpm (touch filter params)
+// led.brd.fpm (board filter params)
+// led.mat.fpm (matrix filter params)
+```
+
+#### 2. Scanline 滤镜增强 🌊
+- [x] **离散方向 → 连续角度**：支持 0-360° 任意角度旋转
+- [x] **旋转矩阵算法**：使用向量投影计算扫描线位置
+- [x] **参数增强**：
+  - `width` (1-16): 扫描线宽度，影响光晕范围
+  - `intensity` (0-255): 中心亮度增益，使用二次衰减曲线
+  - `angle` (0-360°): 旋转角度
+- [x] **默认值优化**：width=3, intensity=150
+
+**算法改进**：
+```c
+// 旧算法：4个离散方向（水平/垂直/对角线）
+bool horizontal = (direction == HORIZONTAL);
+float coord = horizontal ? x : y;
+
+// 新算法：任意角度投影
+float angle_rad = angle * M_PI / 180.0f;
+float cos_a = cosf(angle_rad);
+float sin_a = sinf(angle_rad);
+float perp_dist = dx * cos_a + dy * sin_a;
+
+// 增强亮度公式（二次衰减）
+float boost = 1.0 + (intensity/255.0) * 3.0 * fade * fade;
+```
+
+#### 3. Wave 滤镜增强 🌀
+- [x] **方向枚举 → 连续角度**：0-360° 波浪传播方向
+- [x] **向量投影算法**：沿任意角度传播波浪
+- [x] **振幅修正**：amplitude 范围 0-255（修复 WebUI 错误的 1-16px）
+- [x] **默认值优化**：amplitude=128
+
+**Bug 修复**：
+- ❌ 旧问题：WebUI amplitude 默认值为 5，波浪效果几乎不可见
+- ✅ 修复：amplitude=128，效果明显可见
+
+#### 4. Sparkle 滤镜优化 ✨
+- [x] **速度控制优化**：简化概率计算，线性映射
+- [x] **参数影响增强**：
+  - `speed` (0.1-100): 闪烁频率，推荐 1-10
+  - `density` (0-255): 同时闪烁像素数，推荐 50-150
+  - `decay` (0-255): 余晖衰减速度，推荐 100-200
+- [x] **默认值优化**：speed=5, decay=150
+
+**算法简化**：
+```c
+// 旧算法：复杂的平方根映射
+float speed_factor = sqrtf(speed) * 0.1f;
+uint32_t spawn_chance = (uint32_t)(speed_factor * density * 2.56f);
+
+// 新算法：直接线性映射（更直观）
+uint32_t spawn_chance = (uint32_t)(speed * density);
+```
+
+### 三层架构实现
+
+| 层级 | 修改文件 | 关键变更 |
+|------|---------|---------|
+| **Core (ts_led_effect)** | `ts_led_effect.h`, `ts_led_effect.c` | - scanline/wave 结构体改为 `float angle`<br>- 重写旋转投影算法<br>- sparkle 简化概率计算 |
+| **API (ts_api_led)** | `ts_api_led.c` | - 添加 `angle`, `wavelength`, `amplitude` 参数提取<br>- 调整默认值 |
+| **CLI (ts_cmd_led)** | `ts_cmd_led.c` | - `--direction` 参数支持 0-360 角度值<br>- sparkle 速度映射调整 |
+| **WebUI (app.js)** | `app.js` | - filterConfig 参数更新<br>- paramLabels 范围修正<br>- 帮助文本完善 |
+
+### 参数对比表
+
+| 滤镜 | 参数 | 旧范围 | 新范围 | 说明 |
+|------|------|-------|-------|------|
+| **scanline** | direction | 0-3 枚举 | angle: 0-360° | 连续角度旋转 |
+| **scanline** | intensity | - | 0-255 | 二次衰减曲线 |
+| **wave** | direction | 0-3 枚举 | angle: 0-360° | 任意方向传播 |
+| **wave** | amplitude | 1-16 (px) | 0-255 | 修正单位错误 |
+| **sparkle** | speed | 50 默认 | 5 默认 | 更慢的起始速度 |
+| **sparkle** | decay | 230 默认 | 150 默认 | 更明显的余晖 |
+
+### 文档更新
+
+- [x] `docs/COMMANDS.md`：更新 filter 参数说明和示例
+- [x] `docs/LED_ARCHITECTURE.md`：更新 Effect 参数详解
+- [x] `docs/DEVELOPMENT_PROGRESS.md`：添加 Phase 14 记录
+
+### 测试验证
+
+```bash
+# Scanline 角度测试
+led --filter scanline --device matrix --direction 0     # 0° 水平
+led --filter scanline --device matrix --direction 45    # 45° 斜向
+led --filter scanline --device matrix --direction 90    # 90° 垂直
+
+# Wave 角度测试
+led --filter wave --device matrix --direction 90 --amplitude 200
+
+# Sparkle 速度测试
+led --filter sparkle --device matrix --speed 1 --density 100 --decay 100   # 极慢
+led --filter sparkle --device matrix --speed 5 --density 150 --decay 150   # 推荐
+```
+
+### 技术债务
+
+- ✅ 滤镜参数持久化（已解决）
+- ✅ Scanline/Wave 方向灵活性（已解决）
+- ✅ Sparkle 速度控制问题（已解决）
+- ✅ Wave amplitude 参数错误（已解决）
 
 ---
 

@@ -76,6 +76,18 @@ static struct {
     struct arg_str *color_val;
     struct arg_str *effect_name;
     struct arg_int *speed;
+    struct arg_int *intensity;        /**< 滞镜强度/密度参数 (0-100) */
+    struct arg_int *scale;            /**< 滞镜缩放参数 (1-100) */
+    struct arg_int *levels;           /**< 色阶等级 (2-16) */
+    struct arg_int *saturation;       /**< 饱和度 (0-255) */
+    struct arg_int *wavelength;       /**< 波长 (1-32) */
+    struct arg_int *amplitude;        /**< 振幅 (1-16) */
+    struct arg_int *direction;        /**< 方向 (0-3: 横/纵/对角) */
+    struct arg_int *width;            /**< 宽度 (1-8) */
+    struct arg_int *frequency;        /**< 频率 (0-100) */
+    struct arg_int *density;          /**< 密度 (0-100) */
+    struct arg_int *decay;            /**< 衰减 (0-255) */
+    struct arg_int *amount;           /**< 程度/量 (-100 to +100) */
     struct arg_lit *json;
     struct arg_lit *help;
     struct arg_end *end;
@@ -424,6 +436,12 @@ static const struct {
     {"scanline",    TS_LED_EFFECT_SCANLINE,    "Horizontal/vertical scanline"},
     {"wave",        TS_LED_EFFECT_WAVE,        "Brightness wave"},
     {"glitch",      TS_LED_EFFECT_GLITCH,      "Random glitch artifacts"},
+    {"rainbow",     TS_LED_EFFECT_RAINBOW,     "Rainbow color shift"},
+    {"sparkle",     TS_LED_EFFECT_SPARKLE,     "Random sparkles"},
+    {"plasma",      TS_LED_EFFECT_PLASMA,      "Plasma wave effect"},
+    {"sepia",       TS_LED_EFFECT_SEPIA,       "Sepia tone (vintage)"},
+    {"posterize",   TS_LED_EFFECT_POSTERIZE,   "Posterization (color levels)"},
+    {"contrast",    TS_LED_EFFECT_CONTRAST,    "Contrast adjustment"},
     {NULL, 0, NULL}
 };
 
@@ -470,7 +488,21 @@ static int do_led_filter(const char *device_name, const char *filter_name, int s
         return 1;
     }
     
-    // 配置后处理效果
+    // \u83b7\u53d6\u53c2\u6570
+    int intensity = s_led_args.intensity->count > 0 ? s_led_args.intensity->ival[0] : -1;
+    int scale = s_led_args.scale->count > 0 ? s_led_args.scale->ival[0] : -1;
+    int levels = s_led_args.levels->count > 0 ? s_led_args.levels->ival[0] : -1;
+    int saturation = s_led_args.saturation->count > 0 ? s_led_args.saturation->ival[0] : -1;
+    int wavelength = s_led_args.wavelength->count > 0 ? s_led_args.wavelength->ival[0] : -1;
+    int amplitude = s_led_args.amplitude->count > 0 ? s_led_args.amplitude->ival[0] : -1;
+    int direction = s_led_args.direction->count > 0 ? s_led_args.direction->ival[0] : -1;
+    int width = s_led_args.width->count > 0 ? s_led_args.width->ival[0] : -1;
+    int frequency = s_led_args.frequency->count > 0 ? s_led_args.frequency->ival[0] : -1;
+    int density = s_led_args.density->count > 0 ? s_led_args.density->ival[0] : -1;
+    int decay = s_led_args.decay->count > 0 ? s_led_args.decay->ival[0] : -1;
+    int amount = s_led_args.amount->count > 0 ? s_led_args.amount->ival[0] : -1;
+    
+    // \u914d\u7f6e\u540e\u5904\u7406\u6548\u679c
     ts_led_effect_config_t config = {
         .type = type,
         .params = {
@@ -511,15 +543,38 @@ static int do_led_filter(const char *device_name, const char *filter_name, int s
                 break;
             case TS_LED_EFFECT_SCANLINE:
                 config.params.scanline.speed = (float)speed;
-                config.params.scanline.width = 3;
-                config.params.scanline.direction = TS_LED_EFFECT_DIR_HORIZONTAL;
-                config.params.scanline.intensity = 200;
+                config.params.scanline.width = width > 0 ? width : 3;
+                config.params.scanline.angle = direction >= 0 && direction <= 360 ? (float)direction : 0.0f;
+                config.params.scanline.intensity = intensity > 0 ? intensity * 2.55 : 200;
                 break;
             case TS_LED_EFFECT_WAVE:
                 config.params.wave.speed = (float)speed;
-                config.params.wave.wavelength = 8.0f;
-                config.params.wave.amplitude = 128;
-                config.params.wave.direction = TS_LED_EFFECT_DIR_HORIZONTAL;
+                config.params.wave.wavelength = wavelength > 0 ? (float)wavelength : 8.0f;
+                config.params.wave.amplitude = amplitude > 0 ? amplitude * 16 : 128;
+                config.params.wave.angle = direction >= 0 && direction <= 360 ? (float)direction : 0.0f; // 0-360°
+                break;
+            case TS_LED_EFFECT_GLITCH:
+                config.params.glitch.intensity = intensity > 0 ? intensity : speed;
+                config.params.glitch.frequency = frequency > 0 ? frequency * 2.55 : 10;
+                break;
+            case TS_LED_EFFECT_RAINBOW:
+                config.params.rainbow.speed = (float)speed;
+                config.params.rainbow.saturation = saturation > 0 ? saturation : 255;
+                break;
+            case TS_LED_EFFECT_SPARKLE:
+                config.params.sparkle.speed = speed > 0 ? (float)speed * 0.2f : 10.0f;  // CLI速度映射：1-100 → 0.2-20
+                config.params.sparkle.density = density > 0 ? density * 2.55 : (intensity > 0 ? intensity * 2.55 : 127);
+                config.params.sparkle.decay = decay > 0 ? decay : 150;  // 提高decay让余晖更明显
+                break;
+            case TS_LED_EFFECT_PLASMA:
+                config.params.plasma.speed = speed / 10.0f;
+                config.params.plasma.scale = scale > 0 ? scale : 20;
+                break;
+            case TS_LED_EFFECT_POSTERIZE:
+                config.params.posterize.levels = levels > 0 ? levels : (2 + speed * 14 / 100);
+                break;
+            case TS_LED_EFFECT_CONTRAST:
+                config.params.contrast.amount = amount > -101 ? amount : (intensity > 0 ? (intensity - 50) * 2 : (speed - 50) * 2);
                 break;
             default:
                 break;
@@ -553,14 +608,14 @@ static int do_led_filter(const char *device_name, const char *filter_name, int s
             case TS_LED_EFFECT_SCANLINE:
                 config.params.scanline.speed = 50.0f;
                 config.params.scanline.width = 3;
-                config.params.scanline.direction = TS_LED_EFFECT_DIR_HORIZONTAL;
+                config.params.scanline.angle = 0.0f;  // 0° = 水平向右
                 config.params.scanline.intensity = 200;
                 break;
             case TS_LED_EFFECT_WAVE:
                 config.params.wave.speed = 50.0f;
                 config.params.wave.wavelength = 8.0f;
                 config.params.wave.amplitude = 128;
-                config.params.wave.direction = TS_LED_EFFECT_DIR_HORIZONTAL;
+                config.params.wave.angle = 0.0f;  // 0° = 水平向右
                 break;
             case TS_LED_EFFECT_GLITCH:
                 config.params.glitch.intensity = 50;
@@ -2055,6 +2110,18 @@ esp_err_t ts_cmd_led_register(void)
     s_led_args.color_val    = arg_str0(NULL, "color", "<color>", "Color value");
     s_led_args.effect_name  = arg_str0("n", "name", "<effect>", "Effect name");
     s_led_args.speed        = arg_int0(NULL, "speed", "<1-100>", "Effect speed (1=slow, 100=fast)");
+    s_led_args.intensity    = arg_int0(NULL, "intensity", "<0-100>", "Intensity/density (0-100)");
+    s_led_args.scale        = arg_int0(NULL, "scale", "<1-100>", "Scale parameter (1-100)");
+    s_led_args.levels       = arg_int0(NULL, "levels", "<2-16>", "Color levels (2-16)");
+    s_led_args.saturation   = arg_int0(NULL, "saturation", "<0-255>", "Saturation (0-255)");
+    s_led_args.wavelength   = arg_int0(NULL, "wavelength", "<1-32>", "Wave length in pixels (1-32)");
+    s_led_args.amplitude    = arg_int0(NULL, "amplitude", "<1-16>", "Wave amplitude (1-16)");
+    s_led_args.direction    = arg_int0(NULL, "direction", "<0-3>", "Direction: 0=horizontal, 1=vertical, 2/3=diagonal");
+    s_led_args.width        = arg_int0(NULL, "width", "<1-8>", "Line width in pixels (1-8)");
+    s_led_args.frequency    = arg_int0(NULL, "frequency", "<0-100>", "Frequency parameter (0-100)");
+    s_led_args.density      = arg_int0(NULL, "density", "<0-100>", "Density parameter (0-100)");
+    s_led_args.decay        = arg_int0(NULL, "decay", "<0-255>", "Decay/fade speed (0-255)");
+    s_led_args.amount       = arg_int0(NULL, "amount", "<-100 to 100>", "Amount/contrast (-100 to +100)");
     s_led_args.json         = arg_lit0("j", "json", "JSON output");
     s_led_args.help         = arg_lit0("h", "help", "Show help");
     s_led_args.end          = arg_end(32);

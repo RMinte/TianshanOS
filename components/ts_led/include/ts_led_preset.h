@@ -165,6 +165,14 @@ void ts_led_preset_set_current_animation(const char *device_name, const char *an
 void ts_led_preset_set_current_filter(const char *device_name, const char *filter, uint8_t speed);
 
 /**
+ * @brief 设置当前滤镜的完整配置（内部使用，供API调用）
+ * 
+ * @param device_name 设备名
+ * @param config 滤镜配置结构体
+ */
+void ts_led_preset_set_current_filter_config(const char *device_name, const ts_led_effect_config_t *config);
+
+/**
  * @brief 记录当前显示的 QR 码内容（内部使用）
  * 
  * @param device_name 设备名

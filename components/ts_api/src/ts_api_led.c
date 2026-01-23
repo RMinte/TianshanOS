@@ -601,6 +601,12 @@ static const struct {
     {"scanline",    "Horizontal/vertical scanline"},
     {"wave",        "Brightness wave"},
     {"glitch",      "Random glitch artifacts"},
+    {"rainbow",     "Rainbow color cycling"},
+    {"sparkle",     "Sparkling white pixels"},
+    {"plasma",      "Plasma wave effect"},
+    {"sepia",       "Sepia tone filter"},
+    {"posterize",   "Color posterization"},
+    {"contrast",    "Contrast adjustment"},
     {NULL, NULL}
 };
 
@@ -641,6 +647,12 @@ static ts_led_effect_type_t filter_name_to_type(const char *name)
     if (strcmp(name, "scanline") == 0) return TS_LED_EFFECT_SCANLINE;
     if (strcmp(name, "wave") == 0) return TS_LED_EFFECT_WAVE;
     if (strcmp(name, "glitch") == 0) return TS_LED_EFFECT_GLITCH;
+    if (strcmp(name, "rainbow") == 0) return TS_LED_EFFECT_RAINBOW;
+    if (strcmp(name, "sparkle") == 0) return TS_LED_EFFECT_SPARKLE;
+    if (strcmp(name, "plasma") == 0) return TS_LED_EFFECT_PLASMA;
+    if (strcmp(name, "sepia") == 0) return TS_LED_EFFECT_SEPIA;
+    if (strcmp(name, "posterize") == 0) return TS_LED_EFFECT_POSTERIZE;
+    if (strcmp(name, "contrast") == 0) return TS_LED_EFFECT_CONTRAST;
     return TS_LED_EFFECT_NONE;
 }
 
@@ -655,6 +667,24 @@ static esp_err_t api_led_filter_start(const cJSON *params, ts_api_result_t *resu
     cJSON *device_param = cJSON_GetObjectItem(params, "device");
     cJSON *filter_param = cJSON_GetObjectItem(params, "filter");
     cJSON *speed_param = cJSON_GetObjectItem(params, "speed");
+    cJSON *intensity_param = cJSON_GetObjectItem(params, "intensity");
+    cJSON *density_param = cJSON_GetObjectItem(params, "density");
+    cJSON *decay_param = cJSON_GetObjectItem(params, "decay");
+    cJSON *scale_param = cJSON_GetObjectItem(params, "scale");
+    cJSON *levels_param = cJSON_GetObjectItem(params, "levels");
+    cJSON *amount_param = cJSON_GetObjectItem(params, "amount");
+    cJSON *saturation_param = cJSON_GetObjectItem(params, "saturation");
+    cJSON *angle_param = cJSON_GetObjectItem(params, "angle");
+    cJSON *width_param = cJSON_GetObjectItem(params, "width");
+    cJSON *direction_param = cJSON_GetObjectItem(params, "direction");
+    cJSON *wavelength_param = cJSON_GetObjectItem(params, "wavelength");
+    cJSON *amplitude_param = cJSON_GetObjectItem(params, "amplitude");
+    
+    // 提取 angle 和 width 参数
+    float angle = angle_param && cJSON_IsNumber(angle_param) ? (float)cJSON_GetNumberValue(angle_param) : 0.0f;
+    int width = width_param && cJSON_IsNumber(width_param) ? (int)cJSON_GetNumberValue(width_param) : -1;
+    float wavelength = wavelength_param && cJSON_IsNumber(wavelength_param) ? (float)cJSON_GetNumberValue(wavelength_param) : 0.0f;
+    int amplitude = amplitude_param && cJSON_IsNumber(amplitude_param) ? (int)cJSON_GetNumberValue(amplitude_param) : -1;
     
     if (!device_param || !cJSON_IsString(device_param)) {
         ts_api_result_error(result, TS_API_ERR_INVALID_ARG, "Missing 'device' parameter");
@@ -685,20 +715,26 @@ static esp_err_t api_led_filter_start(const cJSON *params, ts_api_result_t *resu
         return ESP_FAIL;
     }
     
-    // 配置滤镜
+    // \u914d\u7f6e\u6ede\u955c
     ts_led_effect_config_t config = {
         .type = type,
         .params = {.brightness = {.level = 255}}
     };
     
-    int speed = 50;
-    if (speed_param && cJSON_IsNumber(speed_param)) {
-        speed = (int)cJSON_GetNumberValue(speed_param);
-        if (speed < 1) speed = 1;
-        if (speed > 100) speed = 100;
-    }
+    // \u83b7\u53d6\u53c2\u6570
+    int speed = speed_param && cJSON_IsNumber(speed_param) ? (int)cJSON_GetNumberValue(speed_param) : 50;
+    int intensity = intensity_param && cJSON_IsNumber(intensity_param) ? (int)cJSON_GetNumberValue(intensity_param) : -1;
+    int density = density_param && cJSON_IsNumber(density_param) ? (int)cJSON_GetNumberValue(density_param) : -1;
+    int decay = decay_param && cJSON_IsNumber(decay_param) ? (int)cJSON_GetNumberValue(decay_param) : -1;
+    int scale = scale_param && cJSON_IsNumber(scale_param) ? (int)cJSON_GetNumberValue(scale_param) : -1;
+    int levels = levels_param && cJSON_IsNumber(levels_param) ? (int)cJSON_GetNumberValue(levels_param) : -1;
+    int amount = amount_param && cJSON_IsNumber(amount_param) ? (int)cJSON_GetNumberValue(amount_param) : -1;
+    int saturation = saturation_param && cJSON_IsNumber(saturation_param) ? (int)cJSON_GetNumberValue(saturation_param) : -1;
     
-    // 根据速度配置滤镜参数
+    if (speed < 1) speed = 1;
+    if (speed > 100) speed = 100;
+    
+    // \u6839\u636e\u901f\u5ea6\u914d\u7f6e\u6ede\u955c\u53c2\u6570
     float freq = 0.2f + (speed - 1) * 4.8f / 99.0f;
     switch (type) {
         case TS_LED_EFFECT_PULSE:
@@ -720,6 +756,44 @@ static esp_err_t api_led_filter_start(const cJSON *params, ts_api_result_t *resu
         case TS_LED_EFFECT_COLOR_SHIFT:
             config.params.color_shift.speed = speed * 3.6f;
             break;
+        case TS_LED_EFFECT_SCANLINE:
+            config.params.scanline.speed = speed;
+            config.params.scanline.width = width > 0 ? width : 3;
+            config.params.scanline.angle = angle; // 0-360度
+            config.params.scanline.intensity = intensity > 0 ? intensity : 150;
+            break;
+        case TS_LED_EFFECT_WAVE:
+            config.params.wave.speed = speed;
+            config.params.wave.wavelength = wavelength > 0 ? wavelength : 8.0f;
+            config.params.wave.amplitude = amplitude > 0 ? amplitude : 128;
+            config.params.wave.angle = angle; // 0-360°
+            break;
+        case TS_LED_EFFECT_GLITCH:
+            config.params.glitch.intensity = intensity > 0 ? intensity : speed;
+            config.params.glitch.frequency = 10;
+            break;
+        case TS_LED_EFFECT_RAINBOW:
+            config.params.rainbow.speed = speed;
+            config.params.rainbow.saturation = saturation > 0 ? saturation : 255;
+            break;
+        case TS_LED_EFFECT_SPARKLE:
+            config.params.sparkle.speed = speed > 0 ? speed : 10.0f;  // 降低默认速度
+            config.params.sparkle.density = density > 0 ? density : 50;
+            config.params.sparkle.decay = decay > 0 ? decay : 150;    // 提高decay让余晖更明显
+            break;
+        case TS_LED_EFFECT_PLASMA:
+            config.params.plasma.speed = speed / 10.0f;
+            config.params.plasma.scale = scale > 0 ? scale : 20;
+            break;
+        case TS_LED_EFFECT_SEPIA:
+            // No parameters
+            break;
+        case TS_LED_EFFECT_POSTERIZE:
+            config.params.posterize.levels = levels > 0 ? levels : (2 + speed * 14 / 100);
+            break;
+        case TS_LED_EFFECT_CONTRAST:
+            config.params.contrast.amount = amount >= -100 && amount <= 100 ? amount : (speed - 50) * 2;
+            break;
         default:
             break;
     }
@@ -730,8 +804,9 @@ static esp_err_t api_led_filter_start(const cJSON *params, ts_api_result_t *resu
         return ret;
     }
     
-    // 记录滤镜状态
+    // 记录滤镜状态和完整配置
     ts_led_preset_set_current_filter(internal_name, filter_param->valuestring, speed);
+    ts_led_preset_set_current_filter_config(internal_name, &config);
     
     cJSON *data = cJSON_CreateObject();
     cJSON_AddStringToObject(data, "device", device_param->valuestring);

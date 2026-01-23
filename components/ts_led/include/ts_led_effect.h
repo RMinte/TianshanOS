@@ -81,6 +81,16 @@ typedef enum {
     TS_LED_EFFECT_NOISE,          /**< Add noise */
     TS_LED_EFFECT_STROBE,         /**< Fast strobe */
     
+    /* Cool effects */
+    TS_LED_EFFECT_RAINBOW,        /**< Rainbow color shift */
+    TS_LED_EFFECT_SPARKLE,        /**< Random sparkles */
+    TS_LED_EFFECT_PLASMA,         /**< Plasma wave */
+    
+    /* Basic filters */
+    TS_LED_EFFECT_SEPIA,          /**< Sepia tone (vintage) */
+    TS_LED_EFFECT_POSTERIZE,      /**< Posterization (color levels) */
+    TS_LED_EFFECT_CONTRAST,       /**< Contrast adjustment */
+    
     TS_LED_EFFECT_MAX
 } ts_led_effect_type_t;
 
@@ -152,15 +162,15 @@ typedef struct {
         
         /* Scanline params */
         struct {
-            ts_led_effect_direction_t direction;
+            float angle;          /**< Rotation angle in degrees (0-360) */
             float speed;          /**< Pixels per second */
-            uint8_t width;        /**< Scanline width in pixels */
-            uint8_t intensity;    /**< Brightness boost 0-255 */
+            uint8_t width;        /**< Scanline width in pixels (1-16, affects blur range) */
+            uint8_t intensity;    /**< Brightness boost (0-255, multiplier for center brightness) */
         } scanline;
         
         /* Wave params */
         struct {
-            ts_led_effect_direction_t direction;
+            float angle;          /**< Wave propagation angle in degrees (0-360), 0°=horizontal right, 90°=vertical up */
             float wavelength;     /**< Wave length in pixels */
             float speed;          /**< Wave speed (pixels/sec) */
             uint8_t amplitude;    /**< Amplitude 0-255 */
@@ -198,6 +208,35 @@ typedef struct {
         struct {
             uint8_t frequency;    /**< Strobe frequency Hz (1-30) */
         } strobe;
+        
+        /* Rainbow params */
+        struct {
+            float speed;          /**< Color rotation speed */
+            uint8_t saturation;   /**< Saturation 0-255 */
+        } rainbow;
+        
+        /* Sparkle params */
+        struct {
+            float speed;          /**< Animation speed (0.1-100), lower=slower spawn rate */
+            uint8_t density;      /**< Sparkle density 0-255, higher=more simultaneous sparkles */
+            uint8_t decay;        /**< Fade speed 0-255, lower=longer afterglow (推荐50-200) */
+        } sparkle;
+        
+        /* Plasma params */
+        struct {
+            float speed;          /**< Animation speed */
+            uint8_t scale;        /**< Plasma scale */
+        } plasma;
+        
+        /* Posterize params */
+        struct {
+            uint8_t levels;       /**< Color levels per channel (2-16) */
+        } posterize;
+        
+        /* Contrast params */
+        struct {
+            int8_t amount;        /**< Contrast adjustment -100 to +100 */
+        } contrast;
     } params;
     
 } ts_led_effect_config_t;

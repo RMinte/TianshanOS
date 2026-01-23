@@ -1156,17 +1156,18 @@ function generateLedModalContent(device, type) {
                     <button class="btn filter-btn" data-filter="wave" onclick="selectFilterInModal('wave', this)">🌊 波浪</button>
                     <button class="btn filter-btn" data-filter="scanline" onclick="selectFilterInModal('scanline', this)">📺 扫描线</button>
                     <button class="btn filter-btn" data-filter="glitch" onclick="selectFilterInModal('glitch', this)">⚡ 故障艺术</button>
+                    <button class="btn filter-btn" data-filter="rainbow" onclick="selectFilterInModal('rainbow', this)">🌈 彩虹</button>
+                    <button class="btn filter-btn" data-filter="sparkle" onclick="selectFilterInModal('sparkle', this)">✨ 闪耀</button>
+                    <button class="btn filter-btn" data-filter="plasma" onclick="selectFilterInModal('plasma', this)">🎆 等离子体</button>
+                    <button class="btn filter-btn" data-filter="sepia" onclick="selectFilterInModal('sepia', this)">🖼️ 怀旧</button>
+                    <button class="btn filter-btn" data-filter="posterize" onclick="selectFilterInModal('posterize', this)">🎨 色阶分离</button>
+                    <button class="btn filter-btn" data-filter="contrast" onclick="selectFilterInModal('contrast', this)">🔆 对比度</button>
                     <button class="btn filter-btn" data-filter="invert" onclick="selectFilterInModal('invert', this)">🔄 反色</button>
                     <button class="btn filter-btn" data-filter="grayscale" onclick="selectFilterInModal('grayscale', this)">⬜ 灰度</button>
                 </div>
                 <div class="filter-config-modal" id="modal-filter-config" style="display:none;">
                     <span class="filter-name" id="modal-filter-name">未选择</span>
-                    <div class="config-row">
-                        <label>速度</label>
-                        <input type="range" id="modal-filter-speed" min="1" max="100" value="50" style="flex:1"
-                               oninput="document.getElementById('modal-filter-speed-val').textContent=this.value">
-                        <span id="modal-filter-speed-val">50</span>
-                    </div>
+                    <div id="modal-filter-params"></div>
                 </div>
                 <div class="config-actions">
                     <button class="btn btn-primary" id="modal-apply-filter-btn" onclick="applyFilterFromModal()" disabled>▶ 应用</button>
@@ -1441,27 +1442,75 @@ function selectFilterInModal(filter, btn) {
     const filterName = document.getElementById('modal-filter-name');
     if (filterName) filterName.textContent = filter;
     
-    const filterConfig = document.getElementById('modal-filter-config');
-    if (filterConfig) filterConfig.style.display = 'flex';
+    const configDiv = document.getElementById('modal-filter-config');
+    const paramsDiv = document.getElementById('modal-filter-params');
+    
+    // \u6e05\u7a7a\u73b0\u6709\u53c2\u6570
+    if (paramsDiv) {
+        paramsDiv.innerHTML = '';
+        
+        // \u6839\u636e\u6ede\u955c\u914d\u7f6e\u751f\u6210\u53c2\u6570\u63a7\u4ef6
+        const config = filterConfig[filter];
+        if (config && config.params && config.params.length > 0) {
+            config.params.forEach(param => {
+                const paramInfo = paramLabels[param];
+                const defaultValue = config.defaults[param] || 50;
+                
+                const row = document.createElement('div');
+                row.className = 'config-row';
+                row.innerHTML = `
+                    <label>${paramInfo.label}</label>
+                    <input type="range" id="modal-filter-${param}" 
+                           min="${paramInfo.min}" max="${paramInfo.max}" 
+                           value="${defaultValue}" style="flex:1"
+                           oninput="document.getElementById('modal-filter-${param}-val').textContent=this.value+'${paramInfo.unit}'">
+                    <span id="modal-filter-${param}-val">${defaultValue}${paramInfo.unit}</span>
+                `;
+                paramsDiv.appendChild(row);
+            });
+        }
+    }
+    
+    if (configDiv) configDiv.style.display = 'flex';
     
     const applyBtn = document.getElementById('modal-apply-filter-btn');
     if (applyBtn) applyBtn.disabled = false;
 }
 
-// 模态框内应用滤镜
+// \u6a21\u6001\u6846\u5185\u5e94\u7528\u6ede\u955c
 async function applyFilterFromModal() {
     if (!selectedModalFilter) {
-        showToast('请先选择一个滤镜', 'warning');
+        showToast('\u8bf7\u5148\u9009\u62e9\u4e00\u4e2a\u6ede\u955c', 'warning');
         return;
     }
     
-    const speed = parseInt(document.getElementById('modal-filter-speed')?.value || '50');
+    // \u6536\u96c6\u6240\u6709\u53c2\u6570
+    const params = { device: 'matrix', filter: selectedModalFilter };
+    const config = filterConfig[selectedModalFilter];
+    
+    if (config && config.params) {
+        config.params.forEach(param => {
+            const input = document.getElementById(`modal-filter-${param}`);
+            if (input) {
+                let value = parseInt(input.value);
+                // \u6839\u636e\u53c2\u6570\u7c7b\u578b\u8f6c\u6362\u503c
+                if (param === 'saturation') {
+                    value = Math.round(value * 2.55); // 0-100 \u8f6c 0-255
+                } else if (param === 'decay') {
+                    value = Math.round(value * 2.55); // 0-100 \u8f6c 0-255
+                } else if (param === 'amount') {
+                    value = value - 50; // 0-100 \u8f6c -50 to +50
+                }
+                params[param] = value;
+            }
+        });
+    }
     
     try {
-        await api.call('led.filter.start', { device: 'matrix', filter: selectedModalFilter, speed });
-        showToast(`滤镜 ${selectedModalFilter} 已应用`, 'success');
+        await api.call('led.filter.start', params);
+        showToast(`\u6ede\u955c ${selectedModalFilter} \u5df2\u5e94\u7528`, 'success');
     } catch (e) {
-        showToast(`应用滤镜失败: ${e.message}`, 'error');
+        showToast(`\u5e94\u7528\u6ede\u955c\u5931\u8d25: ${e.message}`, 'error');
     }
 }
 
@@ -2056,22 +2105,43 @@ async function stopText() {
     }
 }
 
-// 滤镜配置：哪些滤镜需要速度参数
+// 滤镜配置：每个滤镜的参数列表和默认值
 const filterConfig = {
-    // 动态效果 - 需要速度
-    'pulse': { needsSpeed: true, defaultSpeed: 50 },
-    'breathing': { needsSpeed: true, defaultSpeed: 30 },
-    'blink': { needsSpeed: true, defaultSpeed: 50 },
-    'wave': { needsSpeed: true, defaultSpeed: 40 },
-    'scanline': { needsSpeed: true, defaultSpeed: 60 },
-    'glitch': { needsSpeed: true, defaultSpeed: 70 },
-    // 渐变效果 - 需要速度
-    'fade-in': { needsSpeed: true, defaultSpeed: 30 },
-    'fade-out': { needsSpeed: true, defaultSpeed: 30 },
-    'color-shift': { needsSpeed: true, defaultSpeed: 20 },
-    // 静态效果 - 不需要速度
-    'invert': { needsSpeed: false },
-    'grayscale': { needsSpeed: false }
+    'pulse': { params: ['speed'], defaults: { speed: 50 } },
+    'breathing': { params: ['speed'], defaults: { speed: 30 } },
+    'blink': { params: ['speed'], defaults: { speed: 50 } },
+    'wave': { params: ['speed', 'wavelength', 'amplitude', 'angle'], defaults: { speed: 40, wavelength: 8, amplitude: 128, angle: 0 } },
+    'scanline': { params: ['speed', 'width', 'angle', 'intensity'], defaults: { speed: 60, width: 3, angle: 0, intensity: 150 } },
+    'glitch': { params: ['intensity', 'frequency'], defaults: { intensity: 70, frequency: 30 } },
+    'rainbow': { params: ['speed', 'saturation'], defaults: { speed: 50, saturation: 100 } },
+    'sparkle': { params: ['speed', 'density', 'decay'], defaults: { speed: 5, density: 50, decay: 150 } },
+    'plasma': { params: ['speed', 'scale'], defaults: { speed: 50, scale: 20 } },
+    'posterize': { params: ['levels'], defaults: { levels: 4 } },
+    'contrast': { params: ['amount'], defaults: { amount: 50 } },
+    'fade-in': { params: ['speed'], defaults: { speed: 30 } },
+    'fade-out': { params: ['speed'], defaults: { speed: 30 } },
+    'color-shift': { params: ['speed'], defaults: { speed: 20 } },
+    'invert': { params: [], defaults: {} },
+    'grayscale': { params: [], defaults: {} },
+    'sepia': { params: [], defaults: {} }
+};
+
+// 参数标签和范围定义
+const paramLabels = {
+    'speed': { label: '速度', min: 1, max: 100, unit: '', help: '闪耀效果：推荐1-10，低值更慢' },
+    'intensity': { label: '强度', min: 0, max: 255, unit: '', help: '亮度增益倍数，推荐100-200产生明显对比' },
+    'wavelength': { label: '波长', min: 1, max: 32, unit: 'px' },
+    'amplitude': { label: '振幅', min: 0, max: 255, unit: '', help: '波浪亮度变化幅度，推荐50-200' },
+    'direction': { label: '方向', min: 0, max: 3, unit: '', labels: ['横向', '纵向', '对角↘', '对角↙'] },
+    'angle': { label: '角度', min: 0, max: 360, unit: '°', help: '波浪/扫描线旋转角度：0°=水平向右，90°=垂直向上' },
+    'width': { label: '宽度', min: 1, max: 16, unit: 'px', help: '扫描线宽度，值越大光晕越宽' },
+    'frequency': { label: '频率', min: 0, max: 100, unit: '%' },
+    'saturation': { label: '饱和度', min: 0, max: 100, unit: '%' },
+    'density': { label: '密度', min: 0, max: 255, unit: '', help: '同时闪烁的像素数量，推荐50-150' },
+    'decay': { label: '衰减', min: 0, max: 255, unit: '', help: '余晖衰减速度，推荐100-200（值越大衰减越快）' },
+    'scale': { label: '缩放', min: 1, max: 100, unit: '' },
+    'levels': { label: '色阶', min: 2, max: 16, unit: '' },
+    'amount': { label: '程度', min: 0, max: 100, unit: '%' }
 };
 
 let selectedFilter = null;
@@ -2092,22 +2162,52 @@ function selectFilter(filterName, btnElement) {
     const applyBtn = document.getElementById('apply-filter-btn');
     if (applyBtn) applyBtn.disabled = false;
     
-    // 根据滤镜类型显示/隐藏参数
+    // 动态生成参数控件
     const paramsDiv = document.getElementById('filter-params');
-    const speedRow = document.getElementById('filter-speed-row');
     const config = filterConfig[filterName];
     
-    if (config && config.needsSpeed) {
+    if (config && config.params && config.params.length > 0) {
         paramsDiv.style.display = 'block';
-        speedRow.style.display = 'flex';
-        // 设置默认速度
-        const speedSlider = document.getElementById('matrix-filter-speed');
-        if (speedSlider) {
-            speedSlider.value = config.defaultSpeed;
-            document.getElementById('filter-speed-value').textContent = config.defaultSpeed;
-        }
+        paramsDiv.innerHTML = ''; // 清空现有控件
+        
+        config.params.forEach(param => {
+            const paramInfo = paramLabels[param];
+            const defaultValue = config.defaults[param] || 50;
+            
+            const row = document.createElement('div');
+            row.className = 'config-row';
+            row.style.cssText = 'display: flex; align-items: center; gap: 10px; margin-bottom: 10px;';
+            
+            const label = document.createElement('label');
+            label.textContent = paramInfo.label;
+            label.style.minWidth = '60px';
+            
+            const slider = document.createElement('input');
+            slider.type = 'range';
+            slider.id = `filter-${param}`;
+            slider.min = paramInfo.min;
+            slider.max = paramInfo.max;
+            slider.value = defaultValue;
+            slider.style.flex = '1';
+            
+            const valueSpan = document.createElement('span');
+            valueSpan.id = `filter-${param}-val`;
+            valueSpan.textContent = defaultValue + paramInfo.unit;
+            valueSpan.style.minWidth = '50px';
+            valueSpan.style.textAlign = 'right';
+            
+            slider.oninput = () => {
+                valueSpan.textContent = slider.value + paramInfo.unit;
+            };
+            
+            row.appendChild(label);
+            row.appendChild(slider);
+            row.appendChild(valueSpan);
+            paramsDiv.appendChild(row);
+        });
     } else {
         paramsDiv.style.display = 'none';
+        paramsDiv.innerHTML = '';
     }
 }
 
@@ -2118,25 +2218,31 @@ async function applySelectedFilter() {
         return;
     }
     
+    // 收集所有参数
+    const params = { device: 'matrix', filter: selectedFilter };
     const config = filterConfig[selectedFilter];
-    let speed = 50;
     
-    if (config && config.needsSpeed) {
-        const speedSlider = document.getElementById('matrix-filter-speed');
-        speed = parseInt(speedSlider.value) || config.defaultSpeed;
+    if (config && config.params) {
+        config.params.forEach(param => {
+            const input = document.getElementById(`filter-${param}`);
+            if (input) {
+                let value = parseInt(input.value);
+                // 根据参数类型转换值
+                if (param === 'saturation') {
+                    value = Math.round(value * 2.55); // 0-100 转 0-255
+                } else if (param === 'decay') {
+                    value = Math.round(value * 2.55); // 0-100 转 0-255
+                } else if (param === 'amount') {
+                    value = value - 50; // 0-100 转 -50 to +50
+                }
+                params[param] = value;
+            }
+        });
     }
     
     try {
-        await api.ledFilterStart('matrix', selectedFilter, speed);
-        showToast(`滤镜 ${selectedFilter} 已应用`, 'success');
-        
-        // 更新 active 状态
-        document.querySelectorAll('.filter-btn').forEach(btn => {
-            btn.classList.remove('active');
-            if (btn.dataset.filter === selectedFilter) {
-                btn.classList.add('active');
-            }
-        });
+        await api.call('led.filter.start', params);
+        showToast(`已应用滤镜: ${selectedFilter}`, 'success');
     } catch (e) {
         showToast(`应用滤镜失败: ${e.message}`, 'error');
     }
