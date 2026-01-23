@@ -16,7 +16,7 @@ menu "TianShanOS WebUI Configuration"
 
     config TS_WEBUI_WS_MAX_CLIENTS
         int "Max WebSocket Clients"
-        default 4
+        default 8
         depends on TS_WEBUI_WS_ENABLE
 
     config TS_WEBUI_AUTH_REQUIRED

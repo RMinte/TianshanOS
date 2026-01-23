@@ -1263,3 +1263,141 @@ system --time --sync-ntp
 # 手动设置时间（UTC）
 system --time --set "2026-01-23T15:30:00Z"
 ```
+---
+
+## 11. WebSocket 连接管理与终端会话问题
+
+### 11.1 WebSocket 连接槽位泄漏
+
+**症状**:
+- WebUI 运行一段时间后出现大量警告: `W webui_ws: No free WebSocket slots`
+- 终端/日志功能无法使用
+- 必须重启设备才能恢复
+
+**根本原因**:
+
+WebSocket 连接断开时，ESP32 HTTP 服务器可能未立即调用断开事件处理器，导致连接槽位未释放。主要原因:
+1. **浏览器刷新页面**: 旧连接未正常关闭，新连接建立
+2. **网络波动**: 连接实际断开但未被检测到
+3. **异步发送无法检测断连**: `httpd_ws_send_frame_async()` 即使连接断开也可能返回 `ESP_OK`
+
+**解决方案**:
+
+#### 方案 1: 增加连接槽位数量
+
+**文件**: [components/ts_webui/Kconfig](../components/ts_webui/Kconfig)
+```kconfig
+config TS_WEBUI_WS_MAX_CLIENTS
+    int "Max WebSocket Clients"
+    default 8  # 从 4 增加到 8
+    depends on TS_WEBUI_WS_ENABLE
+```
+
+#### 方案 2: 主动检测陈旧连接
+
+使用底层 socket 状态检测替代不可靠的 WebSocket ping:
+
+**文件**: [components/ts_webui/src/ts_webui_ws.c](../components/ts_webui/src/ts_webui_ws.c)
+```c
+#include <sys/socket.h>
+#include <errno.h>
+
+static void add_client(httpd_handle_t hd, int fd, ws_client_type_t type)
+{
+    // 检测陈旧连接并清理
+    char probe;
+    int result = recv(s_clients[i].fd, &probe, 1, MSG_PEEK | MSG_DONTWAIT);
+    
+    if (result == 0 || (result < 0 && errno != EAGAIN && errno != EWOULDBLOCK)) {
+        // Socket 已断开，清理槽位
+        cleanup_disconnected_client(old_fd);
+    }
+}
+```
+
+**关键技术**:
+- `recv(fd, buf, 1, MSG_PEEK | MSG_DONTWAIT)` - 窥探 socket 而不消耗数据
+- `result == 0` - 对端已关闭连接 (FIN 收到)
+- `errno == EAGAIN/EWOULDBLOCK` - 无数据可读 (连接正常)
+
+---
+
+### 11.2 终端会话"Another terminal session is active"问题
+
+**症状**:
+- WebUI 终端页面刷新后无法重新连接
+- 错误提示: `错误: Another terminal session is active`
+- 串口日志: `W webui_ws: Terminal session already active (fd=51), rejecting new request from fd=52`
+
+**解决方案: 终端会话接管策略**
+
+采用"新优先"策略，允许新终端请求主动接管旧会话:
+
+```c
+static void start_terminal_session(httpd_req_t *req)
+{
+    if (s_terminal_client_fd >= 0 && s_terminal_client_fd != fd) {
+        // 采用"新优先"策略: 主动关闭旧会话
+        TS_LOGI(TAG, "Terminal takeover: closing old session (fd=%d) for new request (fd=%d)", 
+                s_terminal_client_fd, fd);
+        
+        // 向旧会话发送关闭通知
+        send_close_notification(old_hd, s_terminal_client_fd, "Another terminal session requested");
+        
+        // 清理旧会话
+        cleanup_disconnected_client(s_terminal_client_fd);
+        s_terminal_client_fd = -1;
+    }
+}
+```
+
+**策略优势**:
+1. **用户友好**: 刷新页面立即恢复终端，无需手动关闭旧会话
+2. **容错性强**: 不依赖不可靠的连接检测
+3. **明确通知**: 旧会话收到 `session_closed` 消息
+
+---
+
+### 11.3 WebSocket 调试技巧
+
+#### 串口日志关键信息
+```
+I webui_ws: WebSocket client connected (fd=51, type=event)
+I webui_ws: Terminal takeover: closing old session (fd=51) for new request (fd=52)
+I webui_ws: Cleaned up stale connection (fd=48, recv=0, errno=0)
+```
+
+#### ESP32 内存监控
+```c
+ESP_LOGI(TAG, "Active slots: %d/%d", active_count, MAX_WS_CLIENTS);
+ESP_LOGI(TAG, "Free heap: %d bytes", esp_get_free_heap_size());
+```
+
+---
+
+### 11.4 WebSocket 最佳实践
+
+| 场景 | 建议配置 | 说明 |
+|------|---------|------|
+| 开发调试 | `MAX_CLIENTS=16` | 允许频繁刷新 |
+| 生产环境 | `MAX_CLIENTS=8` | 平衡资源和连接数 |
+| 多用户 | 实现用户隔离 | 每用户限制连接数 |
+
+---
+
+### 11.5 相关文件索引
+
+| 文件 | 功能 |
+|------|------|
+| [ts_webui_ws.c](../components/ts_webui/src/ts_webui_ws.c) | WebSocket 连接管理 |
+| [ts_webui/Kconfig](../components/ts_webui/Kconfig) | WebSocket 配置选项 |
+| [app.js](../components/ts_webui/web/js/app.js) | WebUI 终端前端 |
+
+---
+
+## 更新日志
+
+- 2026-01-22: 添加 SD 卡重挂载失败 (VFS_MAX_COUNT 限制) 和配置 double-free 问题修复记录
+- 2026-01-23: 添加 OTA 回滚机制误判问题、www 分区 OTA 实现、SSH 功能调试记录
+- 2026-01-23: 添加 SNTP 双服务器配置和 WiFi 开放网络连接问题记录
+- 2026-01-23: 添加 WebSocket 连接管理和终端会话问题完整调试过程

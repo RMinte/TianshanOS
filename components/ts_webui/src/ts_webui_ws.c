@@ -17,13 +17,15 @@
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 #include <string.h>
+#include <sys/socket.h>
+#include <errno.h>
 
 #define TAG "webui_ws"
 
 #ifdef CONFIG_TS_WEBUI_WS_MAX_CLIENTS
 #define MAX_WS_CLIENTS CONFIG_TS_WEBUI_WS_MAX_CLIENTS
 #else
-#define MAX_WS_CLIENTS 4
+#define MAX_WS_CLIENTS 8
 #endif
 
 /* 终端输出缓冲区大小 */
@@ -460,6 +462,9 @@ static void terminal_output_cb(const char *data, size_t len, void *user_data)
     }
 }
 
+/* 前向声明 */
+static void cleanup_disconnected_client(int fd);
+
 static void add_client(httpd_handle_t hd, int fd, ws_client_type_t type)
 {
     // 首先检查是否已存在相同 fd 的客户端（重连情况）
@@ -486,7 +491,50 @@ static void add_client(httpd_handle_t hd, int fd, ws_client_type_t type)
             return;
         }
     }
-    TS_LOGW(TAG, "No free WebSocket slots");
+    
+    // 没有空槽位，尝试清理可能已断开但未标记的连接
+    TS_LOGW(TAG, "No free WebSocket slots, attempting to clean up stale connections...");
+    int oldest_event_slot = -1;
+    for (int i = 0; i < MAX_WS_CLIENTS; i++) {
+        if (s_clients[i].active) {
+            // 检查 socket 状态（使用 recv 探测，MSG_PEEK | MSG_DONTWAIT）
+            char probe;
+            int result = recv(s_clients[i].fd, &probe, 1, MSG_PEEK | MSG_DONTWAIT);
+            if (result == 0 || (result < 0 && errno != EAGAIN && errno != EWOULDBLOCK)) {
+                // Socket 已关闭或错误
+                int old_fd = s_clients[i].fd;
+                TS_LOGI(TAG, "Cleaned up stale connection (fd=%d, recv=%d, errno=%d)", old_fd, result, errno);
+                cleanup_disconnected_client(old_fd);
+                // cleanup_disconnected_client 已经设置 active=false，现在可以使用这个槽位
+                s_clients[i].active = true;
+                s_clients[i].fd = fd;
+                s_clients[i].hd = hd;
+                s_clients[i].type = type;
+                TS_LOGD(TAG, "WebSocket client connected after cleanup (fd=%d, type=%s)", 
+                        fd, type == WS_CLIENT_TYPE_TERMINAL ? "terminal" : "event");
+                return;
+            }
+            // 记录最旧的普通事件客户端槽位（非终端/SSH）
+            if (s_clients[i].type == WS_CLIENT_TYPE_EVENT && oldest_event_slot < 0) {
+                oldest_event_slot = i;
+            }
+        }
+    }
+    
+    // 如果所有连接都活跃，且新连接是终端/SSH，抢占最旧的事件客户端
+    if ((type == WS_CLIENT_TYPE_TERMINAL || type == WS_CLIENT_TYPE_SSH_SHELL) && oldest_event_slot >= 0) {
+        int evicted_fd = s_clients[oldest_event_slot].fd;
+        TS_LOGW(TAG, "All slots full, evicting oldest event client (fd=%d) for %s", 
+                evicted_fd, type == WS_CLIENT_TYPE_TERMINAL ? "terminal" : "ssh");
+        cleanup_disconnected_client(evicted_fd);
+        s_clients[oldest_event_slot].active = true;
+        s_clients[oldest_event_slot].fd = fd;
+        s_clients[oldest_event_slot].hd = hd;
+        s_clients[oldest_event_slot].type = type;
+        return;
+    }
+    
+    TS_LOGE(TAG, "All WebSocket slots are occupied by active connections");
 }
 
 /* 处理终端命令执行 */
@@ -581,9 +629,11 @@ static void start_terminal_session(httpd_req_t *req)
     if (s_terminal_client_fd >= 0 && s_terminal_client_fd != fd) {
         // 检查旧的终端 fd 是否还在活跃客户端列表中
         bool old_fd_active = false;
+        httpd_handle_t old_hd = NULL;
         for (int i = 0; i < MAX_WS_CLIENTS; i++) {
             if (s_clients[i].active && s_clients[i].fd == s_terminal_client_fd) {
                 old_fd_active = true;
+                old_hd = s_clients[i].hd;
                 break;
             }
         }
@@ -594,23 +644,35 @@ static void start_terminal_session(httpd_req_t *req)
             ts_console_clear_output_cb();
             s_terminal_client_fd = -1;
         } else {
-            // 旧的会话仍然活跃，拒绝新会话
-            cJSON *err = cJSON_CreateObject();
-            cJSON_AddStringToObject(err, "type", "error");
-            cJSON_AddStringToObject(err, "message", "Another terminal session is active");
-            char *json = cJSON_PrintUnformatted(err);
-            cJSON_Delete(err);
+            // 旧会话仍在列表中
+            // 采用宽松策略：新的终端请求优先，主动关闭旧会话
+            // 原因：通常是用户刷新页面或网络重连，旧会话应该让位
+            TS_LOGI(TAG, "Terminal takeover: closing old session (fd=%d) for new request (fd=%d)", 
+                    s_terminal_client_fd, fd);
             
-            if (json) {
+            // 向旧会话发送关闭通知
+            cJSON *close_msg = cJSON_CreateObject();
+            cJSON_AddStringToObject(close_msg, "type", "session_closed");
+            cJSON_AddStringToObject(close_msg, "reason", "Another terminal session requested");
+            char *close_json = cJSON_PrintUnformatted(close_msg);
+            cJSON_Delete(close_msg);
+            
+            if (close_json) {
                 httpd_ws_frame_t ws_pkt = {
                     .type = HTTPD_WS_TYPE_TEXT,
-                    .payload = (uint8_t *)json,
-                    .len = strlen(json)
+                    .payload = (uint8_t *)close_json,
+                    .len = strlen(close_json)
                 };
-                httpd_ws_send_frame(req, &ws_pkt);
-                free(json);
+                httpd_ws_send_frame_async(old_hd, s_terminal_client_fd, &ws_pkt);
+                free(close_json);
             }
-            return;
+            
+            // 清理旧会话
+            cleanup_disconnected_client(s_terminal_client_fd);
+            s_terminal_client_fd = -1;
+            
+            // 短暂延迟确保关闭消息发送
+            vTaskDelay(pdMS_TO_TICKS(50));
         }
     }
     
