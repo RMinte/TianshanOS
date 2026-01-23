@@ -383,7 +383,10 @@ static void process_scanline(ts_led_rgb_t *buffer, size_t count,
                              uint16_t width, uint16_t height,
                              const ts_led_effect_config_t *config, uint32_t time_ms)
 {
-    if (width == 0 || height == 0) return;
+    if (width == 0 || height == 0) {
+        ESP_LOGW(TAG, "Scanline effect: invalid dimensions (width=%d, height=%d)", width, height);
+        return;
+    }
     
     float speed = config->params.scanline.speed;
     uint8_t line_width = config->params.scanline.width;
@@ -403,11 +406,20 @@ static void process_scanline(ts_led_rgb_t *buffer, size_t count,
         if (dist > max_pos / 2) dist = max_pos - dist; // Wrap around
         
         if (dist < line_width) {
-            // Boost brightness
-            float boost = 1.0f + (float)intensity / 255.0f * (1.0f - dist / line_width);
-            buffer[i].r = clamp_u8((int32_t)(buffer[i].r * boost));
-            buffer[i].g = clamp_u8((int32_t)(buffer[i].g * boost));
-            buffer[i].b = clamp_u8((int32_t)(buffer[i].b * boost));
+            // 如果像素是黑色，用扫描线颜色填充
+            if (buffer[i].r == 0 && buffer[i].g == 0 && buffer[i].b == 0) {
+                float fade = 1.0f - dist / line_width;
+                uint8_t line_brightness = (uint8_t)(intensity * fade);
+                buffer[i].r = line_brightness;
+                buffer[i].g = line_brightness;
+                buffer[i].b = line_brightness;
+            } else {
+                // 否则增强现有亮度
+                float boost = 1.0f + (float)intensity / 255.0f * (1.0f - dist / line_width);
+                buffer[i].r = clamp_u8((int32_t)(buffer[i].r * boost));
+                buffer[i].g = clamp_u8((int32_t)(buffer[i].g * boost));
+                buffer[i].b = clamp_u8((int32_t)(buffer[i].b * boost));
+            }
         }
     }
 }
@@ -419,7 +431,10 @@ static void process_wave(ts_led_rgb_t *buffer, size_t count,
                          uint16_t width, uint16_t height,
                          const ts_led_effect_config_t *config, uint32_t time_ms)
 {
-    if (width == 0 || height == 0) return;
+    if (width == 0 || height == 0) {
+        ESP_LOGW(TAG, "Wave effect: invalid dimensions (width=%d, height=%d)", width, height);
+        return;
+    }
     
     float wavelength = config->params.wave.wavelength;
     float speed = config->params.wave.speed;
@@ -437,9 +452,17 @@ static void process_wave(ts_led_rgb_t *buffer, size_t count,
         float phase = (coord + time_offset) * 2.0f * 3.14159f / wavelength;
         float wave = (sinf(phase) + 1.0f) * 0.5f; // 0.0 to 1.0
         
-        // Apply brightness modulation
-        uint8_t level = 255 - amplitude + (uint8_t)(wave * amplitude);
-        buffer[i] = scale_rgb(buffer[i], level);
+        // 如果像素是黑色，用波浪模式填充
+        if (buffer[i].r == 0 && buffer[i].g == 0 && buffer[i].b == 0) {
+            uint8_t wave_brightness = (uint8_t)(wave * amplitude);
+            buffer[i].r = wave_brightness;
+            buffer[i].g = wave_brightness;
+            buffer[i].b = wave_brightness;
+        } else {
+            // 否则调制现有亮度
+            uint8_t level = 255 - amplitude + (uint8_t)(wave * amplitude);
+            buffer[i] = scale_rgb(buffer[i], level);
+        }
     }
 }
 
@@ -502,7 +525,32 @@ static void process_glitch(ts_led_rgb_t *buffer, size_t count,
     // Decide if glitch happens this frame
     if ((effect_random() & 0xFF) > frequency) return;
     
+    // 检查是否有任何非黑色像素
+    bool has_content = false;
+    for (size_t i = 0; i < count && !has_content; i++) {
+        if (buffer[i].r != 0 || buffer[i].g != 0 || buffer[i].b != 0) {
+            has_content = true;
+        }
+    }
+    
+    if (!has_content) {
+        // 如果全黑，生成随机故障像素
+        ESP_LOGW(TAG, "Glitch effect: generating random pixels (no content)");
+        size_t num_glitches = (intensity * count) / 512;  // intensity 控制故障密度
+        for (size_t i = 0; i < num_glitches; i++) {
+            size_t pos = (effect_random() * count) >> 16;
+            if (pos < count) {
+                uint8_t brightness = (effect_random() & 0xFF);
+                buffer[pos].r = brightness;
+                buffer[pos].g = (effect_random() & 0xFF);
+                buffer[pos].b = (effect_random() & 0xFF);
+            }
+        }
+        return;
+    }
+    
     if (width == 0 || height == 0) {
+        ESP_LOGW(TAG, "Glitch effect: using linear mode (width=%d, height=%d)", width, height);
         // Linear glitch - random block
         size_t start = (effect_random() * count) >> 16;
         size_t len = (effect_random() * intensity) >> 16;
