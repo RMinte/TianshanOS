@@ -179,6 +179,8 @@ typedef struct {
 #define TS_EVENT_SYSTEM_WARNING     0x0004
 /** 低内存警告 */
 #define TS_EVENT_SYSTEM_LOW_MEMORY  0x0005
+/** 系统信息变更 (WebSocket) */
+#define TS_EVENT_SYSTEM_INFO_CHANGED 0x0006
 
 /* ============================================================================
  * 网络事件 ID
@@ -256,6 +258,21 @@ typedef struct {
 #define TS_EVT_AGX_DATA_UPDATED             0x0503
 /** AGX 错误 */
 #define TS_EVT_AGX_ERROR                    0x0504
+/** 设备状态变更 (WebSocket) */
+#define TS_EVENT_DEVICE_STATUS_CHANGED      0x0505
+
+/* ============================================================================
+ * OTA 事件 ID
+ * ========================================================================== */
+
+/** OTA 进度更新 */
+#define TS_EVENT_OTA_PROGRESS_UPDATE        0x0601
+/** OTA 开始 */
+#define TS_EVENT_OTA_STARTED                0x0602
+/** OTA 完成 */
+#define TS_EVENT_OTA_FINISHED               0x0603
+/** OTA 失败 */
+#define TS_EVENT_OTA_FAILED                 0x0604
 
 /* ============================================================================
  * 事件基础别名（兼容旧代码）

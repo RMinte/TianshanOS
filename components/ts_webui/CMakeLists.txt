@@ -3,6 +3,7 @@ idf_component_register(
         "src/ts_webui.c"
         "src/ts_webui_api.c"
         "src/ts_webui_ws.c"
+        "src/ts_ws_subscriptions.c"
     INCLUDE_DIRS
         "include"
     REQUIRES

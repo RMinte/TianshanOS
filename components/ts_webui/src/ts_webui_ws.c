@@ -11,6 +11,7 @@
 #include "ts_power_policy.h"
 #include "ts_ssh_client.h"
 #include "ts_ssh_shell.h"
+#include "ts_ws_subscriptions.h"
 #include "esp_http_server.h"
 #include "cJSON.h"
 #include "freertos/FreeRTOS.h"
@@ -714,6 +715,9 @@ static void cleanup_disconnected_client(int fd)
 {
     bool was_log_client = false;
     
+    // 清理订阅（新增）
+    ts_ws_client_disconnected(fd);
+    
     for (int i = 0; i < MAX_WS_CLIENTS; i++) {
         if (s_clients[i].active && s_clients[i].fd == fd) {
             // 如果是终端客户端，清理输出回调
@@ -814,8 +818,59 @@ static esp_err_t ws_handler(httpd_req_t *req)
                 free(pong_str);
             }
             else if (strcmp(type->valuestring, "subscribe") == 0) {
-                // 保持为事件订阅客户端（已在握手时添加）
-                TS_LOGD(TAG, "Client subscribed to events");
+                // 处理订阅请求（新增：topic 订阅）
+                int fd = httpd_req_to_sockfd(req);
+                cJSON *topic = cJSON_GetObjectItem(msg, "topic");
+                cJSON *params = cJSON_GetObjectItem(msg, "params");
+                
+                if (topic && cJSON_IsString(topic)) {
+                    esp_err_t ret = ts_ws_subscribe(fd, topic->valuestring, params);
+                    
+                    // 发送确认消息
+                    cJSON *ack = cJSON_CreateObject();
+                    cJSON_AddStringToObject(ack, "type", "subscribed");
+                    cJSON_AddStringToObject(ack, "topic", topic->valuestring);
+                    cJSON_AddBoolToObject(ack, "success", ret == ESP_OK);
+                    if (ret != ESP_OK) {
+                        cJSON_AddStringToObject(ack, "error", esp_err_to_name(ret));
+                    }
+                    
+                    char *ack_str = cJSON_PrintUnformatted(ack);
+                    cJSON_Delete(ack);
+                    if (ack_str) {
+                        ws_pkt.payload = (uint8_t *)ack_str;
+                        ws_pkt.len = strlen(ack_str);
+                        httpd_ws_send_frame(req, &ws_pkt);
+                        free(ack_str);
+                    }
+                } else {
+                    // 保持为事件订阅客户端（已在握手时添加）
+                    TS_LOGD(TAG, "Client subscribed to events");
+                }
+            }
+            else if (strcmp(type->valuestring, "unsubscribe") == 0) {
+                // 处理取消订阅请求（新增）
+                int fd = httpd_req_to_sockfd(req);
+                cJSON *topic = cJSON_GetObjectItem(msg, "topic");
+                
+                if (topic && cJSON_IsString(topic)) {
+                    esp_err_t ret = ts_ws_unsubscribe(fd, topic->valuestring);
+                    
+                    // 发送确认消息
+                    cJSON *ack = cJSON_CreateObject();
+                    cJSON_AddStringToObject(ack, "type", "unsubscribed");
+                    cJSON_AddStringToObject(ack, "topic", topic->valuestring);
+                    cJSON_AddBoolToObject(ack, "success", ret == ESP_OK);
+                    
+                    char *ack_str = cJSON_PrintUnformatted(ack);
+                    cJSON_Delete(ack);
+                    if (ack_str) {
+                        ws_pkt.payload = (uint8_t *)ack_str;
+                        ws_pkt.len = strlen(ack_str);
+                        httpd_ws_send_frame(req, &ws_pkt);
+                        free(ack_str);
+                    }
+                }
             }
             else if (strcmp(type->valuestring, "terminal_start") == 0) {
                 // 启动终端会话
@@ -1004,6 +1059,13 @@ esp_err_t ts_webui_ws_init(void)
     memset(s_clients, 0, sizeof(s_clients));
     s_terminal_client_fd = -1;
     
+    // 初始化订阅管理器（新增）
+    esp_err_t ret = ts_ws_subscriptions_init();
+    if (ret != ESP_OK) {
+        TS_LOGE(TAG, "Failed to initialize subscriptions: %s", esp_err_to_name(ret));
+        return ret;
+    }
+    
     // 创建终端会话互斥锁
     if (!s_terminal_mutex) {
         s_terminal_mutex = xSemaphoreCreateMutex();
@@ -1044,10 +1106,10 @@ esp_err_t ts_webui_ws_init(void)
         .handle_ws_control_frames = true
     };
     
-    esp_err_t ret = httpd_register_uri_handler(server, &ws_uri);
-    if (ret != ESP_OK) {
-        TS_LOGE(TAG, "Failed to register WebSocket handler: %s", esp_err_to_name(ret));
-        return ret;
+    esp_err_t reg_ret = httpd_register_uri_handler(server, &ws_uri);
+    if (reg_ret != ESP_OK) {
+        TS_LOGE(TAG, "Failed to register WebSocket handler: %s", esp_err_to_name(reg_ret));
+        return reg_ret;
     }
     
     // 注册电压保护事件处理器

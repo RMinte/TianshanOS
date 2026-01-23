@@ -213,6 +213,101 @@ static esp_err_t api_system_tasks(const cJSON *params, ts_api_result_t *result)
 }
 
 /**
+ * @brief system.cpu - Get CPU core statistics
+ */
+static esp_err_t api_system_cpu(const cJSON *params, ts_api_result_t *result)
+{
+    cJSON *data = cJSON_CreateObject();
+    if (data == NULL) {
+        ts_api_result_error(result, TS_API_ERR_NO_MEM, "Memory allocation failed");
+        return ESP_ERR_NO_MEM;
+    }
+    
+    /* Get chip info for core count */
+    esp_chip_info_t chip_info;
+    esp_chip_info(&chip_info);
+    uint8_t num_cores = chip_info.cores;
+    
+#if configUSE_TRACE_FACILITY && configGENERATE_RUN_TIME_STATS
+    UBaseType_t task_count = uxTaskGetNumberOfTasks();
+    TaskStatus_t *task_array = malloc(task_count * sizeof(TaskStatus_t));
+    
+    if (task_array == NULL) {
+        cJSON_Delete(data);
+        ts_api_result_error(result, TS_API_ERR_NO_MEM, "Memory allocation failed");
+        return ESP_ERR_NO_MEM;
+    }
+    
+    uint32_t total_runtime;
+    UBaseType_t actual_count = uxTaskGetSystemState(task_array, task_count, &total_runtime);
+    
+    /* Calculate per-core CPU usage */
+    uint32_t core_runtime[2] = {0, 0};  /* ESP32-S3 has max 2 cores */
+    uint32_t idle_runtime[2] = {0, 0};
+    
+    /* Sum up runtime for each core and track idle tasks */
+    for (UBaseType_t i = 0; i < actual_count; i++) {
+        BaseType_t core_id = task_array[i].xCoreID;
+        uint32_t task_runtime = task_array[i].ulRunTimeCounter;
+        
+        if (core_id >= 0 && core_id < num_cores) {
+            core_runtime[core_id] += task_runtime;
+            
+            /* Check if this is an IDLE task */
+            if (strncmp(task_array[i].pcTaskName, "IDLE", 4) == 0) {
+                idle_runtime[core_id] = task_runtime;
+            }
+        }
+    }
+    
+    cJSON *cores = cJSON_AddArrayToObject(data, "cores");
+    uint32_t total_usage_sum = 0;
+    
+    for (int i = 0; i < num_cores; i++) {
+        cJSON *core = cJSON_CreateObject();
+        cJSON_AddNumberToObject(core, "id", i);
+        
+        /* Calculate CPU usage percentage (100% - idle%) */
+        uint32_t cpu_percent = 0;
+        if (core_runtime[i] > 0) {
+            /* Usage = (total - idle) / total * 100 */
+            uint32_t busy_time = core_runtime[i] - idle_runtime[i];
+            cpu_percent = (busy_time * 100) / core_runtime[i];
+        }
+        
+        cJSON_AddNumberToObject(core, "usage", cpu_percent);
+        cJSON_AddNumberToObject(core, "runtime", core_runtime[i]);
+        cJSON_AddNumberToObject(core, "idle_runtime", idle_runtime[i]);
+        
+        cJSON_AddItemToArray(cores, core);
+        total_usage_sum += cpu_percent;
+    }
+    
+    /* Overall CPU usage (average across cores) */
+    cJSON_AddNumberToObject(data, "total_usage", num_cores > 0 ? total_usage_sum / num_cores : 0);
+    cJSON_AddNumberToObject(data, "total_runtime", total_runtime);
+    cJSON_AddNumberToObject(data, "task_count", actual_count);
+    
+    free(task_array);
+#else
+    /* Fallback when runtime stats not available */
+    cJSON *cores = cJSON_AddArrayToObject(data, "cores");
+    for (int i = 0; i < num_cores; i++) {
+        cJSON *core = cJSON_CreateObject();
+        cJSON_AddNumberToObject(core, "id", i);
+        cJSON_AddNumberToObject(core, "usage", 0);
+        cJSON_AddStringToObject(core, "error", "Runtime stats not enabled");
+        cJSON_AddItemToArray(cores, core);
+    }
+    cJSON_AddNumberToObject(data, "total_usage", 0);
+    cJSON_AddStringToObject(data, "error", "CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS not enabled");
+#endif
+    
+    ts_api_result_ok(result, data);
+    return ESP_OK;
+}
+
+/**
  * @brief system.reboot - Reboot the system
  */
 static esp_err_t api_system_reboot(const cJSON *params, ts_api_result_t *result)
@@ -297,6 +392,14 @@ esp_err_t ts_api_system_register(void)
             .description = "Get memory information",
             .category = TS_API_CAT_SYSTEM,
             .handler = api_system_memory,
+            .requires_auth = false,
+            .permission = NULL
+        },
+        {
+            .name = "system.cpu",
+            .description = "Get CPU core statistics",
+            .category = TS_API_CAT_SYSTEM,
+            .handler = api_system_cpu,
             .requires_auth = false,
             .permission = NULL
         },

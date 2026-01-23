@@ -14,6 +14,7 @@
 #include "driver/gpio.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "cJSON.h"
 #include <string.h>
 
 #define TAG "ts_device"
@@ -192,6 +193,23 @@ static esp_err_t agx_power_on(void)
     s_agx.state = TS_DEVICE_STATE_ON;
     
     TS_LOGI(TAG, "AGX powered on (boot #%lu)", s_agx.boot_count);
+    
+    // 发送设备状态变更事件 (WebSocket)
+    cJSON *status = cJSON_CreateObject();
+    if (status) {
+        cJSON_AddStringToObject(status, "device", "agx");
+        cJSON_AddBoolToObject(status, "power", true);
+        cJSON_AddStringToObject(status, "state", "on");
+        cJSON_AddNumberToObject(status, "boot_count", s_agx.boot_count);
+        char *json_str = cJSON_PrintUnformatted(status);
+        if (json_str) {
+            ts_event_post(TS_EVENT_BASE_DEVICE_MON, TS_EVENT_DEVICE_STATUS_CHANGED, 
+                         json_str, strlen(json_str) + 1, 0);
+            cJSON_free(json_str);
+        }
+        cJSON_Delete(status);
+    }
+    
     return ESP_OK;
 }
 
@@ -213,6 +231,22 @@ static esp_err_t agx_power_off(void)
     
     s_agx.state = TS_DEVICE_STATE_OFF;
     TS_LOGI(TAG, "AGX powered off");
+    
+    // 发送设备状态变更事件 (WebSocket)
+    cJSON *status = cJSON_CreateObject();
+    if (status) {
+        cJSON_AddStringToObject(status, "device", "agx");
+        cJSON_AddBoolToObject(status, "power", false);
+        cJSON_AddStringToObject(status, "state", "off");
+        char *json_str = cJSON_PrintUnformatted(status);
+        if (json_str) {
+            ts_event_post(TS_EVENT_BASE_DEVICE_MON, TS_EVENT_DEVICE_STATUS_CHANGED, 
+                         json_str, strlen(json_str) + 1, 0);
+            cJSON_free(json_str);
+        }
+        cJSON_Delete(status);
+    }
+    
     return ESP_OK;
 }
 
@@ -240,6 +274,23 @@ static esp_err_t agx_reset(void)
     s_agx.state = TS_DEVICE_STATE_BOOTING;
     
     TS_LOGI(TAG, "AGX reset complete (boot #%lu)", s_agx.boot_count);
+    
+    // 发送设备状态变更事件 (WebSocket)
+    cJSON *status = cJSON_CreateObject();
+    if (status) {
+        cJSON_AddStringToObject(status, "device", "agx");
+        cJSON_AddBoolToObject(status, "power", true);
+        cJSON_AddStringToObject(status, "state", "resetting");
+        cJSON_AddNumberToObject(status, "boot_count", s_agx.boot_count);
+        char *json_str = cJSON_PrintUnformatted(status);
+        if (json_str) {
+            ts_event_post(TS_EVENT_BASE_DEVICE_MON, TS_EVENT_DEVICE_STATUS_CHANGED, 
+                         json_str, strlen(json_str) + 1, 0);
+            cJSON_free(json_str);
+        }
+        cJSON_Delete(status);
+    }
+    
     return ESP_OK;
 }
 
@@ -322,6 +373,23 @@ static esp_err_t lpmu_power_on(void)
     s_lpmu.state = TS_DEVICE_STATE_ON;
     
     TS_LOGI(TAG, "LPMU powered on (boot #%lu)", s_lpmu.boot_count);
+    
+    // 发送设备状态变更事件 (WebSocket)
+    cJSON *status = cJSON_CreateObject();
+    if (status) {
+        cJSON_AddStringToObject(status, "device", "lpmu");
+        cJSON_AddBoolToObject(status, "power", true);
+        cJSON_AddStringToObject(status, "state", "on");
+        cJSON_AddNumberToObject(status, "boot_count", s_lpmu.boot_count);
+        char *json_str = cJSON_PrintUnformatted(status);
+        if (json_str) {
+            ts_event_post(TS_EVENT_BASE_DEVICE_MON, TS_EVENT_DEVICE_STATUS_CHANGED, 
+                         json_str, strlen(json_str) + 1, 0);
+            cJSON_free(json_str);
+        }
+        cJSON_Delete(status);
+    }
+    
     return ESP_OK;
 }
 
@@ -337,6 +405,22 @@ static esp_err_t lpmu_power_off(void)
     
     s_lpmu.state = TS_DEVICE_STATE_OFF;
     TS_LOGI(TAG, "LPMU powered off");
+    
+    // 发送设备状态变更事件 (WebSocket)
+    cJSON *status = cJSON_CreateObject();
+    if (status) {
+        cJSON_AddStringToObject(status, "device", "lpmu");
+        cJSON_AddBoolToObject(status, "power", false);
+        cJSON_AddStringToObject(status, "state", "off");
+        char *json_str = cJSON_PrintUnformatted(status);
+        if (json_str) {
+            ts_event_post(TS_EVENT_BASE_DEVICE_MON, TS_EVENT_DEVICE_STATUS_CHANGED, 
+                         json_str, strlen(json_str) + 1, 0);
+            cJSON_free(json_str);
+        }
+        cJSON_Delete(status);
+    }
+    
     return ESP_OK;
 }
 

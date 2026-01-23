@@ -8,6 +8,122 @@
 
 let ws = null;
 let refreshInterval = null;
+let subscriptionManager = null;  // WebSocket 订阅管理器
+
+// =========================================================================
+//                         WebSocket 订阅管理器
+// =========================================================================
+
+class SubscriptionManager {
+    constructor(ws) {
+        this.ws = ws;
+        this.subscriptions = new Map(); // topic -> Set(callbacks)
+        this.activeSubs = new Set();    // 已激活的 topic
+    }
+    
+    /**
+     * 订阅主题
+     * @param {string} topic - 主题名称 (system.info, device.status, ota.progress)
+     * @param {function} callback - 数据回调函数
+     * @param {object} params - 订阅参数 (interval 等)
+     */
+    subscribe(topic, callback, params = {}) {
+        // 添加回调
+        if (!this.subscriptions.has(topic)) {
+            this.subscriptions.set(topic, new Set());
+        }
+        this.subscriptions.get(topic).add(callback);
+        
+        // 发送订阅消息（只在首次订阅时）
+        if (!this.activeSubs.has(topic)) {
+            this.ws.send({
+                type: 'subscribe',
+                topic: topic,
+                params: params
+            });
+            this.activeSubs.add(topic);
+            console.log(`[SubscriptionMgr] Subscribed to: ${topic}`, params);
+        }
+    }
+    
+    /**
+     * 取消订阅
+     * @param {string} topic - 主题名称
+     * @param {function} callback - 回调函数（不传则移除所有）
+     */
+    unsubscribe(topic, callback = null) {
+        if (!this.subscriptions.has(topic)) return;
+        
+        if (callback) {
+            // 移除特定回调
+            this.subscriptions.get(topic).delete(callback);
+        } else {
+            // 移除所有回调
+            this.subscriptions.get(topic).clear();
+        }
+        
+        // 如果没有回调了，发送取消订阅消息
+        if (this.subscriptions.get(topic).size === 0) {
+            this.subscriptions.delete(topic);
+            if (this.activeSubs.has(topic)) {
+                this.ws.send({
+                    type: 'unsubscribe',
+                    topic: topic
+                });
+                this.activeSubs.delete(topic);
+                console.log(`[SubscriptionMgr] Unsubscribed from: ${topic}`);
+            }
+        }
+    }
+    
+    /**
+     * 处理 WebSocket 消息
+     * @param {object} msg - WebSocket 消息
+     */
+    handleMessage(msg) {
+        console.log('[SubscriptionMgr] handleMessage:', msg.type, msg.topic, msg);
+        
+        // 处理订阅确认
+        if (msg.type === 'subscribed' || msg.type === 'unsubscribed') {
+            const status = msg.success ? '✅' : '❌';
+            console.log(`[SubscriptionMgr] ${msg.type}: ${msg.topic} ${status}`);
+            if (!msg.success && msg.error) {
+                console.error(`[SubscriptionMgr] Error: ${msg.error}`);
+            }
+            return;
+        }
+        
+        // 分发数据到订阅回调
+        if (msg.type === 'data' && msg.topic) {
+            const callbacks = this.subscriptions.get(msg.topic);
+            console.log(`[SubscriptionMgr] Topic ${msg.topic} has ${callbacks ? callbacks.size : 0} callbacks`);
+            if (callbacks && callbacks.size > 0) {
+                callbacks.forEach(cb => {
+                    try {
+                        console.log(`[SubscriptionMgr] Calling callback for ${msg.topic}`);
+                        cb(msg, msg.timestamp);
+                    } catch (e) {
+                        console.error(`[SubscriptionMgr] Callback error for ${msg.topic}:`, e);
+                    }
+                });
+            } else {
+                console.warn(`[SubscriptionMgr] No callbacks for topic: ${msg.topic}`);
+            }
+        }
+    }
+    
+    /**
+     * 清理所有订阅
+     */
+    clear() {
+        this.activeSubs.forEach(topic => {
+            this.ws.send({ type: 'unsubscribe', topic });
+        });
+        this.subscriptions.clear();
+        this.activeSubs.clear();
+        console.log('[SubscriptionMgr] Cleared all subscriptions');
+    }
+}
 
 // =========================================================================
 //                         初始化
@@ -118,12 +234,22 @@ function setupWebSocket() {
     );
     ws.connect();
     
+    // 初始化订阅管理器
+    subscriptionManager = new SubscriptionManager(ws);
+    
     // 暴露给全局，供日志页面使用
     window.ws = ws;
+    window.subscriptionManager = subscriptionManager;
 }
 
 function handleEvent(msg) {
     // console.log('Event:', msg);
+    
+    // 处理订阅管理器消息 (subscribed/unsubscribed/data)
+    if (subscriptionManager && (msg.type === 'subscribed' || msg.type === 'unsubscribed' || msg.type === 'data')) {
+        subscriptionManager.handleMessage(msg);
+        return;
+    }
     
     // 处理日志消息
     if (msg.type === 'log') {
@@ -190,6 +316,22 @@ function handlePowerEvent(msg) {
 async function loadSystemPage() {
     clearInterval(refreshInterval);
     
+    // 取消之前的订阅
+    if (subscriptionManager) {
+        subscriptionManager.unsubscribe('system.memory');
+        subscriptionManager.unsubscribe('system.cpu');
+        subscriptionManager.unsubscribe('network.status');
+        subscriptionManager.unsubscribe('power.status');
+        subscriptionManager.unsubscribe('fan.status');
+        subscriptionManager.unsubscribe('service.list');
+    }
+    
+    // 停止 uptime 计算
+    if (window.systemUptimeInterval) {
+        clearInterval(window.systemUptimeInterval);
+        window.systemUptimeInterval = null;
+    }
+    
     const content = document.getElementById('page-content');
     content.innerHTML = `
         <div class="page-system">
@@ -231,6 +373,13 @@ async function loadSystemPage() {
                         <p><strong>PSRAM:</strong></p>
                         <div class="progress-bar"><div class="progress" id="psram-progress"></div></div>
                         <p style="font-size:0.9em" id="psram-text">-</p>
+                    </div>
+                </div>
+                
+                <div class="card">
+                    <h3>💻 CPU</h3>
+                    <div class="card-content" id="cpu-cores">
+                        <div class="loading-small">加载中...</div>
                     </div>
                 </div>
                 
@@ -299,59 +448,47 @@ async function loadSystemPage() {
         </div>
     `;
     
-    await refreshSystemPage();
+    // 初始加载
+    await refreshSystemPageOnce();
     
-    // 定时刷新
-    refreshInterval = setInterval(refreshSystemPage, 3000);
-}
-
-async function refreshSystemPage() {
-    // 检查是否还在系统页面
-    if (!document.getElementById('sys-chip')) {
-        clearInterval(refreshInterval);
-        return;
+    // 订阅 WebSocket 实时更新 - 使用聚合订阅（system.dashboard）
+    if (subscriptionManager) {
+        subscriptionManager.subscribe('system.dashboard', (msg) => {
+            console.log('[System Page] Received dashboard:', msg);
+            if (!msg.data) return;
+            
+            const data = msg.data;
+            
+            // 分发到各个更新函数
+            if (data.info) updateSystemInfo(data.info);
+            if (data.memory) updateMemoryInfo(data.memory);
+            if (data.cpu) updateCpuInfo(data.cpu);
+            if (data.network) updateNetworkInfo(data.network);
+            if (data.power) updatePowerInfo(data.power);
+            if (data.fan) updateFanInfo(data.fan);
+            if (data.services) updateServiceList(data.services);
+        }, { interval: 1000 });  // 1秒更新所有数据
     }
     
+    // 启动浏览器本地时间更新定时器
+    startLocalTimeUpdate();
+}
+
+// 单次刷新（初始加载）
+async function refreshSystemPageOnce() {
     // 系统信息
     try {
         const info = await api.getSystemInfo();
         if (info.data) {
-            document.getElementById('sys-chip').textContent = info.data.chip?.model || '-';
-            document.getElementById('sys-version').textContent = info.data.app?.version || '-';
-            document.getElementById('sys-idf').textContent = info.data.app?.idf_version || '-';
-            document.getElementById('sys-compile').textContent = 
-                (info.data.app?.compile_date || '') + ' ' + (info.data.app?.compile_time || '');
-            document.getElementById('sys-uptime').textContent = formatUptime(info.data.uptime_ms);
+            updateSystemInfo(info.data);
         }
     } catch (e) { console.log('System info error:', e); }
     
-    // 时间同步信息
+    // 时间信息
     try {
         const time = await api.timeInfo();
         if (time.data) {
-            // 检查时间是否早于 2025 年，自动同步浏览器时间
-            const deviceYear = time.data.year || (time.data.datetime ? parseInt(time.data.datetime.substring(0, 4)) : 0);
-            if (deviceYear < 2025) {
-                console.log('Device time is before 2025, auto-syncing from browser...');
-                await syncTimeFromBrowser(true);  // 静默同步
-                return;  // 同步后会再次刷新
-            }
-            
-            // 显示实时时间（基于服务器时间+本地偏移）
-            const serverTime = time.data.timestamp_ms || Date.now();
-            const now = new Date(serverTime);
-            const timeStr = now.toLocaleString('zh-CN', { 
-                year: 'numeric', month: '2-digit', day: '2-digit',
-                hour: '2-digit', minute: '2-digit', second: '2-digit',
-                hour12: false 
-            });
-            document.getElementById('sys-datetime').textContent = timeStr;
-            
-            const statusText = time.data.synced ? '✅ 已同步' : '⏳ 未同步';
-            document.getElementById('sys-time-status').textContent = statusText;
-            const sourceMap = { ntp: 'NTP', http: '浏览器', manual: '手动', none: '未同步' };
-            document.getElementById('sys-time-source').textContent = sourceMap[time.data.source] || time.data.source;
-            document.getElementById('sys-timezone').textContent = time.data.timezone || '-';
+            updateTimeInfo(time.data);
         }
     } catch (e) { console.log('Time info error:', e); }
     
@@ -359,27 +496,7 @@ async function refreshSystemPage() {
     try {
         const mem = await api.getMemoryInfo();
         if (mem.data) {
-            const heapTotal = mem.data.internal?.total || 1;
-            const heapFree = mem.data.internal?.free || mem.data.free_heap || 0;
-            const heapUsed = heapTotal - heapFree;
-            const heapPercent = Math.round((heapUsed / heapTotal) * 100);
-            
-            document.getElementById('heap-progress').style.width = heapPercent + '%';
-            document.getElementById('heap-text').textContent = 
-                `${formatBytes(heapUsed)} / ${formatBytes(heapTotal)} (${heapPercent}%)`;
-            
-            if (mem.data.psram?.total) {
-                const psramTotal = mem.data.psram.total;
-                const psramFree = mem.data.psram.free || 0;
-                const psramUsed = psramTotal - psramFree;
-                const psramPercent = Math.round((psramUsed / psramTotal) * 100);
-                
-                document.getElementById('psram-progress').style.width = psramPercent + '%';
-                document.getElementById('psram-text').textContent = 
-                    `${formatBytes(psramUsed)} / ${formatBytes(psramTotal)} (${psramPercent}%)`;
-            } else {
-                document.getElementById('psram-text').textContent = '不可用';
-            }
+            updateMemoryInfo(mem.data);
         }
     } catch (e) { console.log('Memory info error:', e); }
     
@@ -387,11 +504,7 @@ async function refreshSystemPage() {
     try {
         const netStatus = await api.networkStatus();
         if (netStatus.data) {
-            const eth = netStatus.data.ethernet || {};
-            const wifi = netStatus.data.wifi || {};
-            document.getElementById('eth-status').textContent = eth.status === 'connected' ? '已连接' : '未连接';
-            document.getElementById('wifi-status').textContent = wifi.connected ? '已连接' : '未连接';
-            document.getElementById('ip-addr').textContent = eth.ip || wifi.ip || '-';
+            updateNetworkInfo(netStatus.data);
         }
     } catch (e) {
         document.getElementById('eth-status').textContent = '-';
@@ -402,20 +515,7 @@ async function refreshSystemPage() {
     try {
         const powerStatus = await api.powerStatus();
         if (powerStatus.data) {
-            const voltage = powerStatus.data.power_chip?.voltage_v || 
-                           powerStatus.data.voltage?.supply_v || 
-                           powerStatus.data.stats?.avg_voltage_v;
-            const current = powerStatus.data.power_chip?.current_a ||
-                           powerStatus.data.current?.value_a;
-            const power = powerStatus.data.power_chip?.power_w ||
-                         powerStatus.data.power?.value_w;
-            
-            document.getElementById('voltage').textContent = 
-                (typeof voltage === 'number' ? voltage.toFixed(1) + ' V' : '-');
-            document.getElementById('current').textContent = 
-                (typeof current === 'number' ? current.toFixed(2) + ' A' : '-');
-            document.getElementById('power-watts').textContent = 
-                (typeof power === 'number' ? power.toFixed(1) + ' W' : '-');
+            updatePowerInfo(powerStatus.data);
         }
         const protStatus = await api.powerProtectionStatus();
         if (protStatus.data) {
@@ -433,10 +533,7 @@ async function refreshSystemPage() {
     try {
         const devStatus = await api.deviceStatus();
         if (devStatus.data?.devices) {
-            const agx = devStatus.data.devices.find(d => d.name === 'agx');
-            const lpmu = devStatus.data.devices.find(d => d.name === 'lpmu');
-            document.getElementById('agx-status').textContent = agx?.powered ? '🟢 运行中' : '⚫ 关机';
-            document.getElementById('lpmu-status').textContent = lpmu?.powered ? '🟢 运行中' : '⚫ 关机';
+            updateDeviceInfo(devStatus.data.devices);
         }
     } catch (e) {
         document.getElementById('agx-status').textContent = '-';
@@ -446,25 +543,7 @@ async function refreshSystemPage() {
     // 风扇
     try {
         const fans = await api.fanStatus();
-        const container = document.getElementById('fans-grid');
-        if (fans.data?.fans && fans.data.fans.length > 0) {
-            container.innerHTML = fans.data.fans.map(fan => `
-                <div class="fan-card">
-                    <h4>🌀 风扇 ${fan.id}</h4>
-                    <p><strong>模式:</strong> ${fan.mode || 'auto'}</p>
-                    <p><strong>转速:</strong> ${fan.speed || fan.duty || 0}%</p>
-                    <p><strong>RPM:</strong> ${fan.rpm || '-'}</p>
-                    <div class="fan-slider">
-                        <input type="range" min="0" max="100" value="${fan.speed || fan.duty || 0}" 
-                               onchange="setFanSpeed(${fan.id}, this.value)"
-                               oninput="this.nextElementSibling.textContent = this.value + '%'">
-                        <span>${fan.speed || fan.duty || 0}%</span>
-                    </div>
-                </div>
-            `).join('');
-        } else {
-            container.innerHTML = '<p class="text-muted">无可用风扇</p>';
-        }
+        updateFanInfo(fans.data);
     } catch (e) { 
         document.getElementById('fans-grid').innerHTML = '<p class="text-muted">风扇状态不可用</p>';
     }
@@ -472,27 +551,229 @@ async function refreshSystemPage() {
     // 服务列表
     try {
         const services = await api.serviceList();
-        const tbody = document.getElementById('services-body');
-        tbody.innerHTML = '';
+        updateServiceList(services.data);
+    } catch (e) {
+        console.log('Services error:', e);
+    }
+}
+
+// 更新系统信息
+function updateSystemInfo(data) {
+    if (!data) return;
+    document.getElementById('sys-chip').textContent = data.chip?.model || '-';
+    document.getElementById('sys-version').textContent = data.app?.version || '-';
+    document.getElementById('sys-idf').textContent = data.app?.idf_version || '-';
+    document.getElementById('sys-compile').textContent = 
+        (data.app?.compile_date || '') + ' ' + (data.app?.compile_time || '');
+    
+    // 直接显示服务器提供的运行时间（不再前端计算）
+    const uptimeElem = document.getElementById('sys-uptime');
+    if (uptimeElem && data.uptime_ms !== undefined) {
+        uptimeElem.textContent = formatUptime(data.uptime_ms);
+    }
+}
+
+// 更新时间信息
+// 启动本地时间更新定时器
+let localTimeInterval = null;
+function startLocalTimeUpdate() {
+    // 清除旧定时器（如果存在）
+    if (localTimeInterval) {
+        clearInterval(localTimeInterval);
+    }
+    
+    // 立即更新一次
+    updateLocalTime();
+    
+    // 每秒更新
+    localTimeInterval = setInterval(updateLocalTime, 1000);
+}
+
+function updateLocalTime() {
+    const now = new Date();
+    const timeStr = now.toLocaleString('zh-CN', { 
+        year: 'numeric', month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit', second: '2-digit',
+        hour12: false 
+    });
+    const datetimeElem = document.getElementById('sys-datetime');
+    if (datetimeElem) {
+        datetimeElem.textContent = timeStr;
+    }
+}
+
+// 自动同步标志（避免重复触发）
+let autoSyncTriggered = false;
+
+function updateTimeInfo(data) {
+    // 系统时间现在使用浏览器本地时间（通过 startLocalTimeUpdate 定时器更新）
+    // 此函数保留以备后续扩展（例如显示 NTP 同步状态等）
+    if (!data) return;
+    
+    // 检查 ESP32 时间是否早于 2025 年，自动同步浏览器时间（只触发一次）
+    const deviceYear = data.year || (data.datetime ? parseInt(data.datetime.substring(0, 4)) : 0);
+    if (deviceYear > 0 && deviceYear < 2025 && !autoSyncTriggered && !data.synced) {
+        console.log(`检测到 ESP32 时间早于 2025 年 (${deviceYear})，自动从浏览器同步...`);
+        autoSyncTriggered = true;  // 标记已触发，避免重复
+        setTimeout(() => syncTimeFromBrowser(true), 500);  // 延迟执行避免阻塞页面加载
+    }
+    
+    const statusText = data.synced ? '✅ 已同步' : '⏳ 未同步';
+    const statusElem = document.getElementById('sys-time-status');
+    if (statusElem) {
+        statusElem.textContent = statusText;
+    }
+    const sourceMap = { ntp: 'NTP', http: '浏览器', manual: '手动', none: '未同步' };
+    const sourceElem = document.getElementById('sys-time-source');
+    if (sourceElem) {
+        sourceElem.textContent = sourceMap[data.source] || data.source;
+    }
+    const timezoneElem = document.getElementById('sys-timezone');
+    if (timezoneElem) {
+        timezoneElem.textContent = data.timezone || '-';
+    }
+}
+
+// 更新内存信息
+function updateMemoryInfo(data) {
+    if (!data) return;
+    
+    const heapTotal = data.internal?.total || 1;
+    const heapFree = data.internal?.free || data.free_heap || 0;
+    const heapUsed = heapTotal - heapFree;
+    const heapPercent = Math.round((heapUsed / heapTotal) * 100);
+    
+    document.getElementById('heap-progress').style.width = heapPercent + '%';
+    document.getElementById('heap-text').textContent = 
+        `${formatBytes(heapUsed)} / ${formatBytes(heapTotal)} (${heapPercent}%)`;
+    
+    if (data.psram?.total) {
+        const psramTotal = data.psram.total;
+        const psramFree = data.psram.free || 0;
+        const psramUsed = psramTotal - psramFree;
+        const psramPercent = Math.round((psramUsed / psramTotal) * 100);
         
-        if (services.data && services.data.services) {
-            services.data.services.forEach(svc => {
-                const tr = document.createElement('tr');
-                const stateClass = svc.state === 'RUNNING' ? 'status-ok' : 
-                                  svc.state === 'ERROR' ? 'status-error' : 'status-warn';
-                tr.innerHTML = `
-                    <td>${svc.name}</td>
-                    <td><span class="status-badge ${stateClass}">${svc.state}</span></td>
-                    <td>${svc.phase}</td>
-                    <td>${svc.healthy ? '✅' : '❌'}</td>
-                    <td>
-                        <button class="btn btn-small" onclick="serviceAction('${svc.name}', 'restart')">重启</button>
-                    </td>
-                `;
-                tbody.appendChild(tr);
-            });
-        }
-    } catch (e) { console.log('Services error:', e); }
+        document.getElementById('psram-progress').style.width = psramPercent + '%';
+        document.getElementById('psram-text').textContent = 
+            `${formatBytes(psramUsed)} / ${formatBytes(psramTotal)} (${psramPercent}%)`;
+    } else {
+        document.getElementById('psram-text').textContent = '不可用';
+    }
+}
+
+// 更新 CPU 信息
+function updateCpuInfo(data) {
+    if (!data || !data.cores) {
+        console.log('CPU data missing cores:', data);
+        return;
+    }
+    
+    const container = document.getElementById('cpu-cores');
+    if (!container) return;
+    
+    let html = '';
+    data.cores.forEach(core => {
+        const usage = Math.round(core.usage || 0);
+        const color = usage > 80 ? '#e74c3c' : (usage > 50 ? '#f39c12' : '#2ecc71');
+        html += `
+            <p><strong>Core ${core.id}:</strong> ${usage}%</p>
+            <div class="progress-bar">
+                <div class="progress" style="width:${usage}%;background-color:${color}"></div>
+            </div>
+        `;
+    });
+    
+    if (data.total_usage !== undefined) {
+        const avgUsage = Math.round(data.total_usage);
+        html += `<p style="margin-top:8px;font-size:0.9em;color:#888">平均: ${avgUsage}%</p>`;
+    }
+    
+    container.innerHTML = html;
+}
+
+// 更新网络信息
+function updateNetworkInfo(data) {
+    if (!data) return;
+    const eth = data.ethernet || {};
+    const wifi = data.wifi || {};
+    document.getElementById('eth-status').textContent = eth.status === 'connected' ? '已连接' : '未连接';
+    document.getElementById('wifi-status').textContent = wifi.connected ? '已连接' : '未连接';
+    document.getElementById('ip-addr').textContent = eth.ip || wifi.ip || '-';
+}
+
+// 更新电源信息
+function updatePowerInfo(data) {
+    if (!data) return;
+    const voltage = data.power_chip?.voltage_v || 
+                   data.voltage?.supply_v || 
+                   data.stats?.avg_voltage_v;
+    const current = data.power_chip?.current_a ||
+                   data.current?.value_a;
+    const power = data.power_chip?.power_w ||
+                 data.power?.value_w;
+    
+    document.getElementById('voltage').textContent = 
+        (typeof voltage === 'number' ? voltage.toFixed(1) + ' V' : '-');
+    document.getElementById('current').textContent = 
+        (typeof current === 'number' ? current.toFixed(2) + ' A' : '-');
+    document.getElementById('power-watts').textContent = 
+        (typeof power === 'number' ? power.toFixed(1) + ' W' : '-');
+}
+
+// 更新设备信息
+function updateDeviceInfo(devices) {
+    if (!devices) return;
+    const agx = devices.find(d => d.name === 'agx');
+    const lpmu = devices.find(d => d.name === 'lpmu');
+    document.getElementById('agx-status').textContent = agx?.powered ? '🟢 运行中' : '⚫ 关机';
+    document.getElementById('lpmu-status').textContent = lpmu?.powered ? '🟢 运行中' : '⚫ 关机';
+}
+
+// 更新风扇信息
+function updateFanInfo(data) {
+    const container = document.getElementById('fans-grid');
+    if (data?.fans && data.fans.length > 0) {
+        container.innerHTML = data.fans.map(fan => `
+            <div class="fan-card">
+                <h4>🌀 风扇 ${fan.id}</h4>
+                <p><strong>模式:</strong> ${fan.mode || 'auto'}</p>
+                <p><strong>转速:</strong> ${fan.speed || fan.duty || 0}%</p>
+                <p><strong>RPM:</strong> ${fan.rpm || '-'}</p>
+                <div class="fan-slider">
+                    <input type="range" min="0" max="100" value="${fan.speed || fan.duty || 0}" 
+                           onchange="setFanSpeed(${fan.id}, this.value)"
+                           oninput="this.nextElementSibling.textContent = this.value + '%'">
+                    <span>${fan.speed || fan.duty || 0}%</span>
+                </div>
+            </div>
+        `).join('');
+    } else {
+        container.innerHTML = '<p class="text-muted">无可用风扇</p>';
+    }
+}
+
+// 更新服务列表
+function updateServiceList(data) {
+    const tbody = document.getElementById('services-body');
+    tbody.innerHTML = '';
+    
+    if (data && data.services) {
+        data.services.forEach(svc => {
+            const tr = document.createElement('tr');
+            const stateClass = svc.state === 'RUNNING' ? 'status-ok' : 
+                              svc.state === 'ERROR' ? 'status-error' : 'status-warn';
+            tr.innerHTML = `
+                <td>${svc.name}</td>
+                <td><span class="status-badge ${stateClass}">${svc.state}</span></td>
+                <td>${svc.phase}</td>
+                <td>${svc.healthy ? '✅' : '❌'}</td>
+                <td>
+                    <button class="btn btn-small" onclick="serviceAction('${svc.name}', 'restart')">重启</button>
+                </td>
+            `;
+            tbody.appendChild(tr);
+        });
+    }
 }
 
 async function setFanSpeed(id, speed) {
@@ -537,7 +818,16 @@ async function syncTimeFromBrowser(silent = false) {
         const result = await api.timeSync(now);
         if (result.data?.synced) {
             if (!silent) showToast(`时间已同步: ${result.data.datetime}`, 'success');
-            await refreshSystemPage();
+            
+            // 重新获取时间信息并更新显示
+            try {
+                const timeInfo = await api.timeInfo();
+                if (timeInfo.data) {
+                    updateTimeInfo(timeInfo.data);
+                }
+            } catch (e) {
+                console.error('Failed to refresh time info:', e);
+            }
         } else {
             if (!silent) showToast('时间同步失败', 'error');
         }
@@ -3025,6 +3315,11 @@ async function saveNatConfig() {
 async function loadDevicePage() {
     clearInterval(refreshInterval);
     
+    // 取消之前的订阅
+    if (subscriptionManager) {
+        subscriptionManager.unsubscribe('device.status');
+    }
+    
     const content = document.getElementById('page-content');
     content.innerHTML = `
         <div class="page-device">
@@ -3065,60 +3360,89 @@ async function loadDevicePage() {
         </div>
     `;
     
-    await refreshDevicePage();
-    refreshInterval = setInterval(refreshDevicePage, 2000);
+    // 初始加载（HTTP API）
+    await refreshDevicePageOnce();
+    
+    // 订阅 WebSocket 实时更新（取代轮询）
+    if (subscriptionManager) {
+        subscriptionManager.subscribe('device.status', (data) => {
+            updateDeviceUI(data);
+        }, { interval: 2000 });
+    }
 }
 
-async function refreshDevicePage() {
+// 单次刷新（初始加载）
+async function refreshDevicePageOnce() {
     // 设备状态
     try {
         const status = await api.deviceStatus();
         if (status.data?.devices) {
-            const agx = status.data.devices.find(d => d.name === 'agx');
-            const lpmu = status.data.devices.find(d => d.name === 'lpmu');
-            
-            const agxPowerEl = document.getElementById('dev-agx-power');
-            const lpmuPowerEl = document.getElementById('dev-lpmu-power');
-            
-            if (agxPowerEl) {
-                agxPowerEl.textContent = agx?.powered ? '🟢 运行中' : '⚫ 关机';
-                agxPowerEl.className = agx?.powered ? 'status-value status-on' : 'status-value status-off';
-            }
-            if (lpmuPowerEl) {
-                lpmuPowerEl.textContent = lpmu?.powered ? '🟢 运行中' : '⚫ 关机';
-                lpmuPowerEl.className = lpmu?.powered ? 'status-value status-on' : 'status-value status-off';
-            }
+            updateDeviceUI(status.data);
         }
     } catch (e) { console.log('Device status error:', e); }
     
-    // AGX 监控数据 (AGX 未连接时正常返回无数据)
+    // AGX 监控数据
     try {
         const agxData = await api.agxData();
         if (agxData.code === 0 && agxData.data) {
-            const cpuEl = document.getElementById('dev-agx-cpu');
-            const gpuEl = document.getElementById('dev-agx-gpu');
-            const tempEl = document.getElementById('dev-agx-temp');
-            
-            if (cpuEl) cpuEl.textContent = agxData.data.cpu_usage ? `${agxData.data.cpu_usage}%` : '-';
-            if (gpuEl) gpuEl.textContent = agxData.data.gpu_usage ? `${agxData.data.gpu_usage}%` : '-';
-            if (tempEl) tempEl.textContent = agxData.data.temperature ? `${agxData.data.temperature}°C` : '-';
-        } else {
-            // AGX 未连接或无数据，显示占位符
-            const cpuEl = document.getElementById('dev-agx-cpu');
-            const gpuEl = document.getElementById('dev-agx-gpu');
-            const tempEl = document.getElementById('dev-agx-temp');
-            if (cpuEl) cpuEl.textContent = '-';
-            if (gpuEl) gpuEl.textContent = '-';
-            if (tempEl) tempEl.textContent = '-';
+            updateAgxMonitorData(agxData.data);
         }
-    } catch (e) { /* AGX 可能未连接，静默忽略 */ }
+    } catch (e) { /* AGX 未连接时正常 */ }
+}
+
+// 更新设备 UI（统一处理 HTTP 和 WebSocket 数据）
+function updateDeviceUI(data) {
+    if (!data) return;
+    
+    // 处理 WebSocket 格式 (device: "agx", power: true, state: "on")
+    if (data.device) {
+        const deviceName = data.device;
+        const isPowered = data.power === true;
+        const powerEl = document.getElementById(`dev-${deviceName}-power`);
+        
+        if (powerEl) {
+            powerEl.textContent = isPowered ? '🟢 运行中' : '⚫ 关机';
+            powerEl.className = isPowered ? 'status-value status-on' : 'status-value status-off';
+        }
+        return;
+    }
+    
+    // 处理 HTTP API 格式 (devices: [{name, powered}, ...])
+    if (data.devices) {
+        const agx = data.devices.find(d => d.name === 'agx');
+        const lpmu = data.devices.find(d => d.name === 'lpmu');
+        
+        const agxPowerEl = document.getElementById('dev-agx-power');
+        const lpmuPowerEl = document.getElementById('dev-lpmu-power');
+        
+        if (agxPowerEl && agx) {
+            agxPowerEl.textContent = agx.powered ? '🟢 运行中' : '⚫ 关机';
+            agxPowerEl.className = agx.powered ? 'status-value status-on' : 'status-value status-off';
+        }
+        if (lpmuPowerEl && lpmu) {
+            lpmuPowerEl.textContent = lpmu.powered ? '🟢 运行中' : '⚫ 关机';
+            lpmuPowerEl.className = lpmu.powered ? 'status-value status-on' : 'status-value status-off';
+        }
+    }
+}
+
+// 更新 AGX 监控数据
+function updateAgxMonitorData(data) {
+    const cpuEl = document.getElementById('dev-agx-cpu');
+    const gpuEl = document.getElementById('dev-agx-gpu');
+    const tempEl = document.getElementById('dev-agx-temp');
+    
+    if (cpuEl) cpuEl.textContent = data.cpu_usage ? `${data.cpu_usage}%` : '-';
+    if (gpuEl) gpuEl.textContent = data.gpu_usage ? `${data.gpu_usage}%` : '-';
+    if (tempEl) tempEl.textContent = data.temperature ? `${data.temperature}°C` : '-';
 }
 
 async function devicePower(name, on) {
     try {
         await api.devicePower(name, on);
         showToast(`${name.toUpperCase()} ${on ? '开机' : '关机'} 命令已发送`, 'success');
-        await refreshDevicePage();
+        // WebSocket 会自动推送状态更新，但为了即时反馈也做一次 HTTP 查询
+        setTimeout(() => refreshDevicePageOnce(), 500);
     } catch (e) { showToast('操作失败: ' + e.message, 'error'); }
 }
 
@@ -3127,6 +3451,7 @@ async function deviceReset(name) {
         try {
             await api.deviceReset(name);
             showToast(`${name.toUpperCase()} 重启命令已发送`, 'success');
+            setTimeout(() => refreshDevicePageOnce(), 500);
         } catch (e) { showToast('操作失败: ' + e.message, 'error'); }
     }
 }
@@ -3136,7 +3461,7 @@ async function deviceForceOff(name) {
         try {
             await api.deviceForceOff(name);
             showToast(`${name.toUpperCase()} 强制关机命令已发送`, 'success');
-            await refreshDevicePage();
+            setTimeout(() => refreshDevicePageOnce(), 500);
         } catch (e) { showToast('操作失败: ' + e.message, 'error'); }
     }
 }

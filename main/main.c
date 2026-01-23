@@ -5,7 +5,7 @@
  * TianShanOS 主程序入口
  *
  * @author TianShanOS Team
- * @version 0.1.0
+ * @version 0.2.0
  */
 
 #include <stdio.h>

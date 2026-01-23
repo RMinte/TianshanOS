@@ -44,6 +44,7 @@ static struct {
     struct arg_lit *version;
     struct arg_lit *uptime;
     struct arg_lit *memory;
+    struct arg_lit *cpu;
     struct arg_lit *tasks;
     struct arg_lit *reboot;
     struct arg_lit *save;
@@ -218,6 +219,79 @@ static int do_system_uptime(bool json)
         ts_console_printf("Uptime: %s\n", uptime_str);
     }
     
+    return 0;
+}
+
+/*===========================================================================*/
+/*                          Command: system --cpu                             */
+/*===========================================================================*/
+
+static int do_system_cpu(bool json)
+{
+    /* JSON 模式使用 API */
+    if (json) {
+        ts_api_result_t result;
+        esp_err_t ret = ts_api_call("system.cpu", NULL, &result);
+        if (ret == ESP_OK && result.code == TS_API_OK && result.data) {
+            char *json_str = cJSON_PrintUnformatted(result.data);
+            if (json_str) {
+                ts_console_printf("%s\n", json_str);
+                free(json_str);
+            }
+        } else {
+            ts_console_error("API call failed: %s\n", 
+                result.message ? result.message : esp_err_to_name(ret));
+        }
+        ts_api_result_free(&result);
+        return (ret == ESP_OK) ? 0 : 1;
+    }
+    
+    /* 格式化输出 */
+    ts_api_result_t result;
+    esp_err_t ret = ts_api_call("system.cpu", NULL, &result);
+    if (ret != ESP_OK || result.code != TS_API_OK || !result.data) {
+        ts_console_error("Failed to get CPU stats: %s\n", 
+            result.message ? result.message : esp_err_to_name(ret));
+        ts_api_result_free(&result);
+        return 1;
+    }
+    
+    cJSON *cores = cJSON_GetObjectItem(result.data, "cores");
+    cJSON *total_usage = cJSON_GetObjectItem(result.data, "total_usage");
+    
+    ts_console_printf("CPU Usage:\n\n");
+    
+    if (cores && cJSON_IsArray(cores)) {
+        int num_cores = cJSON_GetArraySize(cores);
+        for (int i = 0; i < num_cores; i++) {
+            cJSON *core = cJSON_GetArrayItem(cores, i);
+            if (core) {
+                cJSON *core_id = cJSON_GetObjectItem(core, "id");
+                cJSON *usage = cJSON_GetObjectItem(core, "usage");
+                if (core_id && usage) {
+                    int usage_val = (int)cJSON_GetNumberValue(usage);
+                    ts_console_printf("  Core %d: %3d%%  ", 
+                        (int)cJSON_GetNumberValue(core_id), usage_val);
+                    
+                    // 简单的进度条（40个字符宽）
+                    int bars = (usage_val * 40) / 100;
+                    ts_console_printf("[");
+                    for (int j = 0; j < 40; j++) {
+                        if (j < bars) ts_console_printf("█");
+                        else ts_console_printf("░");
+                    }
+                    ts_console_printf("]\n");
+                }
+            }
+        }
+    }
+    
+    if (total_usage) {
+        int total = (int)cJSON_GetNumberValue(total_usage);
+        ts_console_printf("\n  Total:  %3d%%\n", total);
+    }
+    
+    ts_api_result_free(&result);
     return 0;
 }
 
@@ -431,6 +505,7 @@ static int cmd_system(int argc, char **argv)
         ts_console_printf("  -V, --version       Show version\n");
         ts_console_printf("  -u, --uptime        Show uptime\n");
         ts_console_printf("  -m, --memory        Show memory usage\n");
+        ts_console_printf("  -c, --cpu           Show CPU core usage\n");
         ts_console_printf("  -t, --tasks         Show task list\n");
         ts_console_printf("  -r, --reboot        Reboot system\n");
         ts_console_printf("      --save          Save system config to NVS/SD\n");
@@ -439,6 +514,7 @@ static int cmd_system(int argc, char **argv)
         ts_console_printf("  -h, --help          Show this help\n\n");
         ts_console_printf("Examples:\n");
         ts_console_printf("  system --info\n");
+        ts_console_printf("  system --cpu\n");
         ts_console_printf("  system --memory --json\n");
         ts_console_printf("  system --reboot --delay 5\n");
         return 0;
@@ -474,6 +550,10 @@ static int cmd_system(int argc, char **argv)
         return do_system_memory(json);
     }
     
+    if (s_system_args.cpu->count > 0) {
+        return do_system_cpu(json);
+    }
+    
     if (s_system_args.tasks->count > 0) {
         return do_system_tasks(json);
     }
@@ -492,6 +572,7 @@ esp_err_t ts_cmd_system_register(void)
     s_system_args.version = arg_lit0("V", "version", "Show version");
     s_system_args.uptime  = arg_lit0("u", "uptime", "Show uptime");
     s_system_args.memory  = arg_lit0("m", "memory", "Show memory usage");
+    s_system_args.cpu     = arg_lit0("c", "cpu", "Show CPU core usage");
     s_system_args.tasks   = arg_lit0("t", "tasks", "Show tasks");
     s_system_args.reboot  = arg_lit0("r", "reboot", "Reboot system");
     s_system_args.save    = arg_lit0(NULL, "save", "Save system config");
