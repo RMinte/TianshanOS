@@ -49,6 +49,12 @@ esp_err_t ts_cmd_fan_register(void);
 esp_err_t ts_cmd_storage_register(void);
 
 /**
+ * @brief 注册 https 命令
+ * https --status/--start/--stop/--restart
+ */
+esp_err_t ts_cmd_https_register(void);
+
+/**
  * @brief 注册 net 命令
  * net --status/--ip/--set/--dhcp
  */

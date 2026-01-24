@@ -74,6 +74,12 @@ esp_err_t ts_http_server_register_route(const ts_http_route_t *route);
 esp_err_t ts_http_server_unregister_route(const char *uri, ts_http_method_t method);
 
 /**
+ * @brief Sync all registered routes to HTTPS server
+ * @note Call this function after HTTPS server starts to register all routes
+ */
+esp_err_t ts_http_server_sync_routes_to_https(void);
+
+/**
  * @brief Send response
  */
 esp_err_t ts_http_send_response(ts_http_request_t *req, int status, 

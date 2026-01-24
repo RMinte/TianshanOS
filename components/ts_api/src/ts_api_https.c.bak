@@ -1,0 +1,428 @@
+/**
+ * @file ts_api_https.c
+ * @brief HTTPS/Certificate Management API Handlers
+ * 
+ * 提供 HTTPS 服务器和证书管理的 API 端点：
+ * - https.start - 启动 HTTPS 服务器
+ * - https.stop - 停止 HTTPS 服务器
+ * - https.restart - 重启 HTTPS 服务器
+ * - https.status - 获取服务器状态
+ * - cert.generate - 生成自签名证书
+ * - cert.upload - 上传证书（PEM 格式）
+ * - cert.info - 获取证书信息
+ * - cert.delete - 删除证书
+ * 
+ * @author TianShanOS Team
+ * @version 1.0.0
+ * @date 2026-01-24
+ */
+
+#include "ts_api.h"
+#include "ts_https.h"
+#include "ts_log.h"
+#include <string.h>
+#include <stdlib.h>
+
+#define TAG "api_https"
+
+/*===========================================================================*/
+/*                          HTTPS Server APIs                                 */
+/*===========================================================================*/
+
+/**
+ * @brief API: https.start - 启动 HTTPS 服务器
+ * 
+ * 参数：无
+ * 
+ * 返回：
+ * {
+ *   "success": true,
+ *   "message": "HTTPS server started on port 443"
+ * }
+ */
+static esp_err_t api_https_start(const cJSON *params, ts_api_result_t *result)
+{
+    (void)params; // 未使用参数
+    
+    esp_err_t ret = ts_https_start();
+    if (ret == ESP_OK) {
+        result->code = TS_API_OK;
+        result->message = "HTTPS server started on port 443";
+        result->data = cJSON_CreateObject();
+        cJSON_AddBoolToObject(result->data, "success", true);
+    } else if (ret == ESP_ERR_INVALID_STATE) {
+        result->code = TS_API_ERR_INVALID_ARG;
+        result->message = "HTTPS server already running";
+        return ESP_ERR_INVALID_STATE;
+    } else {
+        result->code = TS_API_ERR_INTERNAL;
+        result->message = esp_err_to_name(ret);
+        return ret;
+    }
+    
+    return ESP_OK;
+}
+
+/**
+ * @brief API: https.stop - 停止 HTTPS 服务器
+ */
+static esp_err_t api_https_stop(const cJSON *params, ts_api_result_t *result)
+{
+    (void)params;
+    
+    esp_err_t ret = ts_https_stop();
+    if (ret == ESP_OK) {
+        result->code = TS_API_OK;
+        result->message = "HTTPS server stopped";
+        result->data = cJSON_CreateObject();
+        cJSON_AddBoolToObject(result->data, "success", true);
+    } else {
+        result->code = TS_API_ERR_INTERNAL;
+        result->message = esp_err_to_name(ret);
+        return ret;
+    }
+    
+    return ESP_OK;
+}
+
+/**
+ * @brief API: https.restart - 重启 HTTPS 服务器
+ */
+static esp_err_t api_https_restart(const cJSON *params, ts_api_result_t *result)
+{
+    (void)params;
+    
+    esp_err_t ret = ts_https_reload_certificate();
+    if (ret == ESP_OK) {
+        result->code = TS_API_OK;
+        result->message = "HTTPS server restarted with new certificate";
+        result->data = cJSON_CreateObject();
+        cJSON_AddBoolToObject(result->data, "success", true);
+    } else {
+        result->code = TS_API_ERR_INTERNAL;
+        result->message = esp_err_to_name(ret);
+        return ret;
+    }
+    
+    return ESP_OK;
+}
+
+/**
+ * @brief API: https.status - 获取 HTTPS 服务器状态
+ * 
+ * 返回：
+ * {
+ *   "running": true,
+ *   "port": 443,
+ *   "has_certificate": true,
+ *   "cert_type": "self_signed"
+ * }
+ */
+static esp_err_t api_https_status(const cJSON *params, ts_api_result_t *result)
+{
+    (void)params;
+    
+    bool running = ts_https_is_running();
+    bool has_cert = ts_https_has_certificate();
+    const char *cert_type = ts_https_get_cert_type_string();
+    
+    result->code = TS_API_OK;
+    result->message = "HTTPS status retrieved";
+    result->data = cJSON_CreateObject();
+    cJSON_AddBoolToObject(result->data, "running", running);
+    cJSON_AddNumberToObject(result->data, "port", 443);
+    cJSON_AddBoolToObject(result->data, "has_certificate", has_cert);
+    cJSON_AddStringToObject(result->data, "cert_type", cert_type ? cert_type : "none");
+    
+    return ESP_OK;
+}
+
+/*===========================================================================*/
+/*                          Certificate APIs                                  */
+/*===========================================================================*/
+
+/**
+ * @brief API: cert.generate - 生成自签名证书
+ * 
+ * 参数：
+ * {
+ *   "common_name": "TianShanOS",         // 可选，默认 "TianShanOS"
+ *   "organization": "HiddenPeak Labs",   // 可选，默认 "HiddenPeak Labs"
+ *   "country": "CN",                     // 可选，默认 "CN"
+ *   "days": 365                          // 可选，默认 365 天
+ * }
+ * 
+ * 返回：
+ * {
+ *   "success": true,
+ *   "message": "Self-signed certificate generated",
+ *   "cert_info": { ... }
+ * }
+ */
+static esp_err_t api_cert_generate(const cJSON *params, ts_api_result_t *result)
+{
+    // 获取参数
+    const cJSON *cn_obj = cJSON_GetObjectItem(params, "common_name");
+    const cJSON *org_obj = cJSON_GetObjectItem(params, "organization");
+    const cJSON *country_obj = cJSON_GetObjectItem(params, "country");
+    const cJSON *days_obj = cJSON_GetObjectItem(params, "days");
+    
+    const char *cn = (cn_obj && cJSON_IsString(cn_obj)) ? cn_obj->valuestring : "TianShanOS";
+    const char *org = (org_obj && cJSON_IsString(org_obj)) ? org_obj->valuestring : "HiddenPeak Labs";
+    const char *country = (country_obj && cJSON_IsString(country_obj)) ? country_obj->valuestring : "CN";
+    uint32_t days = (days_obj && cJSON_IsNumber(days_obj)) ? days_obj->valueint : 365;
+    
+    // 生成证书
+    esp_err_t ret = ts_https_generate_self_signed_cert(cn, org, country, days);
+    if (ret != ESP_OK) {
+        result->code = TS_API_ERR_INTERNAL;
+        result->message = "Failed to generate certificate";
+        result->data = cJSON_CreateObject();
+        cJSON_AddStringToObject(result->data, "error", esp_err_to_name(ret));
+        return ret;
+    }
+    
+    result->code = TS_API_OK;
+    result->message = "Self-signed certificate generated successfully";
+    result->data = cJSON_CreateObject();
+    
+    // 获取证书信息
+    ts_cert_info_t info;
+    ret = ts_https_get_cert_info(&info);
+    if (ret == ESP_OK) {
+        cJSON *cert_info = cJSON_CreateObject();
+        cJSON_AddStringToObject(cert_info, "common_name", info.common_name);
+        cJSON_AddStringToObject(cert_info, "organization", info.organization);
+        cJSON_AddStringToObject(cert_info, "country", info.country);
+        cJSON_AddStringToObject(cert_info, "issuer", info.issuer);
+        cJSON_AddStringToObject(cert_info, "serial_number", info.serial_number);
+        cJSON_AddStringToObject(cert_info, "signature_algorithm", info.signature_algorithm);
+        cJSON_AddStringToObject(cert_info, "key_type", info.key_type);
+        cJSON_AddNumberToObject(cert_info, "key_size", info.key_size);
+        cJSON_AddNumberToObject(cert_info, "valid_from", info.valid_from);
+        cJSON_AddNumberToObject(cert_info, "valid_to", info.valid_to);
+        cJSON_AddBoolToObject(cert_info, "is_self_signed", info.is_self_signed);
+        cJSON_AddBoolToObject(cert_info, "is_ca", info.is_ca);
+        
+        cJSON_AddItemToObject(result->data, "cert_info", cert_info);
+    }
+    
+    return ESP_OK;
+}
+
+/**
+ * @brief API: cert.upload - 上传证书和私钥
+ * 
+ * 参数：
+ * {
+ *   "certificate": "-----BEGIN CERTIFICATE-----\n...",
+ *   "private_key": "-----BEGIN PRIVATE KEY-----\n...",
+ *   "ca_chain": "-----BEGIN CERTIFICATE-----\n..." // 可选
+ * }
+ */
+static esp_err_t api_cert_upload(const cJSON *params, ts_api_result_t *result)
+{
+    const cJSON *cert_obj = cJSON_GetObjectItem(params, "certificate");
+    const cJSON *key_obj = cJSON_GetObjectItem(params, "private_key");
+    const cJSON *ca_obj = cJSON_GetObjectItem(params, "ca_chain");
+    
+    if (!cert_obj || !cJSON_IsString(cert_obj) || !key_obj || !cJSON_IsString(key_obj)) {
+        result->code = TS_API_ERR_INVALID_ARG;
+        result->message = "Missing certificate or private_key";
+        return ESP_ERR_INVALID_ARG;
+    }
+    
+    const char *cert_pem = cert_obj->valuestring;
+    const char *key_pem = key_obj->valuestring;
+    const char *ca_pem = (ca_obj && cJSON_IsString(ca_obj)) ? ca_obj->valuestring : NULL;
+    
+    // 上传证书
+    esp_err_t ret = ts_https_set_certificate(cert_pem, strlen(cert_pem),
+                                              key_pem, strlen(key_pem),
+                                              ca_pem, ca_pem ? strlen(ca_pem) : 0);
+    if (ret != ESP_OK) {
+        result->code = TS_API_ERR_INTERNAL;
+        result->message = "Failed to upload certificate";
+        result->data = cJSON_CreateObject();
+        cJSON_AddStringToObject(result->data, "error", esp_err_to_name(ret));
+        return ret;
+    }
+    
+    result->code = TS_API_OK;
+    result->message = "Certificate uploaded successfully";
+    result->data = cJSON_CreateObject();
+    cJSON_AddBoolToObject(result->data, "success", true);
+    
+    return ESP_OK;
+}
+
+/**
+ * @brief API: cert.info - 获取当前证书信息
+ * 
+ * 返回：
+ * {
+ *   "has_certificate": true,
+ *   "cert_info": {
+ *     "common_name": "TianShanOS",
+ *     "organization": "HiddenPeak Labs",
+ *     "country": "CN",
+ *     "valid_from": 1737705600,
+ *     "valid_to": 1769241600,
+ *     "is_self_signed": true,
+ *     ...
+ *   }
+ * }
+ */
+static esp_err_t api_cert_info(const cJSON *params, ts_api_result_t *result)
+{
+    (void)params;
+    
+    bool has_cert = ts_https_has_certificate();
+    result->code = TS_API_OK;
+    result->data = cJSON_CreateObject();
+    cJSON_AddBoolToObject(result->data, "has_certificate", has_cert);
+    
+    if (!has_cert) {
+        result->message = "No certificate installed";
+        return ESP_OK;
+    }
+    
+    ts_cert_info_t info;
+    esp_err_t ret = ts_https_get_cert_info(&info);
+    if (ret != ESP_OK) {
+        result->code = TS_API_ERR_INTERNAL;
+        result->message = "Failed to get certificate info";
+        return ret;
+    }
+    
+    result->message = "Certificate information retrieved";
+    cJSON *cert_info = cJSON_CreateObject();
+    cJSON_AddStringToObject(cert_info, "common_name", info.common_name);
+    cJSON_AddStringToObject(cert_info, "organization", info.organization);
+    cJSON_AddStringToObject(cert_info, "country", info.country);
+    cJSON_AddStringToObject(cert_info, "issuer", info.issuer);
+    cJSON_AddStringToObject(cert_info, "serial_number", info.serial_number);
+    cJSON_AddStringToObject(cert_info, "signature_algorithm", info.signature_algorithm);
+    cJSON_AddStringToObject(cert_info, "key_type", info.key_type);
+    cJSON_AddNumberToObject(cert_info, "key_size", info.key_size);
+    cJSON_AddNumberToObject(cert_info, "valid_from", info.valid_from);
+    cJSON_AddNumberToObject(cert_info, "valid_to", info.valid_to);
+    cJSON_AddBoolToObject(cert_info, "is_self_signed", info.is_self_signed);
+    cJSON_AddBoolToObject(cert_info, "is_ca", info.is_ca);
+    
+    // 计算剩余天数
+    time_t now = time(NULL);
+    int days_remaining = (info.valid_to - now) / 86400;
+    cJSON_AddNumberToObject(cert_info, "days_remaining", days_remaining);
+    
+    // 是否即将过期（30 天内）
+    cJSON_AddBoolToObject(cert_info, "expires_soon", days_remaining < 30);
+    
+    cJSON_AddItemToObject(result->data, "cert_info", cert_info);
+    
+    return ESP_OK;
+}
+
+/**
+ * @brief API: cert.delete - 删除当前证书
+ */
+static esp_err_t api_cert_delete(const cJSON *params, ts_api_result_t *result)
+{
+    (void)params;
+    
+    esp_err_t ret = ts_https_delete_certificate();
+    if (ret == ESP_OK) {
+        result->code = TS_API_OK;
+        result->message = "Certificate deleted";
+        result->data = cJSON_CreateObject();
+        cJSON_AddBoolToObject(result->data, "success", true);
+    } else {
+        result->code = TS_API_ERR_INTERNAL;
+        result->message = "Failed to delete certificate";
+        result->data = cJSON_CreateObject();
+        cJSON_AddStringToObject(result->data, "error", esp_err_to_name(ret));
+        return ret;
+    }
+    
+    return ESP_OK;
+}
+
+/*===========================================================================*/
+/*                          Registration                                      */
+/*===========================================================================*/
+
+/**
+ * @brief 注册 HTTPS 相关 API 端点
+ */
+esp_err_t ts_api_https_register(void)
+{
+    static const ts_api_endpoint_t https_apis[] = {
+        {
+            .name = "https.start",
+            .description = "Start HTTPS server",
+            .category = TS_API_CAT_SECURITY,
+            .handler = api_https_start,
+            .requires_auth = false,
+            .permission = NULL
+        },
+        {
+            .name = "https.stop",
+            .description = "Stop HTTPS server",
+            .category = TS_API_CAT_SECURITY,
+            .handler = api_https_stop,
+            .requires_auth = false,
+            .permission = NULL
+        },
+        {
+            .name = "https.restart",
+            .description = "Restart HTTPS server",
+            .category = TS_API_CAT_SECURITY,
+            .handler = api_https_restart,
+            .requires_auth = false,
+            .permission = NULL
+        },
+        {
+            .name = "https.status",
+            .description = "Get HTTPS server status",
+            .category = TS_API_CAT_SECURITY,
+            .handler = api_https_status,
+            .requires_auth = false,
+            .permission = NULL
+        },
+        {
+            .name = "cert.generate",
+            .description = "Generate self-signed certificate",
+            .category = TS_API_CAT_SECURITY,
+            .handler = api_cert_generate,
+            .requires_auth = false,
+            .permission = NULL
+        },
+        {
+            .name = "cert.upload",
+            .description = "Upload certificate and private key",
+            .category = TS_API_CAT_SECURITY,
+            .handler = api_cert_upload,
+            .requires_auth = false,
+            .permission = NULL
+        },
+        {
+            .name = "cert.info",
+            .description = "Get certificate information",
+            .category = TS_API_CAT_SECURITY,
+            .handler = api_cert_info,
+            .requires_auth = false,
+            .permission = NULL
+        },
+        {
+            .name = "cert.delete",
+            .description = "Delete certificate",
+            .category = TS_API_CAT_SECURITY,
+            .handler = api_cert_delete,
+            .requires_auth = false,
+            .permission = NULL
+        }
+    };
+    
+    return ts_api_register_multiple(https_apis, 
+                                     sizeof(https_apis) / sizeof(https_apis[0]));
+}

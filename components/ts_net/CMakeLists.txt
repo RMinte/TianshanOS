@@ -15,6 +15,7 @@ idf_component_register(
         ts_core
         ts_hal
         ts_storage
+        ts_security
         esp_netif
         esp_eth
         esp_wifi

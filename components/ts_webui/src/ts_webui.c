@@ -119,6 +119,7 @@ esp_err_t ts_webui_start(void)
         .uri = "/*",
         .method = TS_HTTP_GET,
         .handler = static_file_handler,
+        .user_data = NULL,
         .requires_auth = false
     };
     ts_http_server_register_route(&static_route);

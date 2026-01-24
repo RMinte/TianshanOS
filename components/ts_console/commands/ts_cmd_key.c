@@ -39,11 +39,16 @@ static struct {
     struct arg_lit *delete;     /**< 删除密钥 */
     struct arg_lit *export;     /**< 导出公钥 */
     struct arg_lit *export_priv; /**< 导出私钥（需 exportable） */
+    struct arg_lit *use_for_https; /**< 将密钥部署到 HTTPS */
     struct arg_str *id;         /**< 密钥 ID */
     struct arg_str *file;       /**< 文件路径（导入用） */
     struct arg_str *output;     /**< 输出路径（导出用） */
     struct arg_str *type;       /**< 密钥类型 */
     struct arg_str *comment;    /**< 注释 */
+    struct arg_str *cn;         /**< 证书 Common Name (用于 HTTPS) */
+    struct arg_str *org;        /**< 证书 Organization (用于 HTTPS) */
+    struct arg_str *country;    /**< 证书 Country (用于 HTTPS) */
+    struct arg_int *days;       /**< 证书有效天数 (用于 HTTPS) */
     struct arg_lit *exportable; /**< 允许私钥导出 */
     struct arg_lit *json;       /**< JSON 格式输出 */
     struct arg_lit *help;
@@ -670,6 +675,11 @@ static int key_cmd_handler(int argc, char **argv)
         return do_key_export(key_id, output_path);
     }
     
+    if (s_key_args.use_for_https->count > 0) {
+        ts_console_printf("Error: HTTPS server not implemented\n");
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+    
     /* 无操作指定 - 默认显示列表 */
     return do_key_list(json_output);
 }
@@ -688,15 +698,20 @@ esp_err_t ts_cmd_key_register(void)
     s_key_args.delete = arg_lit0("d", "delete", "Delete stored key");
     s_key_args.export = arg_lit0("e", "export", "Export public key to file");
     s_key_args.export_priv = arg_lit0(NULL, "export-priv", "Export private key (requires exportable)");
+    s_key_args.use_for_https = arg_lit0(NULL, "use-for-https", "Deploy key for HTTPS (generates self-signed cert)");
     s_key_args.id = arg_str0(NULL, "id", "<name>", "Key identifier");
     s_key_args.file = arg_str0("f", "file", "<path>", "Private key file (for import)");
     s_key_args.output = arg_str0("o", "output", "<path>", "Output file (for export)");
     s_key_args.type = arg_str0("t", "type", "<type>", "Key type: rsa, ecdsa, ec256, ec384");
     s_key_args.comment = arg_str0("c", "comment", "<text>", "Comment/description");
+    s_key_args.cn = arg_str0(NULL, "cn", "<name>", "Certificate Common Name (for HTTPS)");
+    s_key_args.org = arg_str0(NULL, "org", "<organization>", "Certificate Organization (for HTTPS)");
+    s_key_args.country = arg_str0(NULL, "country", "<code>", "Certificate Country Code (for HTTPS)");
+    s_key_args.days = arg_int0(NULL, "days", "<num>", "Certificate validity days (for HTTPS)");
     s_key_args.exportable = arg_lit0(NULL, "exportable", "Allow private key export");
     s_key_args.json = arg_lit0("j", "json", "JSON format output");
     s_key_args.help = arg_lit0("h", "help", "Show help");
-    s_key_args.end = arg_end(5);
+    s_key_args.end = arg_end(7);
     
     /* 检查参数分配 */
     void *argtable[] = {
@@ -707,11 +722,16 @@ esp_err_t ts_cmd_key_register(void)
         s_key_args.delete,
         s_key_args.export,
         s_key_args.export_priv,
+        s_key_args.use_for_https,
         s_key_args.id,
         s_key_args.file,
         s_key_args.output,
         s_key_args.type,
         s_key_args.comment,
+        s_key_args.cn,
+        s_key_args.org,
+        s_key_args.country,
+        s_key_args.days,
         s_key_args.exportable,
         s_key_args.json,
         s_key_args.help,

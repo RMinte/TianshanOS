@@ -10,10 +10,22 @@
 #include <string.h>
 
 #define TAG "ts_http"
-#define MAX_ROUTES 32
+#define MAX_ROUTES 64
 
 static httpd_handle_t s_server = NULL;
 static bool s_initialized = false;
+
+// 路由注册表（用于同步到 HTTPS）
+typedef struct {
+    const char *uri_ptr;     // 原始 URI 指针（来自 .rodata 字符串常量）
+    ts_http_method_t method;
+    ts_http_handler_t handler;
+    void *user_data;         // 原始 user_data
+    bool requires_auth;      // 认证要求
+} registered_route_t;
+
+static registered_route_t s_registered_routes[MAX_ROUTES];
+static int s_route_count = 0;
 
 esp_err_t ts_http_server_init(void)
 {
@@ -141,7 +153,32 @@ esp_err_t ts_http_server_register_route(const ts_http_route_t *route)
         .user_ctx = route_copy
     };
     
-    return httpd_register_uri_handler(s_server, &uri);
+    // 注册到 HTTP 服务器
+    esp_err_t ret = httpd_register_uri_handler(s_server, &uri);
+    if (ret != ESP_OK) {
+        free(route_copy);
+        return ret;
+    }
+    
+    // 保存路由信息到注册表
+    if (s_route_count < MAX_ROUTES) {
+        // 注意：不再复制 URI 字符串，直接保存原始指针（来自 .rodata）
+        s_registered_routes[s_route_count].uri_ptr = route->uri;  // 保存原始 URI 指针
+        s_registered_routes[s_route_count].method = route->method;
+        s_registered_routes[s_route_count].handler = route->handler;
+        s_registered_routes[s_route_count].user_data = route->user_data;  // 保存 user_data
+        s_registered_routes[s_route_count].requires_auth = route->requires_auth;  // 保存认证要求
+        s_route_count++;
+    }
+    
+    return ESP_OK;
+}
+
+esp_err_t ts_http_server_sync_routes_to_https(void)
+{
+    // HTTPS 功能未实现
+    TS_LOGW(TAG, "HTTPS server not available");
+    return ESP_ERR_NOT_SUPPORTED;
 }
 
 esp_err_t ts_http_server_unregister_route(const char *uri, ts_http_method_t method)
