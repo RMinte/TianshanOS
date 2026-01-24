@@ -44,6 +44,7 @@ static struct {
     struct arg_lit *version;
     struct arg_lit *uptime;
     struct arg_lit *memory;
+    struct arg_lit *memory_detail;  // 详细内存分析
     struct arg_lit *cpu;
     struct arg_lit *tasks;
     struct arg_lit *reboot;
@@ -370,6 +371,107 @@ static int do_system_memory(bool json)
 }
 
 /*===========================================================================*/
+/*                     Command: system --memory-detail                        */
+/*===========================================================================*/
+
+/**
+ * @brief 详细内存分析（DRAM/PSRAM/DMA 堆信息）
+ */
+static int do_system_memory_detail(void)
+{
+    ts_console_printf("\n=== Detailed Heap Memory Analysis ===\n");
+    
+    // DRAM (Internal RAM)
+    ts_console_printf("\n[DRAM - Internal RAM]\n");
+    heap_caps_print_heap_info(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    
+    // PSRAM (External RAM)
+    ts_console_printf("\n[PSRAM - External RAM]\n");
+    heap_caps_print_heap_info(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    
+    // DMA Capable Memory
+    ts_console_printf("\n[DMA Capable Memory]\n");
+    heap_caps_print_heap_info(MALLOC_CAP_DMA);
+    
+    // 32-bit aligned memory
+    ts_console_printf("\n[32-bit Aligned Memory]\n");
+    heap_caps_print_heap_info(MALLOC_CAP_32BIT);
+    
+    // 显示最大可分配块
+    size_t dram_free = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+    size_t dram_largest = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
+    size_t dram_total = heap_caps_get_total_size(MALLOC_CAP_INTERNAL);
+    
+    size_t psram_free = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+    size_t psram_largest = heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM);
+    size_t psram_total = heap_caps_get_total_size(MALLOC_CAP_SPIRAM);
+    
+    size_t dma_free = heap_caps_get_free_size(MALLOC_CAP_DMA);
+    size_t dma_largest = heap_caps_get_largest_free_block(MALLOC_CAP_DMA);
+    size_t dma_total = heap_caps_get_total_size(MALLOC_CAP_DMA);
+    
+    ts_console_printf("\n=== Allocation Summary ===\n");
+    ts_console_printf("%-8s  %10s  %10s  %10s  %7s  %10s\n",
+                      "Type", "Total", "Free", "Used", "Used%", "Largest");
+    ts_console_printf("────────────────────────────────────────────────────────────────\n");
+    
+    if (dram_total > 0) {
+        int used_pct = 100 - (dram_free * 100 / dram_total);
+        ts_console_printf("%-8s  %10u  %10u  %10u  %6d%%  %10u\n",
+                          "DRAM", dram_total, dram_free, 
+                          dram_total - dram_free, used_pct, dram_largest);
+    }
+    
+    if (psram_total > 0) {
+        int used_pct = 100 - (psram_free * 100 / psram_total);
+        ts_console_printf("%-8s  %10u  %10u  %10u  %6d%%  %10u\n",
+                          "PSRAM", psram_total, psram_free,
+                          psram_total - psram_free, used_pct, psram_largest);
+    }
+    
+    if (dma_total > 0) {
+        int used_pct = 100 - (dma_free * 100 / dma_total);
+        ts_console_printf("%-8s  %10u  %10u  %10u  %6d%%  %10u\n",
+                          "DMA", dma_total, dma_free,
+                          dma_total - dma_free, used_pct, dma_largest);
+    }
+    
+    // 内存碎片化分析
+    ts_console_printf("\n=== Fragmentation Analysis ===\n");
+    if (dram_total > 0 && dram_free > 0) {
+        float dram_frag = 100.0f * (1.0f - (float)dram_largest / dram_free);
+        ts_console_printf("DRAM  Fragmentation: %.1f%% (largest/free: %u/%u)\n",
+                          dram_frag, dram_largest, dram_free);
+    }
+    if (psram_total > 0 && psram_free > 0) {
+        float psram_frag = 100.0f * (1.0f - (float)psram_largest / psram_free);
+        ts_console_printf("PSRAM Fragmentation: %.1f%% (largest/free: %u/%u)\n",
+                          psram_frag, psram_largest, psram_free);
+    }
+    
+    // 最小空闲堆记录
+    size_t min_free = esp_get_minimum_free_heap_size();
+    ts_console_printf("\n=== Historical Data ===\n");
+    ts_console_printf("Minimum free heap ever: %u bytes\n", min_free);
+    
+    ts_console_printf("\n💡 Optimization Tips:\n");
+    if (dram_total > 0) {
+        int used_pct = 100 - (dram_free * 100 / dram_total);
+        if (used_pct > 80) {
+            ts_console_printf("  ⚠️  DRAM usage > 80%%, consider moving buffers to PSRAM\n");
+        }
+    }
+    if (psram_total > 0) {
+        int used_pct = 100 - (psram_free * 100 / psram_total);
+        if (used_pct < 50) {
+            ts_console_printf("  ℹ️  PSRAM usage < 50%%, plenty of space available\n");
+        }
+    }
+    
+    return 0;
+}
+
+/*===========================================================================*/
 /*                          Command: system --tasks                           */
 /*===========================================================================*/
 
@@ -505,6 +607,7 @@ static int cmd_system(int argc, char **argv)
         ts_console_printf("  -V, --version       Show version\n");
         ts_console_printf("  -u, --uptime        Show uptime\n");
         ts_console_printf("  -m, --memory        Show memory usage\n");
+        ts_console_printf("      --memory-detail Show detailed memory analysis\n");
         ts_console_printf("  -c, --cpu           Show CPU core usage\n");
         ts_console_printf("  -t, --tasks         Show task list\n");
         ts_console_printf("  -r, --reboot        Reboot system\n");
@@ -550,6 +653,10 @@ static int cmd_system(int argc, char **argv)
         return do_system_memory(json);
     }
     
+    if (s_system_args.memory_detail->count > 0) {
+        return do_system_memory_detail();
+    }
+    
     if (s_system_args.cpu->count > 0) {
         return do_system_cpu(json);
     }
@@ -572,6 +679,7 @@ esp_err_t ts_cmd_system_register(void)
     s_system_args.version = arg_lit0("V", "version", "Show version");
     s_system_args.uptime  = arg_lit0("u", "uptime", "Show uptime");
     s_system_args.memory  = arg_lit0("m", "memory", "Show memory usage");
+    s_system_args.memory_detail = arg_lit0(NULL, "memory-detail", "Show detailed memory analysis");
     s_system_args.cpu     = arg_lit0("c", "cpu", "Show CPU core usage");
     s_system_args.tasks   = arg_lit0("t", "tasks", "Show tasks");
     s_system_args.reboot  = arg_lit0("r", "reboot", "Reboot system");
