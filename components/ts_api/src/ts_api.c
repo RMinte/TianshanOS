@@ -119,11 +119,19 @@ esp_err_t ts_api_init(void)
         return ESP_ERR_NO_MEM;
     }
     
-    /* Allocate endpoint array */
-    s_api.endpoints = calloc(CONFIG_TS_API_MAX_ENDPOINTS, sizeof(api_entry_t));
+    /* Allocate endpoint array in PSRAM */
+    s_api.endpoints = heap_caps_calloc(CONFIG_TS_API_MAX_ENDPOINTS, sizeof(api_entry_t),
+                                        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (s_api.endpoints == NULL) {
-        vSemaphoreDelete(s_api.mutex);
-        return ESP_ERR_NO_MEM;
+        TS_LOGW(TAG, "PSRAM not available, using DRAM for API endpoints");
+        s_api.endpoints = calloc(CONFIG_TS_API_MAX_ENDPOINTS, sizeof(api_entry_t));
+        if (s_api.endpoints == NULL) {
+            vSemaphoreDelete(s_api.mutex);
+            return ESP_ERR_NO_MEM;
+        }
+    } else {
+        TS_LOGI(TAG, "API endpoints allocated in PSRAM (%zu bytes)",
+                CONFIG_TS_API_MAX_ENDPOINTS * sizeof(api_entry_t));
     }
     
     s_api.endpoint_count = 0;

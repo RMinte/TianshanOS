@@ -1019,8 +1019,12 @@ static esp_err_t ws_handler(httpd_req_t *req)
                 if (j_max && cJSON_IsNumber(j_max)) max_level = (ts_log_level_t)j_max->valueint;
                 if (limit > CONFIG_TS_LOG_BUFFER_SIZE) limit = CONFIG_TS_LOG_BUFFER_SIZE;
                 
-                // 分配缓冲区
-                ts_log_entry_t *entries = malloc(limit * sizeof(ts_log_entry_t));
+                // 分配缓冲区（优先使用 PSRAM）
+                ts_log_entry_t *entries = heap_caps_malloc(limit * sizeof(ts_log_entry_t),
+                                                            MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+                if (!entries) {
+                    entries = malloc(limit * sizeof(ts_log_entry_t));  // Fallback to DRAM
+                }
                 if (entries) {
                     size_t count = ts_log_buffer_search(entries, limit, min_level, max_level, NULL, NULL);
                     
