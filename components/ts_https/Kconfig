@@ -1,0 +1,51 @@
+menu "TianShanOS HTTPS Server"
+
+    config TS_HTTPS_ENABLED
+        bool "Enable HTTPS Server"
+        default y
+        help
+            Enable the mTLS HTTPS server for secure API access.
+
+    config TS_HTTPS_PORT
+        int "HTTPS Server Port"
+        default 443
+        range 1 65535
+        depends on TS_HTTPS_ENABLED
+        help
+            Port number for the HTTPS server.
+
+    config TS_HTTPS_MAX_CLIENTS
+        int "Maximum Concurrent Clients"
+        default 3
+        range 1 8
+        depends on TS_HTTPS_ENABLED
+        help
+            Maximum number of concurrent HTTPS connections.
+            Each connection uses ~40KB of memory.
+
+    config TS_HTTPS_REQUIRE_CLIENT_CERT
+        bool "Require Client Certificate (mTLS)"
+        default y
+        depends on TS_HTTPS_ENABLED
+        help
+            When enabled, clients must provide a valid certificate
+            signed by the trusted CA. This enables mutual TLS (mTLS).
+
+    config TS_HTTPS_CTRL_LISTEN_BACKLOG
+        int "Connection Listen Backlog"
+        default 5
+        range 1 10
+        depends on TS_HTTPS_ENABLED
+        help
+            TCP listen backlog size.
+
+    config TS_HTTPS_SESSION_CACHE_SIZE
+        int "TLS Session Cache Size"
+        default 4
+        range 0 16
+        depends on TS_HTTPS_ENABLED
+        help
+            Number of TLS sessions to cache for session resumption.
+            Set to 0 to disable session caching.
+
+endmenu

@@ -8,6 +8,7 @@
  */
 
 #include "ts_time_sync.h"
+#include "ts_event.h"
 #include "esp_log.h"
 #include "esp_sntp.h"
 #include "esp_netif_sntp.h"
@@ -23,6 +24,7 @@ static struct {
     ts_time_sync_info_t info;
     char ntp_server1[64];
     char ntp_server2[64];
+    char ntp_server3[64];
     char timezone[32];
 } s_time_sync = {
     .initialized = false,
@@ -46,6 +48,10 @@ static void time_sync_notification_cb(struct timeval *tv)
     char strftime_buf[64];
     strftime(strftime_buf, sizeof(strftime_buf), "%Y-%m-%d %H:%M:%S", &timeinfo);
     ESP_LOGI(TAG, "Local time: %s (%s)", strftime_buf, s_time_sync.timezone);
+    
+    /* 发布时间同步完成事件 */
+    ts_event_post(TS_EVENT_BASE_TIME, TS_EVENT_TIME_SYNCED, 
+                  &s_time_sync.info, sizeof(s_time_sync.info), 0);
 }
 
 esp_err_t ts_time_sync_init(const ts_time_sync_config_t *config)
@@ -69,6 +75,9 @@ esp_err_t ts_time_sync_init(const ts_time_sync_config_t *config)
     if (config->ntp_server2) {
         strncpy(s_time_sync.ntp_server2, config->ntp_server2, sizeof(s_time_sync.ntp_server2) - 1);
     }
+    if (config->ntp_server3) {
+        strncpy(s_time_sync.ntp_server3, config->ntp_server3, sizeof(s_time_sync.ntp_server3) - 1);
+    }
     if (config->timezone) {
         strncpy(s_time_sync.timezone, config->timezone, sizeof(s_time_sync.timezone) - 1);
     }
@@ -86,6 +95,9 @@ esp_err_t ts_time_sync_init(const ts_time_sync_config_t *config)
     ESP_LOGI(TAG, "  NTP server 1: %s", s_time_sync.ntp_server1);
     if (s_time_sync.ntp_server2[0]) {
         ESP_LOGI(TAG, "  NTP server 2: %s", s_time_sync.ntp_server2);
+    }
+    if (s_time_sync.ntp_server3[0]) {
+        ESP_LOGI(TAG, "  NTP server 3: %s", s_time_sync.ntp_server3);
     }
     
     /* 自动启动 NTP */
@@ -132,12 +144,19 @@ esp_err_t ts_time_sync_start_ntp(void)
     esp_sntp_config_t sntp_config = ESP_NETIF_SNTP_DEFAULT_CONFIG(s_time_sync.ntp_server1);
     sntp_config.sync_cb = time_sync_notification_cb;
     
-    /* 配置第二个服务器（如果有）*/
+    /* 配置多个服务器 */
+    int num_servers = 1;
+    sntp_config.servers[0] = s_time_sync.ntp_server1;
+    
     if (s_time_sync.ntp_server2[0]) {
-        sntp_config.num_of_servers = 2;
-        sntp_config.servers[0] = s_time_sync.ntp_server1;
         sntp_config.servers[1] = s_time_sync.ntp_server2;
+        num_servers = 2;
     }
+    if (s_time_sync.ntp_server3[0]) {
+        sntp_config.servers[2] = s_time_sync.ntp_server3;
+        num_servers = 3;
+    }
+    sntp_config.num_of_servers = num_servers;
     
     /* 不阻塞等待同步，服务器可能在启动初期不可用 */
     sntp_config.start = true;
@@ -174,15 +193,17 @@ esp_err_t ts_time_sync_set_ntp_server(const char *server, int index)
         return ESP_ERR_INVALID_STATE;
     }
     
-    if (!server || index < 0 || index > 1) {
+    if (!server || index < 0 || index > 2) {
         return ESP_ERR_INVALID_ARG;
     }
     
     if (index == 0) {
         strncpy(s_time_sync.ntp_server1, server, sizeof(s_time_sync.ntp_server1) - 1);
         strncpy(s_time_sync.info.ntp_server, server, sizeof(s_time_sync.info.ntp_server) - 1);
-    } else {
+    } else if (index == 1) {
         strncpy(s_time_sync.ntp_server2, server, sizeof(s_time_sync.ntp_server2) - 1);
+    } else {
+        strncpy(s_time_sync.ntp_server3, server, sizeof(s_time_sync.ntp_server3) - 1);
     }
     
     /* 如果 NTP 已启动，需要重启 */
@@ -278,4 +299,15 @@ esp_err_t ts_time_sync_force_ntp(void)
     /* 重启 SNTP 强制同步 */
     ts_time_sync_stop_ntp();
     return ts_time_sync_start_ntp();
+}
+
+bool ts_time_sync_needs_sync(void)
+{
+    time_t now;
+    time(&now);
+    struct tm timeinfo;
+    localtime_r(&now, &timeinfo);
+    
+    /* 如果年份 < 2025，说明系统时间无效（ESP32 默认 1970） */
+    return (timeinfo.tm_year + 1900) < TS_TIME_MIN_VALID_YEAR;
 }

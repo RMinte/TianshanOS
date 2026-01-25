@@ -59,6 +59,7 @@ typedef struct {
 typedef struct {
     const char *ntp_server1;        /**< Primary NTP server (NULL to disable) */
     const char *ntp_server2;        /**< Secondary NTP server (optional) */
+    const char *ntp_server3;        /**< Tertiary NTP server (optional) */
     const char *timezone;           /**< Timezone string (e.g., "CST-8") */
     uint32_t sync_interval_ms;      /**< NTP sync interval (default: 1 hour) */
     bool auto_start;                /**< Auto start NTP on init */
@@ -68,8 +69,9 @@ typedef struct {
  * @brief Default configuration
  */
 #define TS_TIME_SYNC_CONFIG_DEFAULT() { \
-    .ntp_server1 = "pool.ntp.org", \
-    .ntp_server2 = "time.windows.com", \
+    .ntp_server1 = "10.10.99.100", \
+    .ntp_server2 = "10.10.99.99", \
+    .ntp_server3 = "10.10.99.98", \
     .timezone = "CST-8", \
     .sync_interval_ms = 3600000, \
     .auto_start = true, \
@@ -154,6 +156,23 @@ int64_t ts_time_sync_get_time_ms(void);
  * @return ESP_OK on success
  */
 esp_err_t ts_time_sync_force_ntp(void);
+
+/**
+ * @brief Check if system time needs synchronization
+ * 
+ * Returns true if system time is before year 2025, indicating
+ * that time has not been properly set (ESP32 defaults to 1970).
+ * 
+ * @return true if time sync is needed (year < 2025)
+ */
+bool ts_time_sync_needs_sync(void);
+
+/**
+ * @brief Minimum valid year for time validation
+ * 
+ * System time before this year is considered invalid and needs sync.
+ */
+#define TS_TIME_MIN_VALID_YEAR 2025
 
 #ifdef __cplusplus
 }

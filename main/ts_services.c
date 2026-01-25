@@ -13,6 +13,7 @@
 
 #include "ts_services.h"
 #include "ts_service.h"
+#include "ts_event.h"
 #include "ts_storage.h"
 #include "ts_console.h"
 #include "ts_cmd_all.h"
@@ -28,6 +29,9 @@
 #include "ts_keystore.h"
 #include "ts_known_hosts.h"
 #include "ts_cert.h"
+#include "ts_pki_client.h"
+#include "ts_https.h"
+#include "ts_https_api.h"
 #include "ts_api.h"
 #include "ts_webui.h"
 #include "ts_power_monitor.h"
@@ -48,6 +52,7 @@ static ts_service_handle_t s_power_handle = NULL;
 static ts_service_handle_t s_network_handle = NULL;
 static ts_service_handle_t s_security_handle = NULL;
 static ts_service_handle_t s_api_handle = NULL;
+static ts_service_handle_t s_https_handle = NULL;
 static ts_service_handle_t s_webui_handle = NULL;
 static ts_service_handle_t s_console_handle = NULL;
 
@@ -384,8 +389,9 @@ static esp_err_t network_service_start(ts_service_handle_t handle, void *user_da
     
     /* 初始化时间同步（NTP） */
     ts_time_sync_config_t time_config = {
-        .ntp_server1 = "pool.ntp.org",
-        .ntp_server2 = "time.windows.com",
+        .ntp_server1 = "10.10.99.100",   /* 本地 NTP 服务器（首选） */
+        .ntp_server2 = "10.10.99.99",    /* 本地 NTP 服务器（备用 1） */
+        .ntp_server3 = "10.10.99.98",    /* 本地 NTP 服务器（备用 2） */
         .timezone = "CST-8",            /* 中国标准时间 */
         .sync_interval_ms = 3600000,    /* 每小时同步一次 */
         .auto_start = true,             /* 自动启动 NTP */
@@ -426,6 +432,33 @@ static bool network_service_health(ts_service_handle_t handle, void *user_data)
  * Security 服务回调
  * ========================================================================== */
 
+/**
+ * @brief PKI 自动注册进度回调
+ */
+static void pki_enroll_callback(ts_pki_enroll_status_t status, 
+                                 const char *message, 
+                                 void *user_data)
+{
+    (void)user_data;
+    
+    switch (status) {
+        case TS_PKI_ENROLL_PENDING:
+            ESP_LOGI(TAG, "PKI: %s", message);
+            break;
+        case TS_PKI_ENROLL_APPROVED:
+            ESP_LOGI(TAG, "PKI: Certificate enrollment complete!");
+            break;
+        case TS_PKI_ENROLL_REJECTED:
+            ESP_LOGW(TAG, "PKI: CSR was rejected by admin");
+            break;
+        case TS_PKI_ENROLL_ERROR:
+            ESP_LOGE(TAG, "PKI: Enrollment error - %s", message);
+            break;
+        default:
+            break;
+    }
+}
+
 static esp_err_t security_service_init(ts_service_handle_t handle, void *user_data)
 {
     (void)handle;
@@ -461,6 +494,17 @@ static esp_err_t security_service_init(ts_service_handle_t handle, void *user_da
         /* 不是致命错误，继续 */
     }
     
+    /* 初始化 PKI 自动注册客户端 */
+    ts_pki_client_config_t pki_config;
+    ts_pki_client_get_default_config(&pki_config);
+    pki_config.auto_start = false;  /* 在 service_start 时启动 */
+    
+    ret = ts_pki_client_init_with_config(&pki_config);
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to init PKI client: %s", esp_err_to_name(ret));
+        /* 不是致命错误，继续 */
+    }
+    
     return ESP_OK;
 }
 
@@ -468,6 +512,24 @@ static esp_err_t security_service_start(ts_service_handle_t handle, void *user_d
 {
     (void)handle;
     (void)user_data;
+    
+    /* 检查当前证书状态 */
+    ts_cert_pki_status_t cert_status;
+    esp_err_t ret = ts_cert_get_status(&cert_status);
+    
+    if (ret == ESP_OK && cert_status.status != TS_CERT_STATUS_ACTIVATED) {
+        /* 没有有效证书，启动自动注册 */
+        ESP_LOGI(TAG, "No valid certificate, starting auto-enrollment...");
+        ret = ts_pki_client_start_auto_enroll(pki_enroll_callback, NULL);
+        if (ret != ESP_OK) {
+            ESP_LOGW(TAG, "Failed to start auto-enrollment: %s", esp_err_to_name(ret));
+        }
+    } else if (ret == ESP_OK) {
+        ESP_LOGI(TAG, "Certificate status: %s (valid for %d days)",
+                 ts_cert_status_to_str(cert_status.status),
+                 cert_status.cert_info.days_until_expiry);
+    }
+    
     return ESP_OK;  /* Security 在 init 时已启动 */
 }
 
@@ -476,6 +538,7 @@ static esp_err_t security_service_stop(ts_service_handle_t handle, void *user_da
     (void)handle;
     (void)user_data;
     
+    ts_pki_client_deinit();
     ts_cert_deinit();
     ts_known_hosts_deinit();
     ts_keystore_deinit();
@@ -543,6 +606,173 @@ static bool api_service_health(ts_service_handle_t handle, void *user_data)
     (void)user_data;
     /* API 层只要初始化成功就一直可用 */
     return true;
+}
+
+/* ============================================================================
+ * HTTPS 服务回调 (mTLS) - 事件驱动方式
+ * ========================================================================== */
+
+/* HTTPS 服务状态 */
+static struct {
+    bool pending_init;          /* 等待时间同步后初始化 */
+    ts_service_handle_t handle; /* 服务句柄 */
+} s_https_state = {0};
+
+/* 时间同步事件处理器 - 当时间同步完成后初始化 HTTPS */
+static void https_time_sync_handler(const ts_event_t *event, void *user_data)
+{
+    (void)user_data;
+    
+    if (!s_https_state.pending_init) {
+        return;
+    }
+    
+    ESP_LOGI(TAG, "Time synced, now initializing HTTPS with valid time...");
+    
+    /* 刷新 PKI 状态（使用正确的系统时间） */
+    ts_cert_refresh_status();
+    
+    /* 检查 PKI 状态 */
+    ts_cert_pki_status_t pki_status;
+    esp_err_t ret = ts_cert_get_status(&pki_status);
+    if (ret != ESP_OK || pki_status.status != TS_CERT_STATUS_ACTIVATED) {
+        ESP_LOGW(TAG, "PKI not activated after time sync, HTTPS disabled");
+        s_https_state.pending_init = false;
+        return;
+    }
+    
+    /* 初始化 HTTPS 服务器 */
+    ts_https_config_t config = TS_HTTPS_CONFIG_DEFAULT();
+    ret = ts_https_init(&config);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to init HTTPS: %s", esp_err_to_name(ret));
+        s_https_state.pending_init = false;
+        return;
+    }
+    
+    /* 注册默认 API 端点 */
+    ret = ts_https_register_default_api();
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to register default API: %s", esp_err_to_name(ret));
+        s_https_state.pending_init = false;
+        return;
+    }
+    
+    /* 启动 HTTPS 服务器 */
+    ret = ts_https_start();
+    if (ret == ESP_OK) {
+        ESP_LOGI(TAG, "HTTPS server started on port 443 (mTLS enabled) [delayed start]");
+    } else {
+        ESP_LOGE(TAG, "Failed to start HTTPS: %s", esp_err_to_name(ret));
+    }
+    
+    s_https_state.pending_init = false;
+}
+
+static esp_err_t https_service_init(ts_service_handle_t handle, void *user_data)
+{
+    (void)user_data;
+    
+    ESP_LOGI(TAG, "Initializing HTTPS service...");
+    s_https_state.handle = handle;
+    
+    /* 检查系统时间是否有效（年份 >= 2025） */
+    if (ts_time_sync_needs_sync()) {
+        /* 时间无效，注册事件等待时间同步后再初始化 */
+        ESP_LOGI(TAG, "System time invalid (< 2025), waiting for time sync event...");
+        s_https_state.pending_init = true;
+        
+        /* 注册时间同步事件处理器 */
+        ts_event_register(TS_EVENT_BASE_TIME, TS_EVENT_TIME_SYNCED, 
+                         https_time_sync_handler, NULL, NULL);
+        
+        ESP_LOGI(TAG, "HTTPS init deferred until time sync completes");
+        return ESP_OK;  /* 非阻塞返回，不影响其他服务 */
+    }
+    
+    /* 时间有效，直接初始化 */
+    ESP_LOGI(TAG, "System time valid, initializing HTTPS immediately...");
+    
+    /* 刷新 PKI 状态 */
+    ts_cert_refresh_status();
+    
+    /* 检查 PKI 状态 */
+    ts_cert_pki_status_t pki_status;
+    esp_err_t ret = ts_cert_get_status(&pki_status);
+    if (ret != ESP_OK || pki_status.status != TS_CERT_STATUS_ACTIVATED) {
+        ESP_LOGW(TAG, "PKI not activated, HTTPS server will not start");
+        ESP_LOGW(TAG, "Use 'pki' command to generate and install certificates");
+        return ESP_OK;  /* 不是致命错误，继续 */
+    }
+    
+    /* 初始化 HTTPS 服务器 */
+    ts_https_config_t config = TS_HTTPS_CONFIG_DEFAULT();
+    ret = ts_https_init(&config);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to init HTTPS: %s", esp_err_to_name(ret));
+        return ret;
+    }
+    
+    /* 注册默认 API 端点 */
+    ret = ts_https_register_default_api();
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to register default API: %s", esp_err_to_name(ret));
+        return ret;
+    }
+    
+    return ESP_OK;
+}
+
+static esp_err_t https_service_start(ts_service_handle_t handle, void *user_data)
+{
+    (void)handle;
+    (void)user_data;
+    
+    ESP_LOGI(TAG, "Starting HTTPS service...");
+    
+    /* 如果正在等待时间同步，跳过启动（会在事件回调中启动） */
+    if (s_https_state.pending_init) {
+        ESP_LOGI(TAG, "HTTPS start deferred (waiting for time sync)");
+        return ESP_OK;
+    }
+    
+    /* 检查是否已初始化 */
+    ts_cert_pki_status_t pki_status;
+    esp_err_t ret = ts_cert_get_status(&pki_status);
+    if (ret != ESP_OK || pki_status.status != TS_CERT_STATUS_ACTIVATED) {
+        ESP_LOGW(TAG, "HTTPS server not starting (PKI not activated)");
+        return ESP_OK;
+    }
+    
+    ret = ts_https_start();
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to start HTTPS: %s", esp_err_to_name(ret));
+        return ret;
+    }
+    
+    ESP_LOGI(TAG, "HTTPS server started on port 443 (mTLS enabled)");
+    return ESP_OK;
+}
+
+static esp_err_t https_service_stop(ts_service_handle_t handle, void *user_data)
+{
+    (void)handle;
+    (void)user_data;
+    
+    ESP_LOGI(TAG, "Stopping HTTPS service...");
+    
+    ts_https_stop();
+    ts_https_deinit();
+    
+    return ESP_OK;
+}
+
+static bool https_service_health(ts_service_handle_t handle, void *user_data)
+{
+    (void)handle;
+    (void)user_data;
+    
+    return ts_https_is_running();
 }
 
 /* ============================================================================
@@ -789,6 +1019,18 @@ static const ts_service_def_t s_api_service_def = {
     .user_data = NULL,
 };
 
+static const ts_service_def_t s_https_service_def = {
+    .name = "https",
+    .phase = TS_SERVICE_PHASE_SERVICE,
+    .capabilities = TS_SERVICE_CAP_RESTARTABLE,
+    .dependencies = {"security", "network", NULL},  /* 依赖安全（证书）和网络 */
+    .init = https_service_init,
+    .start = https_service_start,
+    .stop = https_service_stop,
+    .health_check = https_service_health,
+    .user_data = NULL,
+};
+
 static const ts_service_def_t s_webui_service_def = {
     .name = "webui",
     .phase = TS_SERVICE_PHASE_UI,
@@ -886,6 +1128,14 @@ esp_err_t ts_services_register_all(void)
         return ret;
     }
     ESP_LOGI(TAG, "  - api service registered");
+    
+    // 注册 HTTPS 服务 (mTLS)
+    ret = ts_service_register(&s_https_service_def, &s_https_handle);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to register HTTPS service: %s", esp_err_to_name(ret));
+        return ret;
+    }
+    ESP_LOGI(TAG, "  - https service registered");
     
     // 注册 WebUI 服务
     ret = ts_service_register(&s_webui_service_def, &s_webui_handle);

@@ -1,0 +1,13 @@
+idf_component_register(
+    SRCS
+        "src/ts_pki_client.c"
+    INCLUDE_DIRS
+        "include"
+    REQUIRES
+        esp_http_client
+        json
+        ts_cert
+    PRIV_REQUIRES
+        esp_netif
+        nvs_flash
+)

@@ -1,0 +1,19 @@
+idf_component_register(
+    SRCS 
+        "src/ts_https.c"
+        "src/ts_https_auth.c"
+        "src/ts_https_api.c"
+    INCLUDE_DIRS "include"
+    REQUIRES 
+        esp_http_server 
+        esp_https_server
+        mbedtls
+        ts_cert
+        ts_core
+        esp_app_format
+    PRIV_REQUIRES 
+        nvs_flash 
+        esp_event
+        json
+        esp_timer
+)

@@ -55,6 +55,12 @@ typedef struct {
 esp_err_t ts_net_init(void);
 
 /**
+ * @brief Initialize mDNS service (call after obtaining IP)
+ * @note This is automatically called when IP is obtained, but can be called manually
+ */
+esp_err_t ts_net_mdns_start(void);
+
+/**
  * @brief Deinitialize network subsystem
  */
 esp_err_t ts_net_deinit(void);

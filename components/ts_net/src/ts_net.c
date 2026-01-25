@@ -9,14 +9,54 @@
 #include "ts_log.h"
 #include "esp_netif.h"
 #include "esp_event.h"
+#include "mdns.h"
 #include <string.h>
 #include <lwip/ip4_addr.h>
 
 #define TAG "ts_net"
 
 static bool s_initialized = false;
+static bool s_mdns_initialized = false;
 static char s_hostname[32] = "tianshanOS";
 static char s_ip_str[16];
+
+/**
+ * @brief 初始化 mDNS 服务（获取 IP 后调用）
+ */
+esp_err_t ts_net_mdns_start(void)
+{
+    if (s_mdns_initialized) {
+        return ESP_OK;
+    }
+    
+    esp_err_t ret = mdns_init();
+    if (ret != ESP_OK) {
+        TS_LOGW(TAG, "mDNS init failed: %s", esp_err_to_name(ret));
+        return ret;
+    }
+    
+    // 设置 mDNS 主机名（从 Kconfig 获取）
+    ret = mdns_hostname_set(CONFIG_LWIP_LOCAL_HOSTNAME);
+    if (ret != ESP_OK) {
+        TS_LOGW(TAG, "mDNS hostname set failed: %s", esp_err_to_name(ret));
+    }
+    
+    ret = mdns_instance_name_set("TianShanOS Rack Manager");
+    if (ret != ESP_OK) {
+        TS_LOGW(TAG, "mDNS instance name set failed: %s", esp_err_to_name(ret));
+    }
+    
+    // 注册 HTTPS 服务
+    ret = mdns_service_add(NULL, "_https", "_tcp", 443, NULL, 0);
+    if (ret != ESP_OK) {
+        TS_LOGW(TAG, "mDNS service add failed: %s", esp_err_to_name(ret));
+    }
+    
+    s_mdns_initialized = true;
+    TS_LOGI(TAG, "mDNS initialized: %s.local", CONFIG_LWIP_LOCAL_HOSTNAME);
+    
+    return ESP_OK;
+}
 
 esp_err_t ts_net_init(void)
 {

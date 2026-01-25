@@ -263,6 +263,16 @@ esp_err_t ts_cert_get_ca_chain(char *ca_chain_pem, size_t *ca_chain_len);
 esp_err_t ts_cert_get_status(ts_cert_pki_status_t *status);
 
 /**
+ * @brief Refresh PKI status
+ * 
+ * Re-validates certificate against current system time.
+ * Should be called after NTP time sync to update status.
+ * 
+ * @return ESP_OK on success
+ */
+esp_err_t ts_cert_refresh_status(void);
+
+/**
  * @brief Get certificate information
  * 
  * @param info Output certificate information

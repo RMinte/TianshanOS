@@ -7,6 +7,7 @@
  * - CSR 生成（带 SAN IP 扩展）
  * - 证书安装与验证
  * - NVS 持久化存储
+ * - CA 链保存到 SD 卡（供用户下载信任）
  * 
  * 内存分配优先使用 PSRAM
  */
@@ -14,6 +15,7 @@
 #include "ts_cert.h"
 #include "ts_crypto.h"
 #include "ts_core.h"
+#include "ts_time_sync.h"
 
 #include "mbedtls/pk.h"
 #include "mbedtls/x509_csr.h"
@@ -31,8 +33,10 @@
 #include "lwip/inet.h"
 
 #include <string.h>
+#include <stdio.h>
 #include <time.h>
 #include <sys/time.h>
+#include <sys/stat.h>
 
 static const char *TAG = "ts_cert";
 
@@ -45,6 +49,10 @@ static const char *TAG = "ts_cert";
 #define NVS_KEY_CERT            "cert"
 #define NVS_KEY_CA_CHAIN        "ca_chain"
 #define NVS_KEY_STATUS          "status"
+
+/** CA chain file path on SD card for user download */
+#define CA_CHAIN_SDCARD_PATH    "/sdcard/pki/ca-chain.crt"
+#define CA_CHAIN_SDCARD_DIR     "/sdcard/pki"
 
 /*===========================================================================*/
 /*                          Static Variables                                  */
@@ -118,12 +126,22 @@ static esp_err_t nvs_write_string(const char *key, const char *str)
 static void update_status(void)
 {
     if (s_private_key_pem && s_certificate_pem) {
-        /* Check if certificate is expired */
-        ts_cert_info_t info;
-        if (ts_cert_get_info(&info) == ESP_OK && info.is_valid) {
+        /* 
+         * Check if certificate is expired
+         * 但如果系统时间未同步，跳过过期检查（使用统一的 ts_time_sync API）
+         */
+        if (ts_time_sync_needs_sync()) {
+            /* 时间未同步，假设证书有效 */
+            ESP_LOGW(TAG, "System time not synced (year < %d), assuming cert valid", 
+                     TS_TIME_MIN_VALID_YEAR);
             s_status = TS_CERT_STATUS_ACTIVATED;
         } else {
-            s_status = TS_CERT_STATUS_EXPIRED;
+            ts_cert_info_t info;
+            if (ts_cert_get_info(&info) == ESP_OK && info.is_valid) {
+                s_status = TS_CERT_STATUS_ACTIVATED;
+            } else {
+                s_status = TS_CERT_STATUS_EXPIRED;
+            }
         }
     } else if (s_private_key_pem) {
         s_status = TS_CERT_STATUS_KEY_GENERATED;
@@ -219,25 +237,36 @@ esp_err_t ts_cert_init(void)
     
     /* Load existing credentials */
     err = nvs_read_string(NVS_KEY_PRIVKEY, &s_private_key_pem);
-    if (err != ESP_OK && err != ESP_ERR_NVS_NOT_FOUND) {
+    if (err == ESP_OK && s_private_key_pem) {
+        ESP_LOGI(TAG, "Loaded private key from NVS (%d bytes)", strlen(s_private_key_pem));
+    } else if (err != ESP_ERR_NVS_NOT_FOUND) {
         ESP_LOGW(TAG, "Failed to read private key: %s", esp_err_to_name(err));
     }
     
     err = nvs_read_string(NVS_KEY_CERT, &s_certificate_pem);
-    if (err != ESP_OK && err != ESP_ERR_NVS_NOT_FOUND) {
+    if (err == ESP_OK && s_certificate_pem) {
+        ESP_LOGI(TAG, "Loaded certificate from NVS (%d bytes)", strlen(s_certificate_pem));
+    } else if (err != ESP_ERR_NVS_NOT_FOUND) {
         ESP_LOGW(TAG, "Failed to read certificate: %s", esp_err_to_name(err));
     }
     
     err = nvs_read_string(NVS_KEY_CA_CHAIN, &s_ca_chain_pem);
-    if (err != ESP_OK && err != ESP_ERR_NVS_NOT_FOUND) {
+    if (err == ESP_OK && s_ca_chain_pem) {
+        ESP_LOGI(TAG, "Loaded CA chain from NVS (%d bytes)", strlen(s_ca_chain_pem));
+    } else if (err != ESP_ERR_NVS_NOT_FOUND) {
         ESP_LOGW(TAG, "Failed to read CA chain: %s", esp_err_to_name(err));
     }
     
+    /* 必须先设置 initialized，因为 update_status 会调用 ts_cert_get_info */
+    s_initialized = true;
+    
     update_status();
     
-    ESP_LOGI(TAG, "Initialized, status: %s", ts_cert_status_to_str(s_status));
+    ESP_LOGI(TAG, "Initialized, status: %s, has_key=%d, has_cert=%d", 
+             ts_cert_status_to_str(s_status),
+             s_private_key_pem != NULL,
+             s_certificate_pem != NULL);
     
-    s_initialized = true;
     return ESP_OK;
 }
 
@@ -623,7 +652,7 @@ esp_err_t ts_cert_install_ca_chain(const char *ca_chain_pem, size_t ca_chain_len
         return ESP_ERR_INVALID_ARG;
     }
     
-    /* Store CA chain */
+    /* Store CA chain in NVS */
     esp_err_t err = nvs_write_string(NVS_KEY_CA_CHAIN, ca_chain_pem);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to store CA chain: %s", esp_err_to_name(err));
@@ -633,6 +662,30 @@ esp_err_t ts_cert_install_ca_chain(const char *ca_chain_pem, size_t ca_chain_len
     /* Update cache */
     free(s_ca_chain_pem);
     s_ca_chain_pem = strdup(ca_chain_pem);
+    
+    /* Save CA chain to SD card for user download */
+    /* Create directory if not exists */
+    struct stat st;
+    if (stat(CA_CHAIN_SDCARD_DIR, &st) != 0) {
+        if (mkdir(CA_CHAIN_SDCARD_DIR, 0755) != 0) {
+            ESP_LOGW(TAG, "Failed to create %s directory (SD card may not be mounted)", CA_CHAIN_SDCARD_DIR);
+            /* Continue anyway, NVS storage succeeded */
+        }
+    }
+    
+    /* Write CA chain file */
+    FILE *f = fopen(CA_CHAIN_SDCARD_PATH, "w");
+    if (f) {
+        size_t written = fwrite(ca_chain_pem, 1, strlen(ca_chain_pem), f);
+        fclose(f);
+        if (written == strlen(ca_chain_pem)) {
+            ESP_LOGI(TAG, "CA chain saved to %s for user download", CA_CHAIN_SDCARD_PATH);
+        } else {
+            ESP_LOGW(TAG, "Partial write to SD card: %zu/%zu bytes", written, strlen(ca_chain_pem));
+        }
+    } else {
+        ESP_LOGW(TAG, "Could not save CA chain to SD card (SD card may not be mounted)");
+    }
     
     ESP_LOGI(TAG, "CA chain installed");
     return ESP_OK;
@@ -701,6 +754,25 @@ esp_err_t ts_cert_get_ca_chain(char *ca_chain_pem, size_t *ca_chain_len)
 /*===========================================================================*/
 /*                           Status & Info                                    */
 /*===========================================================================*/
+
+esp_err_t ts_cert_refresh_status(void)
+{
+    if (!s_initialized) return ESP_ERR_INVALID_STATE;
+    
+    ts_cert_status_t old_status = s_status;
+    update_status();
+    
+    if (old_status != s_status) {
+        ESP_LOGI(TAG, "PKI status updated: %s -> %s",
+                 ts_cert_status_to_str(old_status),
+                 ts_cert_status_to_str(s_status));
+    } else {
+        ESP_LOGD(TAG, "PKI status refreshed: %s (unchanged)", 
+                 ts_cert_status_to_str(s_status));
+    }
+    
+    return ESP_OK;
+}
 
 esp_err_t ts_cert_get_status(ts_cert_pki_status_t *status)
 {

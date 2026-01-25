@@ -8,6 +8,7 @@ idf_component_register(
     REQUIRES
         ts_core
         ts_security
+        ts_net
         mbedtls
         nvs_flash
         esp_netif

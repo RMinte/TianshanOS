@@ -213,10 +213,10 @@ struct ts_keypair_s {
     ts_crypto_key_type_t type;
 };
 
-/* Random number generator context */
-static mbedtls_entropy_context s_entropy;
-static mbedtls_ctr_drbg_context s_ctr_drbg;
-static bool s_rng_initialized = false;
+/* Random number generator context - 非 static 以便 ts_cert.c 共享 */
+mbedtls_entropy_context s_entropy;
+mbedtls_ctr_drbg_context s_ctr_drbg;
+bool s_rng_initialized = false;
 
 static esp_err_t init_rng(void)
 {

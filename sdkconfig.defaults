@@ -52,7 +52,7 @@ CONFIG_LOG_MAXIMUM_LEVEL_DEBUG=y
 # LWIP 配置
 # ============================================================================
 # SNTP 配置
-CONFIG_LWIP_SNTP_MAX_SERVERS=2
+CONFIG_LWIP_SNTP_MAX_SERVERS=3
 
 # ============================================================================
 # NVS 安全配置

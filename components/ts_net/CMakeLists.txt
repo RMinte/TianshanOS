@@ -23,6 +23,7 @@ idf_component_register(
         esp_https_server
         lwip
         mbedtls
+        mdns
     PRIV_REQUIRES
         driver
         esp_event
