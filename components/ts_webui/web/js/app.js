@@ -4730,7 +4730,18 @@ async function loadSecurityPage() {
             </div>
             
             <div class="section">
-                <h2>🔒 HTTPS 证书</h2>
+                <h2>� 已知主机指纹</h2>
+                <p style="color:#666;margin-bottom:15px;font-size:0.9em">💡 SSH 连接时自动记录的服务器指纹，用于防止中间人攻击。如果服务器重装需要更新指纹。</p>
+                <table class="data-table">
+                    <thead>
+                        <tr><th>主机</th><th>端口</th><th>密钥类型</th><th>指纹 (SHA256)</th><th>添加时间</th><th>操作</th></tr>
+                    </thead>
+                    <tbody id="known-hosts-table-body"></tbody>
+                </table>
+            </div>
+            
+            <div class="section">
+                <h2>�🔒 HTTPS 证书</h2>
                 <div id="cert-status-card" class="info-card" style="margin-bottom:15px">
                     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
                         <span style="font-size:1.1em;font-weight:bold">
@@ -5129,6 +5140,9 @@ async function refreshSecurityPage() {
     // SSH 已部署主机列表
     await refreshSshHostsList();
     
+    // 已知主机指纹列表
+    await refreshKnownHostsList();
+    
     // HTTPS 证书状态
     await refreshCertStatus();
 }
@@ -5162,7 +5176,8 @@ async function refreshSshHostsList() {
                 <td><span class="badge badge-info">🔑 ${escapeHtml(h.keyid || 'default')}</span></td>
                 <td>
                     <button class="btn btn-sm" onclick="testSshHostByIndex(${idx})" title="测试连接">🔍 测试</button>
-                    <button class="btn btn-sm btn-danger" onclick="revokeKeyFromHost(${idx})" title="撤销并移除">🔓 撤销</button>
+                    <button class="btn btn-sm btn-danger" onclick="revokeKeyFromHost(${idx})" title="撤销公钥">🔓 撤销</button>
+                    <button class="btn btn-sm" onclick="removeHostByIndex(${idx})" title="仅移除本地记录" style="background:#6c757d;color:white">🗑️ 移除</button>
                 </td>
             </tr>
         `).join('');
@@ -5172,6 +5187,76 @@ async function refreshSshHostsList() {
     } catch (e) {
         console.error('Refresh SSH hosts error:', e);
         tbody.innerHTML = '<tr><td colspan="6" class="error">加载失败</td></tr>';
+    }
+}
+
+/**
+ * 刷新已知主机指纹列表
+ */
+async function refreshKnownHostsList() {
+    const tbody = document.getElementById('known-hosts-table-body');
+    if (!tbody) return;
+    
+    try {
+        const result = await api.call('hosts.list', {});
+        const hosts = result.data?.hosts || [];
+        
+        if (hosts.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="6" class="empty-state">暂无已知主机指纹</td></tr>';
+            return;
+        }
+        
+        // 存储已知主机列表
+        window._knownHostsList = hosts;
+        
+        tbody.innerHTML = hosts.map((h, idx) => `
+            <tr>
+                <td><code>${escapeHtml(h.host)}</code></td>
+                <td>${h.port}</td>
+                <td><span class="badge">${escapeHtml(h.type)}</span></td>
+                <td><code style="font-size:0.8em;word-break:break-all">${escapeHtml(h.fingerprint.substring(0, 32))}...</code></td>
+                <td>${formatTimestamp(h.added)}</td>
+                <td>
+                    <button class="btn btn-sm" onclick="showFullFingerprint(${idx})" title="查看完整指纹">👁️ 查看</button>
+                    <button class="btn btn-sm" onclick="removeKnownHost(${idx})" title="删除指纹记录" style="background:#dc3545;color:white">🗑️ 删除</button>
+                </td>
+            </tr>
+        `).join('');
+    } catch (e) {
+        console.error('Refresh known hosts error:', e);
+        tbody.innerHTML = '<tr><td colspan="6" class="error">加载失败</td></tr>';
+    }
+}
+
+/**
+ * 显示完整指纹
+ */
+function showFullFingerprint(index) {
+    const host = window._knownHostsList?.[index];
+    if (!host) return;
+    
+    alert(`主机: ${host.host}:${host.port}\n类型: ${host.type}\n指纹 (SHA256):\n${host.fingerprint}`);
+}
+
+/**
+ * 删除已知主机指纹
+ */
+async function removeKnownHost(index) {
+    const host = window._knownHostsList?.[index];
+    if (!host) return;
+    
+    if (!confirm(`确定要删除主机 ${host.host}:${host.port} 的指纹记录吗？\n\n删除后下次连接将重新验证服务器指纹。`)) return;
+    
+    try {
+        const result = await api.call('hosts.remove', { host: host.host, port: host.port });
+        if (result.code === 0) {
+            showToast('已删除主机指纹', 'success');
+            await refreshKnownHostsList();
+        } else {
+            showToast('删除失败: ' + (result.message || '未知错误'), 'error');
+        }
+    } catch (e) {
+        showToast('删除失败: ' + e.message, 'error');
     }
 }
 
@@ -6802,6 +6887,9 @@ window.saveAllModules = saveAllModules;
 window.syncConfigToSd = syncConfigToSd;
 window.markModuleConfigChanged = markModuleConfigChanged;
 window.refreshSshHostsList = refreshSshHostsList;
+window.refreshKnownHostsList = refreshKnownHostsList;
+window.showFullFingerprint = showFullFingerprint;
+window.removeKnownHost = removeKnownHost;
 window.deleteSshHostFromSecurity = deleteSshHostFromSecurity;
 window.testSshConnection = testSshConnection;
 window.testSshHostByIndex = testSshHostByIndex;

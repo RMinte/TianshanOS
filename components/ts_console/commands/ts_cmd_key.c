@@ -21,6 +21,7 @@
 #include "ts_keystore.h"
 #include "argtable3/argtable3.h"
 #include "esp_system.h"
+#include "esp_heap_caps.h"
 #include <string.h>
 #include <stdio.h>
 #include <time.h>
@@ -144,12 +145,22 @@ static int do_key_list(bool json_output)
         return (ret == ESP_OK) ? 0 : 1;
     }
     
-    /* 格式化输出 */
-    ts_keystore_key_info_t keys[TS_KEYSTORE_MAX_KEYS];
+    /* 格式化输出 - 使用 PSRAM 分配避免栈溢出 */
+    ts_keystore_key_info_t *keys = heap_caps_malloc(
+        sizeof(ts_keystore_key_info_t) * TS_KEYSTORE_MAX_KEYS, 
+        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!keys) {
+        keys = malloc(sizeof(ts_keystore_key_info_t) * TS_KEYSTORE_MAX_KEYS);
+    }
+    if (!keys) {
+        ts_console_printf("Error: Memory allocation failed\n");
+        return 1;
+    }
     size_t count = TS_KEYSTORE_MAX_KEYS;
     
     esp_err_t ret = ts_keystore_list_keys(keys, &count);
     if (ret != ESP_OK) {
+        free(keys);
         ts_console_printf("Error: Failed to list keys (%s)\n", esp_err_to_name(ret));
         return 1;
     }
@@ -181,6 +192,7 @@ static int do_key_list(bool json_output)
     ts_console_printf("══════════════════════════════════════════════════════════════════\n");
     ts_console_printf("  Total: %zu / %d keys\n\n", count, TS_KEYSTORE_MAX_KEYS);
     
+    free(keys);
     return 0;
 }
 

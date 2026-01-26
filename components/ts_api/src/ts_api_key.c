@@ -9,6 +9,7 @@
 #include "ts_api.h"
 #include "ts_keystore.h"
 #include "ts_log.h"
+#include "esp_heap_caps.h"
 #include <string.h>
 
 #define TAG "api_key"
@@ -44,7 +45,17 @@ static esp_err_t api_key_list(const cJSON *params, ts_api_result_t *result)
     /* 检查是否显示隐藏密钥（TODO: 从认证状态判断） */
     bool show_hidden = true;  // 暂时默认显示全部，后续接入认证系统
     
-    ts_keystore_key_info_t keys[TS_KEYSTORE_MAX_KEYS];
+    /* 使用 PSRAM 分配避免栈溢出 */
+    ts_keystore_key_info_t *keys = heap_caps_malloc(
+        sizeof(ts_keystore_key_info_t) * TS_KEYSTORE_MAX_KEYS,
+        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!keys) {
+        keys = malloc(sizeof(ts_keystore_key_info_t) * TS_KEYSTORE_MAX_KEYS);
+    }
+    if (!keys) {
+        ts_api_result_error(result, TS_API_ERR_NO_MEM, "Memory allocation failed");
+        return ESP_ERR_NO_MEM;
+    }
     size_t count = TS_KEYSTORE_MAX_KEYS;
     
     esp_err_t ret = ts_keystore_list_keys_ex(keys, &count, show_hidden);
@@ -53,6 +64,7 @@ static esp_err_t api_key_list(const cJSON *params, ts_api_result_t *result)
     
     // 如果模块未初始化，返回空列表而不是错误
     if (ret == ESP_ERR_INVALID_STATE) {
+        free(keys);
         cJSON *data = cJSON_CreateObject();
         cJSON_AddNumberToObject(data, "count", 0);
         cJSON_AddNumberToObject(data, "max_keys", TS_KEYSTORE_MAX_KEYS);
@@ -62,12 +74,14 @@ static esp_err_t api_key_list(const cJSON *params, ts_api_result_t *result)
     }
     
     if (ret != ESP_OK) {
+        free(keys);
         ts_api_result_error(result, TS_API_ERR_INTERNAL, "Failed to list keys");
         return ret;
     }
     
     cJSON *data = cJSON_CreateObject();
     if (!data) {
+        free(keys);
         ts_api_result_error(result, TS_API_ERR_NO_MEM, "Memory allocation failed");
         return ESP_ERR_NO_MEM;
     }
@@ -102,6 +116,7 @@ static esp_err_t api_key_list(const cJSON *params, ts_api_result_t *result)
         cJSON_AddItemToArray(keys_array, item);
     }
     
+    free(keys);
     ts_api_result_ok(result, data);
     return ESP_OK;
 }
