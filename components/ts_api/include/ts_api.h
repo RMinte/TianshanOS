@@ -389,6 +389,11 @@ void ts_api_log_register(void);
  */
 esp_err_t ts_api_automation_register(void);
 
+/**
+ * @brief Register Certificate (PKI) APIs
+ */
+esp_err_t ts_api_cert_register(void);
+
 #ifdef __cplusplus
 }
 #endif

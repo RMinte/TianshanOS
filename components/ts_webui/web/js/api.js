@@ -380,6 +380,43 @@ class TianShanAPI {
     async hostsRemove(host, port = 22) { return this.call('hosts.remove', { host, port }, 'POST'); }
     async hostsUpdate(host, port = 22) { return this.call('hosts.update', { host, port }, 'POST'); }
     async hostsClear() { return this.call('hosts.clear', {}, 'POST'); }
+    
+    // =====================================================================
+    //                    Certificate (PKI) Management API
+    // =====================================================================
+    
+    /** 获取 HTTPS 证书 PKI 状态 */
+    async certStatus() { return this.call('cert.status'); }
+    
+    /** 生成 ECDSA P-256 密钥对 */
+    async certGenerateKeypair(force = false) { 
+        return this.call('cert.generate_keypair', { force }, 'POST'); 
+    }
+    
+    /** 生成证书签名请求 (CSR) */
+    async certGenerateCSR(opts = {}) { 
+        return this.call('cert.generate_csr', opts, 'POST'); 
+    }
+    
+    /** 安装签发的证书 */
+    async certInstall(certPem) { 
+        return this.call('cert.install', { cert_pem: certPem }, 'POST'); 
+    }
+    
+    /** 安装 CA 证书链 */
+    async certInstallCA(caPem) { 
+        return this.call('cert.install_ca', { ca_pem: caPem }, 'POST'); 
+    }
+    
+    /** 获取设备证书 PEM */
+    async certGetCertificate() { 
+        return this.call('cert.get_certificate'); 
+    }
+    
+    /** 删除所有 PKI 凭证（需要 confirm=true） */
+    async certDelete() { 
+        return this.call('cert.delete', { confirm: true }, 'POST'); 
+    }
 }
 
 // =========================================================================

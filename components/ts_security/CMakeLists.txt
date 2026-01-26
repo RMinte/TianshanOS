@@ -10,6 +10,7 @@ idf_component_register(
         "src/ts_port_forward.c"
         "src/ts_ssh_shell.c"
         "src/ts_keystore.c"
+        "src/ts_ssh_hosts_config.c"
     INCLUDE_DIRS
         "include"
     REQUIRES

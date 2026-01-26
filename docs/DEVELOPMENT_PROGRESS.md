@@ -29,6 +29,117 @@
 | Phase 15: WebUI 日志流修复 & 导航栏清理 | ✅ 完成 | 100% | 2026-01-24 |
 | Phase 16: DRAM 碎片优化 | ✅ 完成 | 100% | 2026-01-24 |
 | Phase 17: 自动化引擎实现 | ✅ 完成 | 100% | 2026-01-27 |
+| Phase 18: HTTPS 证书管理 | ✅ 完成 | 100% | 2026-01-27 |
+
+---
+
+## 📋 Phase 18: HTTPS 证书管理 ✅
+
+**时间**：2026年1月27日  
+**目标**：实现完整的 HTTPS/mTLS 证书管理系统，支持设备端 PKI 操作和 WebUI 管理界面
+
+### 核心功能
+
+#### 1. ts_cert 证书管理组件 🔐
+
+**实现特性**：
+- ECDSA P-256 密钥对生成（存储在 PSRAM，安全清零）
+- X.509 CSR 生成（符合 RFC 2986）
+- 证书链验证（Root CA → Intermediate CA → Device Cert）
+- NVS 持久化存储（私钥/证书/CA链）
+- 证书状态查询（有效期、主体、签发者）
+
+**存储架构**：
+```
+NVS namespace: ts_cert
+├── priv_key    - ECDSA P-256 私钥 (PEM)
+├── cert        - 设备证书 (PEM)
+└── ca_chain    - CA 证书链 (PEM)
+```
+
+#### 2. Core API 层 (ts_api_cert) 🌐
+
+**7 个 REST API 端点**：
+
+| API | 方法 | 功能 |
+|-----|------|------|
+| `cert.status` | GET | 获取证书状态（有效期、CN、签发者等） |
+| `cert.generate_key` | POST | 生成新的 ECDSA P-256 密钥对 |
+| `cert.generate_csr` | POST | 生成 CSR（需提供 CN） |
+| `cert.get_csr` | GET | 获取已生成的 CSR |
+| `cert.install` | POST | 安装签发的证书（PEM 格式） |
+| `cert.install_ca` | POST | 安装 CA 证书链 |
+| `cert.delete` | POST | 删除所有证书和密钥 |
+
+**返回格式示例**：
+```json
+{
+  "success": true,
+  "data": {
+    "has_private_key": true,
+    "has_certificate": true,
+    "has_ca_chain": true,
+    "cert_info": {
+      "subject_cn": "TIANSHAN-DEVICE-001",
+      "issuer_cn": "TianShanOS Intermediate CA",
+      "not_before": "2026-01-27 00:00:00",
+      "not_after": "2027-01-27 00:00:00",
+      "serial": "01",
+      "is_valid": true,
+      "days_until_expiry": 363
+    }
+  }
+}
+```
+
+#### 3. WebUI 安全页面增强 🎨
+
+**统一密钥管理表格**：
+- SSH 密钥（来自 ts_keystore）
+- HTTPS 密钥（来自 ts_cert）
+- 状态展示：🔐 已生成 / 🔒 未生成
+- 操作按钮：生成密钥、查看证书、生成 CSR、删除
+
+**HTTPS 证书状态卡片**：
+- 证书有效性指示（✅ 已激活 / ⚠️ 即将过期 / ❌ 已过期）
+- 详细信息：主体 CN、签发者、有效期、序列号
+- 操作按钮：生成 CSR、安装证书、安装 CA、删除
+
+**模态框交互**：
+- CSR 生成：输入 CN → 调用 API → 显示 PEM（可复制）
+- 证书安装：粘贴 PEM → 调用 API → 刷新状态
+- CA 安装：粘贴 CA 链 PEM → 调用 API → 验证完整性
+
+### 技术细节
+
+#### API 端点限制调整
+将 `CONFIG_TS_API_MAX_ENDPOINTS` 从 200 增加到 256，支持新增的 7 个证书 API。
+
+#### 前端字段映射修复
+修复 API 返回字段与前端代码不匹配的问题：
+- `has_keypair` → `has_private_key`
+- `certificate` → `cert_info`
+
+### 新增文件
+
+| 文件 | 描述 |
+|------|------|
+| `components/ts_api/src/ts_api_cert.c` | 证书 API 实现（7 个端点） |
+| `components/ts_webui/web/js/api.js` | 新增 `CertAPI` 命名空间 |
+| `components/ts_webui/web/js/app.js` | 安全页面 HTTPS 证书管理 UI |
+
+### 安全页面结构
+
+```
+安全与连接
+├── 🔑 密钥管理
+│   ├── SSH 密钥（ts_keystore）
+│   └── HTTPS 密钥（ts_cert） ✨ 新增
+├── 🖥️ 已部署主机
+└── 🔒 HTTPS 证书 ✨ 新增
+    ├── 状态卡片（有效期/CN/签发者）
+    └── 操作按钮（CSR/安装/删除）
+```
 
 ---
 

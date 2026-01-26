@@ -18,6 +18,7 @@
 #include "ts_variable.h"
 #include "ts_rule_engine.h"
 #include "ts_source_manager.h"
+#include "ts_action_manager.h"
 #include "ts_log.h"
 #include "cJSON.h"
 #include "esp_heap_caps.h"
@@ -1562,6 +1563,469 @@ static esp_err_t api_automation_test_device(const cJSON *params, ts_api_result_t
     return ESP_OK;
 }
 
+/**
+ * @brief automation.test.ssh - Test SSH command execution
+ */
+static esp_err_t api_automation_test_ssh(const cJSON *params, ts_api_result_t *result)
+{
+    cJSON *host_id = cJSON_GetObjectItem(params, "host_id");
+    cJSON *command = cJSON_GetObjectItem(params, "command");
+    cJSON *timeout_ms = cJSON_GetObjectItem(params, "timeout_ms");
+    
+    if (!host_id || !cJSON_IsString(host_id)) {
+        result->code = TS_API_ERR_INVALID_ARG;
+        result->message = strdup("Missing 'host_id' parameter");
+        return ESP_OK;
+    }
+    
+    if (!command || !cJSON_IsString(command)) {
+        result->code = TS_API_ERR_INVALID_ARG;
+        result->message = strdup("Missing 'command' parameter");
+        return ESP_OK;
+    }
+    
+    ts_auto_action_t action = {
+        .type = TS_AUTO_ACT_SSH_CMD,
+        .ssh = {
+            .timeout_ms = (timeout_ms && cJSON_IsNumber(timeout_ms)) ? 
+                          (uint32_t)timeout_ms->valueint : 30000,
+            .async = false,
+        }
+    };
+    strncpy(action.ssh.host_ref, host_id->valuestring, sizeof(action.ssh.host_ref) - 1);
+    strncpy(action.ssh.command, command->valuestring, sizeof(action.ssh.command) - 1);
+    
+    ts_action_result_t exec_result = {0};
+    esp_err_t ret = ts_action_manager_execute(&action, &exec_result);
+    
+    result->data = cJSON_CreateObject();
+    
+    if (ret == ESP_OK && exec_result.status == TS_ACTION_STATUS_SUCCESS) {
+        result->code = TS_API_OK;
+        result->message = strdup("SSH command executed");
+        cJSON_AddStringToObject(result->data, "output", exec_result.output);
+        cJSON_AddNumberToObject(result->data, "exit_code", exec_result.exit_code);
+        cJSON_AddNumberToObject(result->data, "duration_ms", exec_result.duration_ms);
+    } else {
+        result->code = TS_API_ERR_INTERNAL;
+        if (exec_result.status == TS_ACTION_STATUS_TIMEOUT) {
+            result->message = strdup("SSH command timed out");
+        } else if (exec_result.output[0]) {
+            result->message = strdup(exec_result.output);
+        } else {
+            result->message = strdup("SSH command failed");
+        }
+        if (exec_result.output[0]) {
+            cJSON_AddStringToObject(result->data, "output", exec_result.output);
+        }
+    }
+    
+    return ESP_OK;
+}
+
+/*===========================================================================*/
+/*                        Action Template API                                 */
+/*===========================================================================*/
+
+/**
+ * @brief Convert action type string to enum
+ */
+static ts_auto_action_type_t action_type_from_string(const char *str)
+{
+    if (!str) return TS_AUTO_ACT_LOG;
+    
+    if (strcmp(str, "led") == 0) return TS_AUTO_ACT_LED;
+    if (strcmp(str, "ssh_cmd") == 0) return TS_AUTO_ACT_SSH_CMD;
+    if (strcmp(str, "gpio") == 0) return TS_AUTO_ACT_GPIO;
+    if (strcmp(str, "webhook") == 0) return TS_AUTO_ACT_WEBHOOK;
+    if (strcmp(str, "log") == 0) return TS_AUTO_ACT_LOG;
+    if (strcmp(str, "set_var") == 0) return TS_AUTO_ACT_SET_VAR;
+    if (strcmp(str, "device_ctrl") == 0) return TS_AUTO_ACT_DEVICE_CTRL;
+    
+    return TS_AUTO_ACT_LOG; /* Default */
+}
+
+/**
+ * @brief Convert action type enum to string
+ */
+static const char *action_type_to_string(ts_auto_action_type_t type)
+{
+    switch (type) {
+        case TS_AUTO_ACT_LED: return "led";
+        case TS_AUTO_ACT_SSH_CMD: return "ssh_cmd";
+        case TS_AUTO_ACT_GPIO: return "gpio";
+        case TS_AUTO_ACT_WEBHOOK: return "webhook";
+        case TS_AUTO_ACT_LOG: return "log";
+        case TS_AUTO_ACT_SET_VAR: return "set_var";
+        case TS_AUTO_ACT_DEVICE_CTRL: return "device_ctrl";
+        default: return "unknown";
+    }
+}
+
+/**
+ * @brief automation.actions.list - List all action templates
+ */
+static esp_err_t api_automation_actions_list(const cJSON *params, ts_api_result_t *result)
+{
+    (void)params;
+    
+    result->data = cJSON_CreateObject();
+    cJSON *templates_arr = cJSON_AddArrayToObject(result->data, "templates");
+    
+    int count = ts_action_template_count();
+    if (count > 0) {
+        ts_action_template_t *templates = heap_caps_malloc(
+            sizeof(ts_action_template_t) * count, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        
+        if (templates) {
+            size_t actual_count = 0;
+            esp_err_t ret = ts_action_template_list(templates, count, &actual_count);
+            
+            if (ret == ESP_OK) {
+                for (size_t i = 0; i < actual_count; i++) {
+                    cJSON *tpl_obj = cJSON_CreateObject();
+                    cJSON_AddStringToObject(tpl_obj, "id", templates[i].id);
+                    cJSON_AddStringToObject(tpl_obj, "name", templates[i].name);
+                    cJSON_AddStringToObject(tpl_obj, "description", templates[i].description);
+                    cJSON_AddStringToObject(tpl_obj, "type", 
+                        action_type_to_string(templates[i].action.type));
+                    cJSON_AddBoolToObject(tpl_obj, "enabled", templates[i].enabled);
+                    cJSON_AddNumberToObject(tpl_obj, "use_count", templates[i].use_count);
+                    cJSON_AddNumberToObject(tpl_obj, "created_at", templates[i].created_at);
+                    cJSON_AddNumberToObject(tpl_obj, "last_used_at", templates[i].last_used_at);
+                    cJSON_AddItemToArray(templates_arr, tpl_obj);
+                }
+            }
+            
+            free(templates);
+        }
+    }
+    
+    cJSON_AddNumberToObject(result->data, "count", count);
+    result->code = TS_API_OK;
+    return ESP_OK;
+}
+
+/**
+ * @brief automation.actions.add - Add a new action template
+ */
+static esp_err_t api_automation_actions_add(const cJSON *params, ts_api_result_t *result)
+{
+    cJSON *id = cJSON_GetObjectItem(params, "id");
+    cJSON *name = cJSON_GetObjectItem(params, "name");
+    cJSON *description = cJSON_GetObjectItem(params, "description");
+    cJSON *type = cJSON_GetObjectItem(params, "type");
+    cJSON *enabled = cJSON_GetObjectItem(params, "enabled");
+    
+    if (!id || !cJSON_IsString(id) || !id->valuestring[0]) {
+        result->code = TS_API_ERR_INVALID_ARG;
+        result->message = strdup("Missing 'id' parameter");
+        return ESP_OK;
+    }
+    
+    if (!type || !cJSON_IsString(type)) {
+        result->code = TS_API_ERR_INVALID_ARG;
+        result->message = strdup("Missing 'type' parameter");
+        return ESP_OK;
+    }
+    
+    ts_action_template_t tpl = {
+        .enabled = (enabled && cJSON_IsBool(enabled)) ? cJSON_IsTrue(enabled) : true,
+    };
+    
+    strncpy(tpl.id, id->valuestring, sizeof(tpl.id) - 1);
+    if (name && cJSON_IsString(name)) {
+        strncpy(tpl.name, name->valuestring, sizeof(tpl.name) - 1);
+    } else {
+        strncpy(tpl.name, id->valuestring, sizeof(tpl.name) - 1);
+    }
+    if (description && cJSON_IsString(description)) {
+        strncpy(tpl.description, description->valuestring, sizeof(tpl.description) - 1);
+    }
+    
+    tpl.action.type = action_type_from_string(type->valuestring);
+    
+    /* Parse type-specific parameters */
+    switch (tpl.action.type) {
+        case TS_AUTO_ACT_LED: {
+            cJSON *led = cJSON_GetObjectItem(params, "led");
+            if (led) {
+                cJSON *device = cJSON_GetObjectItem(led, "device");
+                cJSON *index = cJSON_GetObjectItem(led, "index");
+                cJSON *color = cJSON_GetObjectItem(led, "color");
+                cJSON *effect = cJSON_GetObjectItem(led, "effect");
+                cJSON *duration = cJSON_GetObjectItem(led, "duration_ms");
+                
+                if (device && cJSON_IsString(device)) {
+                    strncpy(tpl.action.led.device, device->valuestring, 
+                            sizeof(tpl.action.led.device) - 1);
+                }
+                tpl.action.led.index = (index && cJSON_IsNumber(index)) ? 
+                                       (uint8_t)index->valueint : 0xFF;
+                if (color && cJSON_IsString(color)) {
+                    ts_action_parse_color(color->valuestring, 
+                                          &tpl.action.led.r, 
+                                          &tpl.action.led.g, 
+                                          &tpl.action.led.b);
+                }
+                if (effect && cJSON_IsString(effect)) {
+                    strncpy(tpl.action.led.effect, effect->valuestring, 
+                            sizeof(tpl.action.led.effect) - 1);
+                }
+                tpl.action.led.duration_ms = (duration && cJSON_IsNumber(duration)) ?
+                                             (uint16_t)duration->valueint : 0;
+            }
+            break;
+        }
+        case TS_AUTO_ACT_SSH_CMD: {
+            cJSON *ssh = cJSON_GetObjectItem(params, "ssh");
+            if (ssh) {
+                cJSON *host_ref = cJSON_GetObjectItem(ssh, "host_ref");
+                cJSON *command = cJSON_GetObjectItem(ssh, "command");
+                cJSON *timeout = cJSON_GetObjectItem(ssh, "timeout_ms");
+                cJSON *async = cJSON_GetObjectItem(ssh, "async");
+                
+                if (host_ref && cJSON_IsString(host_ref)) {
+                    strncpy(tpl.action.ssh.host_ref, host_ref->valuestring, 
+                            sizeof(tpl.action.ssh.host_ref) - 1);
+                }
+                if (command && cJSON_IsString(command)) {
+                    strncpy(tpl.action.ssh.command, command->valuestring, 
+                            sizeof(tpl.action.ssh.command) - 1);
+                }
+                tpl.action.ssh.timeout_ms = (timeout && cJSON_IsNumber(timeout)) ?
+                                            (uint32_t)timeout->valueint : 30000;
+                tpl.action.ssh.async = (async && cJSON_IsBool(async)) ? 
+                                       cJSON_IsTrue(async) : false;
+            }
+            break;
+        }
+        case TS_AUTO_ACT_GPIO: {
+            cJSON *gpio = cJSON_GetObjectItem(params, "gpio");
+            if (gpio) {
+                cJSON *pin = cJSON_GetObjectItem(gpio, "pin");
+                cJSON *level = cJSON_GetObjectItem(gpio, "level");
+                cJSON *pulse = cJSON_GetObjectItem(gpio, "pulse_ms");
+                
+                tpl.action.gpio.pin = (pin && cJSON_IsNumber(pin)) ?
+                                      (uint8_t)pin->valueint : 0;
+                tpl.action.gpio.level = (level && cJSON_IsBool(level)) ?
+                                        cJSON_IsTrue(level) : false;
+                tpl.action.gpio.pulse_ms = (pulse && cJSON_IsNumber(pulse)) ?
+                                           (uint32_t)pulse->valueint : 0;
+            }
+            break;
+        }
+        case TS_AUTO_ACT_DEVICE_CTRL: {
+            cJSON *device = cJSON_GetObjectItem(params, "device");
+            if (device) {
+                cJSON *dev_name = cJSON_GetObjectItem(device, "device");
+                cJSON *action = cJSON_GetObjectItem(device, "action");
+                
+                if (dev_name && cJSON_IsString(dev_name)) {
+                    strncpy(tpl.action.device.device, dev_name->valuestring, 
+                            sizeof(tpl.action.device.device) - 1);
+                }
+                if (action && cJSON_IsString(action)) {
+                    strncpy(tpl.action.device.action, action->valuestring, 
+                            sizeof(tpl.action.device.action) - 1);
+                }
+            }
+            break;
+        }
+        case TS_AUTO_ACT_LOG: {
+            cJSON *log = cJSON_GetObjectItem(params, "log");
+            if (log) {
+                cJSON *level = cJSON_GetObjectItem(log, "level");
+                cJSON *message = cJSON_GetObjectItem(log, "message");
+                
+                tpl.action.log.level = (level && cJSON_IsNumber(level)) ?
+                                       (uint8_t)level->valueint : 3;
+                if (message && cJSON_IsString(message)) {
+                    strncpy(tpl.action.log.message, message->valuestring, 
+                            sizeof(tpl.action.log.message) - 1);
+                }
+            }
+            break;
+        }
+        case TS_AUTO_ACT_SET_VAR: {
+            cJSON *set_var = cJSON_GetObjectItem(params, "set_var");
+            if (set_var) {
+                cJSON *variable = cJSON_GetObjectItem(set_var, "variable");
+                cJSON *value = cJSON_GetObjectItem(set_var, "value");
+                
+                if (variable && cJSON_IsString(variable)) {
+                    strncpy(tpl.action.set_var.variable, variable->valuestring, 
+                            sizeof(tpl.action.set_var.variable) - 1);
+                }
+                if (value && cJSON_IsString(value)) {
+                    tpl.action.set_var.value.type = TS_AUTO_VAL_STRING;
+                    strncpy(tpl.action.set_var.value.str_val, value->valuestring, 
+                            sizeof(tpl.action.set_var.value.str_val) - 1);
+                }
+            }
+            break;
+        }
+        case TS_AUTO_ACT_WEBHOOK: {
+            cJSON *webhook = cJSON_GetObjectItem(params, "webhook");
+            if (webhook) {
+                cJSON *url = cJSON_GetObjectItem(webhook, "url");
+                cJSON *method = cJSON_GetObjectItem(webhook, "method");
+                cJSON *body = cJSON_GetObjectItem(webhook, "body_template");
+                
+                if (url && cJSON_IsString(url)) {
+                    strncpy(tpl.action.webhook.url, url->valuestring, 
+                            sizeof(tpl.action.webhook.url) - 1);
+                }
+                if (method && cJSON_IsString(method)) {
+                    strncpy(tpl.action.webhook.method, method->valuestring, 
+                            sizeof(tpl.action.webhook.method) - 1);
+                } else {
+                    strcpy(tpl.action.webhook.method, "POST");
+                }
+                if (body && cJSON_IsString(body)) {
+                    strncpy(tpl.action.webhook.body_template, body->valuestring, 
+                            sizeof(tpl.action.webhook.body_template) - 1);
+                }
+            }
+            break;
+        }
+        default:
+            break;
+    }
+    
+    esp_err_t ret = ts_action_template_add(&tpl);
+    
+    if (ret == ESP_OK) {
+        result->code = TS_API_OK;
+        result->message = strdup("Action template created");
+    } else if (ret == ESP_ERR_NO_MEM) {
+        result->code = TS_API_ERR_INTERNAL;
+        result->message = strdup("Max templates reached");
+    } else if (ret == ESP_ERR_INVALID_STATE) {
+        result->code = TS_API_ERR_INVALID_ARG;
+        result->message = strdup("Template ID already exists");
+    } else {
+        result->code = TS_API_ERR_INTERNAL;
+        result->message = strdup("Failed to create template");
+    }
+    
+    return ESP_OK;
+}
+
+/**
+ * @brief automation.actions.delete - Delete an action template
+ */
+static esp_err_t api_automation_actions_delete(const cJSON *params, ts_api_result_t *result)
+{
+    cJSON *id = cJSON_GetObjectItem(params, "id");
+    
+    if (!id || !cJSON_IsString(id)) {
+        result->code = TS_API_ERR_INVALID_ARG;
+        result->message = strdup("Missing 'id' parameter");
+        return ESP_OK;
+    }
+    
+    esp_err_t ret = ts_action_template_remove(id->valuestring);
+    
+    if (ret == ESP_OK) {
+        result->code = TS_API_OK;
+        result->message = strdup("Action template deleted");
+    } else if (ret == ESP_ERR_NOT_FOUND) {
+        result->code = TS_API_ERR_NOT_FOUND;
+        result->message = strdup("Template not found");
+    } else {
+        result->code = TS_API_ERR_INTERNAL;
+        result->message = strdup("Failed to delete template");
+    }
+    
+    return ESP_OK;
+}
+
+/**
+ * @brief automation.actions.execute - Execute an action template
+ */
+static esp_err_t api_automation_actions_execute(const cJSON *params, ts_api_result_t *result)
+{
+    cJSON *id = cJSON_GetObjectItem(params, "id");
+    
+    if (!id || !cJSON_IsString(id)) {
+        result->code = TS_API_ERR_INVALID_ARG;
+        result->message = strdup("Missing 'id' parameter");
+        return ESP_OK;
+    }
+    
+    ts_action_result_t exec_result = {0};
+    esp_err_t ret = ts_action_template_execute(id->valuestring, &exec_result);
+    
+    result->data = cJSON_CreateObject();
+    
+    if (ret == ESP_OK && exec_result.status == TS_ACTION_STATUS_SUCCESS) {
+        result->code = TS_API_OK;
+        result->message = strdup("Action executed successfully");
+        cJSON_AddNumberToObject(result->data, "duration_ms", exec_result.duration_ms);
+        if (exec_result.output[0]) {
+            cJSON_AddStringToObject(result->data, "output", exec_result.output);
+        }
+    } else {
+        result->code = TS_API_ERR_INTERNAL;
+        if (exec_result.output[0]) {
+            result->message = strdup(exec_result.output);
+        } else {
+            result->message = strdup("Action execution failed");
+        }
+    }
+    
+    return ESP_OK;
+}
+
+/*===========================================================================*/
+/*                        Action Statistics API                               */
+/*===========================================================================*/
+
+/**
+ * @brief automation.action.stats - Get action execution statistics
+ */
+static esp_err_t api_automation_action_stats(const cJSON *params, ts_api_result_t *result)
+{
+    (void)params;
+    
+    ts_action_stats_t stats;
+    esp_err_t ret = ts_action_get_stats(&stats);
+    
+    if (ret != ESP_OK) {
+        result->code = TS_API_ERR_INTERNAL;
+        result->message = strdup("Failed to get action stats");
+        return ESP_OK;
+    }
+    
+    result->data = cJSON_CreateObject();
+    cJSON_AddNumberToObject(result->data, "total_executed", stats.total_executed);
+    cJSON_AddNumberToObject(result->data, "success_count", stats.total_success);
+    cJSON_AddNumberToObject(result->data, "failed_count", stats.total_failed);
+    cJSON_AddNumberToObject(result->data, "timeout_count", stats.total_timeout);
+    cJSON_AddNumberToObject(result->data, "queue_pending", stats.queue_high_water);  // 使用 high water mark
+    cJSON_AddBoolToObject(result->data, "queue_running", false);  // TODO: 添加队列运行状态追踪
+    
+    result->code = TS_API_OK;
+    return ESP_OK;
+}
+
+/**
+ * @brief automation.action.stats.reset - Reset action statistics
+ */
+static esp_err_t api_automation_action_stats_reset(const cJSON *params, ts_api_result_t *result)
+{
+    (void)params;
+    
+    ts_action_reset_stats();
+    
+    result->code = TS_API_OK;
+    result->message = strdup("Action statistics reset");
+    
+    return ESP_OK;
+}
+
 /*===========================================================================*/
 /*                     Proxy APIs for External Connection Test               */
 /*===========================================================================*/
@@ -2900,6 +3364,71 @@ esp_err_t ts_api_automation_register(void)
         .requires_auth = true,
     };
     ts_api_register(&ep_test_device);
+
+    ts_api_endpoint_t ep_test_ssh = {
+        .name = "automation.test.ssh",
+        .description = "Test SSH command execution",
+        .category = TS_API_CAT_SYSTEM,
+        .handler = api_automation_test_ssh,
+        .requires_auth = true,
+    };
+    ts_api_register(&ep_test_ssh);
+
+    // Action Template APIs
+    ts_api_endpoint_t ep_actions_list = {
+        .name = "automation.actions.list",
+        .description = "List all action templates",
+        .category = TS_API_CAT_SYSTEM,
+        .handler = api_automation_actions_list,
+        .requires_auth = false,
+    };
+    ts_api_register(&ep_actions_list);
+
+    ts_api_endpoint_t ep_actions_add = {
+        .name = "automation.actions.add",
+        .description = "Create a new action template",
+        .category = TS_API_CAT_SYSTEM,
+        .handler = api_automation_actions_add,
+        .requires_auth = true,
+    };
+    ts_api_register(&ep_actions_add);
+
+    ts_api_endpoint_t ep_actions_delete = {
+        .name = "automation.actions.delete",
+        .description = "Delete an action template",
+        .category = TS_API_CAT_SYSTEM,
+        .handler = api_automation_actions_delete,
+        .requires_auth = true,
+    };
+    ts_api_register(&ep_actions_delete);
+
+    ts_api_endpoint_t ep_actions_execute = {
+        .name = "automation.actions.execute",
+        .description = "Execute an action template",
+        .category = TS_API_CAT_SYSTEM,
+        .handler = api_automation_actions_execute,
+        .requires_auth = true,
+    };
+    ts_api_register(&ep_actions_execute);
+
+    // Action Statistics APIs
+    ts_api_endpoint_t ep_action_stats = {
+        .name = "automation.action.stats",
+        .description = "Get action execution statistics",
+        .category = TS_API_CAT_SYSTEM,
+        .handler = api_automation_action_stats,
+        .requires_auth = false,
+    };
+    ts_api_register(&ep_action_stats);
+
+    ts_api_endpoint_t ep_action_stats_reset = {
+        .name = "automation.action.stats.reset",
+        .description = "Reset action statistics",
+        .category = TS_API_CAT_SYSTEM,
+        .handler = api_automation_action_stats_reset,
+        .requires_auth = true,
+    };
+    ts_api_register(&ep_action_stats_reset);
 
     // Proxy APIs for external connection test
     ts_api_endpoint_t ep_proxy_fetch = {

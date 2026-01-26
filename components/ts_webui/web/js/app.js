@@ -4706,46 +4706,7 @@ async function loadSecurityPage() {
             <h1>安全与连接</h1>
             
             <div class="section">
-                <h2>🔑 SSH 连接测试</h2>
-                <form id="ssh-test-form" class="ssh-form" onsubmit="testSsh(event)">
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label>主机</label>
-                            <input type="text" id="ssh-host" required placeholder="192.168.1.100">
-                        </div>
-                        <div class="form-group" style="width:80px">
-                            <label>端口</label>
-                            <input type="number" id="ssh-port" value="22">
-                        </div>
-                        <div class="form-group">
-                            <label>用户名</label>
-                            <input type="text" id="ssh-user" required placeholder="root">
-                        </div>
-                    </div>
-                    <div class="form-group">
-                        <label>认证方式</label>
-                        <select id="ssh-auth-type" onchange="toggleSshAuthType()">
-                            <option value="password">密码</option>
-                            <option value="keyid">密钥 (安全存储)</option>
-                        </select>
-                    </div>
-                    <div class="form-group" id="ssh-password-group">
-                        <label>密码</label>
-                        <input type="password" id="ssh-password" placeholder="输入 SSH 密码">
-                    </div>
-                    <div class="form-group hidden" id="ssh-keyid-group">
-                        <label>密钥</label>
-                        <select id="ssh-keyid">
-                            <option value="">-- 选择密钥 --</option>
-                        </select>
-                    </div>
-                    <button type="submit" class="btn btn-primary">测试连接</button>
-                </form>
-                <div id="ssh-result" class="result-box hidden"></div>
-            </div>
-            
-            <div class="section">
-                <h2>🔐 密钥管理</h2>
+                <h2>� 密钥管理</h2>
                 <div class="button-group" style="margin-bottom:15px">
                     <button class="btn btn-primary" onclick="showGenerateKeyModal()">➕ 生成新密钥</button>
                 </div>
@@ -4758,16 +4719,48 @@ async function loadSecurityPage() {
             </div>
             
             <div class="section">
-                <h2>📡 已知主机</h2>
-                <div class="button-group" style="margin-bottom:15px">
-                    <button class="btn btn-danger" onclick="clearAllHosts()">🗑️ 清除所有</button>
-                </div>
+                <h2>🖥️ 已部署主机</h2>
+                <p style="color:#666;margin-bottom:15px;font-size:0.9em">💡 通过上方密钥的「部署」按钮将公钥部署到远程服务器后，主机将自动出现在此列表</p>
                 <table class="data-table">
                     <thead>
-                        <tr><th>主机</th><th>端口</th><th>密钥类型</th><th>指纹</th><th>操作</th></tr>
+                        <tr><th>主机 ID</th><th>地址</th><th>端口</th><th>用户名</th><th>部署密钥</th><th>操作</th></tr>
                     </thead>
-                    <tbody id="hosts-table-body"></tbody>
+                    <tbody id="ssh-hosts-table-body"></tbody>
                 </table>
+            </div>
+            
+            <div class="section">
+                <h2>🔒 HTTPS 证书</h2>
+                <div id="cert-status-card" class="info-card" style="margin-bottom:15px">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+                        <span style="font-size:1.1em;font-weight:bold">
+                            <span id="cert-status-icon">🔄</span>
+                            <span id="cert-status-text">加载中...</span>
+                        </span>
+                        <span id="cert-expiry-badge" class="badge" style="display:none"></span>
+                    </div>
+                    <div id="cert-info-details" style="display:none">
+                        <div style="display:grid;grid-template-columns:repeat(2, 1fr);gap:8px;font-size:0.9em">
+                            <div><strong>主体 CN：</strong><span id="cert-subject-cn">-</span></div>
+                            <div><strong>签发者：</strong><span id="cert-issuer-cn">-</span></div>
+                            <div><strong>生效时间：</strong><span id="cert-not-before">-</span></div>
+                            <div><strong>过期时间：</strong><span id="cert-not-after">-</span></div>
+                            <div><strong>序列号：</strong><span id="cert-serial" style="font-family:monospace;font-size:0.85em">-</span></div>
+                            <div><strong>有效状态：</strong><span id="cert-valid-status">-</span></div>
+                        </div>
+                    </div>
+                    <div id="cert-no-key-hint" style="display:none;color:#666;font-style:italic">
+                        尚未生成密钥对，请先点击下方按钮生成
+                    </div>
+                </div>
+                <div class="button-group" style="display:flex;flex-wrap:wrap;gap:8px">
+                    <button class="btn" id="btn-cert-gen-key" onclick="showCertGenKeyModal()">🔑 生成密钥对</button>
+                    <button class="btn" id="btn-cert-gen-csr" onclick="showCertCSRModal()" disabled>📋 生成 CSR</button>
+                    <button class="btn" id="btn-cert-install" onclick="showCertInstallModal()" disabled>📥 安装证书</button>
+                    <button class="btn" id="btn-cert-install-ca" onclick="showCertInstallCAModal()" disabled>🏛️ 安装 CA</button>
+                    <button class="btn" id="btn-cert-view" onclick="showCertViewModal()" disabled>👁️ 查看证书</button>
+                    <button class="btn btn-danger" id="btn-cert-delete" onclick="deleteCertCredentials()" disabled>🗑️ 删除凭证</button>
+                </div>
             </div>
             
             <!-- 生成密钥弹窗 -->
@@ -4781,11 +4774,12 @@ async function loadSecurityPage() {
                     <div class="form-group">
                         <label>密钥类型</label>
                         <select id="keygen-type">
-                            <option value="rsa2048">RSA 2048-bit</option>
+                            <option value="rsa2048" selected>RSA 2048-bit (推荐)</option>
                             <option value="rsa4096">RSA 4096-bit</option>
-                            <option value="ec256" selected>ECDSA P-256 (推荐)</option>
-                            <option value="ec384">ECDSA P-384</option>
+                            <option value="ec256">ECDSA P-256 ⚠️</option>
+                            <option value="ec384">ECDSA P-384 ⚠️</option>
                         </select>
+                        <div style="font-size:0.85em;color:#e67e22;margin-top:4px">⚠️ ECDSA 密钥暂不支持 SSH 公钥认证，请使用 RSA</div>
                     </div>
                     <div class="form-group">
                         <label>备注 (可选)</label>
@@ -4834,7 +4828,7 @@ async function loadSecurityPage() {
                         <input type="password" id="deploy-password" placeholder="输入 SSH 登录密码" required>
                     </div>
                     <div style="background:#e3f2fd;border:1px solid #2196f3;border-radius:4px;padding:10px;margin:15px 0;font-size:0.9rem">
-                        💡 部署后将可使用此密钥免密登录该服务器
+                        💡 部署成功后，该主机将自动添加到「已部署主机」列表，之后可使用此密钥免密登录
                     </div>
                     <div id="deploy-result" class="result-box hidden" style="margin-bottom:15px"></div>
                     <div class="form-actions">
@@ -4911,6 +4905,101 @@ async function loadSecurityPage() {
                     </div>
                 </div>
             </div>
+            
+            <!-- HTTPS 证书：生成密钥对弹窗 -->
+            <div class="modal hidden" id="cert-genkey-modal">
+                <div class="modal-content" style="max-width:450px">
+                    <h2>🔑 生成 HTTPS 密钥对</h2>
+                    <p style="color:#666;margin-bottom:15px">为设备生成 ECDSA P-256 密钥对，用于 mTLS 身份验证</p>
+                    <div id="cert-genkey-existing-warning" class="hidden" style="background:#fff3cd;border:1px solid #ffc107;border-radius:4px;padding:10px;margin-bottom:15px">
+                        ⚠️ 已存在密钥对，继续将覆盖现有密钥！
+                    </div>
+                    <div id="cert-genkey-result" class="result-box hidden" style="margin-bottom:15px"></div>
+                    <div class="form-actions">
+                        <button class="btn" onclick="hideCertGenKeyModal()">取消</button>
+                        <button class="btn btn-primary" id="cert-genkey-btn" onclick="generateCertKeypair()">🔑 生成</button>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- HTTPS 证书：生成/查看 CSR 弹窗 -->
+            <div class="modal hidden" id="cert-csr-modal">
+                <div class="modal-content" style="max-width:600px">
+                    <h2>📋 证书签名请求 (CSR)</h2>
+                    <div class="form-group">
+                        <label>设备 ID (CN)</label>
+                        <input type="text" id="csr-device-id" placeholder="TIANSHAN-RM01-0001">
+                        <div style="font-size:0.85em;color:#666;margin-top:4px">留空则使用默认配置</div>
+                    </div>
+                    <div class="form-group">
+                        <label>组织 (O)</label>
+                        <input type="text" id="csr-org" placeholder="HiddenPeak Labs">
+                    </div>
+                    <div class="form-group">
+                        <label>部门 (OU)</label>
+                        <input type="text" id="csr-ou" placeholder="Device">
+                    </div>
+                    <div id="csr-result-box" class="hidden" style="margin-top:15px">
+                        <label>CSR 内容（复制到 CA 服务器签发）</label>
+                        <textarea id="csr-pem-output" readonly style="width:100%;height:200px;font-family:monospace;font-size:11px"></textarea>
+                        <button class="btn btn-small" onclick="copyCSRToClipboard()" style="margin-top:8px">📋 复制到剪贴板</button>
+                    </div>
+                    <div id="csr-gen-result" class="result-box hidden" style="margin-top:10px"></div>
+                    <div class="form-actions" style="margin-top:15px">
+                        <button class="btn" onclick="hideCertCSRModal()">关闭</button>
+                        <button class="btn btn-primary" id="csr-gen-btn" onclick="generateCSR()">📋 生成 CSR</button>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- HTTPS 证书：安装证书弹窗 -->
+            <div class="modal hidden" id="cert-install-modal">
+                <div class="modal-content" style="max-width:600px">
+                    <h2>📥 安装设备证书</h2>
+                    <p style="color:#666;margin-bottom:15px">粘贴 CA 签发的 PEM 格式证书</p>
+                    <div class="form-group">
+                        <label>证书 PEM</label>
+                        <textarea id="cert-pem-input" placeholder="-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----" style="width:100%;height:200px;font-family:monospace;font-size:11px"></textarea>
+                    </div>
+                    <div id="cert-install-result" class="result-box hidden" style="margin-top:10px"></div>
+                    <div class="form-actions" style="margin-top:15px">
+                        <button class="btn" onclick="hideCertInstallModal()">取消</button>
+                        <button class="btn btn-primary" onclick="installCertificate()">📥 安装</button>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- HTTPS 证书：安装 CA 链弹窗 -->
+            <div class="modal hidden" id="cert-ca-modal">
+                <div class="modal-content" style="max-width:600px">
+                    <h2>🏛️ 安装 CA 证书链</h2>
+                    <p style="color:#666;margin-bottom:15px">粘贴根证书和中间证书（PEM 格式，可拼接多个）</p>
+                    <div class="form-group">
+                        <label>CA 证书链 PEM</label>
+                        <textarea id="ca-pem-input" placeholder="-----BEGIN CERTIFICATE-----&#10;(Root CA)&#10;-----END CERTIFICATE-----&#10;-----BEGIN CERTIFICATE-----&#10;(Intermediate CA)&#10;-----END CERTIFICATE-----" style="width:100%;height:200px;font-family:monospace;font-size:11px"></textarea>
+                    </div>
+                    <div id="ca-install-result" class="result-box hidden" style="margin-top:10px"></div>
+                    <div class="form-actions" style="margin-top:15px">
+                        <button class="btn" onclick="hideCertInstallCAModal()">取消</button>
+                        <button class="btn btn-primary" onclick="installCAChain()">🏛️ 安装</button>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- HTTPS 证书：查看证书弹窗 -->
+            <div class="modal hidden" id="cert-view-modal">
+                <div class="modal-content" style="max-width:600px">
+                    <h2>👁️ 查看设备证书</h2>
+                    <div id="cert-view-loading" style="text-align:center;padding:20px">🔄 加载中...</div>
+                    <div id="cert-view-content" class="hidden">
+                        <textarea id="cert-view-pem" readonly style="width:100%;height:250px;font-family:monospace;font-size:11px"></textarea>
+                        <button class="btn btn-small" onclick="copyCertToClipboard()" style="margin-top:8px">📋 复制到剪贴板</button>
+                    </div>
+                    <div class="form-actions" style="margin-top:15px">
+                        <button class="btn" onclick="hideCertViewModal()">关闭</button>
+                    </div>
+                </div>
+            </div>
         </div>
     `;
     
@@ -4919,9 +5008,13 @@ async function loadSecurityPage() {
 
 async function refreshSecurityPage() {
     // 密钥列表
+    const tbody = document.getElementById('keys-table-body');
+    let allKeysHtml = '';
+    let sshKeys = [];
+    
+    // 1. 加载 SSH 密钥
     try {
         const keys = await api.keyList();
-        const tbody = document.getElementById('keys-table-body');
         const sshKeySelect = document.getElementById('ssh-keyid');
         
         // 更新 SSH 测试的密钥下拉列表
@@ -4940,7 +5033,8 @@ async function refreshSecurityPage() {
         }
         
         if (keys.data?.keys && keys.data.keys.length > 0) {
-            tbody.innerHTML = keys.data.keys.map(key => {
+            sshKeys = keys.data.keys;
+            allKeysHtml += keys.data.keys.map(key => {
                 // 隐藏密钥显示别名，否则显示真实 ID
                 const displayId = (key.hidden && key.alias) ? key.alias : key.id;
                 const hiddenIcon = key.hidden ? '🔒 ' : '';
@@ -4952,7 +5046,7 @@ async function refreshSecurityPage() {
                         ${key.alias && !key.hidden ? `<div style="font-size:0.85em;color:#666;margin-top:2px">${escapeHtml(key.alias)}</div>` : ''}
                     </td>
                     <td>${escapeHtml(key.type_desc || key.type)}</td>
-                    <td>${escapeHtml(key.comment) || '-'}</td>
+                    <td><span class="badge badge-info">SSH</span> ${escapeHtml(key.comment) || '-'}</td>
                     <td>${formatTimestamp(key.created)}</td>
                     <td>${key.exportable ? '✅ 是' : '❌ 否'}</td>
                     <td>
@@ -4965,124 +5059,341 @@ async function refreshSecurityPage() {
                 </tr>
                 `;
             }).join('');
-        } else {
-            tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#888">暂无密钥，点击上方按钮生成新密钥</td></tr>';
         }
     } catch (e) {
-        document.getElementById('keys-table-body').innerHTML = '<tr><td colspan="6" style="color:red">加载失败: ' + e.message + '</td></tr>';
+        console.error('加载 SSH 密钥失败:', e);
     }
     
-    // 已知主机
+    // 2. 加载 HTTPS 密钥（来自 ts_cert）
     try {
-        const hosts = await api.hostsList();
-        const tbody = document.getElementById('hosts-table-body');
-        if (hosts.data?.hosts && hosts.data.hosts.length > 0) {
-            tbody.innerHTML = hosts.data.hosts.map(host => `
-                <tr>
-                    <td><code>${escapeHtml(host.host)}</code></td>
-                    <td>${host.port}</td>
-                    <td>${escapeHtml(host.type) || '-'}</td>
-                    <td><code title="${escapeHtml(host.fingerprint)}">${host.fingerprint ? host.fingerprint.substring(0, 24) + '...' : '-'}</code></td>
-                    <td><button class="btn btn-small btn-danger" onclick="removeHost('${escapeHtml(host.host)}', ${host.port})">移除</button></td>
+        const certStatus = await api.certStatus();
+        console.log('HTTPS cert status:', certStatus);
+        
+        if (certStatus.code === 0) {
+            // 字段名是 has_private_key，不是 has_keypair
+            const hasKeypair = certStatus.data?.has_private_key;
+            const hasCert = certStatus.data?.has_certificate;
+            const certInfo = certStatus.data?.cert_info || {};
+            
+            if (hasKeypair) {
+                // 已有密钥对
+                const comment = hasCert ? `CN=${certInfo.subject_cn || 'unknown'}` : '(未安装证书)';
+                
+                allKeysHtml += `
+                <tr style="background:#f0f7ff">
+                    <td>
+                        <code>🔐 https</code>
+                        <div style="font-size:0.85em;color:#666;margin-top:2px">HTTPS 服务器密钥</div>
+                    </td>
+                    <td>ECDSA P-256</td>
+                    <td><span class="badge" style="background:#2196f3;color:white">HTTPS</span> ${escapeHtml(comment)}</td>
+                    <td>-</td>
+                    <td>❌ 否</td>
+                    <td>
+                        <button class="btn btn-small" onclick="showCertCSRModal()" title="生成证书签名请求">📋 CSR</button>
+                        <button class="btn btn-small" onclick="showCertViewModal()" ${hasCert ? '' : 'disabled'} title="查看证书">👁️ 证书</button>
+                        <button class="btn btn-small btn-danger" onclick="deleteCertCredentials()" title="删除 HTTPS 密钥和证书">🗑️ 删除</button>
+                    </td>
                 </tr>
-            `).join('');
-        } else {
-            tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#888">暂无已知主机</td></tr>';
+                `;
+            } else {
+                // 未生成密钥对，显示提示行
+                allKeysHtml += `
+                <tr style="background:#fff8e1">
+                    <td>
+                        <code style="color:#888">🔒 https</code>
+                        <div style="font-size:0.85em;color:#999;margin-top:2px">HTTPS 服务器密钥</div>
+                    </td>
+                    <td style="color:#888">-</td>
+                    <td><span class="badge" style="background:#ff9800;color:white">HTTPS</span> <em style="color:#888">未生成密钥</em></td>
+                    <td>-</td>
+                    <td>-</td>
+                    <td>
+                        <button class="btn btn-small btn-primary" onclick="showCertGenKeyModal()" title="生成 HTTPS 密钥对">🔑 生成密钥</button>
+                    </td>
+                </tr>
+                `;
+            }
         }
     } catch (e) {
-        document.getElementById('hosts-table-body').innerHTML = '<tr><td colspan="5" style="color:red">加载失败: ' + e.message + '</td></tr>';
+        console.error('加载 HTTPS 密钥状态失败:', e);
     }
+    
+    // 3. 更新表格
+    if (allKeysHtml) {
+        tbody.innerHTML = allKeysHtml;
+    } else {
+        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#888">暂无密钥，点击上方按钮生成新密钥</td></tr>';
+    }
+    
+    // SSH 已部署主机列表
+    await refreshSshHostsList();
+    
+    // HTTPS 证书状态
+    await refreshCertStatus();
 }
 
-function toggleSshAuthType() {
-    const authType = document.getElementById('ssh-auth-type').value;
-    const passwordGroup = document.getElementById('ssh-password-group');
-    const keyidGroup = document.getElementById('ssh-keyid-group');
-    
-    if (authType === 'password') {
-        passwordGroup.classList.remove('hidden');
-        keyidGroup.classList.add('hidden');
-    } else {
-        passwordGroup.classList.add('hidden');
-        keyidGroup.classList.remove('hidden');
-    }
-}
-
-async function testSsh(e) {
-    e.preventDefault();
-    
-    const host = document.getElementById('ssh-host').value;
-    const port = parseInt(document.getElementById('ssh-port').value);
-    const user = document.getElementById('ssh-user').value;
-    const authType = document.getElementById('ssh-auth-type').value;
-    
-    let auth;
-    if (authType === 'password') {
-        const password = document.getElementById('ssh-password').value;
-        if (!password) {
-            showToast('请输入密码', 'error');
-            return;
-        }
-        auth = { password };
-    } else {
-        const keyid = document.getElementById('ssh-keyid').value;
-        if (!keyid) {
-            showToast('请选择密钥', 'error');
-            return;
-        }
-        auth = { keyid };
-    }
-    
-    const resultBox = document.getElementById('ssh-result');
-    resultBox.classList.remove('hidden');
-    resultBox.textContent = '测试中...';
-    resultBox.className = 'result-box';
+/**
+ * 刷新安全页面的已部署主机列表
+ */
+async function refreshSshHostsList() {
+    const tbody = document.getElementById('ssh-hosts-table-body');
+    if (!tbody) return;
     
     try {
-        const result = await api.sshTest(host, user, auth, port);
+        const result = await api.call('ssh.hosts.list', {});
+        const hosts = result.data?.hosts || [];
         
-        // 检查 API 返回的 code（非 HTTP 状态码）
-        if (result.code === 1001) {
-            // 主机指纹不匹配 - 显示警告模态框
-            showHostMismatchModal(result.data || {
-                host,
-                port,
-                current_fingerprint: result.data?.current_fingerprint || '未知',
-                stored_fingerprint: result.data?.stored_fingerprint || '未知'
-            });
-            resultBox.textContent = '⚠️ 主机指纹不匹配! 可能存在中间人攻击风险';
-            resultBox.classList.add('error');
+        if (hosts.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="6" class="empty-state">暂无已部署主机，请先在上方密钥管理中点击「部署」</td></tr>';
             return;
         }
         
-        if (result.code === 1002) {
-            // 新主机需要确认（trust_new=false 时）
-            resultBox.textContent = '🆕 新主机: ' + (result.data?.fingerprint || '');
-            resultBox.classList.add('warning');
+        // 存储主机数据供后续操作使用
+        window._sshHostsData = {};
+        hosts.forEach(h => { window._sshHostsData[h.id] = h; });
+        
+        tbody.innerHTML = hosts.map((h, idx) => `
+            <tr>
+                <td><code>${escapeHtml(h.id)}</code></td>
+                <td>${escapeHtml(h.host)}</td>
+                <td>${h.port}</td>
+                <td>${escapeHtml(h.username)}</td>
+                <td><span class="badge badge-info">🔑 ${escapeHtml(h.keyid || 'default')}</span></td>
+                <td>
+                    <button class="btn btn-sm" onclick="testSshHostByIndex(${idx})" title="测试连接">🔍 测试</button>
+                    <button class="btn btn-sm btn-danger" onclick="revokeKeyFromHost(${idx})" title="撤销并移除">🔓 撤销</button>
+                </td>
+            </tr>
+        `).join('');
+        
+        // 存储主机列表供索引访问
+        window._sshHostsList = hosts;
+    } catch (e) {
+        console.error('Refresh SSH hosts error:', e);
+        tbody.innerHTML = '<tr><td colspan="6" class="error">加载失败</td></tr>';
+    }
+}
+
+/**
+ * 测试 SSH 连接
+ */
+async function testSshConnection(hostId) {
+    showToast(`正在测试连接 ${hostId}...`, 'info');
+    
+    try {
+        // 获取主机信息
+        const hostResult = await api.call('ssh.hosts.get', { id: hostId });
+        console.log('ssh.hosts.get result:', hostResult);
+        
+        if (hostResult.code !== 0) {
+            showToast(`无法获取主机信息: ${hostResult.message || '未知错误'}`, 'error');
             return;
         }
         
-        // 检查连接结果
-        if (result.data?.success) {
-            // 显示指纹信息
-            let msg = `✅ 连接成功! (${authType === 'password' ? '密码' : '密钥'}认证)`;
-            if (result.data.fingerprint) {
-                msg += `\n📝 指纹: ${result.data.fingerprint.substring(0, 32)}...`;
-            }
-            if (result.data.host_status === 'new_trusted') {
-                msg += '\n🆕 新主机已添加到已知主机列表';
-            }
-            resultBox.textContent = msg;
-            resultBox.classList.add('success');
+        if (!hostResult.data) {
+            showToast('主机信息为空', 'error');
+            return;
+        }
+        
+        const host = hostResult.data;
+        
+        // 执行 ssh.exec 测试连接（执行简单命令）
+        const execResult = await api.call('ssh.exec', {
+            host: host.host,
+            port: host.port,
+            username: host.username,
+            keyid: host.keyid || 'default',
+            command: 'echo "TianShanOS SSH Test OK"'
+        });
+        
+        if (execResult.code === 0) {
+            showToast(`✅ 连接 ${hostId} 成功！`, 'success');
         } else {
-            resultBox.textContent = '❌ 连接失败: ' + (result.data?.error || result.message || '未知错误');
-            resultBox.classList.add('error');
+            showToast(`❌ 连接失败: ${execResult.message || '未知错误'}`, 'error');
         }
     } catch (e) {
-        // 网络错误或其他异常
-        console.error('SSH test error:', e);
-        resultBox.textContent = '❌ 连接失败: ' + e.message;
+        console.error('Test SSH connection error:', e);
+        showToast(`❌ 测试失败: ${e.message}`, 'error');
+    }
+}
+
+/**
+ * 通过索引测试 SSH 连接（避免 ID 中的特殊字符问题）
+ */
+async function testSshHostByIndex(index) {
+    const host = window._sshHostsList?.[index];
+    if (!host) {
+        showToast('主机信息不存在', 'error');
+        return;
+    }
+    
+    showToast(`正在测试连接 ${host.id}...`, 'info');
+    
+    try {
+        const execResult = await api.call('ssh.exec', {
+            host: host.host,
+            port: host.port,
+            user: host.username,  // API 需要 'user' 而不是 'username'
+            keyid: host.keyid || 'default',
+            command: 'echo "TianShanOS SSH Test OK"',
+            trust_new: true
+        });
+        
+        if (execResult.code === 0) {
+            showToast(`✅ 连接 ${host.id} 成功！`, 'success');
+        } else {
+            showToast(`❌ 连接失败: ${execResult.message || '未知错误'}`, 'error');
+        }
+    } catch (e) {
+        console.error('Test SSH connection error:', e);
+        showToast(`❌ 测试失败: ${e.message}`, 'error');
+    }
+}
+
+/**
+ * 通过索引移除主机记录
+ */
+async function removeHostByIndex(index) {
+    const host = window._sshHostsList?.[index];
+    if (!host) {
+        showToast('主机信息不存在', 'error');
+        return;
+    }
+    
+    if (!confirm(`确定要从列表中移除主机 "${host.id}" 吗？\n\n注意：这只会移除本地记录，不会删除已部署到服务器上的公钥。如需撤销公钥，请点击「撤销」按钮。`)) return;
+    
+    try {
+        const result = await api.call('ssh.hosts.remove', { id: host.id });
+        if (result.code === 0) {
+            showToast(`SSH 主机 ${host.id} 已从列表移除`, 'success');
+            await refreshSshHostsList();
+        } else {
+            showToast('移除失败: ' + (result.message || '未知错误'), 'error');
+        }
+    } catch (e) {
+        showToast('移除失败: ' + e.message, 'error');
+    }
+}
+
+/**
+ * 从已部署主机撤销公钥（弹出密码输入框）
+ */
+function revokeKeyFromHost(index) {
+    const host = window._sshHostsList?.[index];
+    if (!host) {
+        showToast('主机信息不存在', 'error');
+        return;
+    }
+    
+    // 创建撤销确认弹窗
+    let modal = document.getElementById('revoke-host-modal');
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'revoke-host-modal';
+        modal.className = 'modal';
+        document.body.appendChild(modal);
+    }
+    
+    modal.innerHTML = `
+        <div class="modal-content" style="max-width:500px">
+            <h2>🔓 撤销并移除主机</h2>
+            <p>将从服务器 <strong>${escapeHtml(host.username)}@${escapeHtml(host.host)}:${host.port}</strong> 撤销密钥 <code>${escapeHtml(host.keyid || 'default')}</code></p>
+            <p style="color:#666;font-size:0.9rem;margin-top:10px">撤销成功后将自动从列表中移除该主机</p>
+            <div class="form-group" style="margin-top:15px">
+                <label>服务器密码</label>
+                <input type="password" id="revoke-host-password" class="form-control" placeholder="输入 SSH 密码">
+            </div>
+            <div id="revoke-host-result" class="result-box hidden" style="margin-top:10px"></div>
+            <div class="form-actions" style="margin-top:15px">
+                <button class="btn" onclick="hideRevokeHostModal()">取消</button>
+                <button class="btn btn-danger" id="revoke-host-btn" onclick="doRevokeFromHost(${index})">🔓 撤销并移除</button>
+            </div>
+        </div>
+    `;
+    
+    modal.classList.remove('hidden');
+    document.getElementById('revoke-host-password').focus();
+}
+
+function hideRevokeHostModal() {
+    const modal = document.getElementById('revoke-host-modal');
+    if (modal) modal.classList.add('hidden');
+}
+
+async function doRevokeFromHost(index) {
+    const host = window._sshHostsList?.[index];
+    if (!host) return;
+    
+    const password = document.getElementById('revoke-host-password').value;
+    if (!password) {
+        showToast('请输入密码', 'error');
+        return;
+    }
+    
+    const resultBox = document.getElementById('revoke-host-result');
+    const revokeBtn = document.getElementById('revoke-host-btn');
+    
+    resultBox.classList.remove('hidden', 'success', 'error');
+    resultBox.textContent = '🔄 正在撤销公钥...';
+    revokeBtn.disabled = true;
+    
+    try {
+        const result = await api.sshRevoke(host.host, host.username, password, host.keyid || 'default', host.port);
+        
+        if (result.data?.revoked) {
+            resultBox.textContent = `✅ 撤销成功！已从服务器移除 ${result.data.removed_count || 1} 个匹配的公钥`;
+            resultBox.classList.add('success');
+            
+            // 自动移除本地记录
+            await api.call('ssh.hosts.remove', { id: host.id });
+            showToast('已撤销公钥并移除主机记录', 'success');
+            
+            setTimeout(() => {
+                hideRevokeHostModal();
+                refreshSshHostsList();
+            }, 1000);
+        } else if (result.data?.found === false) {
+            resultBox.textContent = '⚠️ 未在服务器上找到匹配的公钥（可能已被移除）\n是否仍要移除本地记录？';
+            resultBox.classList.add('error');
+            
+            // 提供移除本地记录的选项
+            revokeBtn.textContent = '🗑️ 仅移除本地记录';
+            revokeBtn.onclick = async () => {
+                await api.call('ssh.hosts.remove', { id: host.id });
+                showToast('已移除本地主机记录', 'success');
+                hideRevokeHostModal();
+                refreshSshHostsList();
+            };
+            revokeBtn.disabled = false;
+            return;  // 不进入 finally
+        } else {
+            throw new Error(result.message || '撤销失败');
+        }
+    } catch (e) {
+        resultBox.textContent = '❌ 撤销失败: ' + e.message;
         resultBox.classList.add('error');
+    } finally {
+        revokeBtn.disabled = false;
+    }
+}
+
+/**
+ * 从安全页面删除 SSH 主机（保留兼容性）
+ */
+async function deleteSshHostFromSecurity(id) {
+    if (!confirm(`确定要从列表中移除主机 "${id}" 吗？\n\n注意：这只会移除本地记录，不会删除已部署到服务器上的公钥。如需撤销公钥，请使用密钥管理中的「撤销」功能。`)) return;
+    
+    try {
+        const result = await api.call('ssh.hosts.remove', { id });
+        if (result.code === 0) {
+            showToast(`SSH 主机 ${id} 已从列表移除`, 'success');
+            await refreshSshHostsList();
+        } else {
+            showToast('移除失败: ' + (result.message || '未知错误'), 'error');
+        }
+    } catch (e) {
+        showToast('移除失败: ' + e.message, 'error');
     }
 }
 
@@ -5317,6 +5628,8 @@ async function deployKey() {
             resultBox.textContent = msg;
             resultBox.classList.add('success');
             showToast('密钥部署成功', 'success');
+            // 刷新已部署主机列表（后端 ssh.copyid 会自动注册主机）
+            await refreshSshHostsList();
         } else {
             throw new Error('部署失败');
         }
@@ -5449,10 +5762,393 @@ async function clearAllHosts() {
     }
 }
 
+// =========================================================================
+//                  HTTPS Certificate (PKI) Management
+// =========================================================================
+
+/**
+ * 刷新证书状态卡片
+ */
+async function refreshCertStatus() {
+    const statusIcon = document.getElementById('cert-status-icon');
+    const statusText = document.getElementById('cert-status-text');
+    const expiryBadge = document.getElementById('cert-expiry-badge');
+    const infoDetails = document.getElementById('cert-info-details');
+    const noKeyHint = document.getElementById('cert-no-key-hint');
+    
+    // 按钮引用
+    const btnGenKey = document.getElementById('btn-cert-gen-key');
+    const btnGenCSR = document.getElementById('btn-cert-gen-csr');
+    const btnInstall = document.getElementById('btn-cert-install');
+    const btnInstallCA = document.getElementById('btn-cert-install-ca');
+    const btnView = document.getElementById('btn-cert-view');
+    const btnDelete = document.getElementById('btn-cert-delete');
+    
+    if (!statusIcon) return; // 不在安全页面
+    
+    try {
+        const result = await api.certStatus();
+        const data = result.data;
+        
+        if (!data) throw new Error('无响应数据');
+        
+        // 存储状态供弹窗使用
+        window._certPkiStatus = data;
+        
+        // 根据状态更新 UI
+        const hasKey = data.has_private_key;
+        const hasCert = data.has_certificate;
+        const hasCa = data.has_ca_chain;
+        
+        // 更新按钮状态
+        btnGenKey.disabled = false;
+        btnGenCSR.disabled = !hasKey;
+        btnInstall.disabled = !hasKey;
+        btnInstallCA.disabled = !hasKey;
+        btnView.disabled = !hasCert;
+        btnDelete.disabled = !hasKey && !hasCert && !hasCa;
+        
+        // 状态显示
+        switch (data.status) {
+            case 'not_initialized':
+                statusIcon.textContent = '⚪';
+                statusText.textContent = '未初始化';
+                noKeyHint.style.display = 'block';
+                infoDetails.style.display = 'none';
+                expiryBadge.style.display = 'none';
+                break;
+            case 'key_generated':
+                statusIcon.textContent = '🔑';
+                statusText.textContent = '密钥已生成，等待 CSR';
+                noKeyHint.style.display = 'none';
+                infoDetails.style.display = 'none';
+                expiryBadge.style.display = 'none';
+                break;
+            case 'csr_pending':
+                statusIcon.textContent = '📋';
+                statusText.textContent = 'CSR 已生成，等待签发';
+                noKeyHint.style.display = 'none';
+                infoDetails.style.display = 'none';
+                expiryBadge.style.display = 'none';
+                break;
+            case 'activated':
+                statusIcon.textContent = '✅';
+                statusText.textContent = '已激活';
+                noKeyHint.style.display = 'none';
+                infoDetails.style.display = 'block';
+                updateCertInfoDetails(data.cert_info);
+                break;
+            case 'expired':
+                statusIcon.textContent = '❌';
+                statusText.textContent = '已过期';
+                noKeyHint.style.display = 'none';
+                infoDetails.style.display = 'block';
+                updateCertInfoDetails(data.cert_info);
+                break;
+            case 'error':
+                statusIcon.textContent = '⚠️';
+                statusText.textContent = '错误';
+                noKeyHint.style.display = 'none';
+                infoDetails.style.display = 'none';
+                expiryBadge.style.display = 'none';
+                break;
+            default:
+                statusIcon.textContent = '❓';
+                statusText.textContent = data.status_display || data.status;
+        }
+        
+    } catch (e) {
+        console.error('Refresh cert status error:', e);
+        statusIcon.textContent = '❌';
+        statusText.textContent = '加载失败';
+        if (noKeyHint) noKeyHint.style.display = 'none';
+        if (infoDetails) infoDetails.style.display = 'none';
+        if (expiryBadge) expiryBadge.style.display = 'none';
+    }
+}
+
+function updateCertInfoDetails(certInfo) {
+    if (!certInfo) return;
+    
+    document.getElementById('cert-subject-cn').textContent = certInfo.subject_cn || '-';
+    document.getElementById('cert-issuer-cn').textContent = certInfo.issuer_cn || '-';
+    document.getElementById('cert-not-before').textContent = certInfo.not_before ? formatTimestamp(certInfo.not_before) : '-';
+    document.getElementById('cert-not-after').textContent = certInfo.not_after ? formatTimestamp(certInfo.not_after) : '-';
+    document.getElementById('cert-serial').textContent = certInfo.serial || '-';
+    document.getElementById('cert-valid-status').textContent = certInfo.is_valid ? '✅ 有效' : '❌ 无效';
+    
+    // 更新过期徽章
+    const expiryBadge = document.getElementById('cert-expiry-badge');
+    if (certInfo.days_until_expiry !== undefined) {
+        expiryBadge.style.display = 'inline-block';
+        if (certInfo.days_until_expiry < 0) {
+            expiryBadge.textContent = `已过期 ${Math.abs(certInfo.days_until_expiry)} 天`;
+            expiryBadge.className = 'badge badge-danger';
+        } else if (certInfo.days_until_expiry < 30) {
+            expiryBadge.textContent = `${certInfo.days_until_expiry} 天后过期`;
+            expiryBadge.className = 'badge badge-warning';
+        } else {
+            expiryBadge.textContent = `剩余 ${certInfo.days_until_expiry} 天`;
+            expiryBadge.className = 'badge badge-success';
+        }
+    } else {
+        expiryBadge.style.display = 'none';
+    }
+}
+
+// ====== 证书管理弹窗 ======
+
+function showCertGenKeyModal() {
+    const modal = document.getElementById('cert-genkey-modal');
+    const warningBox = document.getElementById('cert-genkey-existing-warning');
+    const resultBox = document.getElementById('cert-genkey-result');
+    
+    // 如果已有密钥，显示警告
+    if (window._certPkiStatus?.has_private_key) {
+        warningBox.classList.remove('hidden');
+    } else {
+        warningBox.classList.add('hidden');
+    }
+    
+    resultBox.classList.add('hidden');
+    modal.classList.remove('hidden');
+}
+
+function hideCertGenKeyModal() {
+    document.getElementById('cert-genkey-modal').classList.add('hidden');
+}
+
+async function generateCertKeypair() {
+    const resultBox = document.getElementById('cert-genkey-result');
+    const btn = document.getElementById('cert-genkey-btn');
+    
+    const force = window._certPkiStatus?.has_private_key;
+    
+    resultBox.classList.remove('hidden', 'success', 'error');
+    resultBox.textContent = '🔄 正在生成密钥对...';
+    btn.disabled = true;
+    
+    try {
+        const result = await api.certGenerateKeypair(force);
+        if (result.code === 0 || result.data?.success) {
+            resultBox.textContent = '✅ ECDSA P-256 密钥对生成成功！';
+            resultBox.classList.add('success');
+            showToast('密钥对生成成功', 'success');
+            
+            setTimeout(() => {
+                hideCertGenKeyModal();
+                refreshCertStatus();
+            }, 1000);
+        } else {
+            throw new Error(result.message || '生成失败');
+        }
+    } catch (e) {
+        resultBox.textContent = '❌ 生成失败: ' + e.message;
+        resultBox.classList.add('error');
+    } finally {
+        btn.disabled = false;
+    }
+}
+
+function showCertCSRModal() {
+    const modal = document.getElementById('cert-csr-modal');
+    document.getElementById('csr-result-box').classList.add('hidden');
+    document.getElementById('csr-gen-result').classList.add('hidden');
+    document.getElementById('csr-pem-output').value = '';
+    modal.classList.remove('hidden');
+}
+
+function hideCertCSRModal() {
+    document.getElementById('cert-csr-modal').classList.add('hidden');
+}
+
+async function generateCSR() {
+    const deviceId = document.getElementById('csr-device-id').value.trim();
+    const org = document.getElementById('csr-org').value.trim();
+    const ou = document.getElementById('csr-ou').value.trim();
+    
+    const resultBox = document.getElementById('csr-gen-result');
+    const csrResultBox = document.getElementById('csr-result-box');
+    const btn = document.getElementById('csr-gen-btn');
+    
+    resultBox.classList.remove('hidden', 'success', 'error');
+    resultBox.textContent = '🔄 正在生成 CSR...';
+    btn.disabled = true;
+    
+    try {
+        const opts = {};
+        if (deviceId) opts.device_id = deviceId;
+        if (org) opts.organization = org;
+        if (ou) opts.org_unit = ou;
+        
+        const result = await api.certGenerateCSR(opts);
+        if (result.code === 0 && result.data?.csr_pem) {
+            resultBox.classList.add('hidden');
+            csrResultBox.classList.remove('hidden');
+            document.getElementById('csr-pem-output').value = result.data.csr_pem;
+            showToast('CSR 生成成功', 'success');
+        } else {
+            throw new Error(result.message || '生成失败');
+        }
+    } catch (e) {
+        resultBox.textContent = '❌ 生成失败: ' + e.message;
+        resultBox.classList.add('error');
+    } finally {
+        btn.disabled = false;
+    }
+}
+
+function copyCSRToClipboard() {
+    const csr = document.getElementById('csr-pem-output').value;
+    navigator.clipboard.writeText(csr).then(() => {
+        showToast('CSR 已复制到剪贴板', 'success');
+    }).catch(e => {
+        showToast('复制失败: ' + e.message, 'error');
+    });
+}
+
+function showCertInstallModal() {
+    const modal = document.getElementById('cert-install-modal');
+    document.getElementById('cert-pem-input').value = '';
+    document.getElementById('cert-install-result').classList.add('hidden');
+    modal.classList.remove('hidden');
+}
+
+function hideCertInstallModal() {
+    document.getElementById('cert-install-modal').classList.add('hidden');
+}
+
+async function installCertificate() {
+    const certPem = document.getElementById('cert-pem-input').value.trim();
+    if (!certPem) {
+        showToast('请输入证书 PEM', 'error');
+        return;
+    }
+    
+    const resultBox = document.getElementById('cert-install-result');
+    resultBox.classList.remove('hidden', 'success', 'error');
+    resultBox.textContent = '🔄 正在安装证书...';
+    
+    try {
+        const result = await api.certInstall(certPem);
+        if (result.code === 0 || result.data?.success) {
+            resultBox.textContent = '✅ 证书安装成功！';
+            resultBox.classList.add('success');
+            showToast('证书安装成功', 'success');
+            
+            setTimeout(() => {
+                hideCertInstallModal();
+                refreshCertStatus();
+            }, 1000);
+        } else {
+            throw new Error(result.message || '安装失败');
+        }
+    } catch (e) {
+        resultBox.textContent = '❌ 安装失败: ' + e.message;
+        resultBox.classList.add('error');
+    }
+}
+
+function showCertInstallCAModal() {
+    const modal = document.getElementById('cert-ca-modal');
+    document.getElementById('ca-pem-input').value = '';
+    document.getElementById('ca-install-result').classList.add('hidden');
+    modal.classList.remove('hidden');
+}
+
+function hideCertInstallCAModal() {
+    document.getElementById('cert-ca-modal').classList.add('hidden');
+}
+
+async function installCAChain() {
+    const caPem = document.getElementById('ca-pem-input').value.trim();
+    if (!caPem) {
+        showToast('请输入 CA 证书链 PEM', 'error');
+        return;
+    }
+    
+    const resultBox = document.getElementById('ca-install-result');
+    resultBox.classList.remove('hidden', 'success', 'error');
+    resultBox.textContent = '🔄 正在安装 CA 证书链...';
+    
+    try {
+        const result = await api.certInstallCA(caPem);
+        if (result.code === 0 || result.data?.success) {
+            resultBox.textContent = '✅ CA 证书链安装成功！';
+            resultBox.classList.add('success');
+            showToast('CA 证书链安装成功', 'success');
+            
+            setTimeout(() => {
+                hideCertInstallCAModal();
+                refreshCertStatus();
+            }, 1000);
+        } else {
+            throw new Error(result.message || '安装失败');
+        }
+    } catch (e) {
+        resultBox.textContent = '❌ 安装失败: ' + e.message;
+        resultBox.classList.add('error');
+    }
+}
+
+async function showCertViewModal() {
+    const modal = document.getElementById('cert-view-modal');
+    const loading = document.getElementById('cert-view-loading');
+    const content = document.getElementById('cert-view-content');
+    
+    loading.style.display = 'block';
+    content.classList.add('hidden');
+    modal.classList.remove('hidden');
+    
+    try {
+        const result = await api.certGetCertificate();
+        if (result.code === 0 && result.data?.cert_pem) {
+            document.getElementById('cert-view-pem').value = result.data.cert_pem;
+            loading.style.display = 'none';
+            content.classList.remove('hidden');
+        } else {
+            throw new Error(result.message || '获取证书失败');
+        }
+    } catch (e) {
+        loading.textContent = '❌ 加载失败: ' + e.message;
+    }
+}
+
+function hideCertViewModal() {
+    document.getElementById('cert-view-modal').classList.add('hidden');
+}
+
+function copyCertToClipboard() {
+    const cert = document.getElementById('cert-view-pem').value;
+    navigator.clipboard.writeText(cert).then(() => {
+        showToast('证书已复制到剪贴板', 'success');
+    }).catch(e => {
+        showToast('复制失败: ' + e.message, 'error');
+    });
+}
+
+async function deleteCertCredentials() {
+    if (!confirm('⚠️ 确定要删除所有 PKI 凭证吗？\n\n这将删除：\n• 私钥\n• 设备证书\n• CA 证书链\n\n此操作不可撤销！')) {
+        return;
+    }
+    
+    try {
+        const result = await api.certDelete();
+        if (result.code === 0 || result.data?.success) {
+            showToast('PKI 凭证已删除', 'success');
+            await refreshCertStatus();
+        } else {
+            throw new Error(result.message || '删除失败');
+        }
+    } catch (e) {
+        showToast('删除失败: ' + e.message, 'error');
+    }
+}
+
 function showGenerateKeyModal() {
     document.getElementById('keygen-modal').classList.remove('hidden');
     document.getElementById('keygen-id').value = '';
-    document.getElementById('keygen-type').value = 'ec256';
+    document.getElementById('keygen-type').value = 'rsa2048';  // RSA 是唯一支持 SSH 公钥认证的类型
     document.getElementById('keygen-comment').value = '';
     document.getElementById('keygen-exportable').checked = false;
 }
@@ -6105,8 +6801,14 @@ window.resetCurrentModule = resetCurrentModule;
 window.saveAllModules = saveAllModules;
 window.syncConfigToSd = syncConfigToSd;
 window.markModuleConfigChanged = markModuleConfigChanged;
-window.toggleSshAuthType = toggleSshAuthType;
-window.testSsh = testSsh;
+window.refreshSshHostsList = refreshSshHostsList;
+window.deleteSshHostFromSecurity = deleteSshHostFromSecurity;
+window.testSshConnection = testSshConnection;
+window.testSshHostByIndex = testSshHostByIndex;
+window.removeHostByIndex = removeHostByIndex;
+window.revokeKeyFromHost = revokeKeyFromHost;
+window.hideRevokeHostModal = hideRevokeHostModal;
+window.doRevokeFromHost = doRevokeFromHost;
 window.deleteKey = deleteKey;
 window.exportKey = exportKey;
 window.exportPrivateKey = exportPrivateKey;
@@ -8113,6 +8815,36 @@ async function loadAutomationPage() {
                 </div>
             </div>
             
+            <!-- 动作模板管理 -->
+            <div class="section">
+                <div class="section-header">
+                    <h2>⚡ 动作模板</h2>
+                    <div class="section-actions">
+                        <button class="btn btn-primary btn-sm" onclick="showAddActionModal()">➕ 添加</button>
+                        <button class="btn btn-sm" onclick="refreshActions()">🔄</button>
+                    </div>
+                </div>
+                <div class="card compact">
+                    <div id="actions-list" class="card-content">
+                        <div class="loading-small">加载中...</div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 动作执行统计 -->
+            <div class="section">
+                <div class="section-header">
+                    <h2>📊 执行统计</h2>
+                    <div class="section-actions">
+                        <button class="btn btn-sm" onclick="refreshActionStats()">🔄</button>
+                        <button class="btn btn-sm btn-danger" onclick="resetActionStats()">🗑️ 重置</button>
+                    </div>
+                </div>
+                <div class="status-grid" id="action-stats">
+                    <div class="status-card loading">加载中...</div>
+                </div>
+            </div>
+            
             <!-- 测试动作面板 -->
             <div class="section">
                 <div class="section-header">
@@ -8195,7 +8927,9 @@ async function loadAutomationPage() {
         refreshAutomationStatus(),
         refreshRules(),
         refreshSources(),
-        refreshVariables()
+        refreshVariables(),
+        refreshActions(),
+        refreshActionStats()
     ]);
 }
 
@@ -8628,6 +9362,481 @@ async function testDevice() {
         addResult(false, `设备测试失败: ${error.message}`);
     }
 }
+
+/**
+ * HTML 转义
+ */
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+/**
+ * 刷新动作模板列表
+ */
+async function refreshActions() {
+    const container = document.getElementById('actions-list');
+    if (!container) return;
+    
+    try {
+        const result = await api.call('automation.actions.list', {});
+        const actions = result.data?.actions || [];
+        
+        if (actions.length === 0) {
+            container.innerHTML = '<p style="text-align:center;color:var(--text-light)">暂无动作模板，点击"添加"创建</p>';
+        } else {
+            container.innerHTML = `
+                <table class="data-table compact">
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>名称</th>
+                            <th>类型</th>
+                            <th>描述</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${actions.map(a => `
+                            <tr>
+                                <td><code>${a.id}</code></td>
+                                <td>${a.name || a.id}</td>
+                                <td><span class="badge badge-${getActionTypeBadge(a.type)}">${getActionTypeLabel(a.type)}</span></td>
+                                <td class="text-muted">${a.description || '-'}</td>
+                                <td>
+                                    <button class="btn btn-xs" onclick="testAction('${a.id}')" title="测试">▶️</button>
+                                    <button class="btn btn-xs" onclick="editAction('${a.id}')" title="编辑">✏️</button>
+                                    <button class="btn btn-danger btn-xs" onclick="deleteAction('${a.id}')" title="删除">🗑️</button>
+                                </td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            `;
+        }
+    } catch (error) {
+        container.innerHTML = `<p style="color:var(--danger)">加载失败: ${error.message}</p>`;
+    }
+}
+
+/**
+ * 获取动作类型标签
+ */
+function getActionTypeLabel(type) {
+    const labels = {
+        'led': 'LED',
+        'ssh_cmd': 'SSH',
+        'gpio': 'GPIO',
+        'webhook': 'Webhook',
+        'log': '日志',
+        'set_var': '变量',
+        'device_ctrl': '设备'
+    };
+    return labels[type] || type;
+}
+
+/**
+ * 获取动作类型徽章样式
+ */
+function getActionTypeBadge(type) {
+    const badges = {
+        'led': 'info',
+        'ssh_cmd': 'primary',
+        'gpio': 'warning',
+        'webhook': 'secondary',
+        'log': 'light',
+        'set_var': 'dark',
+        'device_ctrl': 'danger'
+    };
+    return badges[type] || 'secondary';
+}
+
+/**
+ * 显示添加动作模板对话框
+ */
+function showAddActionModal() {
+    const modal = document.createElement('div');
+    modal.className = 'modal active';
+    modal.id = 'action-modal';
+    modal.innerHTML = `
+        <div class="modal-content modal-lg">
+            <div class="modal-header">
+                <h3>⚡ 添加动作模板</h3>
+                <button class="modal-close" onclick="closeModal('action-modal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-row">
+                    <div class="form-group" style="flex:1">
+                        <label>动作 ID <span class="required">*</span></label>
+                        <input type="text" id="action-id" class="input" placeholder="唯一标识，如: restart_agx">
+                    </div>
+                    <div class="form-group" style="flex:1">
+                        <label>名称</label>
+                        <input type="text" id="action-name" class="input" placeholder="显示名称">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>动作类型 <span class="required">*</span></label>
+                    <select id="action-type" class="input" onchange="updateActionTypeFields()">
+                        <option value="led">💡 LED 控制</option>
+                        <option value="ssh_cmd">🔐 SSH 命令</option>
+                        <option value="gpio">🔌 GPIO 控制</option>
+                        <option value="device_ctrl">🖥️ 设备控制</option>
+                        <option value="log">📝 日志记录</option>
+                        <option value="set_var">📊 设置变量</option>
+                        <option value="webhook">🌐 Webhook</option>
+                    </select>
+                </div>
+                <div id="action-type-fields">
+                    <!-- 动态生成的类型特定字段 -->
+                </div>
+                <div class="form-group">
+                    <label>描述</label>
+                    <input type="text" id="action-description" class="input" placeholder="动作说明">
+                </div>
+                <div class="form-group">
+                    <label>执行延迟 (ms)</label>
+                    <input type="number" id="action-delay" class="input" value="0" min="0">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn" onclick="closeModal('action-modal')">取消</button>
+                <button class="btn btn-primary" onclick="submitAction()">保存</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+    updateActionTypeFields();
+}
+
+/**
+ * 更新动作类型字段
+ */
+function updateActionTypeFields() {
+    const type = document.getElementById('action-type').value;
+    const container = document.getElementById('action-type-fields');
+    
+    const fields = {
+        led: `
+            <div class="form-row">
+                <div class="form-group" style="flex:1">
+                    <label>LED 设备</label>
+                    <select id="action-led-device" class="input">
+                        <option value="board">Board</option>
+                        <option value="matrix">Matrix</option>
+                        <option value="touch">Touch</option>
+                    </select>
+                </div>
+                <div class="form-group" style="flex:1">
+                    <label>LED 索引</label>
+                    <input type="number" id="action-led-index" class="input" value="255" placeholder="255=全部">
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group" style="flex:1">
+                    <label>颜色</label>
+                    <input type="color" id="action-led-color" class="input" value="#FF0000">
+                </div>
+                <div class="form-group" style="flex:1">
+                    <label>特效</label>
+                    <input type="text" id="action-led-effect" class="input" placeholder="可选，如: blink, pulse">
+                </div>
+            </div>
+        `,
+        ssh_cmd: `
+            <div class="form-group">
+                <label>主机引用 <span class="required">*</span></label>
+                <input type="text" id="action-ssh-host" class="input" placeholder="变量名，如: hosts.agx0.ip 或直接 IP">
+                <small class="form-hint">支持变量引用 \${hosts.xxx.ip}</small>
+            </div>
+            <div class="form-group">
+                <label>命令 <span class="required">*</span></label>
+                <input type="text" id="action-ssh-command" class="input" placeholder="如: sudo reboot">
+            </div>
+            <div class="form-row">
+                <div class="form-group" style="flex:1">
+                    <label>超时 (ms)</label>
+                    <input type="number" id="action-ssh-timeout" class="input" value="30000">
+                </div>
+                <div class="form-group" style="flex:1">
+                    <label>异步执行</label>
+                    <select id="action-ssh-async" class="input">
+                        <option value="false">否 (等待结果)</option>
+                        <option value="true">是 (后台执行)</option>
+                    </select>
+                </div>
+            </div>
+        `,
+        gpio: `
+            <div class="form-row">
+                <div class="form-group" style="flex:1">
+                    <label>GPIO 引脚 <span class="required">*</span></label>
+                    <input type="number" id="action-gpio-pin" class="input" placeholder="如: 48">
+                </div>
+                <div class="form-group" style="flex:1">
+                    <label>电平</label>
+                    <select id="action-gpio-level" class="input">
+                        <option value="true">高电平 (1)</option>
+                        <option value="false">低电平 (0)</option>
+                    </select>
+                </div>
+            </div>
+            <div class="form-group">
+                <label>脉冲时长 (ms)</label>
+                <input type="number" id="action-gpio-pulse" class="input" value="0" placeholder="0=保持电平">
+            </div>
+        `,
+        device_ctrl: `
+            <div class="form-row">
+                <div class="form-group" style="flex:1">
+                    <label>设备 <span class="required">*</span></label>
+                    <select id="action-device-name" class="input">
+                        <option value="agx0">AGX 0</option>
+                        <option value="lpmu0">LPMU 0</option>
+                    </select>
+                </div>
+                <div class="form-group" style="flex:1">
+                    <label>操作 <span class="required">*</span></label>
+                    <select id="action-device-action" class="input">
+                        <option value="power_on">开机</option>
+                        <option value="power_off">关机</option>
+                        <option value="reset">重启</option>
+                        <option value="force_off">强制关机</option>
+                    </select>
+                </div>
+            </div>
+        `,
+        log: `
+            <div class="form-row">
+                <div class="form-group" style="flex:1">
+                    <label>日志级别</label>
+                    <select id="action-log-level" class="input">
+                        <option value="3">INFO</option>
+                        <option value="2">WARN</option>
+                        <option value="1">ERROR</option>
+                        <option value="4">DEBUG</option>
+                    </select>
+                </div>
+            </div>
+            <div class="form-group">
+                <label>消息模板 <span class="required">*</span></label>
+                <input type="text" id="action-log-message" class="input" placeholder="支持变量 \${var_name}">
+            </div>
+        `,
+        set_var: `
+            <div class="form-group">
+                <label>变量名 <span class="required">*</span></label>
+                <input type="text" id="action-var-name" class="input" placeholder="如: system.flag">
+            </div>
+            <div class="form-group">
+                <label>值 <span class="required">*</span></label>
+                <input type="text" id="action-var-value" class="input" placeholder="支持表达式">
+            </div>
+        `,
+        webhook: `
+            <div class="form-group">
+                <label>URL <span class="required">*</span></label>
+                <input type="text" id="action-webhook-url" class="input" placeholder="https://...">
+            </div>
+            <div class="form-row">
+                <div class="form-group" style="flex:1">
+                    <label>方法</label>
+                    <select id="action-webhook-method" class="input">
+                        <option value="POST">POST</option>
+                        <option value="GET">GET</option>
+                        <option value="PUT">PUT</option>
+                    </select>
+                </div>
+            </div>
+            <div class="form-group">
+                <label>Body 模板</label>
+                <input type="text" id="action-webhook-body" class="input" placeholder='{"event": "\${trigger}"}'>
+            </div>
+        `
+    };
+    
+    container.innerHTML = fields[type] || '';
+}
+
+/**
+ * 提交动作模板
+ */
+async function submitAction() {
+    const id = document.getElementById('action-id').value.trim();
+    const name = document.getElementById('action-name').value.trim();
+    const type = document.getElementById('action-type').value;
+    const description = document.getElementById('action-description').value.trim();
+    const delay = parseInt(document.getElementById('action-delay').value) || 0;
+    
+    if (!id) {
+        alert('请填写动作 ID');
+        return;
+    }
+    
+    const data = { id, name: name || id, type, description, delay_ms: delay };
+    
+    // 根据类型收集特定字段
+    switch (type) {
+        case 'led':
+            data.led = {
+                device: document.getElementById('action-led-device').value,
+                index: parseInt(document.getElementById('action-led-index').value) || 255,
+                color: document.getElementById('action-led-color').value,
+                effect: document.getElementById('action-led-effect').value
+            };
+            break;
+        case 'ssh_cmd':
+            data.ssh = {
+                host_ref: document.getElementById('action-ssh-host').value,
+                command: document.getElementById('action-ssh-command').value,
+                timeout_ms: parseInt(document.getElementById('action-ssh-timeout').value) || 30000,
+                async: document.getElementById('action-ssh-async').value === 'true'
+            };
+            break;
+        case 'gpio':
+            data.gpio = {
+                pin: parseInt(document.getElementById('action-gpio-pin').value),
+                level: document.getElementById('action-gpio-level').value === 'true',
+                pulse_ms: parseInt(document.getElementById('action-gpio-pulse').value) || 0
+            };
+            break;
+        case 'device_ctrl':
+            data.device = {
+                device: document.getElementById('action-device-name').value,
+                action: document.getElementById('action-device-action').value
+            };
+            break;
+        case 'log':
+            data.log = {
+                level: parseInt(document.getElementById('action-log-level').value),
+                message: document.getElementById('action-log-message').value
+            };
+            break;
+        case 'set_var':
+            data.set_var = {
+                variable: document.getElementById('action-var-name').value,
+                value: document.getElementById('action-var-value').value
+            };
+            break;
+        case 'webhook':
+            data.webhook = {
+                url: document.getElementById('action-webhook-url').value,
+                method: document.getElementById('action-webhook-method').value,
+                body_template: document.getElementById('action-webhook-body').value
+            };
+            break;
+    }
+    
+    try {
+        const result = await api.call('automation.actions.add', data);
+        if (result.code === 0) {
+            addResult(true, `动作模板 ${id} 创建成功`);
+            closeModal('action-modal');
+            await refreshActions();
+        } else {
+            alert(`创建失败: ${result.message}`);
+        }
+    } catch (error) {
+        alert(`创建失败: ${error.message}`);
+    }
+}
+
+/**
+ * 测试动作
+ */
+async function testAction(id) {
+    try {
+        addResult(true, `正在执行动作: ${id}...`);
+        const result = await api.call('automation.actions.execute', { id });
+        addResult(result.code === 0, `动作 ${id}: ${result.message || 'OK'}`);
+    } catch (error) {
+        addResult(false, `动作执行失败: ${error.message}`);
+    }
+}
+
+/**
+ * 编辑动作
+ */
+async function editAction(id) {
+    // TODO: 加载动作详情并显示编辑对话框
+    alert(`编辑功能开发中: ${id}`);
+}
+
+/**
+ * 删除动作
+ */
+async function deleteAction(id) {
+    if (!confirm(`确定要删除动作模板 "${id}" 吗？`)) return;
+    
+    try {
+        const result = await api.call('automation.actions.delete', { id });
+        addResult(result.code === 0, `删除动作 ${id}: ${result.message || 'OK'}`);
+        if (result.code === 0) {
+            await refreshActions();
+        }
+    } catch (error) {
+        addResult(false, `删除失败: ${error.message}`);
+    }
+}
+
+/**
+ * 刷新动作执行统计
+ */
+async function refreshActionStats() {
+    const container = document.getElementById('action-stats');
+    
+    try {
+        const result = await api.call('automation.action.stats', {});
+        const stats = result.data || {};
+        
+        container.innerHTML = `
+            <div class="status-card">
+                <div class="status-value">${stats.total_executed || 0}</div>
+                <div class="status-label">总执行次数</div>
+            </div>
+            <div class="status-card success">
+                <div class="status-value">${stats.success_count || 0}</div>
+                <div class="status-label">成功</div>
+            </div>
+            <div class="status-card error">
+                <div class="status-value">${stats.failed_count || 0}</div>
+                <div class="status-label">失败</div>
+            </div>
+            <div class="status-card warning">
+                <div class="status-value">${stats.timeout_count || 0}</div>
+                <div class="status-label">超时</div>
+            </div>
+            <div class="status-card">
+                <div class="status-value">${stats.queue_pending || 0}</div>
+                <div class="status-label">队列待执行</div>
+            </div>
+            <div class="status-card ${stats.queue_running ? 'info' : ''}">
+                <div class="status-value">${stats.queue_running ? '⏳' : '✓'}</div>
+                <div class="status-label">执行状态</div>
+            </div>
+        `;
+    } catch (error) {
+        container.innerHTML = `<div class="status-card error"><div class="status-value">⚠</div><div class="status-label">${error.message}</div></div>`;
+    }
+}
+
+/**
+ * 重置动作统计
+ */
+async function resetActionStats() {
+    if (!confirm('确定要重置所有执行统计吗？')) return;
+    
+    try {
+        const result = await api.call('automation.action.stats.reset', {});
+        addResult(result.code === 0, `统计重置: ${result.message || 'OK'}`);
+        await refreshActionStats();
+    } catch (error) {
+        addResult(false, `重置统计失败: ${error.message}`);
+    }
+}
+
+
 
 /**
  * 添加执行结果
@@ -9741,3 +10950,14 @@ window.testGpio = testGpio;
 window.testDevice = testDevice;
 window.addResult = addResult;
 window.clearResults = clearResults;
+window.refreshActionStats = refreshActionStats;
+window.resetActionStats = resetActionStats;
+// 动作模板管理
+window.refreshActions = refreshActions;
+window.showAddActionModal = showAddActionModal;
+window.updateActionTypeFields = updateActionTypeFields;
+window.submitAction = submitAction;
+window.testAction = testAction;
+window.editAction = editAction;
+window.deleteAction = deleteAction;
+

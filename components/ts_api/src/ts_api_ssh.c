@@ -8,6 +8,7 @@
  * - ssh.copyid - 部署公钥
  * - ssh.revoke - 撤销公钥
  * - ssh.keygen - 生成密钥对
+ * - ssh.hosts.* - SSH 主机凭证管理（持久化）
  * 
  * 所有 SSH 连接操作都包含主机指纹验证（Known Hosts），
  * 由 trust_new 和 accept_changed 参数控制行为。
@@ -24,6 +25,7 @@
 #include "ts_ssh_client.h"
 #include "ts_keystore.h"
 #include "ts_known_hosts.h"
+#include "ts_ssh_hosts_config.h"
 #include "ts_log.h"
 #include <string.h>
 #include <stdlib.h>
@@ -640,6 +642,34 @@ static esp_err_t api_ssh_copyid(const cJSON *params, ts_api_result_t *result)
     
     free(pubkey_data);
     
+    /* 部署成功后，自动注册到 SSH 主机配置（无论验证是否成功） */
+    if (deploy_ok) {
+        /* 生成主机 ID：user@host:port */
+        char auto_id[TS_SSH_HOST_ID_MAX];
+        if (ssh_port == 22) {
+            snprintf(auto_id, sizeof(auto_id), "%s@%s", 
+                     user->valuestring, host->valuestring);
+        } else {
+            snprintf(auto_id, sizeof(auto_id), "%s@%s:%d", 
+                     user->valuestring, host->valuestring, ssh_port);
+        }
+        
+        ts_ssh_host_config_t host_config = {
+            .port = (uint16_t)ssh_port,
+            .auth_type = TS_SSH_HOST_AUTH_KEY,
+            .enabled = true,
+        };
+        strncpy(host_config.id, auto_id, sizeof(host_config.id) - 1);
+        strncpy(host_config.host, host->valuestring, sizeof(host_config.host) - 1);
+        strncpy(host_config.username, user->valuestring, sizeof(host_config.username) - 1);
+        strncpy(host_config.keyid, keyid->valuestring, sizeof(host_config.keyid) - 1);
+        
+        esp_err_t add_ret = ts_ssh_hosts_config_add(&host_config);
+        if (add_ret == ESP_OK) {
+            TS_LOGI(TAG, "Auto-registered SSH host: %s", auto_id);
+        }
+    }
+    
     /* 返回结果 */
     cJSON *data = cJSON_CreateObject();
     cJSON_AddBoolToObject(data, "deployed", true);
@@ -949,6 +979,197 @@ static esp_err_t api_ssh_keygen(const cJSON *params, ts_api_result_t *result)
 }
 
 /*===========================================================================*/
+/*                      SSH Hosts Config API                                  */
+/*===========================================================================*/
+
+/**
+ * @brief ssh.hosts.list - 列出所有 SSH 主机配置
+ */
+static esp_err_t api_ssh_hosts_list(const cJSON *params, ts_api_result_t *result)
+{
+    (void)params;
+    
+    cJSON *data = cJSON_CreateObject();
+    cJSON *hosts_arr = cJSON_AddArrayToObject(data, "hosts");
+    
+    ts_ssh_host_config_t configs[TS_SSH_HOSTS_MAX];
+    size_t count = 0;
+    
+    if (ts_ssh_hosts_config_list(configs, TS_SSH_HOSTS_MAX, &count) == ESP_OK) {
+        for (size_t i = 0; i < count; i++) {
+            cJSON *item = cJSON_CreateObject();
+            cJSON_AddStringToObject(item, "id", configs[i].id);
+            cJSON_AddStringToObject(item, "host", configs[i].host);
+            cJSON_AddNumberToObject(item, "port", configs[i].port);
+            cJSON_AddStringToObject(item, "username", configs[i].username);
+            cJSON_AddStringToObject(item, "auth_type", 
+                configs[i].auth_type == TS_SSH_HOST_AUTH_KEY ? "key" : "password");
+            if (configs[i].keyid[0]) {
+                cJSON_AddStringToObject(item, "keyid", configs[i].keyid);
+            }
+            cJSON_AddBoolToObject(item, "enabled", configs[i].enabled);
+            cJSON_AddNumberToObject(item, "created", configs[i].created_time);
+            cJSON_AddNumberToObject(item, "last_used", configs[i].last_used_time);
+            cJSON_AddItemToArray(hosts_arr, item);
+        }
+    }
+    
+    cJSON_AddNumberToObject(data, "count", (int)count);
+    ts_api_result_ok(result, data);
+    return ESP_OK;
+}
+
+/**
+ * @brief ssh.hosts.add - 添加 SSH 主机配置
+ * 
+ * Params: {
+ *   "id": "agx0",
+ *   "host": "192.168.55.100",
+ *   "port": 22,
+ *   "username": "root",
+ *   "auth_type": "key" | "password",
+ *   "keyid": "default" (如果 auth_type=key)
+ * }
+ */
+static esp_err_t api_ssh_hosts_add(const cJSON *params, ts_api_result_t *result)
+{
+    if (!params) {
+        ts_api_result_error(result, TS_API_ERR_INVALID_ARG, "Missing parameters");
+        return ESP_OK;
+    }
+    
+    const cJSON *id = cJSON_GetObjectItem(params, "id");
+    const cJSON *host = cJSON_GetObjectItem(params, "host");
+    const cJSON *port = cJSON_GetObjectItem(params, "port");
+    const cJSON *username = cJSON_GetObjectItem(params, "username");
+    const cJSON *auth_type = cJSON_GetObjectItem(params, "auth_type");
+    const cJSON *keyid = cJSON_GetObjectItem(params, "keyid");
+    
+    if (!id || !cJSON_IsString(id) || !id->valuestring[0]) {
+        ts_api_result_error(result, TS_API_ERR_INVALID_ARG, "Missing 'id' parameter");
+        return ESP_OK;
+    }
+    if (!host || !cJSON_IsString(host) || !host->valuestring[0]) {
+        ts_api_result_error(result, TS_API_ERR_INVALID_ARG, "Missing 'host' parameter");
+        return ESP_OK;
+    }
+    if (!username || !cJSON_IsString(username) || !username->valuestring[0]) {
+        ts_api_result_error(result, TS_API_ERR_INVALID_ARG, "Missing 'username' parameter");
+        return ESP_OK;
+    }
+    
+    ts_ssh_host_config_t config = {
+        .port = (port && cJSON_IsNumber(port)) ? (uint16_t)port->valueint : 22,
+        .auth_type = TS_SSH_HOST_AUTH_KEY, /* 默认密钥认证 */
+        .enabled = true,
+    };
+    
+    strncpy(config.id, id->valuestring, sizeof(config.id) - 1);
+    strncpy(config.host, host->valuestring, sizeof(config.host) - 1);
+    strncpy(config.username, username->valuestring, sizeof(config.username) - 1);
+    
+    if (auth_type && cJSON_IsString(auth_type)) {
+        if (strcmp(auth_type->valuestring, "password") == 0) {
+            config.auth_type = TS_SSH_HOST_AUTH_PASSWORD;
+        }
+    }
+    
+    if (keyid && cJSON_IsString(keyid)) {
+        strncpy(config.keyid, keyid->valuestring, sizeof(config.keyid) - 1);
+    }
+    
+    esp_err_t ret = ts_ssh_hosts_config_add(&config);
+    
+    if (ret == ESP_OK) {
+        cJSON *data = cJSON_CreateObject();
+        cJSON_AddBoolToObject(data, "added", true);
+        cJSON_AddStringToObject(data, "id", config.id);
+        ts_api_result_ok(result, data);
+    } else if (ret == ESP_ERR_NO_MEM) {
+        ts_api_result_error(result, TS_API_ERR_INTERNAL, "Max hosts reached");
+    } else {
+        ts_api_result_error(result, TS_API_ERR_INTERNAL, "Failed to add host");
+    }
+    
+    return ESP_OK;
+}
+
+/**
+ * @brief ssh.hosts.remove - 删除 SSH 主机配置
+ */
+static esp_err_t api_ssh_hosts_remove(const cJSON *params, ts_api_result_t *result)
+{
+    if (!params) {
+        ts_api_result_error(result, TS_API_ERR_INVALID_ARG, "Missing parameters");
+        return ESP_OK;
+    }
+    
+    const cJSON *id = cJSON_GetObjectItem(params, "id");
+    if (!id || !cJSON_IsString(id)) {
+        ts_api_result_error(result, TS_API_ERR_INVALID_ARG, "Missing 'id' parameter");
+        return ESP_OK;
+    }
+    
+    esp_err_t ret = ts_ssh_hosts_config_remove(id->valuestring);
+    
+    if (ret == ESP_OK) {
+        cJSON *data = cJSON_CreateObject();
+        cJSON_AddBoolToObject(data, "removed", true);
+        cJSON_AddStringToObject(data, "id", id->valuestring);
+        ts_api_result_ok(result, data);
+    } else if (ret == ESP_ERR_NOT_FOUND) {
+        ts_api_result_error(result, TS_API_ERR_NOT_FOUND, "Host not found");
+    } else {
+        ts_api_result_error(result, TS_API_ERR_INTERNAL, "Failed to remove host");
+    }
+    
+    return ESP_OK;
+}
+
+/**
+ * @brief ssh.hosts.get - 获取 SSH 主机配置
+ */
+static esp_err_t api_ssh_hosts_get(const cJSON *params, ts_api_result_t *result)
+{
+    if (!params) {
+        ts_api_result_error(result, TS_API_ERR_INVALID_ARG, "Missing parameters");
+        return ESP_OK;
+    }
+    
+    const cJSON *id = cJSON_GetObjectItem(params, "id");
+    if (!id || !cJSON_IsString(id)) {
+        ts_api_result_error(result, TS_API_ERR_INVALID_ARG, "Missing 'id' parameter");
+        return ESP_OK;
+    }
+    
+    ts_ssh_host_config_t config;
+    esp_err_t ret = ts_ssh_hosts_config_get(id->valuestring, &config);
+    
+    if (ret == ESP_OK) {
+        cJSON *data = cJSON_CreateObject();
+        cJSON_AddStringToObject(data, "id", config.id);
+        cJSON_AddStringToObject(data, "host", config.host);
+        cJSON_AddNumberToObject(data, "port", config.port);
+        cJSON_AddStringToObject(data, "username", config.username);
+        cJSON_AddStringToObject(data, "auth_type", 
+            config.auth_type == TS_SSH_HOST_AUTH_KEY ? "key" : "password");
+        if (config.keyid[0]) {
+            cJSON_AddStringToObject(data, "keyid", config.keyid);
+        }
+        cJSON_AddBoolToObject(data, "enabled", config.enabled);
+        cJSON_AddNumberToObject(data, "created", config.created_time);
+        cJSON_AddNumberToObject(data, "last_used", config.last_used_time);
+        ts_api_result_ok(result, data);
+    } else if (ret == ESP_ERR_NOT_FOUND) {
+        ts_api_result_error(result, TS_API_ERR_NOT_FOUND, "Host not found");
+    } else {
+        ts_api_result_error(result, TS_API_ERR_INTERNAL, "Failed to get host");
+    }
+    
+    return ESP_OK;
+}
+
+/*===========================================================================*/
 /*                          Registration                                      */
 /*===========================================================================*/
 
@@ -987,6 +1208,35 @@ static const ts_api_endpoint_t ssh_endpoints[] = {
         .category = TS_API_CAT_SECURITY,
         .handler = api_ssh_keygen,
         .requires_auth = true,
+    },
+    /* SSH Host Config APIs */
+    {
+        .name = "ssh.hosts.list",
+        .description = "List all SSH host configurations",
+        .category = TS_API_CAT_SECURITY,
+        .handler = api_ssh_hosts_list,
+        .requires_auth = false,
+    },
+    {
+        .name = "ssh.hosts.add",
+        .description = "Add SSH host configuration",
+        .category = TS_API_CAT_SECURITY,
+        .handler = api_ssh_hosts_add,
+        .requires_auth = true,
+    },
+    {
+        .name = "ssh.hosts.remove",
+        .description = "Remove SSH host configuration",
+        .category = TS_API_CAT_SECURITY,
+        .handler = api_ssh_hosts_remove,
+        .requires_auth = true,
+    },
+    {
+        .name = "ssh.hosts.get",
+        .description = "Get SSH host configuration by ID",
+        .category = TS_API_CAT_SECURITY,
+        .handler = api_ssh_hosts_get,
+        .requires_auth = false,
     },
 };
 

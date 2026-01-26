@@ -400,8 +400,9 @@ static esp_err_t load_sources_from_nvs(void)
             continue;
         }
 
-        // 分配并读取
-        char *json = malloc(len);
+        // 分配并读取（优先使用 PSRAM）
+        char *json = heap_caps_malloc(len, MALLOC_CAP_SPIRAM);
+        if (!json) json = malloc(len);
         if (!json) continue;
 
         ret = nvs_get_str(handle, key, json, &len);

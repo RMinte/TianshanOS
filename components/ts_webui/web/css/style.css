@@ -3814,6 +3814,21 @@ body {
     grid-column: 1 / -1;
 }
 
+.status-card.success {
+    background: #d1fae5;
+    color: #059669;
+}
+
+.status-card.warning {
+    background: #fef3c7;
+    color: #d97706;
+}
+
+.status-card.info {
+    background: #dbeafe;
+    color: #2563eb;
+}
+
 .status-card.loading {
     grid-column: 1 / -1;
     color: var(--text-light);
@@ -3899,6 +3914,10 @@ body {
     box-shadow: 0 1px 3px rgba(0,0,0,0.08);
 }
 
+.test-panel.wide {
+    grid-column: 1 / -1;
+}
+
 .test-panel-title {
     padding: 10px 14px;
     font-weight: 600;
@@ -3918,6 +3937,55 @@ body {
 .test-panel-body .input {
     flex: 1;
     min-width: 80px;
+}
+
+/* SSH 结果输出 */
+.test-result-output {
+    padding: 10px 14px;
+    margin: 0;
+    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+    font-size: 0.85rem;
+    background: #1a1a2e;
+    color: #e8e8e8;
+    border-top: 1px solid var(--border-color);
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+.test-result-output.loading {
+    background: var(--bg-color);
+    color: var(--text-light);
+    text-align: center;
+}
+
+.test-result-output.success {
+    border-top: 2px solid var(--secondary-color);
+}
+
+.test-result-output.error {
+    border-top: 2px solid var(--danger-color);
+    background: #2d1f2f;
+    color: #ffb4b4;
+}
+
+.test-result-output pre {
+    margin: 0;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+}
+
+.test-result-output .exit-code {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px dashed rgba(255,255,255,0.2);
+    color: #a8a8a8;
+    font-size: 0.8rem;
+}
+
+/* 按钮更小尺寸 */
+.btn-xs {
+    padding: 2px 6px;
+    font-size: 0.75rem;
 }
 
 /* 执行日志 */

@@ -277,13 +277,52 @@ fatfs,    data, fat,     0x3F0000,0x10000,
 
 ---
 
-## 八、相关文件
+## 八、HTTPS/mTLS 证书管理
+
+### 8.1 ts_cert 组件
+
+| 特性 | 状态 | 等级 | 说明 |
+|------|------|------|------|
+| ECDSA P-256 密钥生成 | ✅ 已实现 | L1 | PSRAM 分配，安全清零 |
+| X.509 CSR 生成 | ✅ 已实现 | L1 | RFC 2986 标准 |
+| 证书链验证 | ✅ 已实现 | L1 | Root → Intermediate → Device |
+| NVS 持久化 | ✅ 已实现 | L1 | namespace: ts_cert |
+| 私钥禁止导出 | ✅ 已实现 | L1 | 仅支持 CSR 流程 |
+
+### 8.2 证书管理 API
+
+| API 端点 | 功能 | 状态 |
+|---------|------|------|
+| `cert.status` | 获取证书状态 | ✅ |
+| `cert.generate_key` | 生成 ECDSA 密钥对 | ✅ |
+| `cert.generate_csr` | 生成 CSR | ✅ |
+| `cert.get_csr` | 获取已生成的 CSR | ✅ |
+| `cert.install` | 安装签发的证书 | ✅ |
+| `cert.install_ca` | 安装 CA 链 | ✅ |
+| `cert.delete` | 删除证书和密钥 | ✅ |
+
+### 8.3 WebUI 集成
+
+| 功能 | 状态 | 说明 |
+|------|------|------|
+| 统一密钥管理表格 | ✅ | SSH + HTTPS 密钥整合显示 |
+| HTTPS 证书状态卡片 | ✅ | 有效期/CN/签发者/序列号 |
+| CSR 生成模态框 | ✅ | 输入 CN → 生成 PEM |
+| 证书安装模态框 | ✅ | 粘贴 PEM → 安装 |
+| CA 链安装 | ✅ | 支持完整证书链 |
+
+---
+
+## 九、相关文件
 
 | 文件 | 说明 |
 |------|------|
-| `components/ts_security/src/ts_keystore.c` | 密钥存储实现 |
-| `components/ts_security/include/ts_keystore.h` | 密钥存储 API |
+| `components/ts_security/src/ts_keystore.c` | SSH 密钥存储实现 |
+| `components/ts_security/include/ts_keystore.h` | SSH 密钥存储 API |
+| `components/ts_security/src/ts_cert.c` | HTTPS 证书管理实现 |
+| `components/ts_security/include/ts_cert.h` | HTTPS 证书管理 API |
 | `components/ts_security/src/ts_known_hosts.c` | Known hosts 实现 |
+| `components/ts_api/src/ts_api_cert.c` | 证书管理 REST API |
 | `components/ts_console/commands/ts_cmd_key.c` | key 命令实现 |
 | `components/ts_console/commands/ts_cmd_ssh.c` | ssh 命令实现 |
 | `components/ts_console/commands/ts_cmd_hosts.c` | hosts 命令实现 |
@@ -301,3 +340,4 @@ fatfs,    data, fat,     0x3F0000,0x10000,
 | 1.2 | 2026-01-19 | 完成 SSH 安全增强：主机验证、hosts 命令、revoke 功能 |
 | 1.3 | 2026-01-19 | L2 准备：配置 HMAC 方案 NVS 加密选项，添加启用指南 |
 | 1.4 | 2026-01-19 | L2 测试推迟至功能开发完成后进行 |
+| 1.5 | 2026-01-27 | 完成 HTTPS/mTLS 证书管理：ts_cert 组件、7 个 API 端点、WebUI 集成 |

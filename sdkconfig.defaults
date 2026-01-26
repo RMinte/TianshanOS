@@ -219,6 +219,7 @@ CONFIG_HTTPD_LOG_PURGE_DATA=n
 # ============================================================================
 # TianShanOS 组件启用配置
 # ============================================================================
+CONFIG_TS_API_MAX_ENDPOINTS=256
 CONFIG_TS_CONFIG_ENABLE=y
 CONFIG_TS_LOG_ENABLE=y
 CONFIG_TS_EVENT_ENABLE=y

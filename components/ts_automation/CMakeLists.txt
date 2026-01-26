@@ -4,6 +4,7 @@ idf_component_register(
         "src/ts_variable.c"
         "src/ts_source_manager.c"
         "src/ts_rule_engine.c"
+        "src/ts_action_manager.c"
     INCLUDE_DIRS
         "include"
     REQUIRES
