@@ -13,7 +13,7 @@ set(TS_API_SRCS
     "src/ts_api_service.c"
     "src/ts_api_storage.c"
     "src/ts_api_gpio.c"
-    "src/ts_api_agx.c"
+    "src/ts_api_monitor.c"
     "src/ts_api_wifi.c"
     "src/ts_api_dhcp.c"
     "src/ts_api_nat.c"
@@ -24,11 +24,12 @@ set(TS_API_SRCS
     "src/ts_api_time.c"
     "src/ts_api_ota.c"
     "src/ts_api_log.c"
+    "src/ts_api_automation.c"
 )
 
 idf_component_register(
     SRCS ${TS_API_SRCS}
     INCLUDE_DIRS "include"
-    REQUIRES ts_core ts_drivers ts_led ts_net json ts_storage ts_security ts_ota
-    PRIV_REQUIRES ts_hal esp_timer esp_app_format spi_flash bootloader_support esp_wifi app_update esp_https_ota
+    REQUIRES ts_core ts_drivers ts_led ts_net json ts_storage ts_security ts_ota ts_automation
+    PRIV_REQUIRES ts_hal esp_timer esp_app_format spi_flash bootloader_support esp_wifi app_update esp_https_ota esp_http_client espressif__esp_websocket_client
 )

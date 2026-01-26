@@ -81,8 +81,6 @@ class SubscriptionManager {
      * @param {object} msg - WebSocket 消息
      */
     handleMessage(msg) {
-        console.log('[SubscriptionMgr] handleMessage:', msg.type, msg.topic, msg);
-        
         // 处理订阅确认
         if (msg.type === 'subscribed' || msg.type === 'unsubscribed') {
             const status = msg.success ? '✅' : '❌';
@@ -96,19 +94,16 @@ class SubscriptionManager {
         // 分发数据到订阅回调
         if (msg.type === 'data' && msg.topic) {
             const callbacks = this.subscriptions.get(msg.topic);
-            console.log(`[SubscriptionMgr] Topic ${msg.topic} has ${callbacks ? callbacks.size : 0} callbacks`);
             if (callbacks && callbacks.size > 0) {
                 callbacks.forEach(cb => {
                     try {
-                        console.log(`[SubscriptionMgr] Calling callback for ${msg.topic}`);
                         cb(msg, msg.timestamp);
                     } catch (e) {
                         console.error(`[SubscriptionMgr] Callback error for ${msg.topic}:`, e);
                     }
                 });
-            } else {
-                console.warn(`[SubscriptionMgr] No callbacks for topic: ${msg.topic}`);
             }
+            // 没有回调时静默丢弃（页面切换时的正常行为）
         }
     }
     
@@ -155,6 +150,7 @@ document.addEventListener('DOMContentLoaded', () => {
     router.register('/terminal', loadTerminalPage);
     router.register('/config', loadConfigPage);
     router.register('/security', loadSecurityPage);
+    router.register('/automation', loadAutomationPage);
     
     // 启动 WebSocket
     setupWebSocket();
@@ -8037,3 +8033,1711 @@ window.hideMemoryDetailModal = hideMemoryDetailModal;
 window.refreshMemoryDetail = refreshMemoryDetail;
 // 旧路由 #/logs 会自动重定向到 #/terminal 并打开日志模态框
 // =========================================================================
+
+// =========================================================================
+//                         自动化引擎页面
+// =========================================================================
+
+/**
+ * 加载自动化引擎测试页面
+ */
+async function loadAutomationPage() {
+    // 取消之前的订阅
+    if (subscriptionManager) {
+        subscriptionManager.unsubscribe('system.dashboard');
+    }
+    
+    const content = document.getElementById('page-content');
+    content.innerHTML = `
+        <div class="page-automation">
+            <div class="page-header-row">
+                <h1>⚙️ 自动化引擎</h1>
+                <div class="header-actions">
+                    <button class="btn btn-primary" onclick="automationControl('start')">▶️ 启动</button>
+                    <button class="btn btn-danger" onclick="automationControl('stop')">⏹️ 停止</button>
+                    <button class="btn" onclick="automationControl('pause')">⏸️ 暂停</button>
+                    <button class="btn" onclick="automationControl('reload')">🔄 重载</button>
+                </div>
+            </div>
+            
+            <!-- 状态卡片 -->
+            <div class="status-grid" id="automation-status">
+                <div class="status-card loading">加载中...</div>
+            </div>
+            
+            <!-- 数据源列表 -->
+            <div class="section">
+                <div class="section-header">
+                    <h2>📡 数据源</h2>
+                    <div class="section-actions">
+                        <button class="btn btn-primary btn-sm" onclick="showAddSourceModal()">➕ 添加</button>
+                        <button class="btn btn-sm" onclick="refreshSources()">🔄</button>
+                    </div>
+                </div>
+                <div class="card compact">
+                    <div id="sources-list" class="card-content">
+                        <div class="loading-small">加载中...</div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 规则列表 -->
+            <div class="section">
+                <div class="section-header">
+                    <h2>📋 规则列表</h2>
+                    <div class="section-actions">
+                        <button class="btn btn-primary btn-sm" onclick="showAddRuleModal()">➕ 添加</button>
+                        <button class="btn btn-sm" onclick="refreshRules()">🔄</button>
+                    </div>
+                </div>
+                <div class="card compact">
+                    <div id="rules-list" class="card-content">
+                        <div class="loading-small">加载中...</div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 变量列表 -->
+            <div class="section">
+                <div class="section-header">
+                    <h2>📊 变量 <span id="variables-count" class="badge"></span></h2>
+                    <div class="section-actions">
+                        <input type="text" id="variable-filter" placeholder="搜索变量..." class="input input-sm" oninput="filterVariables()">
+                        <button class="btn btn-sm" onclick="refreshVariables()">🔄</button>
+                    </div>
+                </div>
+                <div class="card compact">
+                    <div id="variables-list" class="card-content variables-container">
+                        <div class="loading-small">加载中...</div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 测试动作面板 -->
+            <div class="section">
+                <div class="section-header">
+                    <h2>🧪 测试执行器</h2>
+                </div>
+                <div class="test-panels">
+                    <!-- LED 测试 -->
+                    <div class="test-panel">
+                        <div class="test-panel-title">💡 LED</div>
+                        <div class="test-panel-body">
+                            <select id="led-device" class="input">
+                                <option value="board">Board</option>
+                                <option value="matrix">Matrix</option>
+                                <option value="touch">Touch</option>
+                            </select>
+                            <select id="led-operation" class="input">
+                                <option value="on">开启</option>
+                                <option value="off">关闭</option>
+                                <option value="blink">闪烁</option>
+                                <option value="effect">特效</option>
+                            </select>
+                            <input type="text" id="led-params" placeholder='{"color":"#FF0000"}' class="input">
+                            <button class="btn btn-primary btn-sm" onclick="testLed()">▶</button>
+                        </div>
+                    </div>
+                    
+                    <!-- GPIO 测试 -->
+                    <div class="test-panel">
+                        <div class="test-panel-title">🔌 GPIO</div>
+                        <div class="test-panel-body">
+                            <input type="number" id="gpio-pin" placeholder="Pin" class="input" value="48" style="width:60px">
+                            <select id="gpio-operation" class="input">
+                                <option value="set_high">高电平</option>
+                                <option value="set_low">低电平</option>
+                                <option value="toggle">翻转</option>
+                                <option value="pulse">脉冲</option>
+                            </select>
+                            <input type="text" id="gpio-params" placeholder='{"duration_ms":100}' class="input">
+                            <button class="btn btn-primary btn-sm" onclick="testGpio()">▶</button>
+                        </div>
+                    </div>
+                    
+                    <!-- Device 测试 -->
+                    <div class="test-panel">
+                        <div class="test-panel-title">🖥️ 设备</div>
+                        <div class="test-panel-body">
+                            <select id="device-id" class="input">
+                                <option value="agx_0">AGX 0</option>
+                                <option value="lpmu_0">LPMU 0</option>
+                            </select>
+                            <select id="device-operation" class="input">
+                                <option value="power_on">开机</option>
+                                <option value="power_off">关机</option>
+                                <option value="reset">重启</option>
+                                <option value="force_off">强制关机</option>
+                            </select>
+                            <button class="btn btn-primary btn-sm" onclick="testDevice()">▶</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 执行结果 -->
+            <div class="section">
+                <div class="section-header">
+                    <h2>📜 执行日志</h2>
+                    <button class="btn btn-sm btn-danger" onclick="clearResults()">🗑️ 清空</button>
+                </div>
+                <div class="card compact">
+                    <div id="execution-results" class="result-log">
+                        <p class="empty-state">暂无执行记录</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    // 加载所有数据（忽略单个失败，允许部分加载）
+    await Promise.allSettled([
+        refreshAutomationStatus(),
+        refreshRules(),
+        refreshSources(),
+        refreshVariables()
+    ]);
+}
+
+/**
+ * 刷新自动化引擎状态
+ */
+async function refreshAutomationStatus() {
+    const container = document.getElementById('automation-status');
+    if (!container) return;
+    
+    try {
+        const result = await api.call('automation.status');
+        if (result.code === 0 && result.data) {
+            const d = result.data;
+            const stateClass = d.state === 'running' ? 'running' : d.state === 'paused' ? 'paused' : 'stopped';
+            const stateText = d.state === 'running' ? '运行中' : d.state === 'paused' ? '已暂停' : '已停止';
+            
+            container.innerHTML = `
+                <div class="status-card primary">
+                    <div class="status-icon state-${stateClass}">●</div>
+                    <div class="status-info">
+                        <span class="status-value">${stateText}</span>
+                        <span class="status-label">引擎状态</span>
+                    </div>
+                </div>
+                <div class="status-card">
+                    <div class="status-value">${d.rule_count || 0}</div>
+                    <div class="status-label">规则</div>
+                </div>
+                <div class="status-card">
+                    <div class="status-value">${d.variable_count || 0}</div>
+                    <div class="status-label">变量</div>
+                </div>
+                <div class="status-card">
+                    <div class="status-value">${d.source_count || 0}</div>
+                    <div class="status-label">数据源</div>
+                </div>
+                <div class="status-card">
+                    <div class="status-value">${d.rules_executed || 0}</div>
+                    <div class="status-label">执行次数</div>
+                </div>
+                <div class="status-card">
+                    <div class="status-value">${formatUptime(d.uptime_sec || 0)}</div>
+                    <div class="status-label">运行时长</div>
+                </div>
+            `;
+        } else {
+            container.innerHTML = `<div class="status-card error"><span>⚠️ ${result.message || '获取状态失败'}</span></div>`;
+        }
+    } catch (error) {
+        const isNetworkError = error.message.includes('fetch') || error.message.includes('network');
+        container.innerHTML = `<div class="status-card error"><span>${isNetworkError ? '🔌 网络连接失败' : '❌ ' + error.message}</span></div>`;
+    }
+}
+
+/**
+ * 格式化运行时长
+ */
+function formatUptime(seconds) {
+    if (seconds < 60) return `${seconds}秒`;
+    if (seconds < 3600) return `${Math.floor(seconds/60)}分${seconds%60}秒`;
+    const h = Math.floor(seconds/3600);
+    const m = Math.floor((seconds%3600)/60);
+    return `${h}时${m}分`;
+}
+
+/**
+ * 自动化引擎控制
+ */
+async function automationControl(action) {
+    try {
+        const result = await api.call(`automation.${action}`);
+        addResult(result.code === 0, `${action}: ${result.message || 'OK'}`);
+        if (result.code === 0) {
+            await refreshAutomationStatus();
+        }
+    } catch (error) {
+        addResult(false, `${action} 失败: ${error.message}`);
+    }
+}
+
+/**
+ * 刷新规则列表
+ */
+async function refreshRules() {
+    const container = document.getElementById('rules-list');
+    if (!container) return;
+    
+    try {
+        const result = await api.call('automation.rules.list');
+        if (result.code === 0 && result.data && result.data.rules) {
+            const rules = result.data.rules;
+            if (rules.length === 0) {
+                container.innerHTML = '<p style="text-align:center;color:var(--text-light)">暂无规则，点击"添加"创建第一条</p>';
+                return;
+            }
+            
+            container.innerHTML = `
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>名称</th>
+                            <th>状态</th>
+                            <th>条件</th>
+                            <th>动作</th>
+                            <th>触发次数</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${rules.map(r => `
+                            <tr>
+                                <td><code>${r.id}</code></td>
+                                <td>${r.name || r.id}</td>
+                                <td><span class="status-badge ${r.enabled ? 'status-running' : 'status-stopped'}">${r.enabled ? '启用' : '禁用'}</span></td>
+                                <td>${r.conditions_count || 0}</td>
+                                <td>${r.actions_count || 0}</td>
+                                <td>${r.trigger_count || 0}</td>
+                                <td style="white-space:nowrap">
+                                    <button class="btn btn-sm" onclick="toggleRule('${r.id}', ${!r.enabled})" title="${r.enabled ? '禁用' : '启用'}">${r.enabled ? '🔴' : '🟢'}</button>
+                                    <button class="btn btn-sm" onclick="triggerRule('${r.id}')" title="手动触发">▶️</button>
+                                    <button class="btn btn-sm btn-danger" onclick="deleteRule('${r.id}')" title="删除">🗑️</button>
+                                </td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            `;
+        } else {
+            container.innerHTML = `<p style="text-align:center;color:var(--text-light)">⚠️ ${result.message || '获取规则失败'}</p>`;
+        }
+    } catch (error) {
+        const isNetworkError = error.message.includes('fetch') || error.message.includes('network');
+        container.innerHTML = `<p style="text-align:center;color:var(--danger-color)">${isNetworkError ? '🔌 网络连接失败' : '❌ ' + error.message}</p>`;
+    }
+}
+
+/**
+ * 切换规则启用状态
+ */
+async function toggleRule(id, enable) {
+    try {
+        const action = enable ? 'automation.rules.enable' : 'automation.rules.disable';
+        const result = await api.call(action, { id });
+        addResult(result.code === 0, `规则 ${id} ${enable ? '启用' : '禁用'}: ${result.message || 'OK'}`);
+        if (result.code === 0) {
+            await refreshRules();
+        }
+    } catch (error) {
+        addResult(false, `切换规则状态失败: ${error.message}`);
+    }
+}
+
+/**
+ * 手动触发规则
+ */
+async function triggerRule(id) {
+    try {
+        const result = await api.call('automation.rules.trigger', { id });
+        addResult(result.code === 0, `触发规则 ${id}: ${result.message || 'OK'}`);
+    } catch (error) {
+        addResult(false, `触发规则失败: ${error.message}`);
+    }
+}
+
+/**
+ * 刷新数据源列表
+ */
+async function refreshSources() {
+    const container = document.getElementById('sources-list');
+    if (!container) return;
+    
+    try {
+        const result = await api.call('automation.sources.list');
+        if (result.code === 0 && result.data && result.data.sources) {
+            const sources = result.data.sources;
+            if (sources.length === 0) {
+                container.innerHTML = '<p style="text-align:center;color:var(--text-light)">暂无数据源，点击"添加"创建第一个</p>';
+                return;
+            }
+            
+            container.innerHTML = `
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>标签</th>
+                            <th>类型</th>
+                            <th>状态</th>
+                            <th>更新间隔</th>
+                            <th>最新值</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${sources.map(s => `
+                            <tr>
+                                <td><code>${s.id}</code></td>
+                                <td>${s.label || s.id}</td>
+                                <td><span style="padding:2px 8px;background:var(--primary-color);color:white;border-radius:4px;font-size:0.85em">${s.type || 'unknown'}</span></td>
+                                <td><span class="status-badge ${s.enabled ? 'status-running' : 'status-stopped'}">${s.enabled ? '启用' : '禁用'}</span></td>
+                                <td>${s.poll_interval_ms ? (s.poll_interval_ms / 1000) + '秒' : '-'}</td>
+                                <td><code style="font-size:0.85em">${s.last_value !== undefined ? JSON.stringify(s.last_value) : '-'}</code></td>
+                                <td style="white-space:nowrap">
+                                    <button class="btn btn-sm" onclick="toggleSource('${s.id}', ${!s.enabled})" title="${s.enabled ? '禁用' : '启用'}">${s.enabled ? '🔴' : '🟢'}</button>
+                                    <button class="btn btn-sm btn-danger" onclick="deleteSource('${s.id}')" title="删除">🗑️</button>
+                                </td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            `;
+        } else {
+            container.innerHTML = `<p style="text-align:center;color:var(--text-light)">⚠️ ${result.message || '获取数据源失败'}</p>`;
+        }
+    } catch (error) {
+        const isNetworkError = error.message.includes('fetch') || error.message.includes('network');
+        container.innerHTML = `<p style="text-align:center;color:var(--danger-color)">${isNetworkError ? '🔌 网络连接失败' : '❌ ' + error.message}</p>`;
+    }
+}
+
+// 缓存变量数据用于过滤
+let allVariables = [];
+
+/**
+ * 刷新变量列表
+ */
+async function refreshVariables() {
+    const container = document.getElementById('variables-list');
+    const countBadge = document.getElementById('variables-count');
+    if (!container) return;
+    
+    container.innerHTML = '<div class="loading-small">加载中...</div>';
+    
+    try {
+        const result = await api.call('automation.variables.list');
+        if (result.code === 0 && result.data && result.data.variables) {
+            allVariables = result.data.variables;
+            if (countBadge) countBadge.textContent = allVariables.length;
+            renderVariables(allVariables);
+        } else {
+            container.innerHTML = `<p style="text-align:center;color:var(--text-light)">⚠️ ${result.message || '获取变量失败'}</p>`;
+        }
+    } catch (error) {
+        container.innerHTML = `<p style="text-align:center;color:var(--danger-color)">❌ ${error.message}</p>`;
+    }
+}
+
+/**
+ * 过滤变量
+ */
+function filterVariables() {
+    const filter = document.getElementById('variable-filter').value.toLowerCase().trim();
+    if (!filter) {
+        renderVariables(allVariables);
+        return;
+    }
+    const filtered = allVariables.filter(v => 
+        v.name.toLowerCase().includes(filter) || 
+        (v.source_id && v.source_id.toLowerCase().includes(filter))
+    );
+    renderVariables(filtered);
+}
+
+/**
+ * 渲染变量列表
+ */
+function renderVariables(variables) {
+    const container = document.getElementById('variables-list');
+    if (!container) return;
+    
+    if (variables.length === 0) {
+        container.innerHTML = '<p style="text-align:center;color:var(--text-light)">暂无变量数据</p>';
+        return;
+    }
+    
+    // 按来源分组
+    const grouped = {};
+    variables.forEach(v => {
+        const source = v.source_id || 'system';
+        if (!grouped[source]) grouped[source] = [];
+        grouped[source].push(v);
+    });
+    
+    let html = '<div class="variables-grouped">';
+    for (const [source, vars] of Object.entries(grouped)) {
+        html += `
+            <details class="variable-group" open>
+                <summary class="variable-group-header">
+                    <span class="source-name">📡 ${source}</span>
+                    <span class="variable-count">${vars.length} 个变量</span>
+                </summary>
+                <div class="variable-items">
+                    <table class="data-table compact">
+                        <thead>
+                            <tr>
+                                <th>变量名</th>
+                                <th>类型</th>
+                                <th>当前值</th>
+                                <th>更新时间</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${vars.map(v => `
+                                <tr>
+                                    <td><code class="variable-name">${v.name}</code></td>
+                                    <td><span class="type-badge type-${v.type || 'unknown'}">${v.type || '-'}</span></td>
+                                    <td class="variable-value">${formatVariableValue(v.value, v.type)}</td>
+                                    <td class="variable-time">${v.updated_at ? formatTimeAgo(v.updated_at) : '-'}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            </details>
+        `;
+    }
+    html += '</div>';
+    container.innerHTML = html;
+}
+
+/**
+ * 格式化变量值显示
+ */
+function formatVariableValue(value, type) {
+    if (value === undefined || value === null) return '<span class="null-value">null</span>';
+    
+    if (type === 'number') {
+        // 数字保留2位小数
+        const num = parseFloat(value);
+        if (!isNaN(num)) {
+            return `<span class="number-value">${num % 1 === 0 ? num : num.toFixed(2)}</span>`;
+        }
+    } else if (type === 'boolean') {
+        return value ? '<span class="bool-true">✓ true</span>' : '<span class="bool-false">✗ false</span>';
+    } else if (type === 'string') {
+        const str = String(value);
+        if (str.length > 50) {
+            return `<span class="string-value" title="${str}">"${str.substring(0, 47)}..."</span>`;
+        }
+        return `<span class="string-value">"${str}"</span>`;
+    }
+    
+    // 默认：JSON 格式
+    const str = JSON.stringify(value);
+    if (str.length > 60) {
+        return `<code title="${str}">${str.substring(0, 57)}...</code>`;
+    }
+    return `<code>${str}</code>`;
+}
+
+/**
+ * 格式化时间为相对时间
+ */
+function formatTimeAgo(timestamp) {
+    const now = Date.now();
+    const ts = typeof timestamp === 'number' ? timestamp * 1000 : new Date(timestamp).getTime();
+    const diff = now - ts;
+    
+    if (diff < 1000) return '刚刚';
+    if (diff < 60000) return `${Math.floor(diff / 1000)}秒前`;
+    if (diff < 3600000) return `${Math.floor(diff / 60000)}分钟前`;
+    if (diff < 86400000) return `${Math.floor(diff / 3600000)}小时前`;
+    return new Date(ts).toLocaleString();
+}
+
+/**
+ * 测试 LED 动作
+ */
+async function testLed() {
+    const device = document.getElementById('led-device').value;
+    const operation = document.getElementById('led-operation').value;
+    let params = document.getElementById('led-params').value.trim();
+    
+    try {
+        params = params ? JSON.parse(params) : {};
+    } catch (e) {
+        addResult(false, 'LED 参数 JSON 格式错误');
+        return;
+    }
+    
+    try {
+        const result = await api.call('automation.test.led', { device, operation, params });
+        addResult(result.code === 0, `LED 测试 (${device}.${operation}): ${result.message || 'OK'}`);
+    } catch (error) {
+        addResult(false, `LED 测试失败: ${error.message}`);
+    }
+}
+
+/**
+ * 测试 GPIO 动作
+ */
+async function testGpio() {
+    const pin = parseInt(document.getElementById('gpio-pin').value);
+    const operation = document.getElementById('gpio-operation').value;
+    let params = document.getElementById('gpio-params').value.trim();
+    
+    if (isNaN(pin)) {
+        addResult(false, '请输入有效的 GPIO 引脚号');
+        return;
+    }
+    
+    try {
+        params = params ? JSON.parse(params) : {};
+    } catch (e) {
+        addResult(false, 'GPIO 参数 JSON 格式错误');
+        return;
+    }
+    
+    try {
+        const result = await api.call('automation.test.gpio', { pin, operation, params });
+        addResult(result.code === 0, `GPIO 测试 (GPIO${pin}.${operation}): ${result.message || 'OK'}`);
+    } catch (error) {
+        addResult(false, `GPIO 测试失败: ${error.message}`);
+    }
+}
+
+/**
+ * 测试设备控制动作
+ */
+async function testDevice() {
+    const device = document.getElementById('device-id').value;
+    const operation = document.getElementById('device-operation').value;
+    
+    try {
+        const result = await api.call('automation.test.device', { device, operation });
+        addResult(result.code === 0, `设备测试 (${device}.${operation}): ${result.message || 'OK'}`);
+    } catch (error) {
+        addResult(false, `设备测试失败: ${error.message}`);
+    }
+}
+
+/**
+ * 添加执行结果
+ */
+function addResult(success, message) {
+    const container = document.getElementById('execution-results');
+    if (!container) return;
+    
+    // 移除空状态提示
+    const emptyP = container.querySelector('.empty-state');
+    if (emptyP) emptyP.remove();
+    
+    const time = new Date().toLocaleTimeString();
+    const div = document.createElement('div');
+    div.className = `log-item ${success ? 'success' : 'error'}`;
+    div.innerHTML = `
+        <span class="log-time">[${time}]</span>
+        <span>${success ? '✅' : '❌'} ${message}</span>
+    `;
+    
+    // 插入到最前面
+    container.insertBefore(div, container.firstChild);
+    
+    // 最多保留 50 条记录
+    while (container.children.length > 50) {
+        container.removeChild(container.lastChild);
+    }
+}
+
+/**
+ * 清空执行结果
+ */
+function clearResults() {
+    const container = document.getElementById('execution-results');
+    if (container) {
+        container.innerHTML = '<p class="empty-state">暂无执行记录</p>';
+    }
+}
+
+/**
+ * 切换数据源启用状态
+ */
+async function toggleSource(id, enable) {
+    try {
+        const action = enable ? 'automation.sources.enable' : 'automation.sources.disable';
+        const result = await api.call(action, { id });
+        addResult(result.code === 0, `数据源 ${id} ${enable ? '启用' : '禁用'}: ${result.message || 'OK'}`);
+        if (result.code === 0) {
+            await refreshSources();
+        }
+    } catch (error) {
+        addResult(false, `切换数据源状态失败: ${error.message}`);
+    }
+}
+
+/**
+ * 删除数据源
+ */
+async function deleteSource(id) {
+    if (!confirm(`确定要删除数据源 "${id}" 吗？此操作不可撤销。`)) {
+        return;
+    }
+    
+    try {
+        const result = await api.call('automation.sources.delete', { id });
+        addResult(result.code === 0, `删除数据源 ${id}: ${result.message || 'OK'}`);
+        if (result.code === 0) {
+            await Promise.all([refreshSources(), refreshAutomationStatus()]);
+        }
+    } catch (error) {
+        addResult(false, `删除数据源失败: ${error.message}`);
+    }
+}
+
+/**
+ * 删除规则
+ */
+async function deleteRule(id) {
+    if (!confirm(`确定要删除规则 "${id}" 吗？此操作不可撤销。`)) {
+        return;
+    }
+    
+    try {
+        const result = await api.call('automation.rules.delete', { id });
+        addResult(result.code === 0, `删除规则 ${id}: ${result.message || 'OK'}`);
+        if (result.code === 0) {
+            await Promise.all([refreshRules(), refreshAutomationStatus()]);
+        }
+    } catch (error) {
+        addResult(false, `删除规则失败: ${error.message}`);
+    }
+}
+
+/**
+ * 显示添加数据源模态框
+ */
+function showAddSourceModal() {
+    // 移除可能存在的旧模态框
+    const oldModal = document.getElementById('add-source-modal');
+    if (oldModal) oldModal.remove();
+    
+    const modal = document.createElement('div');
+    modal.id = 'add-source-modal';
+    modal.className = 'modal';
+    modal.innerHTML = `
+        <div class="modal-content automation-modal wide">
+            <div class="modal-header">
+                <h3>➕ 添加外部数据源</h3>
+                <button class="modal-close" onclick="closeModal('add-source-modal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <!-- 数据源类型选择（标签页样式） -->
+                <div class="modal-tabs">
+                    <button type="button" class="modal-tab active" data-type="rest" onclick="switchSourceType('rest')">
+                        🌐 REST API
+                    </button>
+                    <button type="button" class="modal-tab" data-type="websocket" onclick="switchSourceType('websocket')">
+                        🔌 WebSocket
+                    </button>
+                    <button type="button" class="modal-tab" data-type="socketio" onclick="switchSourceType('socketio')">
+                        ⚡ Socket.IO
+                    </button>
+                </div>
+                <input type="hidden" id="source-type" value="rest">
+                
+                <!-- 基本信息 -->
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>数据源 ID <span class="required">*</span></label>
+                        <input type="text" id="source-id" class="input" placeholder="如: agx_temp">
+                    </div>
+                    <div class="form-group">
+                        <label>显示名称</label>
+                        <input type="text" id="source-label" class="input" placeholder="如: AGX 温度">
+                    </div>
+                </div>
+                
+                <!-- REST API 配置 -->
+                <div id="source-rest-config" class="config-section">
+                    <div class="config-title">🌐 REST API 配置</div>
+                    <div class="form-group">
+                        <label>请求地址 <span class="required">*</span></label>
+                        <div class="input-with-btn">
+                            <input type="text" id="source-rest-url" class="input" placeholder="http://192.168.1.100/api/status">
+                            <button class="btn btn-sm" onclick="testRestConnection()" id="btn-test-rest">🔍 测试</button>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group" style="flex:0 0 100px">
+                            <label>方法</label>
+                            <select id="source-rest-method" class="input">
+                                <option value="GET">GET</option>
+                                <option value="POST">POST</option>
+                            </select>
+                        </div>
+                        <div class="form-group" style="flex:0 0 120px">
+                            <label>轮询间隔 (ms)</label>
+                            <input type="number" id="source-interval" class="input" value="5000" min="500">
+                        </div>
+                        <div class="form-group">
+                            <label>Authorization 头（可选）</label>
+                            <input type="text" id="source-rest-auth" class="input" placeholder="Bearer token">
+                        </div>
+                    </div>
+                    
+                    <!-- 测试结果 & 变量选择 -->
+                    <div id="rest-test-result" class="test-result-panel" style="display:none">
+                        <div class="test-result-header">
+                            <span class="test-status"></span>
+                            <button class="btn btn-sm" onclick="toggleJsonPreview()">📄 原始数据</button>
+                        </div>
+                        <div id="rest-json-preview" class="json-preview" style="display:none"></div>
+                        <div id="rest-var-selector" class="var-selector">
+                            <div class="var-selector-title">📊 选择要提取的字段：</div>
+                            <div class="var-list"></div>
+                        </div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>JSON 数据路径 <span style="color:var(--text-light);font-weight:normal">(点击上方字段自动填入)</span></label>
+                        <input type="text" id="source-rest-path" class="input" placeholder="如: data.temperature（留空取整个响应）">
+                    </div>
+                </div>
+                
+                <!-- WebSocket 配置 -->
+                <div id="source-websocket-config" class="config-section" style="display:none">
+                    <div class="config-title">🔌 WebSocket 配置</div>
+                    <div class="form-group">
+                        <label>WebSocket 地址 <span class="required">*</span></label>
+                        <div class="input-with-btn">
+                            <input type="text" id="source-ws-uri" class="input" placeholder="ws://192.168.1.100:8080/ws">
+                            <button class="btn btn-sm" onclick="testWsConnection()" id="btn-test-ws">🔍 测试</button>
+                        </div>
+                    </div>
+                    
+                    <!-- WebSocket 测试结果 -->
+                    <div id="ws-test-result" class="test-result-panel" style="display:none">
+                        <div class="test-result-header">
+                            <span class="test-status"></span>
+                            <button class="btn btn-sm" onclick="toggleWsJsonPreview()">📄 原始数据</button>
+                        </div>
+                        <div id="ws-json-preview" class="json-preview" style="display:none"></div>
+                        <div id="ws-var-selector" class="var-selector">
+                            <div class="var-selector-title">📊 选择要提取的字段：</div>
+                            <div class="var-list"></div>
+                        </div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>JSON 数据路径</label>
+                        <input type="text" id="source-ws-path" class="input" placeholder="如: data.temperature（留空取整个消息）">
+                    </div>
+                    <div class="form-group">
+                        <label>断线重连间隔 (ms)</label>
+                        <input type="number" id="source-ws-reconnect" class="input" value="5000" min="1000">
+                    </div>
+                </div>
+                
+                <!-- Socket.IO 配置 -->
+                <div id="source-socketio-config" class="config-section" style="display:none">
+                    <div class="config-title">⚡ Socket.IO 配置</div>
+                    <div class="form-group">
+                        <label>服务器地址 <span class="required">*</span></label>
+                        <div class="input-with-btn">
+                            <input type="text" id="source-sio-url" class="input" placeholder="http://10.10.99.99:59090">
+                            <button class="btn btn-sm" onclick="testSioConnection()" id="btn-test-sio">🔍 测试</button>
+                        </div>
+                        <small style="color:var(--text-light)">Socket.IO v4 协议，使用 HTTP/HTTPS 地址</small>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>事件名称 <span style="color:var(--text-light);font-weight:normal">(留空自动发现)</span></label>
+                            <input type="text" id="source-sio-event" class="input" placeholder="测试时留空可自动发现事件">
+                        </div>
+                        <div class="form-group" style="flex:0 0 150px">
+                            <label>超时时间 (ms)</label>
+                            <input type="number" id="source-sio-timeout" class="input" value="15000" min="5000">
+                        </div>
+                    </div>
+                    
+                    <!-- Socket.IO 测试结果 -->
+                    <div id="sio-test-result" class="test-result-panel" style="display:none">
+                        <div class="test-result-header">
+                            <span class="test-status"></span>
+                            <button class="btn btn-sm" onclick="toggleSioJsonPreview()">📄 原始数据</button>
+                        </div>
+                        <div id="sio-json-preview" class="json-preview" style="display:none"></div>
+                        <div id="sio-var-selector" class="var-selector">
+                            <div class="var-selector-title">📊 选择要提取的字段：</div>
+                            <div class="var-list"></div>
+                        </div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>JSON 数据路径</label>
+                        <input type="text" id="source-sio-path" class="input" placeholder="如: cpu.avg_usage（留空取整个事件数据）">
+                    </div>
+                    
+                    <!-- Socket.IO 自动发现开关 -->
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="source-sio-auto-discover" checked>
+                        <span>自动发现所有 JSON 字段为变量</span>
+                    </label>
+                    <small style="color:var(--text-light);display:block;margin-top:-10px;margin-bottom:10px;padding-left:24px">
+                        关闭后仅使用上方选中的字段作为变量
+                    </small>
+                </div>
+                
+                <!-- 启用选项 -->
+                <label class="checkbox-label">
+                    <input type="checkbox" id="source-enabled" checked>
+                    <span>创建后立即启用</span>
+                </label>
+            </div>
+            <div class="modal-footer">
+                <button class="btn" onclick="closeModal('add-source-modal')">取消</button>
+                <button class="btn btn-primary" onclick="submitAddSource()">添加数据源</button>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+    setTimeout(() => modal.classList.add('show'), 10);
+}
+
+// 存储测试结果数据
+let lastTestData = null;
+let wsTestSocket = null;
+
+/**
+ * 测试 REST API 连接
+ */
+async function testRestConnection() {
+    const url = document.getElementById('source-rest-url').value.trim();
+    const method = document.getElementById('source-rest-method').value;
+    const auth = document.getElementById('source-rest-auth').value.trim();
+    
+    if (!url) {
+        alert('请输入 API 地址');
+        return;
+    }
+    
+    const btn = document.getElementById('btn-test-rest');
+    const resultPanel = document.getElementById('rest-test-result');
+    const statusSpan = resultPanel.querySelector('.test-status');
+    
+    btn.disabled = true;
+    btn.textContent = '⏳ 测试中...';
+    resultPanel.style.display = 'block';
+    statusSpan.innerHTML = '<span style="color:var(--warning-color)">🔄 正在请求...</span>';
+    
+    try {
+        // 通过 ESP32 代理请求（避免 CORS）
+        const result = await api.call('automation.proxy.fetch', { 
+            url, 
+            method,
+            headers: auth ? { 'Authorization': auth } : {}
+        });
+        
+        if (result.code === 0 && result.data) {
+            lastTestData = result.data.body;
+            statusSpan.innerHTML = `<span style="color:var(--secondary-color)">✅ 连接成功</span> <span style="color:var(--text-light)">(${result.data.status || 200})</span>`;
+            
+            // 解析并显示可选变量
+            try {
+                const jsonData = typeof lastTestData === 'string' ? JSON.parse(lastTestData) : lastTestData;
+                renderVarSelector('rest-var-selector', jsonData, 'source-rest-path');
+                document.getElementById('rest-json-preview').textContent = JSON.stringify(jsonData, null, 2);
+            } catch (e) {
+                // 非 JSON 响应
+                document.querySelector('#rest-var-selector .var-list').innerHTML = 
+                    '<div class="var-item disabled">响应非 JSON 格式，无法解析字段</div>';
+                document.getElementById('rest-json-preview').textContent = lastTestData;
+            }
+        } else {
+            statusSpan.innerHTML = `<span style="color:var(--danger-color)">❌ 请求失败: ${result.message || '未知错误'}</span>`;
+            document.querySelector('#rest-var-selector .var-list').innerHTML = '';
+        }
+    } catch (error) {
+        statusSpan.innerHTML = `<span style="color:var(--danger-color)">❌ 错误: ${error.message}</span>`;
+        document.querySelector('#rest-var-selector .var-list').innerHTML = '';
+    }
+    
+    btn.disabled = false;
+    btn.textContent = '🔍 测试';
+}
+
+/**
+ * 测试 WebSocket 连接
+ */
+async function testWsConnection() {
+    const uri = document.getElementById('source-ws-uri').value.trim();
+    
+    if (!uri) {
+        alert('请输入 WebSocket 地址');
+        return;
+    }
+    
+    const btn = document.getElementById('btn-test-ws');
+    const resultPanel = document.getElementById('ws-test-result');
+    const statusSpan = resultPanel.querySelector('.test-status');
+    
+    // 关闭之前的测试连接
+    if (wsTestSocket) {
+        wsTestSocket.close();
+        wsTestSocket = null;
+    }
+    
+    btn.disabled = true;
+    btn.textContent = '⏳ 连接中...';
+    resultPanel.style.display = 'block';
+    statusSpan.innerHTML = '<span style="color:var(--warning-color)">🔄 正在连接...</span>';
+    
+    try {
+        // 通过 ESP32 测试 WebSocket（获取第一条消息）
+        const result = await api.call('automation.proxy.websocket_test', { uri, timeout_ms: 5000 });
+        
+        if (result.code === 0 && result.data) {
+            lastTestData = result.data.message;
+            statusSpan.innerHTML = `<span style="color:var(--secondary-color)">✅ 连接成功，已收到数据</span>`;
+            
+            try {
+                const jsonData = typeof lastTestData === 'string' ? JSON.parse(lastTestData) : lastTestData;
+                renderVarSelector('ws-var-selector', jsonData, 'source-ws-path');
+                document.getElementById('ws-json-preview').textContent = JSON.stringify(jsonData, null, 2);
+            } catch (e) {
+                document.querySelector('#ws-var-selector .var-list').innerHTML = 
+                    '<div class="var-item disabled">消息非 JSON 格式，无法解析字段</div>';
+                document.getElementById('ws-json-preview').textContent = lastTestData;
+            }
+        } else {
+            statusSpan.innerHTML = `<span style="color:var(--danger-color)">❌ ${result.message || '连接失败'}</span>`;
+            document.querySelector('#ws-var-selector .var-list').innerHTML = '';
+        }
+    } catch (error) {
+        statusSpan.innerHTML = `<span style="color:var(--danger-color)">❌ 错误: ${error.message}</span>`;
+        document.querySelector('#ws-var-selector .var-list').innerHTML = '';
+    }
+    
+    btn.disabled = false;
+    btn.textContent = '🔍 测试';
+}
+
+/**
+ * 测试 Socket.IO 连接
+ */
+async function testSioConnection() {
+    const url = document.getElementById('source-sio-url').value.trim();
+    const event = document.getElementById('source-sio-event').value.trim();
+    const timeout = parseInt(document.getElementById('source-sio-timeout').value) || 15000;
+    
+    if (!url) {
+        alert('请输入 Socket.IO 服务器地址');
+        return;
+    }
+    
+    const btn = document.getElementById('btn-test-sio');
+    const resultPanel = document.getElementById('sio-test-result');
+    const statusSpan = resultPanel.querySelector('.test-status');
+    const eventInput = document.getElementById('source-sio-event');
+    
+    btn.disabled = true;
+    btn.textContent = '⏳ 连接中...';
+    resultPanel.style.display = 'block';
+    
+    // 显示连接阶段状态
+    const statusText = event ? `正在连接并等待事件: ${event}` : '正在连接并自动发现事件...';
+    statusSpan.innerHTML = `<span style="color:var(--warning-color)">🔄 ${statusText}</span>`;
+    
+    try {
+        // 通过 ESP32 测试 Socket.IO 连接
+        // 如果没有指定事件，将获取服务器推送的第一个事件
+        const params = { url, timeout_ms: timeout };
+        if (event) params.event = event;
+        
+        const result = await api.call('automation.proxy.socketio_test', params);
+        
+        if (result.code === 0 && result.data) {
+            const data = result.data;
+            const eventName = data.event || '(未知事件)';
+            lastTestData = data.data;
+            
+            // 显示成功状态和发现的事件
+            let statusHtml = `<span style="color:var(--secondary-color)">✅ 连接成功</span>`;
+            if (data.event) {
+                statusHtml += ` <span style="color:var(--text-light)">| 事件: <strong>${eventName}</strong></span>`;
+            }
+            if (data.sid) {
+                statusHtml += ` <span style="color:var(--text-light);font-size:0.85em">| SID: ${data.sid.substring(0, 8)}...</span>`;
+            }
+            statusSpan.innerHTML = statusHtml;
+            
+            // 自动填充发现的事件名（如果用户没有手动输入）
+            if (data.event && !eventInput.value) {
+                eventInput.value = data.event;
+                eventInput.style.borderColor = 'var(--secondary-color)';
+                setTimeout(() => eventInput.style.borderColor = '', 2000);
+            }
+            
+            try {
+                const jsonData = typeof lastTestData === 'string' ? JSON.parse(lastTestData) : lastTestData;
+                renderVarSelector('sio-var-selector', jsonData, 'source-sio-path');
+                document.getElementById('sio-json-preview').textContent = JSON.stringify(jsonData, null, 2);
+            } catch (e) {
+                document.querySelector('#sio-var-selector .var-list').innerHTML = 
+                    '<div class="var-item disabled">事件数据非 JSON 格式，无法解析字段</div>';
+                document.getElementById('sio-json-preview').textContent = String(lastTestData);
+            }
+        } else {
+            // 显示详细错误信息
+            let errorMsg = result.message || '连接失败';
+            if (result.data && result.data.sid) {
+                errorMsg += ` (已获取 SID，但未收到事件数据)`;
+            }
+            statusSpan.innerHTML = `<span style="color:var(--danger-color)">❌ ${errorMsg}</span>`;
+            document.querySelector('#sio-var-selector .var-list').innerHTML = 
+                '<div class="var-item disabled">提示：留空事件名称可自动发现服务器推送的事件</div>';
+            
+            // 显示详细错误
+            if (result.data && result.data.error) {
+                document.getElementById('sio-json-preview').textContent = result.data.error;
+                document.getElementById('sio-json-preview').style.display = 'block';
+            }
+        }
+    } catch (error) {
+        statusSpan.innerHTML = `<span style="color:var(--danger-color)">❌ 错误: ${error.message}</span>`;
+        document.querySelector('#sio-var-selector .var-list').innerHTML = '';
+    }
+    
+    btn.disabled = false;
+    btn.textContent = '🔍 测试';
+}
+
+/**
+ * 切换 Socket.IO JSON 预览显示
+ */
+function toggleSioJsonPreview() {
+    const preview = document.getElementById('sio-json-preview');
+    preview.style.display = preview.style.display === 'none' ? 'block' : 'none';
+}
+
+/**
+ * 渲染变量选择器
+ */
+function renderVarSelector(containerId, data, targetInputId, prefix = '') {
+    const container = document.querySelector(`#${containerId} .var-list`);
+    if (!container) return;
+    
+    const items = [];
+    flattenJson(data, prefix, items);
+    
+    if (items.length === 0) {
+        container.innerHTML = '<div class="var-item disabled">无可选字段</div>';
+        return;
+    }
+    
+    container.innerHTML = items.map(item => `
+        <div class="var-item" onclick="selectVarPath('${targetInputId}', '${item.path}')">
+            <span class="var-path">${item.path}</span>
+            <span class="var-type">${item.type}</span>
+            <span class="var-value">${item.preview}</span>
+        </div>
+    `).join('');
+}
+
+/**
+ * 扁平化 JSON 对象，提取所有叶子节点路径
+ */
+function flattenJson(obj, prefix, result, maxDepth = 5) {
+    if (maxDepth <= 0) return;
+    
+    if (obj === null || obj === undefined) {
+        result.push({ path: prefix || '(root)', type: 'null', preview: 'null' });
+        return;
+    }
+    
+    const type = typeof obj;
+    
+    if (Array.isArray(obj)) {
+        if (obj.length === 0) {
+            result.push({ path: prefix || '(root)', type: 'array', preview: '[]' });
+        } else {
+            // 显示数组本身
+            result.push({ 
+                path: prefix || '(root)', 
+                type: `array[${obj.length}]`, 
+                preview: `[${obj.length} items]` 
+            });
+            // 展开第一个元素作为示例
+            if (typeof obj[0] === 'object' && obj[0] !== null) {
+                flattenJson(obj[0], prefix ? `${prefix}[0]` : '[0]', result, maxDepth - 1);
+            }
+        }
+    } else if (type === 'object') {
+        const keys = Object.keys(obj);
+        if (keys.length === 0) {
+            result.push({ path: prefix || '(root)', type: 'object', preview: '{}' });
+        } else {
+            for (const key of keys) {
+                const newPath = prefix ? `${prefix}.${key}` : key;
+                const value = obj[key];
+                const valueType = typeof value;
+                
+                if (value === null) {
+                    result.push({ path: newPath, type: 'null', preview: 'null' });
+                } else if (Array.isArray(value)) {
+                    flattenJson(value, newPath, result, maxDepth - 1);
+                } else if (valueType === 'object') {
+                    flattenJson(value, newPath, result, maxDepth - 1);
+                } else {
+                    // 叶子节点
+                    let preview = String(value);
+                    if (preview.length > 30) preview = preview.substring(0, 27) + '...';
+                    result.push({ path: newPath, type: valueType, preview });
+                }
+            }
+        }
+    } else {
+        // 基本类型
+        let preview = String(obj);
+        if (preview.length > 30) preview = preview.substring(0, 27) + '...';
+        result.push({ path: prefix || '(root)', type, preview });
+    }
+}
+
+/**
+ * 选择变量路径
+ */
+function selectVarPath(inputId, path) {
+    const input = document.getElementById(inputId);
+    if (input) {
+        input.value = path;
+        input.focus();
+        // 高亮效果
+        input.style.borderColor = 'var(--secondary-color)';
+        setTimeout(() => input.style.borderColor = '', 1000);
+    }
+}
+
+/**
+ * 切换 JSON 预览显示
+ */
+function toggleJsonPreview() {
+    const preview = document.getElementById('rest-json-preview');
+    preview.style.display = preview.style.display === 'none' ? 'block' : 'none';
+}
+
+function toggleWsJsonPreview() {
+    const preview = document.getElementById('ws-json-preview');
+    preview.style.display = preview.style.display === 'none' ? 'block' : 'none';
+}
+
+/**
+ * 切换数据源类型
+ */
+function switchSourceType(type) {
+    // 更新隐藏字段
+    document.getElementById('source-type').value = type;
+    
+    // 更新标签页状态
+    document.querySelectorAll('.modal-tab').forEach(tab => {
+        tab.classList.toggle('active', tab.dataset.type === type);
+    });
+    
+    // 切换配置区块
+    document.getElementById('source-rest-config').style.display = type === 'rest' ? 'block' : 'none';
+    document.getElementById('source-websocket-config').style.display = type === 'websocket' ? 'block' : 'none';
+    const sioConfig = document.getElementById('source-socketio-config');
+    if (sioConfig) sioConfig.style.display = type === 'socketio' ? 'block' : 'none';
+}
+
+/**
+ * 根据数据源类型更新表单字段（兼容旧调用）
+ */
+function updateSourceTypeFields() {
+    const type = document.getElementById('source-type').value;
+    switchSourceType(type);
+}
+
+// updateBuiltinFields 函数已移除 - 内置数据源由系统自动注册，无需手动配置
+
+/**
+ * 提交添加数据源
+ */
+async function submitAddSource() {
+    const id = document.getElementById('source-id').value.trim();
+    const label = document.getElementById('source-label').value.trim() || id;
+    const type = document.getElementById('source-type').value;
+    const interval = parseInt(document.getElementById('source-interval')?.value) || 1000;
+    const enabled = document.getElementById('source-enabled').checked;
+    
+    if (!id) {
+        alert('请输入数据源 ID');
+        return;
+    }
+    
+    const params = { id, label, type, poll_interval_ms: interval, enabled };
+    
+    // 根据类型添加额外参数
+    if (type === 'websocket') {
+        params.uri = document.getElementById('source-ws-uri').value.trim();
+        params.json_path = document.getElementById('source-ws-path').value.trim();
+        params.reconnect_ms = parseInt(document.getElementById('source-ws-reconnect').value) || 5000;
+        
+        if (!params.uri) {
+            alert('请输入 WebSocket URI');
+            return;
+        }
+    } else if (type === 'rest') {
+        params.url = document.getElementById('source-rest-url').value.trim();
+        params.method = document.getElementById('source-rest-method').value;
+        params.json_path = document.getElementById('source-rest-path').value.trim();
+        params.auth_header = document.getElementById('source-rest-auth').value.trim();
+        
+        if (!params.url) {
+            alert('请输入 REST URL');
+            return;
+        }
+    } else if (type === 'socketio') {
+        // Socket.IO 数据源配置
+        params.url = document.getElementById('source-sio-url').value.trim();
+        params.event = document.getElementById('source-sio-event').value.trim();
+        params.json_path = document.getElementById('source-sio-path').value.trim();
+        params.timeout_ms = parseInt(document.getElementById('source-sio-timeout').value) || 15000;
+        
+        // 自动发现开关
+        const autoDiscoverEl = document.getElementById('source-sio-auto-discover');
+        params.auto_discover = autoDiscoverEl ? autoDiscoverEl.checked : true;
+        
+        if (!params.url) {
+            alert('请输入 Socket.IO 服务器地址');
+            return;
+        }
+        if (!params.event) {
+            alert('请输入要监听的事件名称（可先通过测试按钮自动发现）');
+            return;
+        }
+    }
+    
+    try {
+        const result = await api.call('automation.sources.add', params);
+        if (result.code === 0) {
+            addResult(true, `数据源 ${id} 创建成功`);
+            closeModal('add-source-modal');
+            await Promise.all([refreshSources(), refreshAutomationStatus()]);
+        } else {
+            addResult(false, `创建数据源失败: ${result.message}`);
+        }
+    } catch (error) {
+        addResult(false, `创建数据源失败: ${error.message}`);
+    }
+}
+
+/**
+ * 显示添加规则模态框
+ */
+function showAddRuleModal() {
+    // 移除可能存在的旧模态框
+    const oldModal = document.getElementById('add-rule-modal');
+    if (oldModal) oldModal.remove();
+    
+    const modal = document.createElement('div');
+    modal.id = 'add-rule-modal';
+    modal.className = 'modal';
+    modal.innerHTML = `
+        <div class="modal-content automation-modal wide">
+            <div class="modal-header">
+                <h3>➕ 添加规则</h3>
+                <button class="modal-close" onclick="closeModal('add-rule-modal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <!-- 基本信息 -->
+                <div class="form-row three-col">
+                    <div class="form-group">
+                        <label>规则 ID <span class="required">*</span></label>
+                        <input type="text" id="rule-id" class="input" placeholder="唯一标识符">
+                    </div>
+                    <div class="form-group" style="flex:2">
+                        <label>规则名称 <span class="required">*</span></label>
+                        <input type="text" id="rule-name" class="input" placeholder="规则显示名称">
+                    </div>
+                </div>
+                
+                <div class="form-row three-col">
+                    <div class="form-group">
+                        <label>条件逻辑</label>
+                        <select id="rule-logic" class="input">
+                            <option value="and">全部满足 (AND)</option>
+                            <option value="or">任一满足 (OR)</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>冷却时间 (ms)</label>
+                        <input type="number" id="rule-cooldown" class="input" value="0" min="0">
+                    </div>
+                    <label class="checkbox-label" style="padding-top:24px">
+                        <input type="checkbox" id="rule-enabled" checked>
+                        <span>立即启用</span>
+                    </label>
+                </div>
+                
+                <!-- 条件配置 -->
+                <div class="config-section">
+                    <div class="config-header">
+                        <span class="config-title">📋 触发条件</span>
+                        <button class="btn btn-sm btn-primary" onclick="addConditionRow()">➕ 添加</button>
+                    </div>
+                    <div id="conditions-container">
+                        <p class="empty-hint">点击"添加"创建触发条件</p>
+                    </div>
+                </div>
+                
+                <!-- 动作配置 -->
+                <div class="config-section">
+                    <div class="config-header">
+                        <span class="config-title">⚡ 执行动作</span>
+                        <button class="btn btn-sm btn-primary" onclick="addActionRow()">➕ 添加</button>
+                    </div>
+                    <div id="actions-container">
+                        <p class="empty-hint">点击"添加"创建执行动作</p>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn" onclick="closeModal('add-rule-modal')">取消</button>
+                <button class="btn btn-primary" onclick="submitAddRule()">添加规则</button>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+    setTimeout(() => modal.classList.add('show'), 10);
+}
+
+// 条件行计数器
+let conditionRowCount = 0;
+
+/**
+ * 添加条件行
+ */
+function addConditionRow() {
+    const container = document.getElementById('conditions-container');
+    
+    // 移除空提示
+    const emptyP = container.querySelector('.empty-hint');
+    if (emptyP) emptyP.remove();
+    
+    const row = document.createElement('div');
+    row.className = 'condition-row';
+    row.id = `condition-row-${conditionRowCount}`;
+    row.innerHTML = `
+        <input type="text" class="input cond-variable" placeholder="变量名 (如 gpio.btn1)">
+        <select class="input cond-operator">
+            <option value="eq">== 等于</option>
+            <option value="ne">!= 不等于</option>
+            <option value="gt">> 大于</option>
+            <option value="ge">>= 大于等于</option>
+            <option value="lt">< 小于</option>
+            <option value="le"><= 小于等于</option>
+            <option value="changed">值变化</option>
+            <option value="contains">包含</option>
+        </select>
+        <input type="text" class="input cond-value" placeholder="比较值">
+        <button class="btn btn-sm btn-danger" onclick="this.parentElement.remove()">✕</button>
+    `;
+    
+    container.appendChild(row);
+    conditionRowCount++;
+}
+
+// 动作行计数器
+let actionRowCount = 0;
+
+/**
+ * 添加动作行
+ */
+function addActionRow() {
+    const container = document.getElementById('actions-container');
+    
+    // 移除空提示
+    const emptyP = container.querySelector('.empty-hint');
+    if (emptyP) emptyP.remove();
+    
+    const row = document.createElement('div');
+    row.className = 'action-row';
+    row.id = `action-row-${actionRowCount}`;
+    row.innerHTML = `
+        <div class="action-row-header">
+            <select class="input action-type" onchange="updateActionFields(this)">
+                <option value="led">💡 LED 控制</option>
+                <option value="gpio">🔌 GPIO 输出</option>
+                <option value="device">🖥️ 设备控制</option>
+                <option value="set_var">📝 设置变量</option>
+                <option value="log">📋 日志输出</option>
+                <option value="webhook">🌐 Webhook</option>
+            </select>
+            <input type="number" class="input action-delay" placeholder="延迟ms" value="0" min="0" style="width:80px">
+            <button class="btn btn-sm btn-danger" onclick="this.parentElement.parentElement.remove()">✕</button>
+        </div>
+        <div class="action-params">
+            <select class="input action-led-device">
+                <option value="board">Board</option>
+                <option value="matrix">Matrix</option>
+                <option value="touch">Touch</option>
+            </select>
+            <input type="number" class="input action-led-index" placeholder="索引" value="255" min="0" max="255" style="width:70px">
+            <input type="text" class="input action-led-color" placeholder="#RRGGBB" value="#FF0000" style="width:90px">
+        </div>
+    `;
+    
+    container.appendChild(row);
+    actionRowCount++;
+}
+
+/**
+ * 根据动作类型更新参数字段
+ */
+function updateActionFields(selectElement) {
+    const row = selectElement.closest('.action-row');
+    const paramsContainer = row.querySelector('.action-params');
+    const type = selectElement.value;
+    
+    switch (type) {
+        case 'led':
+            paramsContainer.innerHTML = `
+                <select class="input action-led-device">
+                    <option value="board">Board</option>
+                    <option value="matrix">Matrix</option>
+                    <option value="touch">Touch</option>
+                </select>
+                <input type="number" class="input action-led-index" placeholder="索引" value="255" min="0" max="255" style="width:70px">
+                <input type="text" class="input action-led-color" placeholder="#RRGGBB" value="#FF0000" style="width:90px">
+            `;
+            break;
+        case 'gpio':
+            paramsContainer.innerHTML = `
+                <input type="number" class="input action-gpio-pin" placeholder="Pin" value="0" min="0" max="48" style="width:60px">
+                <select class="input action-gpio-level">
+                    <option value="true">高电平</option>
+                    <option value="false">低电平</option>
+                </select>
+                <input type="number" class="input action-gpio-pulse" placeholder="脉冲ms" value="0" min="0" style="width:80px">
+            `;
+            break;
+        case 'device':
+            paramsContainer.innerHTML = `
+                <select class="input action-device-name">
+                    <option value="agx0">AGX 0</option>
+                    <option value="lpmu0">LPMU 0</option>
+                </select>
+                <select class="input action-device-action">
+                    <option value="power_on">开机</option>
+                    <option value="power_off">关机</option>
+                    <option value="reset">重启</option>
+                    <option value="force_off">强制关机</option>
+                </select>
+            `;
+            break;
+        case 'set_var':
+            paramsContainer.innerHTML = `
+                <input type="text" class="input action-setvar-name" placeholder="变量名" style="width:120px">
+                <input type="text" class="input action-setvar-value" placeholder="值 (JSON)" style="flex:1">
+            `;
+            break;
+        case 'log':
+            paramsContainer.innerHTML = `
+                <select class="input action-log-level" style="width:100px">
+                    <option value="3">INFO</option>
+                    <option value="4">WARN</option>
+                    <option value="5">ERROR</option>
+                </select>
+                <input type="text" class="input action-log-message" placeholder="日志消息" style="flex:1">
+            `;
+            break;
+        case 'webhook':
+            paramsContainer.innerHTML = `
+                <select class="input action-webhook-method" style="width:80px">
+                    <option value="POST">POST</option>
+                    <option value="GET">GET</option>
+                    <option value="PUT">PUT</option>
+                </select>
+                <input type="text" class="input action-webhook-url" placeholder="URL" style="flex:1">
+                <input type="text" class="input action-webhook-body" placeholder='Body JSON' style="width:120px">
+            `;
+            break;
+    }
+}
+
+/**
+ * 提交添加规则
+ */
+async function submitAddRule() {
+    const id = document.getElementById('rule-id').value.trim();
+    const name = document.getElementById('rule-name').value.trim();
+    const logic = document.getElementById('rule-logic').value;
+    const cooldown = parseInt(document.getElementById('rule-cooldown').value) || 0;
+    const enabled = document.getElementById('rule-enabled').checked;
+    
+    if (!id) {
+        alert('请输入规则 ID');
+        return;
+    }
+    if (!name) {
+        alert('请输入规则名称');
+        return;
+    }
+    
+    // 收集条件
+    const conditions = [];
+    document.querySelectorAll('.condition-row').forEach(row => {
+        const variable = row.querySelector('.cond-variable').value.trim();
+        const operator = row.querySelector('.cond-operator').value;
+        let value = row.querySelector('.cond-value').value.trim();
+        
+        if (variable) {
+            // 尝试解析值为 JSON
+            try {
+                value = JSON.parse(value);
+            } catch (e) {
+                // 保持字符串
+            }
+            
+            conditions.push({ variable, operator, value });
+        }
+    });
+    
+    // 收集动作
+    const actions = [];
+    document.querySelectorAll('.action-row').forEach(row => {
+        const type = row.querySelector('.action-type').value;
+        const delay_ms = parseInt(row.querySelector('.action-delay').value) || 0;
+        
+        const action = { type, delay_ms };
+        
+        switch (type) {
+            case 'led': {
+                const device = row.querySelector('.action-led-device')?.value || 'board';
+                const index = parseInt(row.querySelector('.action-led-index')?.value) || 255;
+                const color = row.querySelector('.action-led-color')?.value || '#FF0000';
+                
+                // 解析颜色
+                const colorMatch = color.match(/^#?([0-9A-Fa-f]{2})([0-9A-Fa-f]{2})([0-9A-Fa-f]{2})$/);
+                if (colorMatch) {
+                    action.device = device;
+                    action.index = index;
+                    action.r = parseInt(colorMatch[1], 16);
+                    action.g = parseInt(colorMatch[2], 16);
+                    action.b = parseInt(colorMatch[3], 16);
+                }
+                break;
+            }
+            case 'gpio': {
+                action.pin = parseInt(row.querySelector('.action-gpio-pin')?.value) || 0;
+                action.level = row.querySelector('.action-gpio-level')?.value === 'true';
+                action.pulse_ms = parseInt(row.querySelector('.action-gpio-pulse')?.value) || 0;
+                break;
+            }
+            case 'device': {
+                action.device = row.querySelector('.action-device-name')?.value || 'agx0';
+                action.action = row.querySelector('.action-device-action')?.value || 'power_on';
+                break;
+            }
+            case 'set_var': {
+                action.variable = row.querySelector('.action-setvar-name')?.value || '';
+                let val = row.querySelector('.action-setvar-value')?.value || '';
+                try {
+                    action.value = JSON.parse(val);
+                } catch (e) {
+                    action.value = val;
+                }
+                break;
+            }
+            case 'log': {
+                action.level = parseInt(row.querySelector('.action-log-level')?.value) || 3;
+                action.message = row.querySelector('.action-log-message')?.value || '';
+                break;
+            }
+            case 'webhook': {
+                action.method = row.querySelector('.action-webhook-method')?.value || 'POST';
+                action.url = row.querySelector('.action-webhook-url')?.value || '';
+                action.body = row.querySelector('.action-webhook-body')?.value || '';
+                break;
+            }
+        }
+        
+        actions.push(action);
+    });
+    
+    if (actions.length === 0) {
+        alert('请至少添加一个动作');
+        return;
+    }
+    
+    const params = {
+        id,
+        name,
+        logic,
+        cooldown_ms: cooldown,
+        enabled,
+        conditions,
+        actions
+    };
+    
+    try {
+        const result = await api.call('automation.rules.add', params);
+        if (result.code === 0) {
+            addResult(true, `规则 ${id} 创建成功`);
+            closeModal('add-rule-modal');
+            await Promise.all([refreshRules(), refreshAutomationStatus()]);
+        } else {
+            addResult(false, `创建规则失败: ${result.message}`);
+        }
+    } catch (error) {
+        addResult(false, `创建规则失败: ${error.message}`);
+    }
+}
+
+/**
+ * 关闭模态框
+ */
+function closeModal(modalId) {
+    const modal = document.getElementById(modalId);
+    if (modal) {
+        modal.classList.remove('show');
+        setTimeout(() => modal.remove(), 300);
+    }
+}
+
+// 导出自动化页面函数
+window.refreshAutomationStatus = refreshAutomationStatus;
+window.automationControl = automationControl;
+window.refreshRules = refreshRules;
+window.toggleRule = toggleRule;
+window.triggerRule = triggerRule;
+window.deleteRule = deleteRule;
+window.refreshSources = refreshSources;
+window.toggleSource = toggleSource;
+window.deleteSource = deleteSource;
+window.showAddSourceModal = showAddSourceModal;
+window.switchSourceType = switchSourceType;
+window.updateSourceTypeFields = updateSourceTypeFields;
+window.submitAddSource = submitAddSource;
+window.showAddRuleModal = showAddRuleModal;
+window.addConditionRow = addConditionRow;
+window.addActionRow = addActionRow;
+window.updateActionFields = updateActionFields;
+window.submitAddRule = submitAddRule;
+window.closeModal = closeModal;
+window.testLed = testLed;
+window.testGpio = testGpio;
+window.testDevice = testDevice;
+window.addResult = addResult;
+window.clearResults = clearResults;

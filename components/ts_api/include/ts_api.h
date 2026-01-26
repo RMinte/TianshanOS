@@ -330,9 +330,9 @@ esp_err_t ts_api_storage_register(void);
 esp_err_t ts_api_gpio_register(void);
 
 /**
- * @brief Register AGX monitor APIs
+ * @brief Register compute device monitor APIs
  */
-esp_err_t ts_api_agx_register(void);
+esp_err_t ts_api_monitor_register(void);
 
 /**
  * @brief Register WiFi APIs
@@ -383,6 +383,11 @@ esp_err_t ts_api_ota_register(void);
  * @brief Register Log APIs
  */
 void ts_api_log_register(void);
+
+/**
+ * @brief Register Automation APIs
+ */
+esp_err_t ts_api_automation_register(void);
 
 #ifdef __cplusplus
 }

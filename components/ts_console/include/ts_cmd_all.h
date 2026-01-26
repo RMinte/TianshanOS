@@ -146,10 +146,10 @@ esp_err_t ts_cmd_gpio_register(void);
 esp_err_t ts_cmd_temp_register(void);
 
 /**
- * @brief 注册 agx 命令（AGX 设备监控）
- * agx --status/--data/--start/--stop/--config
+ * @brief 注册 monitor 命令（算力设备监控）
+ * monitor --status/--data/--start/--stop/--config
  */
-esp_err_t ts_cmd_agx_register(void);
+esp_err_t ts_cmd_monitor_register(void);
 
 /**
  * @brief 注册 ota 命令（固件升级）

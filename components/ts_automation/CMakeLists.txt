@@ -1,0 +1,23 @@
+idf_component_register(
+    SRCS
+        "src/ts_automation.c"
+        "src/ts_variable.c"
+        "src/ts_source_manager.c"
+        "src/ts_rule_engine.c"
+    INCLUDE_DIRS
+        "include"
+    REQUIRES
+        ts_core
+        ts_storage
+        json
+    PRIV_REQUIRES
+        ts_api
+        ts_led
+        ts_hal
+        ts_net
+        ts_drivers
+        ts_security
+        ts_jsonpath
+        esp_http_client
+        espressif__esp_websocket_client
+)

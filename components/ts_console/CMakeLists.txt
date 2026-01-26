@@ -8,7 +8,7 @@ set(TS_CONSOLE_SRCS
     "src/ts_i18n.c"
     "src/ts_script.c"
     "linenoise/linenoise.c"
-    "commands/ts_cmd_agx.c"
+    "commands/ts_cmd_monitor.c"
     "commands/ts_cmd_config.c"
     "commands/ts_cmd_device.c"
     "commands/ts_cmd_dhcp.c"

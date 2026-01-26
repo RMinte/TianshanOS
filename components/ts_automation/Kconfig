@@ -1,0 +1,57 @@
+menu "TianShanOS Automation Engine"
+
+    config TS_AUTOMATION_ENABLED
+        bool "Enable Automation Engine"
+        default y
+        help
+            Enable the automation engine for data monitoring,
+            rule-based actions, and LED display control.
+
+    config TS_AUTOMATION_CONFIG_PATH
+        string "Default config file path"
+        default "/sdcard/config/automation.json"
+        depends on TS_AUTOMATION_ENABLED
+        help
+            Default path for automation configuration file on SD card.
+
+    config TS_AUTOMATION_MAX_SOURCES
+        int "Maximum number of data sources"
+        default 16
+        range 4 32
+        depends on TS_AUTOMATION_ENABLED
+        help
+            Maximum number of data sources (builtin + remote).
+
+    config TS_AUTOMATION_MAX_RULES
+        int "Maximum number of rules"
+        default 32
+        range 8 64
+        depends on TS_AUTOMATION_ENABLED
+        help
+            Maximum number of automation rules.
+
+    config TS_AUTOMATION_MAX_VARIABLES
+        int "Maximum number of variables"
+        default 128
+        range 32 256
+        depends on TS_AUTOMATION_ENABLED
+        help
+            Maximum number of variables in the variable store.
+
+    config TS_AUTOMATION_TASK_STACK_SIZE
+        int "Automation task stack size"
+        default 8192
+        range 4096 16384
+        depends on TS_AUTOMATION_ENABLED
+        help
+            Stack size for the automation engine task.
+
+    config TS_AUTOMATION_TASK_PRIORITY
+        int "Automation task priority"
+        default 5
+        range 1 10
+        depends on TS_AUTOMATION_ENABLED
+        help
+            Priority for the automation engine task.
+
+endmenu

@@ -36,6 +36,7 @@
 #include "ts_webui.h"
 #include "ts_power_monitor.h"
 #include "ts_power_policy.h"
+#include "ts_automation.h"
 #include "esp_log.h"
 
 static const char *TAG = "ts_services";
@@ -55,6 +56,7 @@ static ts_service_handle_t s_api_handle = NULL;
 static ts_service_handle_t s_https_handle = NULL;
 static ts_service_handle_t s_webui_handle = NULL;
 static ts_service_handle_t s_console_handle = NULL;
+static ts_service_handle_t s_automation_handle = NULL;
 
 /* ============================================================================
  * HAL 服务回调
@@ -920,6 +922,72 @@ static bool webui_service_health(ts_service_handle_t handle, void *user_data)
 }
 
 /* ============================================================================
+ * Automation 服务回调
+ * ========================================================================== */
+
+static esp_err_t automation_service_init(ts_service_handle_t handle, void *user_data)
+{
+    (void)handle;
+    (void)user_data;
+    
+    ESP_LOGI(TAG, "Initializing automation service...");
+    
+    /* 使用默认配置初始化（不自动启动） */
+    ts_automation_config_t config = TS_AUTOMATION_CONFIG_DEFAULT();
+    config.auto_start = false;  /* 在 service_start 时启动 */
+    
+    esp_err_t ret = ts_automation_init(&config);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to init automation: %s", esp_err_to_name(ret));
+        return ret;
+    }
+    
+    return ESP_OK;
+}
+
+static esp_err_t automation_service_start(ts_service_handle_t handle, void *user_data)
+{
+    (void)handle;
+    (void)user_data;
+    
+    ESP_LOGI(TAG, "Starting automation service...");
+    
+    esp_err_t ret = ts_automation_start();
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to start automation: %s", esp_err_to_name(ret));
+        return ret;
+    }
+    
+    ts_automation_status_t status;
+    ts_automation_get_status(&status);
+    ESP_LOGI(TAG, "Automation engine running: %d sources, %d rules, %d variables",
+             status.sources_count, status.rules_count, status.variables_count);
+    
+    return ESP_OK;
+}
+
+static esp_err_t automation_service_stop(ts_service_handle_t handle, void *user_data)
+{
+    (void)handle;
+    (void)user_data;
+    
+    ESP_LOGI(TAG, "Stopping automation service...");
+    return ts_automation_stop();
+}
+
+static bool automation_service_health(ts_service_handle_t handle, void *user_data)
+{
+    (void)handle;
+    (void)user_data;
+    
+    ts_automation_status_t status;
+    if (ts_automation_get_status(&status) != ESP_OK) {
+        return false;
+    }
+    return status.state == TS_AUTO_STATE_RUNNING;
+}
+
+/* ============================================================================
  * 服务定义
  * ========================================================================== */
 
@@ -1055,6 +1123,18 @@ static const ts_service_def_t s_console_service_def = {
     .user_data = NULL,
 };
 
+static const ts_service_def_t s_automation_service_def = {
+    .name = "automation",
+    .phase = TS_SERVICE_PHASE_SERVICE,
+    .capabilities = TS_SERVICE_CAP_RESTARTABLE | TS_SERVICE_CAP_CONFIGURABLE,
+    .dependencies = {"storage", "hal", "network", NULL},  /* 依赖 storage、HAL 和 network */
+    .init = automation_service_init,
+    .start = automation_service_start,
+    .stop = automation_service_stop,
+    .health_check = automation_service_health,
+    .user_data = NULL,
+};
+
 /* ============================================================================
  * 公开 API
  * ========================================================================== */
@@ -1152,6 +1232,14 @@ esp_err_t ts_services_register_all(void)
         return ret;
     }
     ESP_LOGI(TAG, "  - console service registered");
+    
+    // 注册 automation 服务
+    ret = ts_service_register(&s_automation_service_def, &s_automation_handle);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to register automation service: %s", esp_err_to_name(ret));
+        return ret;
+    }
+    ESP_LOGI(TAG, "  - automation service registered");
     
     ESP_LOGI(TAG, "All core services registered");
     

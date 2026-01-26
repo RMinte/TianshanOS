@@ -9,7 +9,7 @@
 #include "ts_device_ctrl.h"
 #include "ts_usb_mux.h"
 #include "ts_temp_source.h"
-#include "ts_agx_monitor.h"
+#include "ts_compute_monitor.h"
 #include "ts_log.h"
 #include "sdkconfig.h"
 #include "driver/gpio.h"
@@ -135,12 +135,12 @@ esp_err_t ts_drivers_init(void)
     }
 #endif
 
-    /* 初始化 AGX 监控（仅初始化，不自动启动；通过 CLI 命令启动） */
-    ret = ts_agx_monitor_init(NULL);  /* 使用默认配置 */
+    /* 初始化算力设备监控（仅初始化，不自动启动；通过 CLI 命令启动） */
+    ret = ts_compute_monitor_init(NULL);  /* 使用默认配置 */
     if (ret != ESP_OK) {
-        TS_LOGW(TAG, "AGX monitor init failed: %s", esp_err_to_name(ret));
+        TS_LOGW(TAG, "Compute monitor init failed: %s", esp_err_to_name(ret));
     } else {
-        TS_LOGI(TAG, "AGX monitor initialized (use 'agx --start' to connect)");
+        TS_LOGI(TAG, "Compute monitor initialized (use 'compute --start' to connect)");
     }
 
     TS_LOGI(TAG, "Device drivers initialized");
@@ -149,8 +149,8 @@ esp_err_t ts_drivers_init(void)
 
 esp_err_t ts_drivers_deinit(void)
 {
-    /* 停止 AGX 监控 */
-    ts_agx_monitor_deinit();
+    /* 停止算力设备监控 */
+    ts_compute_monitor_deinit();
     
 #ifdef CONFIG_TS_DRIVERS_USB_MUX_ENABLE
     ts_usb_mux_deinit();

@@ -150,6 +150,45 @@ CONFIG_ESP_SYSTEM_EVENT_TASK_STACK_SIZE=3584
 CONFIG_TS_CONSOLE_TASK_STACK_SIZE=6144
 CONFIG_TS_LED_TASK_STACK_SIZE=3072
 
+# ============================================================================
+# Automation Engine 配置
+# ============================================================================
+CONFIG_TS_AUTOMATION_ENABLED=y
+CONFIG_TS_AUTOMATION_CONFIG_PATH="/sdcard/config/automation.json"
+CONFIG_TS_AUTOMATION_MAX_SOURCES=16
+CONFIG_TS_AUTOMATION_MAX_RULES=32
+CONFIG_TS_AUTOMATION_MAX_VARIABLES=256
+CONFIG_TS_AUTOMATION_TASK_STACK_SIZE=8192
+CONFIG_TS_AUTOMATION_TASK_PRIORITY=5
+
+# ============================================================================
+# HTTPS/mTLS 控制通道配置
+# ============================================================================
+CONFIG_TS_HTTPS_ENABLED=y
+CONFIG_TS_HTTPS_PORT=443
+CONFIG_TS_HTTPS_MAX_CLIENTS=3
+CONFIG_TS_HTTPS_REQUIRE_CLIENT_CERT=y
+CONFIG_TS_HTTPS_CTRL_LISTEN_BACKLOG=5
+CONFIG_TS_HTTPS_SESSION_CACHE_SIZE=4
+
+# ============================================================================
+# WebUI 配置
+# ============================================================================
+CONFIG_TS_WEBUI_ENABLE=y
+CONFIG_TS_WEBUI_API_PREFIX="/api/v1"
+CONFIG_TS_WEBUI_WS_ENABLE=y
+CONFIG_TS_WEBUI_WS_MAX_CLIENTS=8
+CONFIG_TS_WEBUI_AUTH_REQUIRED=y
+CONFIG_TS_WEBUI_CORS_ENABLE=y
+CONFIG_TS_WEBUI_STATIC_PATH="/www"
+
+# ============================================================================
+# LED Matrix 配置
+# ============================================================================
+CONFIG_TS_LED_MATRIX_WIDTH=32
+CONFIG_TS_LED_MATRIX_HEIGHT=32
+CONFIG_TS_LED_MATRIX_DEFAULT_BRIGHTNESS=50
+
 # 堆调试（开发期间）
 CONFIG_HEAP_TRACING_OFF=y
 
@@ -177,8 +216,25 @@ CONFIG_FATFS_VOLUME_COUNT=4
 # HTTP 服务器日志配置（隐藏连接重置警告）
 CONFIG_HTTPD_LOG_PURGE_DATA=n
 
-# 组件配置 - TianShanOS
-# CONFIG_TS_CONFIG_ENABLE=y
-# CONFIG_TS_LOG_ENABLE=y
-# CONFIG_TS_EVENT_ENABLE=y
-# CONFIG_TS_SERVICE_ENABLE=y
+# ============================================================================
+# TianShanOS 组件启用配置
+# ============================================================================
+CONFIG_TS_CONFIG_ENABLE=y
+CONFIG_TS_LOG_ENABLE=y
+CONFIG_TS_EVENT_ENABLE=y
+CONFIG_TS_SERVICE_ENABLE=y
+CONFIG_TS_NET_WIFI_ENABLE=y
+CONFIG_TS_NET_ETHERNET_ENABLE=y
+CONFIG_TS_NET_HTTP_SERVER_ENABLE=y
+CONFIG_TS_NET_DHCP_SERVER_ENABLE=y
+CONFIG_TS_STORAGE_ENABLE_SD=y
+CONFIG_TS_STORAGE_ENABLE_SPIFFS=y
+CONFIG_TS_SECURITY_ENABLE=y
+CONFIG_TS_OTA_ENABLED=y
+CONFIG_TS_CERT_ENABLED=y
+
+# WiFi AP 默认配置
+CONFIG_TS_NET_WIFI_AP_SSID="TianShanOS"
+CONFIG_TS_NET_WIFI_AP_PASS="tianshan123"
+CONFIG_TS_NET_WIFI_AP_CHANNEL=1
+CONFIG_TS_NET_WIFI_AP_MAX_CONN=4

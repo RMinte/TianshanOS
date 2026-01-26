@@ -1,20 +1,20 @@
 /**
- * @file ts_cmd_agx.c
- * @brief AGX Monitor Console Commands
+ * @file ts_cmd_compute.c
+ * @brief Compute Monitor Console Commands
  * 
- * 实现 agx 命令族：
- * - agx --status           显示 AGX 监控状态和连接信息
- * - agx --data             显示最新 AGX 数据
- * - agx --start            启动 AGX 监控
- * - agx --stop             停止 AGX 监控
- * - agx --config           显示/设置配置
+ * 实现 compute 命令族（算力设备监控）：
+ * - compute --status           显示算力设备监控状态和连接信息
+ * - compute --data             显示最新算力设备数据
+ * - compute --start            启动算力设备监控
+ * - compute --stop             停止算力设备监控
+ * - compute --config           显示/设置配置
  * 
  * @author TianShanOS Team
  * @version 2.0.0
  */
 
 #include "ts_console.h"
-#include "ts_agx_monitor.h"
+#include "ts_compute_monitor.h"
 #include "ts_api.h"
 #include "ts_log.h"
 #include "esp_console.h"
@@ -23,7 +23,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#define TAG "cmd_agx"
+#define TAG "cmd_compute"
 
 /*===========================================================================*/
 /*                          Argument Tables                                   */
@@ -40,19 +40,19 @@ static struct {
     struct arg_lit *json;
     struct arg_lit *help;
     struct arg_end *end;
-} s_agx_args;
+} s_compute_args;
 
 /*===========================================================================*/
-/*                          Command: agx --status                             */
+/*                          Command: compute --status                             */
 /*===========================================================================*/
 
-static int do_agx_status(bool json)
+static int do_compute_status(bool json)
 {
-    if (!ts_agx_monitor_is_initialized()) {
+    if (!ts_compute_monitor_is_initialized()) {
         if (json) {
-            ts_console_printf("{\"error\":\"AGX monitor not initialized\"}\n");
+            ts_console_printf("{\"error\":\"Compute monitor not initialized\"}\n");
         } else {
-            ts_console_error("AGX monitor not initialized\n");
+            ts_console_error("Compute monitor not initialized\n");
         }
         return 1;
     }
@@ -62,7 +62,7 @@ static int do_agx_status(bool json)
         ts_api_result_t result;
         ts_api_result_init(&result);
         
-        esp_err_t ret = ts_api_call("agx.status", NULL, &result);
+        esp_err_t ret = ts_api_call("compute.status", NULL, &result);
         if (ret == ESP_OK && result.code == TS_API_OK && result.data) {
             char *json_str = cJSON_PrintUnformatted(result.data);
             if (json_str) {
@@ -77,23 +77,23 @@ static int do_agx_status(bool json)
     }
     
     /* 格式化输出 */
-    ts_agx_status_info_t status;
-    esp_err_t ret = ts_agx_monitor_get_status(&status);
+    ts_compute_status_info_t status;
+    esp_err_t ret = ts_compute_monitor_get_status(&status);
     if (ret != ESP_OK) {
         ts_console_error("Failed to get status: %s\n", esp_err_to_name(ret));
         return 1;
     }
     
-    ts_console_printf("AGX Monitor Status:\n");
+    ts_console_printf("Compute Monitor Status:\n");
     ts_console_printf("  Initialized:    %s\n", status.initialized ? "Yes" : "No");
     ts_console_printf("  Running:        %s\n", status.running ? "Yes" : "No");
-    ts_console_printf("  Connection:     %s\n", ts_agx_status_to_str(status.connection_status));
+    ts_console_printf("  Connection:     %s\n", ts_compute_status_to_str(status.connection_status));
     ts_console_printf("  Reconnects:     %lu\n", status.total_reconnects);
     ts_console_printf("  Messages:       %lu\n", status.messages_received);
     ts_console_printf("  Parse Errors:   %lu\n", status.parse_errors);
     ts_console_printf("  Reliability:    %.1f%%\n", status.connection_reliability);
     
-    if (status.connection_status == TS_AGX_STATUS_CONNECTED) {
+    if (status.connection_status == TS_COMPUTE_STATUS_CONNECTED) {
         ts_console_printf("  Connected:      %llu ms\n", status.connected_time_ms);
     }
     
@@ -105,16 +105,16 @@ static int do_agx_status(bool json)
 }
 
 /*===========================================================================*/
-/*                          Command: agx --data                               */
+/*                          Command: compute --data                               */
 /*===========================================================================*/
 
-static int do_agx_data(bool json)
+static int do_compute_data(bool json)
 {
-    if (!ts_agx_monitor_is_data_valid()) {
+    if (!ts_compute_monitor_is_data_valid()) {
         if (json) {
-            ts_console_printf("{\"error\":\"No valid AGX data\"}\n");
+            ts_console_printf("{\"error\":\"No valid Compute data\"}\n");
         } else {
-            ts_console_error("No valid AGX data available\n");
+            ts_console_error("No valid Compute data available\n");
         }
         return 1;
     }
@@ -124,7 +124,7 @@ static int do_agx_data(bool json)
         ts_api_result_t result;
         ts_api_result_init(&result);
         
-        esp_err_t ret = ts_api_call("agx.data", NULL, &result);
+        esp_err_t ret = ts_api_call("compute.data", NULL, &result);
         if (ret == ESP_OK && result.code == TS_API_OK && result.data) {
             char *json_str = cJSON_PrintUnformatted(result.data);
             if (json_str) {
@@ -139,14 +139,14 @@ static int do_agx_data(bool json)
     }
     
     /* 格式化输出 */
-    ts_agx_data_t data;
-    esp_err_t ret = ts_agx_monitor_get_data(&data);
+    ts_compute_data_t data;
+    esp_err_t ret = ts_compute_monitor_get_data(&data);
     if (ret != ESP_OK) {
         ts_console_error("Failed to get data: %s\n", esp_err_to_name(ret));
         return 1;
     }
     
-    ts_console_printf("AGX Data:\n");
+    ts_console_printf("Compute Data:\n");
     ts_console_printf("  Timestamp:     %s\n", data.timestamp);
     ts_console_printf("\n  CPU (%d cores):\n", data.cpu.core_count);
     for (int i = 0; i < data.cpu.core_count; i++) {
@@ -184,60 +184,60 @@ static int do_agx_data(bool json)
 }
 
 /*===========================================================================*/
-/*                          Command: agx --start/stop                         */
+/*                          Command: compute --start/stop                         */
 /*===========================================================================*/
 
-static int do_agx_start(void)
+static int do_compute_start(void)
 {
-    if (!ts_agx_monitor_is_initialized()) {
+    if (!ts_compute_monitor_is_initialized()) {
         /* 初始化默认配置 */
-        esp_err_t ret = ts_agx_monitor_init(NULL);
+        esp_err_t ret = ts_compute_monitor_init(NULL);
         if (ret != ESP_OK) {
             ts_console_error("Failed to initialize: %s\n", esp_err_to_name(ret));
             return 1;
         }
     }
     
-    if (ts_agx_monitor_is_running()) {
-        ts_console_printf("AGX monitor already running\n");
+    if (ts_compute_monitor_is_running()) {
+        ts_console_printf("Compute monitor already running\n");
         return 0;
     }
     
-    esp_err_t ret = ts_agx_monitor_start();
+    esp_err_t ret = ts_compute_monitor_start();
     if (ret != ESP_OK) {
         ts_console_error("Failed to start: %s\n", esp_err_to_name(ret));
         return 1;
     }
     
-    ts_console_printf("AGX monitor started\n");
+    ts_console_printf("Compute monitor started\n");
     return 0;
 }
 
-static int do_agx_stop(void)
+static int do_compute_stop(void)
 {
-    if (!ts_agx_monitor_is_running()) {
-        ts_console_printf("AGX monitor not running\n");
+    if (!ts_compute_monitor_is_running()) {
+        ts_console_printf("Compute monitor not running\n");
         return 0;
     }
     
-    esp_err_t ret = ts_agx_monitor_stop();
+    esp_err_t ret = ts_compute_monitor_stop();
     if (ret != ESP_OK) {
         ts_console_error("Failed to stop: %s\n", esp_err_to_name(ret));
         return 1;
     }
     
-    ts_console_printf("AGX monitor stopped\n");
+    ts_console_printf("Compute monitor stopped\n");
     return 0;
 }
 
 /*===========================================================================*/
-/*                          Command: agx --config                             */
+/*                          Command: compute --config                             */
 /*===========================================================================*/
 
-static int do_agx_config(const char *server, int port, bool json)
+static int do_compute_config(const char *server, int port, bool json)
 {
-    ts_agx_config_t config;
-    ts_agx_monitor_get_default_config(&config);
+    ts_compute_config_t config;
+    ts_compute_monitor_get_default_config(&config);
     
     bool changed = false;
     
@@ -253,14 +253,14 @@ static int do_agx_config(const char *server, int port, bool json)
     
     if (changed) {
         /* 需要重新初始化才能生效 */
-        if (ts_agx_monitor_is_running()) {
-            ts_agx_monitor_stop();
+        if (ts_compute_monitor_is_running()) {
+            ts_compute_monitor_stop();
         }
-        if (ts_agx_monitor_is_initialized()) {
-            ts_agx_monitor_deinit();
+        if (ts_compute_monitor_is_initialized()) {
+            ts_compute_monitor_deinit();
         }
         
-        esp_err_t ret = ts_agx_monitor_init(&config);
+        esp_err_t ret = ts_compute_monitor_init(&config);
         if (ret != ESP_OK) {
             ts_console_error("Failed to reinit with new config: %s\n", esp_err_to_name(ret));
             return 1;
@@ -273,7 +273,7 @@ static int do_agx_config(const char *server, int port, bool json)
             ts_api_result_t result;
             ts_api_result_init(&result);
             
-            esp_err_t ret = ts_api_call("agx.config", NULL, &result);
+            esp_err_t ret = ts_api_call("compute.config", NULL, &result);
             if (ret == ESP_OK && result.code == TS_API_OK && result.data) {
                 char *json_str = cJSON_PrintUnformatted(result.data);
                 if (json_str) {
@@ -284,7 +284,7 @@ static int do_agx_config(const char *server, int port, bool json)
             ts_api_result_free(&result);
             return (ret == ESP_OK) ? 0 : 1;
         } else {
-            ts_console_printf("AGX Monitor Configuration:\n");
+            ts_console_printf("Compute Monitor Configuration:\n");
             ts_console_printf("  Server:           %s\n", config.server_ip);
             ts_console_printf("  Port:             %d\n", config.server_port);
             ts_console_printf("  Reconnect:        %lu ms\n", config.reconnect_interval_ms);
@@ -300,87 +300,87 @@ static int do_agx_config(const char *server, int port, bool json)
 /*                          Main Command Handler                              */
 /*===========================================================================*/
 
-static int agx_cmd_handler(int argc, char **argv)
+static int compute_cmd_handler(int argc, char **argv)
 {
-    int nerrors = arg_parse(argc, argv, (void **)&s_agx_args);
-    bool json = s_agx_args.json->count > 0;
+    int nerrors = arg_parse(argc, argv, (void **)&s_compute_args);
+    bool json = s_compute_args.json->count > 0;
     
-    if (s_agx_args.help->count > 0) {
-        ts_console_printf("Usage: agx [OPTIONS]\n");
+    if (s_compute_args.help->count > 0) {
+        ts_console_printf("Usage: compute [OPTIONS]\n");
         ts_console_printf("\nOptions:\n");
-        ts_console_printf("  --status        Show AGX monitor status\n");
-        ts_console_printf("  --data          Show latest AGX data\n");
-        ts_console_printf("  --start         Start AGX monitoring\n");
-        ts_console_printf("  --stop          Stop AGX monitoring\n");
+        ts_console_printf("  --status        Show compute monitor status\n");
+        ts_console_printf("  --data          Show latest compute data\n");
+        ts_console_printf("  --start         Start compute monitoring\n");
+        ts_console_printf("  --stop          Stop compute monitoring\n");
         ts_console_printf("  --config        Show/set configuration\n");
         ts_console_printf("  --server <ip>   Set server IP\n");
         ts_console_printf("  --port <n>      Set server port\n");
         ts_console_printf("  --json,-j       Output in JSON format\n");
         ts_console_printf("  --help,-h       Show this help\n");
         ts_console_printf("\nExamples:\n");
-        ts_console_printf("  agx --status              # Show connection status\n");
-        ts_console_printf("  agx --data --json         # Get AGX data in JSON\n");
-        ts_console_printf("  agx --start               # Start monitoring\n");
-        ts_console_printf("  agx --config --server 10.10.99.98 --port 58090\n");
+        ts_console_printf("  compute --status              # Show connection status\n");
+        ts_console_printf("  compute --data --json         # Get Compute data in JSON\n");
+        ts_console_printf("  compute --start               # Start monitoring\n");
+        ts_console_printf("  compute --config --server 10.10.99.98 --port 58090\n");
         return 0;
     }
     
     if (nerrors > 0) {
-        arg_print_errors(stderr, s_agx_args.end, "agx");
+        arg_print_errors(stderr, s_compute_args.end, "compute");
         return 1;
     }
     
-    /* agx --start */
-    if (s_agx_args.start->count > 0) {
-        return do_agx_start();
+    /* compute --start */
+    if (s_compute_args.start->count > 0) {
+        return do_compute_start();
     }
     
-    /* agx --stop */
-    if (s_agx_args.stop->count > 0) {
-        return do_agx_stop();
+    /* compute --stop */
+    if (s_compute_args.stop->count > 0) {
+        return do_compute_stop();
     }
     
-    /* agx --data */
-    if (s_agx_args.data->count > 0) {
-        return do_agx_data(json);
+    /* compute --data */
+    if (s_compute_args.data->count > 0) {
+        return do_compute_data(json);
     }
     
-    /* agx --config */
-    if (s_agx_args.config->count > 0 || 
-        s_agx_args.server->count > 0 || 
-        s_agx_args.port->count > 0) {
-        const char *server = s_agx_args.server->count > 0 ? s_agx_args.server->sval[0] : NULL;
-        int port = s_agx_args.port->count > 0 ? s_agx_args.port->ival[0] : 0;
-        return do_agx_config(server, port, json);
+    /* compute --config */
+    if (s_compute_args.config->count > 0 || 
+        s_compute_args.server->count > 0 || 
+        s_compute_args.port->count > 0) {
+        const char *server = s_compute_args.server->count > 0 ? s_compute_args.server->sval[0] : NULL;
+        int port = s_compute_args.port->count > 0 ? s_compute_args.port->ival[0] : 0;
+        return do_compute_config(server, port, json);
     }
     
-    /* Default: agx --status */
-    return do_agx_status(json);
+    /* Default: compute --status */
+    return do_compute_status(json);
 }
 
 /*===========================================================================*/
 /*                          Registration                                      */
 /*===========================================================================*/
 
-esp_err_t ts_cmd_agx_register(void)
+esp_err_t ts_cmd_compute_register(void)
 {
-    s_agx_args.status = arg_lit0(NULL, "status", "Show monitor status");
-    s_agx_args.data   = arg_lit0(NULL, "data", "Show latest AGX data");
-    s_agx_args.start  = arg_lit0(NULL, "start", "Start AGX monitoring");
-    s_agx_args.stop   = arg_lit0(NULL, "stop", "Stop AGX monitoring");
-    s_agx_args.config = arg_lit0(NULL, "config", "Show/set configuration");
-    s_agx_args.server = arg_str0(NULL, "server", "<ip>", "Server IP address");
-    s_agx_args.port   = arg_int0(NULL, "port", "<n>", "Server port");
-    s_agx_args.json   = arg_lit0("j", "json", "Output JSON format");
-    s_agx_args.help   = arg_lit0("h", "help", "Show help");
-    s_agx_args.end    = arg_end(5);
+    s_compute_args.status = arg_lit0(NULL, "status", "Show monitor status");
+    s_compute_args.data   = arg_lit0(NULL, "data", "Show latest compute data");
+    s_compute_args.start  = arg_lit0(NULL, "start", "Start compute monitoring");
+    s_compute_args.stop   = arg_lit0(NULL, "stop", "Stop compute monitoring");
+    s_compute_args.config = arg_lit0(NULL, "config", "Show/set configuration");
+    s_compute_args.server = arg_str0(NULL, "server", "<ip>", "Server IP address");
+    s_compute_args.port   = arg_int0(NULL, "port", "<n>", "Server port");
+    s_compute_args.json   = arg_lit0("j", "json", "Output JSON format");
+    s_compute_args.help   = arg_lit0("h", "help", "Show help");
+    s_compute_args.end    = arg_end(5);
     
     const esp_console_cmd_t cmd = {
-        .command = "agx",
-        .help = "AGX device monitoring",
+        .command = "compute",
+        .help = "Compute device monitoring (Jetson AGX, servers, etc.)",
         .hint = NULL,
-        .func = agx_cmd_handler,
-        .argtable = &s_agx_args,
+        .func = compute_cmd_handler,
+        .argtable = &s_compute_args,
     };
     
     return esp_console_cmd_register(&cmd);

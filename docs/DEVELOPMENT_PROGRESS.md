@@ -1,9 +1,9 @@
 # TianShanOS 开发进度跟踪
 
 > **项目**：TianShanOS（天山操作系统）  
-> **版本**：0.2.1  
-> **最后更新**：2026年1月24日  
-> **代码统计**：100+ 个 C 源文件，75+ 个头文件
+> **版本**：0.3.0  
+> **最后更新**：2026年1月27日  
+> **代码统计**：110+ 个 C 源文件，80+ 个头文件
 
 ---
 
@@ -28,6 +28,146 @@
 | Phase 14: LED 滤镜系统优化 | ✅ 完成 | 100% | 2026-01-23 |
 | Phase 15: WebUI 日志流修复 & 导航栏清理 | ✅ 完成 | 100% | 2026-01-24 |
 | Phase 16: DRAM 碎片优化 | ✅ 完成 | 100% | 2026-01-24 |
+| Phase 17: 自动化引擎实现 | ✅ 完成 | 100% | 2026-01-27 |
+
+---
+
+## 📋 Phase 17: 自动化引擎实现 ✅
+
+**时间**：2026年1月25日 - 1月27日  
+**目标**：实现完整的自动化引擎，支持多数据源监控和 WebUI Dashboard
+
+### 核心功能
+
+#### 1. 数据源管理系统 (ts_source_manager) 🔌
+
+**支持的数据源协议**：
+- **Socket.IO**: 实时 WebSocket 数据流（如 AGX tegrastats）
+- **REST API**: HTTP 轮询数据源（如 LPMU 状态）
+- **WebSocket**: 原生 WebSocket 连接
+
+**配置统一化**：
+```json
+{
+  "sources": [{
+    "id": "agx",
+    "type": "socketio",
+    "url": "http://10.10.99.98:58090",
+    "events": ["tegrastats_update"],
+    "mappings": [
+      {"json_path": "cpu[0].usage", "var_name": "agx.cpu0_usage"},
+      {"json_path": "temperature.cpu", "var_name": "agx.cpu_temp"}
+    ]
+  }]
+}
+```
+
+**自动发现 (auto_discover)**：
+- Socket.IO / REST 源均支持 `auto_discover: true`
+- 自动从 JSON 响应中提取所有字段创建变量
+- 首次接收数据时自动注册，支持嵌套对象/数组
+
+#### 2. 变量存储系统 (ts_variable) 📊
+
+**实现特性**：
+- 支持 bool/int/float/string 四种类型
+- 线程安全（FreeRTOS mutex）
+- 优先使用 PSRAM 分配
+- 变量变化通过事件总线通知
+- 支持按前缀枚举、按源批量删除
+
+#### 3. JSONPath 解析器 (ts_jsonpath) 🔍
+
+**轻量级实现**：
+```c
+// 支持的语法
+cJSON *val = ts_jsonpath_get(root, "cpu[0].usage");      // 数组索引
+cJSON *arr = ts_jsonpath_get(root, "cpu[*].freq");       // 通配符展开
+cJSON *last = ts_jsonpath_get(root, "history[-1].value"); // 负索引
+```
+
+**便捷 API**：
+```c
+double temp = ts_jsonpath_get_number(data, "temperature.cpu", 0.0);
+char *name = ts_jsonpath_get_string(data, "device.name");  // 调用方需 free
+```
+
+#### 4. 算力设备监控 (ts_compute_monitor) 🖥️
+
+**独立模块**（从 ts_source_manager 分离）：
+- 专门监控 Jetson AGX 等算力设备
+- Socket.IO 协议完整实现（握手/probe/upgrade/ping-pong）
+- 自动重连（指数退避）
+- 温度数据自动推送到 `ts_temp_source`
+
+**CLI 命令**：
+```bash
+compute --status           # 连接状态
+compute --data --json      # 最新数据（JSON 格式）
+compute --start/--stop     # 启动/停止监控
+compute --config --server 10.10.99.98 --port 58090
+```
+
+#### 5. WebUI Dashboard 增强 🎨
+
+**数据源配置页面** (`/automation/sources`)：
+- 源列表展示（状态、协议、连接信息）
+- 新增/编辑源配置（表单 + JSON 高级模式）
+- 变量浏览器（实时值、类型、更新时间）
+
+**模态框 CSS 修复**：
+- 修复 `.modal` 默认隐藏逻辑与 JS 的 `hidden` 类不匹配问题
+- 统一使用 `hidden` 类控制显示/隐藏
+
+### 技术优化
+
+#### 日志级别调整
+将 `ts_source_manager.c` 中的频繁操作日志从 INFO 改为 DEBUG：
+- Socket.IO 事件接收/匹配
+- 值更新通知
+- 协议握手细节（probe/upgrade/connect）
+- mapping 处理和 auto-discover 结果
+
+**效果**：CLI 可正常交互，不被日志刷屏
+
+#### sdkconfig.defaults 同步
+新增配置项：
+```kconfig
+# Automation Engine
+CONFIG_TS_AUTOMATION_ENABLED=y
+CONFIG_TS_AUTOMATION_CONFIG_PATH="/sdcard/config/automation.json"
+CONFIG_TS_AUTOMATION_MAX_SOURCES=16
+CONFIG_TS_AUTOMATION_MAX_RULES=32
+CONFIG_TS_AUTOMATION_MAX_VARIABLES=256
+
+# HTTPS/mTLS 控制通道
+CONFIG_TS_HTTPS_ENABLED=y
+CONFIG_TS_HTTPS_REQUIRE_CLIENT_CERT=y
+
+# WebUI
+CONFIG_TS_WEBUI_ENABLE=y
+CONFIG_TS_WEBUI_WS_ENABLE=y
+CONFIG_TS_WEBUI_CORS_ENABLE=y
+
+# LED Matrix
+CONFIG_TS_LED_MATRIX_WIDTH=32
+CONFIG_TS_LED_MATRIX_HEIGHT=32
+```
+
+### 新增文件
+
+| 文件 | 描述 |
+|------|------|
+| `components/ts_automation/src/ts_variable.c` | 变量存储实现 |
+| `components/ts_automation/src/ts_source_manager.c` | 数据源管理 |
+| `components/ts_jsonpath/` | JSONPath 解析组件 |
+| `components/ts_drivers/src/ts_compute_monitor.c` | 算力设备监控 |
+| `components/ts_console/commands/ts_cmd_compute.c` | compute 命令 |
+
+### 相关文档
+
+- `docs/AUTOMATION_ENGINE.md` - 自动化引擎设计文档
+- `sdkconfig.defaults` - 项目配置同步更新
 
 ---
 

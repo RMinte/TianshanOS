@@ -1,8 +1,8 @@
 /**
- * @file ts_agx_monitor.c
- * @brief AGX Device Monitor Implementation for TianShanOS
+ * @file ts_compute_monitor.c
+ * @brief Compute Device Monitor Implementation for TianShanOS
  * 
- * AGX 设备监控服务实现 - WebSocket 客户端
+ * 算力设备监控服务实现 - WebSocket 客户端
  * 
  * 架构设计：
  * 1. 独立任务运行 WebSocket 客户端
@@ -18,7 +18,7 @@
  * 注意：此实现使用 ESP-IDF 的 esp_websocket_client
  */
 
-#include "ts_agx_monitor.h"
+#include "ts_compute_monitor.h"
 #include "ts_core.h"  /* TS_CALLOC_PSRAM */
 #include "ts_temp_source.h"
 #include "ts_event.h"
@@ -33,7 +33,7 @@
 #include <string.h>
 #include <stdlib.h>
 
-static const char *TAG = "ts_agx_monitor";
+static const char *TAG = "ts_compute_monitor";
 
 /*===========================================================================*/
 /*                              Configuration                                 */
@@ -56,13 +56,13 @@ static const char *TAG = "ts_agx_monitor";
 /** 运行时上下文 */
 typedef struct {
     /* 配置 */
-    ts_agx_config_t config;
+    ts_compute_config_t config;
     
     /* 状态 */
     bool initialized;
     bool running;
     bool should_stop;
-    ts_agx_status_t status;
+    ts_compute_status_t status;
     
     /* WebSocket */
     esp_websocket_client_handle_t ws_client;
@@ -71,7 +71,7 @@ typedef struct {
     bool upgrade_complete;
     
     /* 数据 */
-    ts_agx_data_t latest_data;
+    ts_compute_data_t latest_data;
     SemaphoreHandle_t data_mutex;
     
     /* 任务 */
@@ -85,66 +85,66 @@ typedef struct {
     uint64_t connected_since;
     
     /* 回调 */
-    ts_agx_event_callback_t callback;
+    ts_compute_event_callback_t callback;
     void *callback_user_data;
     
     /* 错误 */
-    char last_error[TS_AGX_MAX_ERROR_MSG_LEN];
+    char last_error[TS_COMPUTE_MAX_ERROR_MSG_LEN];
     
-} agx_monitor_ctx_t;
+} compute_monitor_ctx_t;
 
-static agx_monitor_ctx_t *s_ctx = NULL;
+static compute_monitor_ctx_t *s_ctx = NULL;
 
 /*===========================================================================*/
 /*                              Forward Declarations                          */
 /*===========================================================================*/
 
-static void agx_monitor_task(void *arg);
+static void compute_monitor_task(void *arg);
 static esp_err_t socketio_handshake(void);
 static void websocket_event_handler(void *arg, esp_event_base_t event_base,
                                     int32_t event_id, void *event_data);
-static esp_err_t parse_tegrastats_data(const char *json_str, ts_agx_data_t *data);
-static void update_temp_source(const ts_agx_data_t *data);
-static void publish_status_event(ts_agx_status_t status);
-static void publish_data_event(const ts_agx_data_t *data);
+static esp_err_t parse_tegrastats_data(const char *json_str, ts_compute_data_t *data);
+static void update_temp_source(const ts_compute_data_t *data);
+static void publish_status_event(ts_compute_status_t status);
+static void publish_data_event(const ts_compute_data_t *data);
 static void set_error(const char *error);
-static void set_status(ts_agx_status_t status);
+static void set_status(ts_compute_status_t status);
 
 /*===========================================================================*/
 /*                              Public API                                    */
 /*===========================================================================*/
 
-esp_err_t ts_agx_monitor_get_default_config(ts_agx_config_t *config)
+esp_err_t ts_compute_monitor_get_default_config(ts_compute_config_t *config)
 {
     if (config == NULL) {
         return ESP_ERR_INVALID_ARG;
     }
     
-    memset(config, 0, sizeof(ts_agx_config_t));
-    strncpy(config->server_ip, TS_AGX_DEFAULT_SERVER_IP, sizeof(config->server_ip) - 1);
-    config->server_port = TS_AGX_DEFAULT_SERVER_PORT;
-    config->reconnect_interval_ms = TS_AGX_DEFAULT_RECONNECT_MS;
-    config->startup_delay_ms = TS_AGX_DEFAULT_STARTUP_DELAY_MS;
-    config->heartbeat_timeout_ms = TS_AGX_DEFAULT_HEARTBEAT_TIMEOUT_MS;
+    memset(config, 0, sizeof(ts_compute_config_t));
+    strncpy(config->server_ip, TS_COMPUTE_DEFAULT_SERVER_IP, sizeof(config->server_ip) - 1);
+    config->server_port = TS_COMPUTE_DEFAULT_SERVER_PORT;
+    config->reconnect_interval_ms = TS_COMPUTE_DEFAULT_RECONNECT_MS;
+    config->startup_delay_ms = TS_COMPUTE_DEFAULT_STARTUP_DELAY_MS;
+    config->heartbeat_timeout_ms = TS_COMPUTE_DEFAULT_HEARTBEAT_TIMEOUT_MS;
     config->auto_start = true;
     config->update_temp_source = true;
-    config->task_stack_size = TS_AGX_DEFAULT_TASK_STACK;
-    config->task_priority = TS_AGX_DEFAULT_TASK_PRIORITY;
+    config->task_stack_size = TS_COMPUTE_DEFAULT_TASK_STACK;
+    config->task_priority = TS_COMPUTE_DEFAULT_TASK_PRIORITY;
     
     return ESP_OK;
 }
 
-esp_err_t ts_agx_monitor_init(const ts_agx_config_t *config)
+esp_err_t ts_compute_monitor_init(const ts_compute_config_t *config)
 {
     if (s_ctx != NULL) {
         ESP_LOGW(TAG, "Already initialized");
         return ESP_ERR_INVALID_STATE;
     }
     
-    ESP_LOGI(TAG, "Initializing AGX monitor v%s", TS_AGX_MONITOR_VERSION);
+    ESP_LOGI(TAG, "Initializing compute monitor v%s", TS_COMPUTE_MONITOR_VERSION);
     
     /* 分配上下文（优先使用 PSRAM）*/
-    s_ctx = TS_CALLOC_PSRAM(1, sizeof(agx_monitor_ctx_t));
+    s_ctx = TS_CALLOC_PSRAM(1, sizeof(compute_monitor_ctx_t));
     if (s_ctx == NULL) {
         ESP_LOGE(TAG, "Failed to allocate context");
         return ESP_ERR_NO_MEM;
@@ -152,9 +152,9 @@ esp_err_t ts_agx_monitor_init(const ts_agx_config_t *config)
     
     /* 加载配置 */
     if (config != NULL) {
-        memcpy(&s_ctx->config, config, sizeof(ts_agx_config_t));
+        memcpy(&s_ctx->config, config, sizeof(ts_compute_config_t));
     } else {
-        ts_agx_monitor_get_default_config(&s_ctx->config);
+        ts_compute_monitor_get_default_config(&s_ctx->config);
     }
     
     /* 创建互斥锁 */
@@ -172,7 +172,7 @@ esp_err_t ts_agx_monitor_init(const ts_agx_config_t *config)
     }
     
     s_ctx->initialized = true;
-    s_ctx->status = TS_AGX_STATUS_INITIALIZED;
+    s_ctx->status = TS_COMPUTE_STATUS_INITIALIZED;
     
     ESP_LOGI(TAG, "Initialized, server: %s:%d", 
              s_ctx->config.server_ip, s_ctx->config.server_port);
@@ -180,7 +180,7 @@ esp_err_t ts_agx_monitor_init(const ts_agx_config_t *config)
     return ESP_OK;
 }
 
-esp_err_t ts_agx_monitor_deinit(void)
+esp_err_t ts_compute_monitor_deinit(void)
 {
     if (s_ctx == NULL) {
         return ESP_ERR_INVALID_STATE;
@@ -188,7 +188,7 @@ esp_err_t ts_agx_monitor_deinit(void)
     
     /* 停止监控 */
     if (s_ctx->running) {
-        ts_agx_monitor_stop();
+        ts_compute_monitor_stop();
     }
     
     /* 注销温度源 provider */
@@ -206,7 +206,7 @@ esp_err_t ts_agx_monitor_deinit(void)
     return ESP_OK;
 }
 
-esp_err_t ts_agx_monitor_start(void)
+esp_err_t ts_compute_monitor_start(void)
 {
     if (s_ctx == NULL || !s_ctx->initialized) {
         return ESP_ERR_INVALID_STATE;
@@ -217,15 +217,15 @@ esp_err_t ts_agx_monitor_start(void)
         return ESP_OK;
     }
     
-    ESP_LOGI(TAG, "Starting AGX monitor...");
+    ESP_LOGI(TAG, "Starting compute monitor...");
     
     s_ctx->should_stop = false;
     s_ctx->running = true;
     
     /* 创建监控任务 */
     BaseType_t ret = xTaskCreate(
-        agx_monitor_task,
-        "agx_monitor",
+        compute_monitor_task,
+        "compute_monitor",
         s_ctx->config.task_stack_size,
         NULL,
         s_ctx->config.task_priority,
@@ -241,13 +241,13 @@ esp_err_t ts_agx_monitor_start(void)
     return ESP_OK;
 }
 
-esp_err_t ts_agx_monitor_stop(void)
+esp_err_t ts_compute_monitor_stop(void)
 {
     if (s_ctx == NULL || !s_ctx->running) {
         return ESP_ERR_INVALID_STATE;
     }
     
-    ESP_LOGI(TAG, "Stopping AGX monitor...");
+    ESP_LOGI(TAG, "Stopping compute monitor...");
     
     s_ctx->should_stop = true;
     
@@ -259,23 +259,23 @@ esp_err_t ts_agx_monitor_stop(void)
     }
     
     s_ctx->running = false;
-    set_status(TS_AGX_STATUS_INITIALIZED);
+    set_status(TS_COMPUTE_STATUS_INITIALIZED);
     
     ESP_LOGI(TAG, "Stopped");
     return ESP_OK;
 }
 
-bool ts_agx_monitor_is_initialized(void)
+bool ts_compute_monitor_is_initialized(void)
 {
     return (s_ctx != NULL && s_ctx->initialized);
 }
 
-bool ts_agx_monitor_is_running(void)
+bool ts_compute_monitor_is_running(void)
 {
     return (s_ctx != NULL && s_ctx->running);
 }
 
-esp_err_t ts_agx_monitor_get_data(ts_agx_data_t *data)
+esp_err_t ts_compute_monitor_get_data(ts_compute_data_t *data)
 {
     if (s_ctx == NULL || data == NULL) {
         return ESP_ERR_INVALID_ARG;
@@ -285,13 +285,13 @@ esp_err_t ts_agx_monitor_get_data(ts_agx_data_t *data)
         return ESP_ERR_TIMEOUT;
     }
     
-    memcpy(data, &s_ctx->latest_data, sizeof(ts_agx_data_t));
+    memcpy(data, &s_ctx->latest_data, sizeof(ts_compute_data_t));
     xSemaphoreGive(s_ctx->data_mutex);
     
     return ESP_OK;
 }
 
-bool ts_agx_monitor_is_data_valid(void)
+bool ts_compute_monitor_is_data_valid(void)
 {
     if (s_ctx == NULL) {
         return false;
@@ -316,13 +316,13 @@ bool ts_agx_monitor_is_data_valid(void)
     return valid;
 }
 
-esp_err_t ts_agx_monitor_get_status(ts_agx_status_info_t *status)
+esp_err_t ts_compute_monitor_get_status(ts_compute_status_info_t *status)
 {
     if (s_ctx == NULL || status == NULL) {
         return ESP_ERR_INVALID_ARG;
     }
     
-    memset(status, 0, sizeof(ts_agx_status_info_t));
+    memset(status, 0, sizeof(ts_compute_status_info_t));
     
     status->initialized = s_ctx->initialized;
     status->running = s_ctx->running;
@@ -332,7 +332,7 @@ esp_err_t ts_agx_monitor_get_status(ts_agx_status_info_t *status)
     status->parse_errors = s_ctx->parse_errors;
     status->last_message_time_us = s_ctx->last_message_time;
     
-    if (s_ctx->status == TS_AGX_STATUS_CONNECTED && s_ctx->connected_since > 0) {
+    if (s_ctx->status == TS_COMPUTE_STATUS_CONNECTED && s_ctx->connected_since > 0) {
         status->connected_time_ms = (esp_timer_get_time() - s_ctx->connected_since) / 1000;
     }
     
@@ -348,15 +348,15 @@ esp_err_t ts_agx_monitor_get_status(ts_agx_status_info_t *status)
     return ESP_OK;
 }
 
-ts_agx_status_t ts_agx_monitor_get_connection_status(void)
+ts_compute_status_t ts_compute_monitor_get_connection_status(void)
 {
     if (s_ctx == NULL) {
-        return TS_AGX_STATUS_UNINITIALIZED;
+        return TS_COMPUTE_STATUS_UNINITIALIZED;
     }
     return s_ctx->status;
 }
 
-esp_err_t ts_agx_monitor_register_callback(ts_agx_event_callback_t callback,
+esp_err_t ts_compute_monitor_register_callback(ts_compute_event_callback_t callback,
                                            void *user_data)
 {
     if (s_ctx == NULL) {
@@ -368,7 +368,7 @@ esp_err_t ts_agx_monitor_register_callback(ts_agx_event_callback_t callback,
     return ESP_OK;
 }
 
-esp_err_t ts_agx_monitor_unregister_callback(void)
+esp_err_t ts_compute_monitor_unregister_callback(void)
 {
     if (s_ctx == NULL) {
         return ESP_ERR_INVALID_STATE;
@@ -379,16 +379,16 @@ esp_err_t ts_agx_monitor_unregister_callback(void)
     return ESP_OK;
 }
 
-const char *ts_agx_status_to_str(ts_agx_status_t status)
+const char *ts_compute_status_to_str(ts_compute_status_t status)
 {
     switch (status) {
-        case TS_AGX_STATUS_UNINITIALIZED: return "UNINITIALIZED";
-        case TS_AGX_STATUS_INITIALIZED:   return "INITIALIZED";
-        case TS_AGX_STATUS_CONNECTING:    return "CONNECTING";
-        case TS_AGX_STATUS_CONNECTED:     return "CONNECTED";
-        case TS_AGX_STATUS_DISCONNECTED:  return "DISCONNECTED";
-        case TS_AGX_STATUS_RECONNECTING:  return "RECONNECTING";
-        case TS_AGX_STATUS_ERROR:         return "ERROR";
+        case TS_COMPUTE_STATUS_UNINITIALIZED: return "UNINITIALIZED";
+        case TS_COMPUTE_STATUS_INITIALIZED:   return "INITIALIZED";
+        case TS_COMPUTE_STATUS_CONNECTING:    return "CONNECTING";
+        case TS_COMPUTE_STATUS_CONNECTED:     return "CONNECTED";
+        case TS_COMPUTE_STATUS_DISCONNECTED:  return "DISCONNECTED";
+        case TS_COMPUTE_STATUS_RECONNECTING:  return "RECONNECTING";
+        case TS_COMPUTE_STATUS_ERROR:         return "ERROR";
         default:                          return "UNKNOWN";
     }
 }
@@ -400,17 +400,17 @@ const char *ts_agx_status_to_str(ts_agx_status_t status)
 /**
  * @brief 设置状态并发布事件
  */
-static void set_status(ts_agx_status_t status)
+static void set_status(ts_compute_status_t status)
 {
     if (s_ctx == NULL) return;
     
-    ts_agx_status_t old_status = s_ctx->status;
+    ts_compute_status_t old_status = s_ctx->status;
     s_ctx->status = status;
     
     if (old_status != status) {
         ESP_LOGI(TAG, "Status: %s -> %s", 
-                 ts_agx_status_to_str(old_status),
-                 ts_agx_status_to_str(status));
+                 ts_compute_status_to_str(old_status),
+                 ts_compute_status_to_str(status));
         publish_status_event(status);
     }
 }
@@ -429,19 +429,19 @@ static void set_error(const char *error)
 /**
  * @brief 发布状态事件
  */
-static void publish_status_event(ts_agx_status_t status)
+static void publish_status_event(ts_compute_status_t status)
 {
     ts_event_id_t event_id;
     
     switch (status) {
-        case TS_AGX_STATUS_CONNECTED:
+        case TS_COMPUTE_STATUS_CONNECTED:
             event_id = TS_EVT_AGX_CONNECTED;
             break;
-        case TS_AGX_STATUS_DISCONNECTED:
-        case TS_AGX_STATUS_RECONNECTING:
+        case TS_COMPUTE_STATUS_DISCONNECTED:
+        case TS_COMPUTE_STATUS_RECONNECTING:
             event_id = TS_EVT_AGX_DISCONNECTED;
             break;
-        case TS_AGX_STATUS_ERROR:
+        case TS_COMPUTE_STATUS_ERROR:
             event_id = TS_EVT_AGX_ERROR;
             break;
         default:
@@ -460,12 +460,12 @@ static void publish_status_event(ts_agx_status_t status)
 /**
  * @brief 发布数据更新事件
  */
-static void publish_data_event(const ts_agx_data_t *data)
+static void publish_data_event(const ts_compute_data_t *data)
 {
     if (data == NULL) return;
     
     ts_event_post(TS_EVENT_BASE_DEVICE_MON, TS_EVT_AGX_DATA_UPDATED,
-                  data, sizeof(ts_agx_data_t), 0);
+                  data, sizeof(ts_compute_data_t), 0);
     
     /* 回调通知 */
     if (s_ctx->callback != NULL) {
@@ -476,7 +476,7 @@ static void publish_data_event(const ts_agx_data_t *data)
 /**
  * @brief 更新温度源
  */
-static void update_temp_source(const ts_agx_data_t *data)
+static void update_temp_source(const ts_compute_data_t *data)
 {
     if (data == NULL || !s_ctx->config.update_temp_source) return;
     
@@ -594,7 +594,7 @@ static void websocket_event_handler(void *arg, esp_event_base_t event_base,
             ESP_LOGW(TAG, "WebSocket disconnected");
             s_ctx->ws_connected = false;
             s_ctx->upgrade_complete = false;
-            set_status(TS_AGX_STATUS_DISCONNECTED);
+            set_status(TS_COMPUTE_STATUS_DISCONNECTED);
             break;
             
         case WEBSOCKET_EVENT_DATA:
@@ -614,7 +614,7 @@ static void websocket_event_handler(void *arg, esp_event_base_t event_base,
                         s_ctx->upgrade_complete = true;
                         s_ctx->connected_since = esp_timer_get_time();
                         s_ctx->last_message_time = esp_timer_get_time();  /* 初始化心跳时间 */
-                        set_status(TS_AGX_STATUS_CONNECTED);
+                        set_status(TS_COMPUTE_STATUS_CONNECTED);
                         ESP_LOGI(TAG, "Socket.IO upgrade complete");
                     }
                     else if (strcmp(msg, SOCKETIO_PING_MESSAGE) == 0) {
@@ -640,7 +640,7 @@ static void websocket_event_handler(void *arg, esp_event_base_t event_base,
                                     strcmp(event_name->valuestring, "tegrastats_update") == 0 &&
                                     event_data_json != NULL) {
                                     
-                                    ts_agx_data_t agx_data;
+                                    ts_compute_data_t agx_data;
                                     memset(&agx_data, 0, sizeof(agx_data));
                                     
                                     if (parse_tegrastats_data(
@@ -654,7 +654,7 @@ static void websocket_event_handler(void *arg, esp_event_base_t event_base,
                                         if (xSemaphoreTake(s_ctx->data_mutex, 
                                                           pdMS_TO_TICKS(100)) == pdTRUE) {
                                             memcpy(&s_ctx->latest_data, &agx_data, 
-                                                   sizeof(ts_agx_data_t));
+                                                   sizeof(ts_compute_data_t));
                                             xSemaphoreGive(s_ctx->data_mutex);
                                         }
                                         
@@ -687,7 +687,7 @@ static void websocket_event_handler(void *arg, esp_event_base_t event_base,
         case WEBSOCKET_EVENT_ERROR:
             ESP_LOGE(TAG, "WebSocket error");
             set_error("WebSocket error");
-            set_status(TS_AGX_STATUS_ERROR);
+            set_status(TS_COMPUTE_STATUS_ERROR);
             break;
             
         default:
@@ -698,7 +698,7 @@ static void websocket_event_handler(void *arg, esp_event_base_t event_base,
 /**
  * @brief 解析 tegrastats 数据
  */
-static esp_err_t parse_tegrastats_data(const char *json_str, ts_agx_data_t *data)
+static esp_err_t parse_tegrastats_data(const char *json_str, ts_compute_data_t *data)
 {
     if (json_str == NULL || data == NULL) {
         return ESP_ERR_INVALID_ARG;
@@ -721,8 +721,8 @@ static esp_err_t parse_tegrastats_data(const char *json_str, ts_agx_data_t *data
     cJSON *cpu = cJSON_GetObjectItem(root, "cpu");
     if (cpu != NULL && cJSON_IsArray(cpu)) {
         data->cpu.core_count = cJSON_GetArraySize(cpu);
-        if (data->cpu.core_count > TS_AGX_MAX_CPU_CORES) {
-            data->cpu.core_count = TS_AGX_MAX_CPU_CORES;
+        if (data->cpu.core_count > TS_COMPUTE_MAX_CPU_CORES) {
+            data->cpu.core_count = TS_COMPUTE_MAX_CPU_CORES;
         }
         
         for (int i = 0; i < data->cpu.core_count; i++) {
@@ -818,9 +818,9 @@ static esp_err_t parse_tegrastats_data(const char *json_str, ts_agx_data_t *data
 }
 
 /**
- * @brief AGX 监控主任务
+ * @brief 算力监控主任务
  */
-static void agx_monitor_task(void *arg)
+static void compute_monitor_task(void *arg)
 {
     ESP_LOGI(TAG, "Monitor task started");
     
@@ -828,11 +828,11 @@ static void agx_monitor_task(void *arg)
     
     while (!s_ctx->should_stop) {
         /* Socket.IO 握手 */
-        set_status(TS_AGX_STATUS_CONNECTING);
+        set_status(TS_COMPUTE_STATUS_CONNECTING);
         
         if (socketio_handshake() != ESP_OK) {
             ESP_LOGW(TAG, "Handshake failed, retry in %lu ms", reconnect_delay);
-            set_status(TS_AGX_STATUS_RECONNECTING);
+            set_status(TS_COMPUTE_STATUS_RECONNECTING);
             s_ctx->total_reconnects++;
             
             /* 指数退避 */
@@ -865,7 +865,7 @@ static void agx_monitor_task(void *arg)
         s_ctx->ws_client = esp_websocket_client_init(&ws_cfg);
         if (s_ctx->ws_client == NULL) {
             set_error("WebSocket init failed");
-            set_status(TS_AGX_STATUS_RECONNECTING);
+            set_status(TS_COMPUTE_STATUS_RECONNECTING);
             s_ctx->total_reconnects++;
             vTaskDelay(pdMS_TO_TICKS(reconnect_delay));
             continue;
@@ -880,7 +880,7 @@ static void agx_monitor_task(void *arg)
             set_error("WebSocket start failed");
             esp_websocket_client_destroy(s_ctx->ws_client);
             s_ctx->ws_client = NULL;
-            set_status(TS_AGX_STATUS_RECONNECTING);
+            set_status(TS_COMPUTE_STATUS_RECONNECTING);
             s_ctx->total_reconnects++;
             vTaskDelay(pdMS_TO_TICKS(reconnect_delay));
             continue;
@@ -898,7 +898,7 @@ static void agx_monitor_task(void *arg)
             esp_websocket_client_stop(s_ctx->ws_client);
             esp_websocket_client_destroy(s_ctx->ws_client);
             s_ctx->ws_client = NULL;
-            set_status(TS_AGX_STATUS_RECONNECTING);
+            set_status(TS_COMPUTE_STATUS_RECONNECTING);
             s_ctx->total_reconnects++;
             vTaskDelay(pdMS_TO_TICKS(reconnect_delay));
             continue;
@@ -928,7 +928,7 @@ static void agx_monitor_task(void *arg)
         s_ctx->upgrade_complete = false;
         
         if (!s_ctx->should_stop) {
-            set_status(TS_AGX_STATUS_RECONNECTING);
+            set_status(TS_COMPUTE_STATUS_RECONNECTING);
             s_ctx->total_reconnects++;
             vTaskDelay(pdMS_TO_TICKS(reconnect_delay));
         }

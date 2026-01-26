@@ -1,5 +1,5 @@
 /**
- * @file ts_api_agx.c
+ * @file ts_api_monitor.c
  * @brief AGX Monitor API Handlers
  * 
  * @author TianShanOS Team
@@ -7,30 +7,30 @@
  */
 
 #include "ts_api.h"
-#include "ts_agx_monitor.h"
+#include "ts_compute_monitor.h"
 #include "ts_log.h"
 #include <string.h>
 
-#define TAG "api_agx"
+#define TAG "api_monitor"
 
 /*===========================================================================*/
 /*                          API Handlers                                      */
 /*===========================================================================*/
 
 /**
- * @brief agx.status - Get AGX monitor status
+ * @brief agx.status - Get Compute monitor status
  */
-static esp_err_t api_agx_status(const cJSON *params, ts_api_result_t *result)
+static esp_err_t api_monitor_status(const cJSON *params, ts_api_result_t *result)
 {
     (void)params;
     
-    if (!ts_agx_monitor_is_initialized()) {
-        ts_api_result_error(result, TS_API_ERR_INTERNAL, "AGX monitor not initialized");
+    if (!ts_compute_monitor_is_initialized()) {
+        ts_api_result_error(result, TS_API_ERR_INTERNAL, "Compute monitor not initialized");
         return ESP_ERR_INVALID_STATE;
     }
     
-    ts_agx_status_info_t status;
-    esp_err_t ret = ts_agx_monitor_get_status(&status);
+    ts_compute_status_info_t status;
+    esp_err_t ret = ts_compute_monitor_get_status(&status);
     if (ret != ESP_OK) {
         ts_api_result_error(result, TS_API_ERR_INTERNAL, "Failed to get status");
         return ret;
@@ -44,7 +44,7 @@ static esp_err_t api_agx_status(const cJSON *params, ts_api_result_t *result)
     
     cJSON_AddBoolToObject(data, "initialized", status.initialized);
     cJSON_AddBoolToObject(data, "running", status.running);
-    cJSON_AddStringToObject(data, "connection", ts_agx_status_to_str(status.connection_status));
+    cJSON_AddStringToObject(data, "connection", ts_compute_status_to_str(status.connection_status));
     cJSON_AddNumberToObject(data, "reconnects", status.total_reconnects);
     cJSON_AddNumberToObject(data, "messages", status.messages_received);
     cJSON_AddNumberToObject(data, "errors", status.parse_errors);
@@ -62,17 +62,17 @@ static esp_err_t api_agx_status(const cJSON *params, ts_api_result_t *result)
 /**
  * @brief agx.data - Get latest AGX data
  */
-static esp_err_t api_agx_data(const cJSON *params, ts_api_result_t *result)
+static esp_err_t api_monitor_data(const cJSON *params, ts_api_result_t *result)
 {
     (void)params;
     
-    if (!ts_agx_monitor_is_data_valid()) {
-        ts_api_result_error(result, TS_API_ERR_NOT_FOUND, "No valid AGX data");
+    if (!ts_compute_monitor_is_data_valid()) {
+        ts_api_result_error(result, TS_API_ERR_NOT_FOUND, "No valid compute data");
         return ESP_ERR_NOT_FOUND;
     }
     
-    ts_agx_data_t agx_data;
-    esp_err_t ret = ts_agx_monitor_get_data(&agx_data);
+    ts_compute_data_t agx_data;
+    esp_err_t ret = ts_compute_monitor_get_data(&agx_data);
     if (ret != ESP_OK) {
         ts_api_result_error(result, TS_API_ERR_INTERNAL, "Failed to get data");
         return ret;
@@ -136,14 +136,14 @@ static esp_err_t api_agx_data(const cJSON *params, ts_api_result_t *result)
 }
 
 /**
- * @brief agx.config - Get AGX monitor configuration
+ * @brief agx.config - Get Compute monitor configuration
  */
-static esp_err_t api_agx_config(const cJSON *params, ts_api_result_t *result)
+static esp_err_t api_monitor_config(const cJSON *params, ts_api_result_t *result)
 {
     (void)params;
     
-    ts_agx_config_t config;
-    ts_agx_monitor_get_default_config(&config);
+    ts_compute_config_t config;
+    ts_compute_monitor_get_default_config(&config);
     
     cJSON *data = cJSON_CreateObject();
     if (!data) {
@@ -162,26 +162,26 @@ static esp_err_t api_agx_config(const cJSON *params, ts_api_result_t *result)
 }
 
 /**
- * @brief agx.start - Start AGX monitoring
+ * @brief agx.start - Start Compute monitoring
  */
-static esp_err_t api_agx_start(const cJSON *params, ts_api_result_t *result)
+static esp_err_t api_monitor_start(const cJSON *params, ts_api_result_t *result)
 {
     (void)params;
     
-    if (!ts_agx_monitor_is_initialized()) {
-        esp_err_t ret = ts_agx_monitor_init(NULL);
+    if (!ts_compute_monitor_is_initialized()) {
+        esp_err_t ret = ts_compute_monitor_init(NULL);
         if (ret != ESP_OK) {
             ts_api_result_error(result, TS_API_ERR_INTERNAL, "Failed to initialize");
             return ret;
         }
     }
     
-    if (ts_agx_monitor_is_running()) {
+    if (ts_compute_monitor_is_running()) {
         ts_api_result_ok(result, NULL);
         return ESP_OK;
     }
     
-    esp_err_t ret = ts_agx_monitor_start();
+    esp_err_t ret = ts_compute_monitor_start();
     if (ret != ESP_OK) {
         ts_api_result_error(result, TS_API_ERR_INTERNAL, "Failed to start");
         return ret;
@@ -194,18 +194,18 @@ static esp_err_t api_agx_start(const cJSON *params, ts_api_result_t *result)
 }
 
 /**
- * @brief agx.stop - Stop AGX monitoring
+ * @brief agx.stop - Stop Compute monitoring
  */
-static esp_err_t api_agx_stop(const cJSON *params, ts_api_result_t *result)
+static esp_err_t api_monitor_stop(const cJSON *params, ts_api_result_t *result)
 {
     (void)params;
     
-    if (!ts_agx_monitor_is_running()) {
+    if (!ts_compute_monitor_is_running()) {
         ts_api_result_ok(result, NULL);
         return ESP_OK;
     }
     
-    esp_err_t ret = ts_agx_monitor_stop();
+    esp_err_t ret = ts_compute_monitor_stop();
     if (ret != ESP_OK) {
         ts_api_result_error(result, TS_API_ERR_INTERNAL, "Failed to stop");
         return ret;
@@ -221,42 +221,42 @@ static esp_err_t api_agx_stop(const cJSON *params, ts_api_result_t *result)
 /*                          Registration                                      */
 /*===========================================================================*/
 
-esp_err_t ts_api_agx_register(void)
+esp_err_t ts_api_monitor_register(void)
 {
     static const ts_api_endpoint_t endpoints[] = {
         {
-            .name = "agx.status",
-            .description = "Get AGX monitor status",
+            .name = "monitor.status",
+            .description = "Get Compute monitor status",
             .category = TS_API_CAT_DEVICE,
-            .handler = api_agx_status,
+            .handler = api_monitor_status,
             .requires_auth = false,
         },
         {
-            .name = "agx.data",
-            .description = "Get latest AGX telemetry data",
+            .name = "monitor.data",
+            .description = "Get latest Compute telemetry data",
             .category = TS_API_CAT_DEVICE,
-            .handler = api_agx_data,
+            .handler = api_monitor_data,
             .requires_auth = false,
         },
         {
-            .name = "agx.config",
-            .description = "Get AGX monitor configuration",
+            .name = "monitor.config",
+            .description = "Get Compute monitor configuration",
             .category = TS_API_CAT_DEVICE,
-            .handler = api_agx_config,
+            .handler = api_monitor_config,
             .requires_auth = false,
         },
         {
-            .name = "agx.start",
-            .description = "Start AGX monitoring",
+            .name = "monitor.start",
+            .description = "Start Compute monitoring",
             .category = TS_API_CAT_DEVICE,
-            .handler = api_agx_start,
+            .handler = api_monitor_start,
             .requires_auth = true,
         },
         {
-            .name = "agx.stop",
-            .description = "Stop AGX monitoring",
+            .name = "monitor.stop",
+            .description = "Stop Compute monitoring",
             .category = TS_API_CAT_DEVICE,
-            .handler = api_agx_stop,
+            .handler = api_monitor_stop,
             .requires_auth = true,
         },
     };

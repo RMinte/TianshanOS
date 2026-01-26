@@ -8,7 +8,7 @@ idf_component_register(
         "src/ts_device_ctrl.c"
         "src/ts_usb_mux.c"
         "src/ts_temp_source.c"
-        "src/ts_agx_monitor.c"
+        "src/ts_compute_monitor.c"
     INCLUDE_DIRS
         "include"
     REQUIRES

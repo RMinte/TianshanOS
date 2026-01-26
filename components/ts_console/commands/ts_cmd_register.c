@@ -102,8 +102,8 @@ esp_err_t ts_cmd_register_all(void)
     ret = ts_cmd_temp_register();
     if (ret == ESP_OK) success_count++; else fail_count++;
 
-    // AGX 监控命令
-    ret = ts_cmd_agx_register();
+    // 算力设备监控命令
+    ret = ts_cmd_monitor_register();
     if (ret == ESP_OK) success_count++; else fail_count++;
 
     // OTA 固件升级命令

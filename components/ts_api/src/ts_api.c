@@ -605,10 +605,10 @@ esp_err_t ts_api_register_all(void)
         return ret;
     }
     
-    /* AGX Monitor APIs */
-    ret = ts_api_agx_register();
+    /* Compute Monitor APIs */
+    ret = ts_api_monitor_register();
     if (ret != ESP_OK) {
-        TS_LOGE(TAG, "Failed to register AGX APIs: %s", esp_err_to_name(ret));
+        TS_LOGE(TAG, "Failed to register monitor APIs: %s", esp_err_to_name(ret));
         return ret;
     }
     
@@ -677,6 +677,13 @@ esp_err_t ts_api_register_all(void)
 
     /* Log APIs */
     ts_api_log_register();
+    
+    /* Automation APIs */
+    ret = ts_api_automation_register();
+    if (ret != ESP_OK) {
+        TS_LOGE(TAG, "Failed to register Automation APIs: %s", esp_err_to_name(ret));
+        return ret;
+    }
     
     TS_LOGI(TAG, "All API modules registered (%zu endpoints)", s_api.endpoint_count);
     
