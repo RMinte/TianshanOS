@@ -196,6 +196,172 @@ POST /api/v1/config/delete
 
 **请求**: `POST /api/v1/config/save`
 
+## 变量 API
+
+变量系统用于存储和管理动态数据，主要应用场景：
+- SSH 命令执行结果存储
+- 自动化引擎数据源
+- 命令参数动态替换
+
+### var.get
+获取变量值。
+
+**请求**: `GET /api/v1/var/get?name=cpu_temp.extracted`
+
+**响应**:
+```json
+{
+  "code": 0,
+  "data": {
+    "name": "cpu_temp.extracted",
+    "value": "45000",
+    "type": "string",
+    "source": "ssh",
+    "timestamp": 1706355600000,
+    "persistent": false
+  }
+}
+```
+
+**错误响应** (变量不存在):
+```json
+{
+  "code": 404,
+  "message": "Variable not found: cpu_temp.extracted"
+}
+```
+
+### var.set
+设置变量值。
+
+**请求**:
+```
+POST /api/v1/var/set
+{
+  "name": "my_variable",
+  "value": "hello world",
+  "persistent": false
+}
+```
+
+**参数**:
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `name` | string | 是 | 变量名（最大 64 字符） |
+| `value` | string | 是 | 变量值（最大 256 字符） |
+| `persistent` | bool | 否 | 是否持久化到 NVS（默认 false） |
+
+**响应**:
+```json
+{
+  "code": 0,
+  "message": "Variable set successfully"
+}
+```
+
+### var.delete
+删除变量。
+
+**请求**:
+```
+POST /api/v1/var/delete
+{
+  "name": "my_variable"
+}
+```
+
+**响应**:
+```json
+{
+  "code": 0,
+  "message": "Variable deleted"
+}
+```
+
+### var.list
+列出所有变量或指定前缀的变量。
+
+**请求**: `GET /api/v1/var/list` 或 `GET /api/v1/var/list?prefix=cpu_temp`
+
+**响应**:
+```json
+{
+  "code": 0,
+  "data": {
+    "count": 3,
+    "variables": [
+      {
+        "name": "cpu_temp.extracted",
+        "value": "45000",
+        "type": "string",
+        "source": "ssh",
+        "timestamp": 1706355600000,
+        "persistent": false
+      },
+      {
+        "name": "cpu_temp.status",
+        "value": "success",
+        "type": "string",
+        "source": "ssh",
+        "timestamp": 1706355600000,
+        "persistent": false
+      },
+      {
+        "name": "cpu_temp.exit_code",
+        "value": "0",
+        "type": "number",
+        "source": "ssh",
+        "timestamp": 1706355600000,
+        "persistent": false
+      }
+    ]
+  }
+}
+```
+
+### 变量类型
+
+| 类型 | 说明 | 示例 |
+|------|------|------|
+| `string` | 字符串（默认） | `"hello"` |
+| `number` | 数值（存储为字符串） | `"45000"` |
+| `bool` | 布尔值 | `"true"`, `"false"` |
+
+### 变量来源
+
+| 来源 | 说明 |
+|------|------|
+| `user` | 用户通过 API 或 CLI 设置 |
+| `ssh` | SSH 命令执行结果自动生成 |
+| `system` | 系统内置变量（如 `sys.time`） |
+| `alias` | 指向其他变量的别名 |
+
+### SSH 结果自动变量
+
+当 SSH 命令执行时指定 `var_name` 参数，系统自动创建以下变量：
+
+| 变量名 | 说明 |
+|--------|------|
+| `${var_name}.extracted` | 从输出中提取的值 |
+| `${var_name}.status` | 执行状态（success/error/timeout） |
+| `${var_name}.exit_code` | 命令退出码 |
+| `${var_name}.host` | 执行主机 |
+| `${var_name}.timestamp` | 执行时间戳 |
+| `${last}.extracted` | 最后一次执行的提取值 |
+| `${last}.*` | 最后一次执行的所有属性 |
+
+### 变量替换语法
+
+在支持变量替换的场景中，使用 `${变量名}` 语法：
+
+```
+// 示例命令
+echo "CPU temperature: ${cpu_temp.extracted}"
+
+// 替换后
+echo "CPU temperature: 45000"
+```
+
 ## LED API
 
 ### led.devices

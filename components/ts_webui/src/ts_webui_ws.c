@@ -11,7 +11,10 @@
 #include "ts_power_policy.h"
 #include "ts_ssh_client.h"
 #include "ts_ssh_shell.h"
+#include "ts_keystore.h"
 #include "ts_ws_subscriptions.h"
+// ts_var.h 已废弃，统一使用 ts_variable.h（ts_automation 变量系统）
+#include "ts_variable.h"
 #include "esp_http_server.h"
 #include "cJSON.h"
 #include "freertos/FreeRTOS.h"
@@ -19,6 +22,7 @@
 #include "freertos/task.h"
 #include "esp_heap_caps.h"
 #include <string.h>
+#include <ctype.h>
 #include <sys/socket.h>
 #include <errno.h>
 
@@ -67,6 +71,14 @@ static ts_ssh_shell_t s_ssh_shell = NULL;
 static int s_ssh_client_fd = -1;
 static TaskHandle_t s_ssh_poll_task = NULL;
 static volatile bool s_ssh_running = false;
+
+/* SSH Exec 流式执行状态 */
+static ts_ssh_session_t s_exec_session = NULL;
+static TaskHandle_t s_exec_task = NULL;
+static volatile bool s_exec_running = false;
+static volatile bool s_exec_cancel_requested = false;  /* 实时匹配触发的取消请求 */
+static volatile uint32_t s_exec_session_id = 0;
+static TimerHandle_t s_exec_timeout_timer = NULL;      /* 超时定时器 */
 
 /* 电压保护事件处理器句柄 */
 static ts_event_handler_handle_t s_power_event_handle = NULL;
@@ -1317,4 +1329,1020 @@ static void update_log_stream_state(void)
     if (need_streaming != s_log_streaming_enabled) {
         ts_webui_log_stream_enable(need_streaming);
     }
+}
+
+/*===========================================================================*/
+/*                     SSH Exec Stream Functions                              */
+/*===========================================================================*/
+
+/* SSH Exec 任务参数 */
+typedef struct {
+    ts_ssh_config_t config;
+    char command[512];
+    uint32_t session_id;
+    char keyid[64];           /* 存储 keyid 以便获取私钥 */
+    char var_name[64];        /* 变量名（用于存储结果） */
+    /* 可选参数 */
+    char *expect_pattern;     /* 期望匹配的模式 */
+    char *fail_pattern;       /* 失败模式 */
+    char *extract_pattern;    /* 提取值的模式 */
+    uint32_t timeout_ms;      /* 超时时间 */
+    bool collect_output;      /* 是否收集输出 */
+    uint32_t max_output_size; /* 最大输出大小 */
+    bool stop_on_match;       /* 匹配成功后是否停止命令 */
+    /* 运行时状态 */
+    char *output_buffer;      /* 输出缓冲区 */
+    size_t output_len;        /* 当前输出长度 */
+    size_t output_capacity;   /* 缓冲区容量 */
+    /* 实时匹配状态 */
+    bool match_found;         /* 是否已找到匹配 */
+    bool expect_matched;      /* 期望模式是否匹配 */
+    bool fail_matched;        /* 失败模式是否匹配 */
+    char *extracted_value;    /* 提取的值 */
+} ssh_exec_task_params_t;
+
+/* 全局任务参数指针（用于回调访问） */
+static ssh_exec_task_params_t *s_exec_params = NULL;
+
+/* 简单的正则表达式匹配（支持基本模式）*/
+static bool simple_pattern_match(const char *text, const char *pattern, char **extracted)
+{
+    if (!text || !pattern) return false;
+    
+    /* 简化实现：支持 * 通配符和 () 捕获组 */
+    /* 对于复杂正则，推荐在前端处理 */
+    
+    /* 检查是否包含捕获组 */
+    const char *cap_start = strchr(pattern, '(');
+    const char *cap_end = cap_start ? strchr(cap_start, ')') : NULL;
+    
+    if (cap_start && cap_end && extracted) {
+        /* 有捕获组，提取模式 */
+        /* 格式：prefix(capture)suffix */
+        size_t prefix_len = cap_start - pattern;
+        char *prefix = NULL;
+        if (prefix_len > 0) {
+            prefix = strndup(pattern, prefix_len);
+        }
+        
+        size_t capture_len = cap_end - cap_start - 1;
+        char *capture_pattern = strndup(cap_start + 1, capture_len);
+        
+        const char *suffix = cap_end + 1;
+        
+        /* 查找前缀位置 - 找最后一个匹配 */
+        const char *match_pos = NULL;
+        const char *search_pos = text;
+        if (prefix && prefix[0]) {
+            while ((search_pos = strstr(search_pos, prefix)) != NULL) {
+                match_pos = search_pos + prefix_len;
+                search_pos++;  /* 继续搜索下一个 */
+            }
+        } else {
+            /* 没有前缀，从最后一行开始 */
+            const char *last_newline = strrchr(text, '\n');
+            match_pos = last_newline ? last_newline + 1 : text;
+        }
+        
+        if (match_pos) {
+            /* 查找后缀位置 */
+            const char *end_pos = NULL;
+            if (suffix && suffix[0]) {
+                end_pos = strstr(match_pos, suffix);
+            } else {
+                /* 没有后缀，取到行尾或字符串尾 */
+                end_pos = strchr(match_pos, '\n');
+                if (!end_pos) end_pos = match_pos + strlen(match_pos);
+            }
+            
+            if (end_pos && end_pos > match_pos) {
+                /* 提取捕获的内容 */
+                size_t ext_len = end_pos - match_pos;
+                *extracted = strndup(match_pos, ext_len);
+                /* 去除首尾空白 */
+                if (*extracted) {
+                    char *p = *extracted;
+                    while (*p && isspace((unsigned char)*p)) p++;
+                    if (p != *extracted) memmove(*extracted, p, strlen(p) + 1);
+                    size_t len = strlen(*extracted);
+                    while (len > 0 && isspace((unsigned char)(*extracted)[len - 1])) {
+                        (*extracted)[--len] = '\0';
+                    }
+                }
+            }
+        }
+        
+        free(prefix);
+        free(capture_pattern);
+        return (match_pos != NULL);
+    } else {
+        /* 简单包含匹配 */
+        return strstr(text, pattern) != NULL;
+    }
+}
+
+/* SSH Exec 输出回调 - 广播到所有 WebSocket 客户端并收集输出 */
+static void ssh_exec_output_callback(const char *data, size_t len, bool is_stderr, void *user_data)
+{
+    if (!data || len == 0) return;
+    
+    uint32_t session_id = (uint32_t)(uintptr_t)user_data;
+    
+    /* 收集输出到缓冲区 */
+    if (s_exec_params && s_exec_params->collect_output && s_exec_params->output_buffer) {
+        size_t space = s_exec_params->output_capacity - s_exec_params->output_len - 1;
+        size_t copy_len = (len < space) ? len : space;
+        if (copy_len > 0) {
+            memcpy(s_exec_params->output_buffer + s_exec_params->output_len, data, copy_len);
+            s_exec_params->output_len += copy_len;
+            s_exec_params->output_buffer[s_exec_params->output_len] = '\0';
+        }
+    }
+    
+    /* 构造消息 */
+    cJSON *msg = cJSON_CreateObject();
+    cJSON_AddStringToObject(msg, "type", "ssh_exec_output");
+    cJSON_AddNumberToObject(msg, "session_id", session_id);
+    cJSON_AddBoolToObject(msg, "is_stderr", is_stderr);
+    
+    /* 复制数据并确保 null 结尾 */
+    char *buf = heap_caps_malloc(len + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!buf) buf = malloc(len + 1);
+    if (buf) {
+        memcpy(buf, data, len);
+        buf[len] = '\0';
+        cJSON_AddStringToObject(msg, "data", buf);
+        free(buf);
+    }
+    
+    char *json = cJSON_PrintUnformatted(msg);
+    cJSON_Delete(msg);
+    
+    if (json) {
+        ts_webui_broadcast(json);
+        free(json);
+    }
+    
+    /* 实时模式匹配 */
+    if (s_exec_params && s_exec_params->output_buffer) {
+        const char *output = s_exec_params->output_buffer;
+        bool should_send_match = false;
+        bool pattern_matched = false;  /* expect/fail 模式是否匹配 */
+        bool is_first_extract = false;  /* 是否为首次提取 */
+        
+        /* 检查失败模式（仅在尚未匹配时） */
+        if (!s_exec_params->match_found && s_exec_params->fail_pattern && s_exec_params->fail_pattern[0]) {
+            if (simple_pattern_match(output, s_exec_params->fail_pattern, NULL)) {
+                s_exec_params->fail_matched = true;
+                s_exec_params->match_found = true;
+                should_send_match = true;
+                pattern_matched = true;
+                TS_LOGW(TAG, "Realtime fail pattern matched");
+            }
+        }
+        
+        /* 检查期望模式（仅在尚未匹配时，且失败模式没有匹配） */
+        if (!s_exec_params->match_found && !s_exec_params->fail_matched && 
+            s_exec_params->expect_pattern && s_exec_params->expect_pattern[0]) {
+            if (simple_pattern_match(output, s_exec_params->expect_pattern, NULL)) {
+                s_exec_params->expect_matched = true;
+                s_exec_params->match_found = true;
+                should_send_match = true;
+                pattern_matched = true;
+                TS_LOGI(TAG, "Realtime expect pattern matched");
+            }
+        }
+        
+        /* 提取值 */
+        if (s_exec_params->extract_pattern && s_exec_params->extract_pattern[0]) {
+            char *extracted = NULL;
+            if (simple_pattern_match(output, s_exec_params->extract_pattern, &extracted)) {
+                /* 检查是否为首次提取 */
+                if (!s_exec_params->extracted_value) {
+                    is_first_extract = true;
+                }
+                
+                /* 检查是否与上次提取的值不同 */
+                bool is_new_value = false;
+                if (is_first_extract) {
+                    is_new_value = true;
+                } else if (extracted && strcmp(extracted, s_exec_params->extracted_value) != 0) {
+                    is_new_value = true;
+                }
+                
+                if (is_new_value) {
+                    /* 释放旧值，保存新值 */
+                    if (s_exec_params->extracted_value) {
+                        free(s_exec_params->extracted_value);
+                    }
+                    s_exec_params->extracted_value = extracted;
+                    should_send_match = true;
+                    TS_LOGI(TAG, "Realtime extract: %s (first=%d)", extracted ? extracted : "(null)", is_first_extract);
+                } else {
+                    /* 值相同，释放本次提取的 */
+                    free(extracted);
+                }
+            }
+        }
+        
+        /* 判断是否应该停止 */
+        bool should_stop = false;
+        if (s_exec_params->stop_on_match) {
+            /* 勾选了"匹配后停止"：expect/fail 匹配 或 首次提取成功 都应该停止 */
+            if (pattern_matched || is_first_extract) {
+                should_stop = true;
+            }
+        }
+        
+        /* 发送实时匹配消息 */
+        if (should_send_match) {
+            cJSON *match_msg = cJSON_CreateObject();
+            cJSON_AddStringToObject(match_msg, "type", "ssh_exec_match");
+            cJSON_AddNumberToObject(match_msg, "session_id", session_id);
+            cJSON_AddBoolToObject(match_msg, "expect_matched", s_exec_params->expect_matched);
+            cJSON_AddBoolToObject(match_msg, "fail_matched", s_exec_params->fail_matched);
+            if (s_exec_params->extracted_value) {
+                cJSON_AddStringToObject(match_msg, "extracted", s_exec_params->extracted_value);
+            }
+            /* 标记是否为终止匹配 */
+            cJSON_AddBoolToObject(match_msg, "is_final", should_stop);
+            
+            char *match_json = cJSON_PrintUnformatted(match_msg);
+            cJSON_Delete(match_msg);
+            if (match_json) {
+                ts_webui_broadcast(match_json);
+                free(match_json);
+            }
+            
+            /* ========== 根据命令类型决定变量更新时机 ========== */
+            /* 
+             * 持续监控型：只有 extract_pattern，无 expect/fail/stop_on_match
+             *   → 每次提取到值就实时更新变量（适合持续运行的命令如 ping）
+             * 
+             * 结果导向型：有 expect/fail 或 stop_on_match
+             *   → 等命令结束时才更新变量（在 ssh_exec_task 完成处理）
+             */
+            bool is_continuous_mode = s_exec_params->extract_pattern && 
+                                      !s_exec_params->expect_pattern && 
+                                      !s_exec_params->fail_pattern && 
+                                      !s_exec_params->stop_on_match;
+            
+            TS_LOGI(TAG, "Variable update check: var_name='%s', continuous=%d, extract=%p, expect=%p, fail=%p, stop=%d",
+                    s_exec_params->var_name,
+                    is_continuous_mode,
+                    s_exec_params->extract_pattern,
+                    s_exec_params->expect_pattern,
+                    s_exec_params->fail_pattern,
+                    s_exec_params->stop_on_match);
+            
+            if (is_continuous_mode && s_exec_params->var_name[0]) {
+                /* 持续监控模式：实时更新变量 */
+                char full_var_name[96];
+                ts_auto_variable_t var = {0};
+                strncpy(var.source_id, s_exec_params->var_name, sizeof(var.source_id) - 1);
+                var.flags = 0;
+                
+                /* 更新 extracted 变量 */
+                if (s_exec_params->extracted_value) {
+                    snprintf(full_var_name, sizeof(full_var_name), "%s.extracted", s_exec_params->var_name);
+                    strncpy(var.name, full_var_name, sizeof(var.name) - 1);
+                    var.value.type = TS_AUTO_VAL_STRING;
+                    strncpy(var.value.str_val, s_exec_params->extracted_value, sizeof(var.value.str_val) - 1);
+                    esp_err_t ret = ts_variable_register(&var);
+                    TS_LOGI(TAG, "Registered %s = %s (ret=%d)", full_var_name, s_exec_params->extracted_value, ret);
+                }
+                
+                /* 更新 status 为 running */
+                snprintf(full_var_name, sizeof(full_var_name), "%s.status", s_exec_params->var_name);
+                strncpy(var.name, full_var_name, sizeof(var.name) - 1);
+                var.value.type = TS_AUTO_VAL_STRING;
+                strncpy(var.value.str_val, "running", sizeof(var.value.str_val) - 1);
+                ts_variable_register(&var);
+                
+                /* 更新 host */
+                snprintf(full_var_name, sizeof(full_var_name), "%s.host", s_exec_params->var_name);
+                strncpy(var.name, full_var_name, sizeof(var.name) - 1);
+                var.value.type = TS_AUTO_VAL_STRING;
+                strncpy(var.value.str_val, s_exec_params->config.host ? s_exec_params->config.host : "", sizeof(var.value.str_val) - 1);
+                ts_variable_register(&var);
+                
+                /* 更新 timestamp */
+                snprintf(full_var_name, sizeof(full_var_name), "%s.timestamp", s_exec_params->var_name);
+                strncpy(var.name, full_var_name, sizeof(var.name) - 1);
+                var.value.type = TS_AUTO_VAL_INT;
+                var.value.int_val = (int32_t)(esp_timer_get_time() / 1000000);
+                ts_variable_register(&var);
+                
+                TS_LOGD(TAG, "Continuous mode: realtime update %s", s_exec_params->var_name);
+            }
+            /* 结果导向模式：变量在命令完成时更新（见下方 ssh_exec_task 完成处理） */
+            
+            /* 如果应该停止，中断 SSH 执行 */
+            if (should_stop) {
+                TS_LOGI(TAG, "Aborting SSH execution (pattern=%d, first_extract=%d)",
+                        pattern_matched, is_first_extract);
+                s_exec_cancel_requested = true;
+                if (s_exec_session) {
+                    ts_ssh_abort(s_exec_session);  /* 直接中断 SSH 执行 */
+                }
+            }
+        }
+    }
+}
+
+/* SSH Exec 超时回调 */
+static void ssh_exec_timeout_callback(TimerHandle_t xTimer)
+{
+    TS_LOGW(TAG, "SSH exec timeout triggered");
+    s_exec_cancel_requested = true;
+    if (s_exec_session) {
+        ts_ssh_abort(s_exec_session);
+    }
+}
+
+/* SSH Exec 任务 */
+static void ssh_exec_task(void *arg)
+{
+    ssh_exec_task_params_t *params = (ssh_exec_task_params_t *)arg;
+    uint32_t session_id = params->session_id;
+    int exit_code = -1;
+    esp_err_t ret;
+    char *key_buf = NULL;
+    size_t key_len = 0;
+    
+    /* 重置取消请求标志 */
+    s_exec_cancel_requested = false;
+    
+    TS_LOGI(TAG, "SSH exec task started: session_id=%lu, cmd=%s", 
+            (unsigned long)session_id, params->command);
+    
+    /* 如果使用密钥认证，加载私钥 */
+    if (params->keyid[0] != '\0') {
+        ret = ts_keystore_load_private_key(params->keyid, &key_buf, &key_len);
+        if (ret == ESP_OK && key_buf) {
+            params->config.auth_method = TS_SSH_AUTH_PUBLICKEY;
+            params->config.auth.key.private_key = (const uint8_t *)key_buf;
+            params->config.auth.key.private_key_len = key_len;
+            params->config.auth.key.private_key_path = NULL;
+            params->config.auth.key.passphrase = NULL;
+        } else {
+            TS_LOGE(TAG, "Failed to load key '%s': %s", params->keyid, esp_err_to_name(ret));
+            /* 发送错误消息 */
+            cJSON *msg = cJSON_CreateObject();
+            cJSON_AddStringToObject(msg, "type", "ssh_exec_error");
+            cJSON_AddNumberToObject(msg, "session_id", session_id);
+            cJSON_AddStringToObject(msg, "error", "Failed to load SSH key");
+            char *json = cJSON_PrintUnformatted(msg);
+            cJSON_Delete(msg);
+            if (json) { ts_webui_broadcast(json); free(json); }
+            goto cleanup;
+        }
+    }
+    
+    /* 创建 SSH 会话 */
+    ret = ts_ssh_session_create(&params->config, &s_exec_session);
+    if (ret != ESP_OK) {
+        TS_LOGE(TAG, "Failed to create SSH session: %s", esp_err_to_name(ret));
+        cJSON *msg = cJSON_CreateObject();
+        cJSON_AddStringToObject(msg, "type", "ssh_exec_error");
+        cJSON_AddNumberToObject(msg, "session_id", session_id);
+        cJSON_AddStringToObject(msg, "error", "Failed to create SSH session");
+        char *json = cJSON_PrintUnformatted(msg);
+        cJSON_Delete(msg);
+        if (json) { ts_webui_broadcast(json); free(json); }
+        goto cleanup;
+    }
+    
+    /* 连接 */
+    ret = ts_ssh_connect(s_exec_session);
+    if (ret != ESP_OK) {
+        const char *err = ts_ssh_get_error(s_exec_session);
+        TS_LOGE(TAG, "SSH connect failed: %s", err ? err : "unknown");
+        cJSON *msg = cJSON_CreateObject();
+        cJSON_AddStringToObject(msg, "type", "ssh_exec_error");
+        cJSON_AddNumberToObject(msg, "session_id", session_id);
+        cJSON_AddStringToObject(msg, "error", err ? err : "Connection failed");
+        char *json = cJSON_PrintUnformatted(msg);
+        cJSON_Delete(msg);
+        if (json) { ts_webui_broadcast(json); free(json); }
+        goto cleanup;
+    }
+    
+    /* 发送开始消息 */
+    {
+        cJSON *msg = cJSON_CreateObject();
+        cJSON_AddStringToObject(msg, "type", "ssh_exec_start");
+        cJSON_AddNumberToObject(msg, "session_id", session_id);
+        cJSON_AddStringToObject(msg, "command", params->command);
+        /* 添加配置信息 */
+        if (params->expect_pattern) {
+            cJSON_AddStringToObject(msg, "expect_pattern", params->expect_pattern);
+        }
+        if (params->fail_pattern) {
+            cJSON_AddStringToObject(msg, "fail_pattern", params->fail_pattern);
+        }
+        if (params->extract_pattern) {
+            cJSON_AddStringToObject(msg, "extract_pattern", params->extract_pattern);
+        }
+        char *json = cJSON_PrintUnformatted(msg);
+        cJSON_Delete(msg);
+        if (json) { ts_webui_broadcast(json); free(json); }
+    }
+    
+    /* 判断是否需要启动超时定时器 */
+    /* 超时在以下情况有效：设定了成功/失败条件，或勾选了匹配后停止 */
+    bool need_timeout = params->stop_on_match || 
+                        (params->expect_pattern && params->expect_pattern[0]) ||
+                        (params->fail_pattern && params->fail_pattern[0]);
+    
+    if (need_timeout && params->timeout_ms > 0) {
+        /* 创建或重置超时定时器 */
+        if (s_exec_timeout_timer == NULL) {
+            s_exec_timeout_timer = xTimerCreate("ssh_timeout", 
+                                                 pdMS_TO_TICKS(params->timeout_ms),
+                                                 pdFALSE,  /* 单次触发 */
+                                                 NULL,
+                                                 ssh_exec_timeout_callback);
+        } else {
+            /* 更新超时时间 */
+            xTimerChangePeriod(s_exec_timeout_timer, pdMS_TO_TICKS(params->timeout_ms), 0);
+        }
+        
+        if (s_exec_timeout_timer) {
+            xTimerStart(s_exec_timeout_timer, 0);
+            TS_LOGI(TAG, "SSH exec timeout timer started: %lu ms", (unsigned long)params->timeout_ms);
+        }
+    }
+    
+    /* 流式执行命令 */
+    ret = ts_ssh_exec_stream(s_exec_session, params->command, 
+                              ssh_exec_output_callback, 
+                              (void *)(uintptr_t)session_id, 
+                              &exit_code);
+    
+    /* 停止超时定时器 */
+    if (s_exec_timeout_timer) {
+        xTimerStop(s_exec_timeout_timer, 0);
+    }
+    
+    /* 处理模式匹配和状态判断 */
+    ts_webui_ssh_status_t status = TS_WEBUI_SSH_STATUS_SUCCESS;
+    
+    /* 检查是否因超时被取消 */
+    bool was_timeout = s_exec_cancel_requested && (ret == ESP_ERR_TIMEOUT);
+    
+    /* 优先使用实时匹配结果 */
+    bool expect_matched = params->expect_matched;
+    bool fail_matched = params->fail_matched;
+    char *extracted_value = params->extracted_value;
+    params->extracted_value = NULL;  /* 转移所有权，避免重复释放 */
+    
+    if (was_timeout && !params->match_found) {
+        /* 超时且未匹配成功 */
+        status = TS_WEBUI_SSH_STATUS_TIMEOUT;
+        TS_LOGW(TAG, "SSH exec timed out without match");
+    } else if (ret == ESP_ERR_TIMEOUT && params->match_found) {
+        /* 被中断但已有匹配结果（stop_on_match 触发） */
+        if (params->fail_matched) {
+            status = TS_WEBUI_SSH_STATUS_MATCH_FAILED;
+        } else {
+            status = TS_WEBUI_SSH_STATUS_MATCH_SUCCESS;
+        }
+    } else if (ret == ESP_ERR_TIMEOUT) {
+        status = TS_WEBUI_SSH_STATUS_CANCELLED;
+    } else if (ret != ESP_OK) {
+        status = TS_WEBUI_SSH_STATUS_FAILED;
+    } else if (exit_code != 0 && !params->match_found) {
+        /* 命令失败且没有实时匹配结果 */
+        status = TS_WEBUI_SSH_STATUS_FAILED;
+    } else {
+        /* 命令完成，确定最终状态 */
+        const char *output = params->output_buffer ? params->output_buffer : "";
+        
+        /* 如果实时匹配没有找到，再做一次完整匹配 */
+        if (!params->match_found) {
+            /* 检查失败模式 */
+            if (params->fail_pattern && params->fail_pattern[0]) {
+                fail_matched = simple_pattern_match(output, params->fail_pattern, NULL);
+            }
+            
+            /* 检查期望模式 */
+            if (!fail_matched && params->expect_pattern && params->expect_pattern[0]) {
+                expect_matched = simple_pattern_match(output, params->expect_pattern, NULL);
+            }
+            
+            /* 提取值 */
+            if (!extracted_value && params->extract_pattern && params->extract_pattern[0]) {
+                simple_pattern_match(output, params->extract_pattern, &extracted_value);
+            }
+        }
+        
+        /* 确定最终状态 */
+        if (fail_matched) {
+            status = TS_WEBUI_SSH_STATUS_MATCH_FAILED;
+        } else if (params->expect_pattern && params->expect_pattern[0]) {
+            status = expect_matched ? TS_WEBUI_SSH_STATUS_MATCH_SUCCESS : TS_WEBUI_SSH_STATUS_MATCH_FAILED;
+        } else if (exit_code == 0) {
+            status = TS_WEBUI_SSH_STATUS_SUCCESS;
+        } else {
+            status = TS_WEBUI_SSH_STATUS_FAILED;
+        }
+    }
+    
+    /* 诊断日志：检查变量写入条件 */
+    TS_LOGI(TAG, "SSH exec finished: var_name='%s' (has_var=%d), status=%d (is_cancelled=%d), exit_code=%d",
+            params->var_name,
+            params->var_name[0] ? 1 : 0,
+            status,
+            status == TS_WEBUI_SSH_STATUS_CANCELLED ? 1 : 0,
+            exit_code);
+    
+    /* 存储结果到变量系统 - 包括取消状态也要更新 */
+    if (params->var_name[0]) {
+        const char *status_str = "unknown";
+        switch (status) {
+            case TS_WEBUI_SSH_STATUS_SUCCESS:       status_str = "success"; break;
+            case TS_WEBUI_SSH_STATUS_FAILED:        status_str = "failed"; break;
+            case TS_WEBUI_SSH_STATUS_TIMEOUT:       status_str = "timeout"; break;
+            case TS_WEBUI_SSH_STATUS_MATCH_SUCCESS: status_str = "match_success"; break;
+            case TS_WEBUI_SSH_STATUS_MATCH_FAILED:  status_str = "match_failed"; break;
+            case TS_WEBUI_SSH_STATUS_CANCELLED:     status_str = "cancelled"; break;
+            default: break;
+        }
+        
+        /* 注意：不再调用 ts_var_store_ssh_result()，
+         * 因为它使用旧的 ts_var 系统且会把所有值转成字符串。
+         * 现在只使用 ts_automation 变量系统 */
+        
+        /* 同步更新到 ts_automation 变量系统 - 使用 register 确保变量存在并更新 */
+        TS_LOGI(TAG, "Writing SSH result to automation variables: var_name=%s, status=%s, exit_code=%d",
+                params->var_name, status_str, exit_code);
+        
+        char full_var_name[96];  /* 足够容纳 source_id + suffix */
+        ts_auto_variable_t var = {0};
+        strncpy(var.source_id, params->var_name, sizeof(var.source_id) - 1);
+        var.flags = 0;
+        
+        /* status (string) */
+        snprintf(full_var_name, sizeof(full_var_name), "%s.status", params->var_name);
+        strncpy(var.name, full_var_name, sizeof(var.name) - 1);
+        var.value.type = TS_AUTO_VAL_STRING;
+        strncpy(var.value.str_val, status_str, sizeof(var.value.str_val) - 1);
+        ts_variable_register(&var);
+        
+        /* exit_code (int) */
+        snprintf(full_var_name, sizeof(full_var_name), "%s.exit_code", params->var_name);
+        strncpy(var.name, full_var_name, sizeof(var.name) - 1);
+        var.value.type = TS_AUTO_VAL_INT;
+        var.value.int_val = exit_code;
+        ts_variable_register(&var);
+        
+        /* extracted (string) */
+        snprintf(full_var_name, sizeof(full_var_name), "%s.extracted", params->var_name);
+        strncpy(var.name, full_var_name, sizeof(var.name) - 1);
+        var.value.type = TS_AUTO_VAL_STRING;
+        strncpy(var.value.str_val, extracted_value ? extracted_value : "", sizeof(var.value.str_val) - 1);
+        ts_variable_register(&var);
+        
+        /* expect_matched (bool) */
+        snprintf(full_var_name, sizeof(full_var_name), "%s.expect_matched", params->var_name);
+        strncpy(var.name, full_var_name, sizeof(var.name) - 1);
+        var.value.type = TS_AUTO_VAL_BOOL;
+        var.value.bool_val = expect_matched;
+        ts_variable_register(&var);
+        
+        /* fail_matched (bool) */
+        snprintf(full_var_name, sizeof(full_var_name), "%s.fail_matched", params->var_name);
+        strncpy(var.name, full_var_name, sizeof(var.name) - 1);
+        var.value.type = TS_AUTO_VAL_BOOL;
+        var.value.bool_val = fail_matched;
+        ts_variable_register(&var);
+        
+        /* host (string) */
+        snprintf(full_var_name, sizeof(full_var_name), "%s.host", params->var_name);
+        strncpy(var.name, full_var_name, sizeof(var.name) - 1);
+        var.value.type = TS_AUTO_VAL_STRING;
+        strncpy(var.value.str_val, params->config.host ? params->config.host : "", sizeof(var.value.str_val) - 1);
+        ts_variable_register(&var);
+        
+        /* timestamp (int) */
+        snprintf(full_var_name, sizeof(full_var_name), "%s.timestamp", params->var_name);
+        strncpy(var.name, full_var_name, sizeof(var.name) - 1);
+        var.value.type = TS_AUTO_VAL_INT;
+        var.value.int_val = (int32_t)(esp_timer_get_time() / 1000000);  /* 秒级时间戳 */
+        ts_variable_register(&var);
+        
+        TS_LOGI(TAG, "Synced SSH result to automation variables: %s (7 vars)", params->var_name);
+    }
+    
+    /* 发送完成消息 */
+    {
+        cJSON *msg = cJSON_CreateObject();
+        cJSON_AddStringToObject(msg, "type", 
+            status == TS_WEBUI_SSH_STATUS_CANCELLED ? "ssh_exec_cancelled" : "ssh_exec_done");
+        cJSON_AddNumberToObject(msg, "session_id", session_id);
+        
+        if (status != TS_WEBUI_SSH_STATUS_CANCELLED) {
+            cJSON_AddNumberToObject(msg, "exit_code", exit_code);
+            
+            /* 状态字符串 */
+            const char *status_str = "unknown";
+            switch (status) {
+                case TS_WEBUI_SSH_STATUS_SUCCESS:       status_str = "success"; break;
+                case TS_WEBUI_SSH_STATUS_FAILED:        status_str = "failed"; break;
+                case TS_WEBUI_SSH_STATUS_TIMEOUT:       status_str = "timeout"; break;
+                case TS_WEBUI_SSH_STATUS_MATCH_SUCCESS: status_str = "match_success"; break;
+                case TS_WEBUI_SSH_STATUS_MATCH_FAILED:  status_str = "match_failed"; break;
+                default: break;
+            }
+            cJSON_AddStringToObject(msg, "status", status_str);
+            
+            /* 简单的成功标志 */
+            bool is_success = (status == TS_WEBUI_SSH_STATUS_SUCCESS || 
+                              status == TS_WEBUI_SSH_STATUS_MATCH_SUCCESS);
+            cJSON_AddBoolToObject(msg, "success", is_success);
+            
+            /* 模式匹配结果 */
+            if (params->expect_pattern) {
+                cJSON_AddBoolToObject(msg, "expect_matched", expect_matched);
+            }
+            if (params->fail_pattern) {
+                cJSON_AddBoolToObject(msg, "fail_matched", fail_matched);
+            }
+            
+            /* 提取的值 */
+            if (extracted_value) {
+                cJSON_AddStringToObject(msg, "extracted", extracted_value);
+            }
+            
+            /* 错误信息 */
+            if (ret != ESP_OK && ret != ESP_ERR_TIMEOUT) {
+                cJSON_AddStringToObject(msg, "error", ts_ssh_get_error(s_exec_session));
+            }
+        }
+        
+        char *json = cJSON_PrintUnformatted(msg);
+        cJSON_Delete(msg);
+        if (json) { ts_webui_broadcast(json); free(json); }
+    }
+    
+    /* 释放提取的值 */
+    if (extracted_value) {
+        free(extracted_value);
+    }
+
+cleanup:
+    /* 清理密钥缓冲区 */
+    if (key_buf) {
+        memset(key_buf, 0, key_len);
+        free(key_buf);
+    }
+    
+    /* 断开并销毁会话 */
+    if (s_exec_session) {
+        ts_ssh_disconnect(s_exec_session);
+        ts_ssh_session_destroy(s_exec_session);
+        s_exec_session = NULL;
+    }
+    
+    /* 清理参数 */
+    if (params) {
+        free(params->expect_pattern);
+        free(params->fail_pattern);
+        free(params->extract_pattern);
+        free(params->output_buffer);
+        free(params);
+    }
+    s_exec_params = NULL;
+    
+    s_exec_running = false;
+    s_exec_task = NULL;
+    
+    TS_LOGI(TAG, "SSH exec task ended: session_id=%lu", (unsigned long)session_id);
+    vTaskDelete(NULL);
+}
+
+esp_err_t ts_webui_ssh_exec_start(const char *host, uint16_t port, 
+                                   const char *user, const char *keyid,
+                                   const char *password, const char *command,
+                                   uint32_t *session_id)
+{
+    if (!host || !user || !command) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    
+    /* 检查是否有正在运行的会话 */
+    if (s_exec_running) {
+        TS_LOGW(TAG, "SSH exec session already running");
+        return ESP_ERR_INVALID_STATE;
+    }
+    
+    /* 分配任务参数 */
+    ssh_exec_task_params_t *params = heap_caps_calloc(1, sizeof(ssh_exec_task_params_t), 
+                                                       MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!params) params = calloc(1, sizeof(ssh_exec_task_params_t));
+    if (!params) {
+        return ESP_ERR_NO_MEM;
+    }
+    
+    /* 生成会话 ID */
+    s_exec_session_id++;
+    if (s_exec_session_id == 0) s_exec_session_id = 1;  /* 避免 0 */
+    
+    /* 配置 SSH */
+    params->config = (ts_ssh_config_t)TS_SSH_DEFAULT_CONFIG();
+    params->config.host = strdup(host);
+    params->config.port = port;
+    params->config.username = strdup(user);
+    params->config.timeout_ms = 30000;
+    params->session_id = s_exec_session_id;
+    
+    /* 存储命令 */
+    strncpy(params->command, command, sizeof(params->command) - 1);
+    
+    /* 配置认证方式 */
+    if (keyid && keyid[0]) {
+        strncpy(params->keyid, keyid, sizeof(params->keyid) - 1);
+        /* 实际密钥加载在任务中完成 */
+    } else if (password && password[0]) {
+        params->config.auth_method = TS_SSH_AUTH_PASSWORD;
+        params->config.auth.password = strdup(password);
+    } else {
+        free((void *)params->config.host);
+        free((void *)params->config.username);
+        free(params);
+        return ESP_ERR_INVALID_ARG;
+    }
+    
+    /* 默认启用输出收集 */
+    params->collect_output = true;
+    params->max_output_size = 64 * 1024;  /* 默认 64KB */
+    
+    /* 分配输出缓冲区 */
+    params->output_capacity = params->max_output_size;
+    params->output_buffer = heap_caps_malloc(params->output_capacity, 
+                                              MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!params->output_buffer) {
+        params->output_buffer = malloc(params->output_capacity);
+    }
+    if (params->output_buffer) {
+        params->output_buffer[0] = '\0';
+        params->output_len = 0;
+    }
+    
+    s_exec_running = true;
+    s_exec_params = params;  /* 设置全局指针供回调访问 */
+    
+    /* 创建任务 */
+    BaseType_t ret = xTaskCreate(ssh_exec_task, "ssh_exec", 8192, params, 5, &s_exec_task);
+    if (ret != pdPASS) {
+        TS_LOGE(TAG, "Failed to create SSH exec task");
+        s_exec_running = false;
+        s_exec_params = NULL;
+        free((void *)params->config.host);
+        free((void *)params->config.username);
+        if (params->config.auth.password) free((void *)params->config.auth.password);
+        free(params->output_buffer);
+        free(params);
+        return ESP_FAIL;
+    }
+    
+    if (session_id) {
+        *session_id = s_exec_session_id;
+    }
+    
+    TS_LOGI(TAG, "SSH exec started: session_id=%lu, host=%s, cmd=%s", 
+            (unsigned long)s_exec_session_id, host, command);
+    
+    return ESP_OK;
+}
+
+/* 带选项的扩展版本 */
+esp_err_t ts_webui_ssh_exec_start_ex(const char *host, uint16_t port, 
+                                      const char *user, const char *keyid,
+                                      const char *password, const char *command,
+                                      const ts_webui_ssh_options_t *options,
+                                      uint32_t *session_id)
+{
+    if (!host || !user || !command) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    
+    /* 检查是否有正在运行的会话 */
+    if (s_exec_running) {
+        TS_LOGW(TAG, "SSH exec session already running");
+        return ESP_ERR_INVALID_STATE;
+    }
+    
+    /* 分配任务参数 */
+    ssh_exec_task_params_t *params = heap_caps_calloc(1, sizeof(ssh_exec_task_params_t), 
+                                                       MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!params) params = calloc(1, sizeof(ssh_exec_task_params_t));
+    if (!params) {
+        return ESP_ERR_NO_MEM;
+    }
+    
+    /* 生成会话 ID */
+    s_exec_session_id++;
+    if (s_exec_session_id == 0) s_exec_session_id = 1;
+    
+    /* 配置 SSH */
+    params->config = (ts_ssh_config_t)TS_SSH_DEFAULT_CONFIG();
+    params->config.host = strdup(host);
+    params->config.port = port;
+    params->config.username = strdup(user);
+    params->config.timeout_ms = (options && options->timeout_ms > 0) ? options->timeout_ms : 30000;
+    params->session_id = s_exec_session_id;
+    
+    /* 存储命令 */
+    strncpy(params->command, command, sizeof(params->command) - 1);
+    
+    /* 配置认证方式 */
+    if (keyid && keyid[0]) {
+        strncpy(params->keyid, keyid, sizeof(params->keyid) - 1);
+    } else if (password && password[0]) {
+        params->config.auth_method = TS_SSH_AUTH_PASSWORD;
+        params->config.auth.password = strdup(password);
+    } else {
+        free((void *)params->config.host);
+        free((void *)params->config.username);
+        free(params);
+        return ESP_ERR_INVALID_ARG;
+    }
+    
+    /* 配置可选参数 */
+    if (options) {
+        if (options->expect_pattern && options->expect_pattern[0]) {
+            params->expect_pattern = strdup(options->expect_pattern);
+        }
+        if (options->fail_pattern && options->fail_pattern[0]) {
+            params->fail_pattern = strdup(options->fail_pattern);
+        }
+        if (options->extract_pattern && options->extract_pattern[0]) {
+            params->extract_pattern = strdup(options->extract_pattern);
+        }
+        if (options->var_name && options->var_name[0]) {
+            strncpy(params->var_name, options->var_name, sizeof(params->var_name) - 1);
+            params->var_name[sizeof(params->var_name) - 1] = '\0';
+        }
+        params->timeout_ms = options->timeout_ms;
+        params->collect_output = options->collect_output;
+        params->max_output_size = options->max_output_size > 0 ? options->max_output_size : 64 * 1024;
+        params->stop_on_match = options->stop_on_match;
+        
+        TS_LOGI(TAG, "SSH exec options: expect=%s, fail=%s, extract=%s, stop_on_match=%d, var=%s",
+                params->expect_pattern ? params->expect_pattern : "(null)",
+                params->fail_pattern ? params->fail_pattern : "(null)",
+                params->extract_pattern ? params->extract_pattern : "(null)",
+                params->stop_on_match,
+                params->var_name[0] ? params->var_name : "(none)");
+    } else {
+        params->collect_output = true;
+        params->max_output_size = 64 * 1024;
+        params->stop_on_match = false;
+    }
+    
+    /* 初始化实时匹配状态 */
+    params->match_found = false;
+    params->expect_matched = false;
+    params->fail_matched = false;
+    params->extracted_value = NULL;
+    
+    /* 分配输出缓冲区 */
+    if (params->collect_output) {
+        params->output_capacity = params->max_output_size;
+        params->output_buffer = heap_caps_malloc(params->output_capacity, 
+                                                  MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (!params->output_buffer) {
+            params->output_buffer = malloc(params->output_capacity);
+        }
+        if (params->output_buffer) {
+            params->output_buffer[0] = '\0';
+            params->output_len = 0;
+        }
+    }
+    
+    s_exec_running = true;
+    s_exec_params = params;
+    
+    /* 命令开始时初始化所有变量（重置旧值） */
+    TS_LOGI(TAG, "Checking var_name for init: '%s' (len=%d)", 
+            params->var_name, (int)strlen(params->var_name));
+    if (params->var_name[0]) {
+        ts_auto_variable_t var = {0};
+        char full_var_name[96];
+        
+        /* 设置 source_id（所有变量共用） */
+        strncpy(var.source_id, params->var_name, sizeof(var.source_id) - 1);
+        var.flags = 0;
+        
+        TS_LOGI(TAG, "Initializing 7 variables for source: %s", params->var_name);
+        
+        /* 初始化 status 为 "running" */
+        snprintf(full_var_name, sizeof(full_var_name), "%s.status", params->var_name);
+        strncpy(var.name, full_var_name, sizeof(var.name) - 1);
+        var.value.type = TS_AUTO_VAL_STRING;
+        strncpy(var.value.str_val, "running", sizeof(var.value.str_val) - 1);
+        ts_variable_register(&var);
+        
+        /* 初始化 exit_code 为 -1（未完成） */
+        snprintf(full_var_name, sizeof(full_var_name), "%s.exit_code", params->var_name);
+        strncpy(var.name, full_var_name, sizeof(var.name) - 1);
+        var.value.type = TS_AUTO_VAL_INT;
+        var.value.int_val = -1;
+        ts_variable_register(&var);
+        
+        /* 初始化 extracted 为空 */
+        snprintf(full_var_name, sizeof(full_var_name), "%s.extracted", params->var_name);
+        strncpy(var.name, full_var_name, sizeof(var.name) - 1);
+        var.value.type = TS_AUTO_VAL_STRING;
+        var.value.str_val[0] = '\0';
+        ts_variable_register(&var);
+        
+        /* 初始化 expect_matched 为 false */
+        snprintf(full_var_name, sizeof(full_var_name), "%s.expect_matched", params->var_name);
+        strncpy(var.name, full_var_name, sizeof(var.name) - 1);
+        var.value.type = TS_AUTO_VAL_BOOL;
+        var.value.bool_val = false;
+        ts_variable_register(&var);
+        
+        /* 初始化 fail_matched 为 false */
+        snprintf(full_var_name, sizeof(full_var_name), "%s.fail_matched", params->var_name);
+        strncpy(var.name, full_var_name, sizeof(var.name) - 1);
+        var.value.type = TS_AUTO_VAL_BOOL;
+        var.value.bool_val = false;
+        ts_variable_register(&var);
+        
+        /* 初始化 host */
+        snprintf(full_var_name, sizeof(full_var_name), "%s.host", params->var_name);
+        strncpy(var.name, full_var_name, sizeof(var.name) - 1);
+        var.value.type = TS_AUTO_VAL_STRING;
+        strncpy(var.value.str_val, params->config.host ? params->config.host : "", sizeof(var.value.str_val) - 1);
+        ts_variable_register(&var);
+        
+        /* 初始化 timestamp */
+        snprintf(full_var_name, sizeof(full_var_name), "%s.timestamp", params->var_name);
+        strncpy(var.name, full_var_name, sizeof(var.name) - 1);
+        var.value.type = TS_AUTO_VAL_INT;
+        var.value.int_val = (int32_t)(esp_timer_get_time() / 1000000);  /* 秒级时间戳 */
+        ts_variable_register(&var);
+        
+        TS_LOGI(TAG, "Initialized variables for %s (status=running)", params->var_name);
+    }
+    
+    /* 创建任务 */
+    BaseType_t ret = xTaskCreate(ssh_exec_task, "ssh_exec", 8192, params, 5, &s_exec_task);
+    if (ret != pdPASS) {
+        TS_LOGE(TAG, "Failed to create SSH exec task");
+        s_exec_running = false;
+        s_exec_params = NULL;
+        free((void *)params->config.host);
+        free((void *)params->config.username);
+        if (params->config.auth.password) free((void *)params->config.auth.password);
+        free(params->expect_pattern);
+        free(params->fail_pattern);
+        free(params->extract_pattern);
+        free(params->output_buffer);
+        free(params);
+        return ESP_FAIL;
+    }
+    
+    if (session_id) {
+        *session_id = s_exec_session_id;
+    }
+    
+    TS_LOGI(TAG, "SSH exec started (extended): session_id=%lu, host=%s, cmd=%s, expect=%s", 
+            (unsigned long)s_exec_session_id, host, command, 
+            params->expect_pattern ? params->expect_pattern : "(none)");
+    
+    return ESP_OK;
+}
+
+/* 释放结果结构 */
+void ts_webui_ssh_result_free(ts_webui_ssh_result_t *result)
+{
+    if (!result) return;
+    free(result->extracted_value);
+    free(result->output);
+    free(result->error_msg);
+    memset(result, 0, sizeof(*result));
+}
+
+esp_err_t ts_webui_ssh_exec_cancel(uint32_t session_id)
+{
+    if (!s_exec_running || session_id != s_exec_session_id) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    
+    if (s_exec_session) {
+        ts_ssh_abort(s_exec_session);
+        TS_LOGI(TAG, "SSH exec cancel requested: session_id=%lu", (unsigned long)session_id);
+    }
+    
+    return ESP_OK;
+}
+
+bool ts_webui_ssh_exec_is_running(uint32_t session_id)
+{
+    return s_exec_running && (session_id == 0 || session_id == s_exec_session_id);
 }

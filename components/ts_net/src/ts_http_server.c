@@ -224,16 +224,6 @@ esp_err_t ts_http_send_file(ts_http_request_t *req, const char *filepath)
         return ts_http_send_error(req, 404, "File not found");
     }
     
-    char *buf = TS_MALLOC_PSRAM(size);
-    if (!buf) {
-        return ts_http_send_error(req, 500, "Memory allocation failed");
-    }
-    
-    if (ts_storage_read_file(filepath, buf, size) != size) {
-        free(buf);
-        return ts_http_send_error(req, 500, "Failed to read file");
-    }
-    
     // Detect content type
     const char *ext = strrchr(filepath, '.');
     const char *content_type = "application/octet-stream";
@@ -249,9 +239,59 @@ esp_err_t ts_http_send_file(ts_http_request_t *req, const char *filepath)
     }
     
     httpd_resp_set_type(req->req, content_type);
-    esp_err_t ret = httpd_resp_send(req->req, buf, size);
     
-    free(buf);
+    // 对于小文件（<32KB），直接发送
+    if (size < 32 * 1024) {
+        char *buf = TS_MALLOC_PSRAM(size);
+        if (!buf) {
+            return ts_http_send_error(req, 500, "Memory allocation failed");
+        }
+        
+        if (ts_storage_read_file(filepath, buf, size) != size) {
+            free(buf);
+            return ts_http_send_error(req, 500, "Failed to read file");
+        }
+        
+        esp_err_t ret = httpd_resp_send(req->req, buf, size);
+        free(buf);
+        return ret;
+    }
+    
+    // 对于大文件，使用分块传输（chunked transfer）
+    FILE *f = fopen(filepath, "r");
+    if (!f) {
+        return ts_http_send_error(req, 500, "Failed to open file");
+    }
+    
+    // 分块大小：8KB
+    #define CHUNK_SIZE 8192
+    char *chunk = TS_MALLOC_PSRAM(CHUNK_SIZE);
+    if (!chunk) {
+        fclose(f);
+        return ts_http_send_error(req, 500, "Memory allocation failed");
+    }
+    
+    esp_err_t ret = ESP_OK;
+    size_t read_len;
+    
+    do {
+        read_len = fread(chunk, 1, CHUNK_SIZE, f);
+        if (read_len > 0) {
+            ret = httpd_resp_send_chunk(req->req, chunk, read_len);
+            if (ret != ESP_OK) {
+                ESP_LOGW("http", "Chunk send failed");
+                break;
+            }
+        }
+    } while (read_len == CHUNK_SIZE && ret == ESP_OK);
+    
+    // 发送结束标记（空块）
+    if (ret == ESP_OK) {
+        httpd_resp_send_chunk(req->req, NULL, 0);
+    }
+    
+    free(chunk);
+    fclose(f);
     return ret;
 }
 

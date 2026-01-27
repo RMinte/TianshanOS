@@ -26,7 +26,9 @@
 #include "ts_keystore.h"
 #include "ts_known_hosts.h"
 #include "ts_ssh_hosts_config.h"
+#include "ts_webui.h"
 #include "ts_log.h"
+#include "esp_heap_caps.h"
 #include <string.h>
 #include <stdlib.h>
 
@@ -364,6 +366,194 @@ static esp_err_t api_ssh_exec(const cJSON *params, ts_api_result_t *result)
     cleanup_key_buffer();
     
     return ret;
+}
+
+/**
+ * @brief ssh.exec_stream - Execute remote command with streaming output
+ * 
+ * 流式执行命令，输出通过 WebSocket 实时推送。
+ * 支持使用 ssh.cancel 中止执行。
+ * 
+ * Params: { 
+ *   "host": "192.168.1.100", 
+ *   "user": "root",
+ *   "password": "xxx" | "keyid": "default",
+ *   "port": 22,
+ *   "command": "ping -c 10 8.8.8.8"
+ * }
+ * 
+ * Response: { "session_id": 12345 }
+ * 
+ * WebSocket Events:
+ * - ssh_exec_start: { "session_id", "command" }
+ * - ssh_exec_output: { "session_id", "data", "is_stderr" }
+ * - ssh_exec_done: { "session_id", "exit_code", "success" }
+ * - ssh_exec_error: { "session_id", "error" }
+ * - ssh_exec_cancelled: { "session_id" }
+ * 
+ * Optional options for advanced usage:
+ * - expect_pattern: Regex pattern to match for success
+ * - fail_pattern: Regex pattern that indicates failure
+ * - extract_pattern: Regex pattern with capture group to extract value
+ * - timeout: Command timeout in milliseconds (default 30000)
+ * - collect_output: Whether to collect output (default true)
+ * - max_output_size: Maximum output to collect (default 65536)
+ */
+static esp_err_t api_ssh_exec_stream(const cJSON *params, ts_api_result_t *result)
+{
+    if (!params) {
+        ts_api_result_error(result, TS_API_ERR_INVALID_ARG, "Missing parameters");
+        return ESP_ERR_INVALID_ARG;
+    }
+    
+    /* 检查必需参数 */
+    const cJSON *host = cJSON_GetObjectItem(params, "host");
+    const cJSON *user = cJSON_GetObjectItem(params, "user");
+    const cJSON *cmd = cJSON_GetObjectItem(params, "command");
+    
+    if (!host || !cJSON_IsString(host) || 
+        !user || !cJSON_IsString(user) ||
+        !cmd || !cJSON_IsString(cmd)) {
+        ts_api_result_error(result, TS_API_ERR_INVALID_ARG, 
+                            "Missing required parameters: host, user, command");
+        return ESP_ERR_INVALID_ARG;
+    }
+    
+    /* 可选参数 */
+    const cJSON *port = cJSON_GetObjectItem(params, "port");
+    const cJSON *password = cJSON_GetObjectItem(params, "password");
+    const cJSON *keyid = cJSON_GetObjectItem(params, "keyid");
+    
+    uint16_t ssh_port = (port && cJSON_IsNumber(port)) ? (uint16_t)port->valueint : 22;
+    const char *auth_password = (password && cJSON_IsString(password)) ? password->valuestring : NULL;
+    const char *auth_keyid = (keyid && cJSON_IsString(keyid)) ? keyid->valuestring : NULL;
+    
+    /* 检查认证方式 */
+    if (!auth_password && !auth_keyid) {
+        ts_api_result_error(result, TS_API_ERR_INVALID_ARG, 
+                            "Either 'password' or 'keyid' must be provided");
+        return ESP_ERR_INVALID_ARG;
+    }
+    
+    /* 解析可选的匹配选项 */
+    const cJSON *expect_pattern = cJSON_GetObjectItem(params, "expect_pattern");
+    const cJSON *fail_pattern = cJSON_GetObjectItem(params, "fail_pattern");
+    const cJSON *extract_pattern = cJSON_GetObjectItem(params, "extract_pattern");
+    const cJSON *var_name = cJSON_GetObjectItem(params, "var_name");
+    const cJSON *timeout = cJSON_GetObjectItem(params, "timeout");
+    const cJSON *collect_output = cJSON_GetObjectItem(params, "collect_output");
+    const cJSON *max_output_size = cJSON_GetObjectItem(params, "max_output_size");
+    const cJSON *stop_on_match = cJSON_GetObjectItem(params, "stop_on_match");
+    
+    /* 检查是否有任何可选参数 */
+    bool has_options = (expect_pattern || fail_pattern || extract_pattern || var_name ||
+                        timeout || collect_output || max_output_size || stop_on_match);
+    
+    esp_err_t ret;
+    uint32_t session_id = 0;
+    
+    if (has_options) {
+        /* 使用扩展 API */
+        ts_webui_ssh_options_t options = {0};
+        options.expect_pattern = (expect_pattern && cJSON_IsString(expect_pattern)) ? 
+                                  expect_pattern->valuestring : NULL;
+        options.fail_pattern = (fail_pattern && cJSON_IsString(fail_pattern)) ? 
+                                fail_pattern->valuestring : NULL;
+        options.extract_pattern = (extract_pattern && cJSON_IsString(extract_pattern)) ? 
+                                   extract_pattern->valuestring : NULL;
+        options.var_name = (var_name && cJSON_IsString(var_name)) ?
+                            var_name->valuestring : NULL;
+        options.timeout_ms = (timeout && cJSON_IsNumber(timeout)) ? 
+                              (uint32_t)timeout->valueint : 0;
+        options.collect_output = (collect_output && cJSON_IsBool(collect_output)) ? 
+                                  cJSON_IsTrue(collect_output) : true;
+        options.max_output_size = (max_output_size && cJSON_IsNumber(max_output_size)) ? 
+                                   (uint32_t)max_output_size->valueint : 0;
+        options.stop_on_match = (stop_on_match && cJSON_IsBool(stop_on_match)) ? 
+                                 cJSON_IsTrue(stop_on_match) : false;
+        
+        TS_LOGW(TAG, "api_ssh_exec_stream: var_name param=%p, is_string=%d, value='%s'",
+                 (void*)var_name, var_name ? cJSON_IsString(var_name) : 0,
+                 options.var_name ? options.var_name : "(null)");
+        
+        ret = ts_webui_ssh_exec_start_ex(
+            host->valuestring, ssh_port,
+            user->valuestring, auth_keyid, auth_password,
+            cmd->valuestring, &options, &session_id
+        );
+    } else {
+        /* 使用基本 API */
+        ret = ts_webui_ssh_exec_start(
+            host->valuestring, ssh_port,
+            user->valuestring, auth_keyid, auth_password,
+            cmd->valuestring, &session_id
+        );
+    }
+    
+    if (ret != ESP_OK) {
+        if (ret == ESP_ERR_INVALID_STATE) {
+            ts_api_result_error(result, TS_API_ERR_BUSY, 
+                                "Another SSH exec session is running");
+        } else {
+            ts_api_result_error(result, TS_API_ERR_INTERNAL, 
+                                "Failed to start SSH exec session");
+        }
+        return ret;
+    }
+    
+    /* 返回 session_id 和配置信息 */
+    cJSON *data = cJSON_CreateObject();
+    cJSON_AddNumberToObject(data, "session_id", session_id);
+    if (has_options) {
+        if (expect_pattern && cJSON_IsString(expect_pattern)) {
+            cJSON_AddStringToObject(data, "expect_pattern", expect_pattern->valuestring);
+        }
+        if (fail_pattern && cJSON_IsString(fail_pattern)) {
+            cJSON_AddStringToObject(data, "fail_pattern", fail_pattern->valuestring);
+        }
+        if (extract_pattern && cJSON_IsString(extract_pattern)) {
+            cJSON_AddStringToObject(data, "extract_pattern", extract_pattern->valuestring);
+        }
+    }
+    ts_api_result_ok(result, data);
+    
+    return ESP_OK;
+}
+
+/**
+ * @brief ssh.cancel - Cancel running SSH exec session
+ * 
+ * Params: { "session_id": 12345 }
+ * 
+ * Response: { "cancelled": true }
+ */
+static esp_err_t api_ssh_cancel(const cJSON *params, ts_api_result_t *result)
+{
+    const cJSON *sid = cJSON_GetObjectItem(params, "session_id");
+    
+    uint32_t session_id = 0;
+    if (sid && cJSON_IsNumber(sid)) {
+        session_id = (uint32_t)sid->valueint;
+    }
+    
+    /* 检查会话是否在运行 */
+    if (!ts_webui_ssh_exec_is_running(session_id)) {
+        ts_api_result_error(result, TS_API_ERR_NOT_FOUND, "No running session");
+        return ESP_ERR_NOT_FOUND;
+    }
+    
+    /* 取消执行 */
+    esp_err_t ret = ts_webui_ssh_exec_cancel(session_id);
+    if (ret != ESP_OK) {
+        ts_api_result_error(result, TS_API_ERR_INTERNAL, "Failed to cancel");
+        return ret;
+    }
+    
+    cJSON *data = cJSON_CreateObject();
+    cJSON_AddBoolToObject(data, "cancelled", true);
+    ts_api_result_ok(result, data);
+    
+    return ESP_OK;
 }
 
 /**
@@ -992,10 +1182,17 @@ static esp_err_t api_ssh_hosts_list(const cJSON *params, ts_api_result_t *result
     cJSON *data = cJSON_CreateObject();
     cJSON *hosts_arr = cJSON_AddArrayToObject(data, "hosts");
     
-    ts_ssh_host_config_t configs[TS_SSH_HOSTS_MAX];
+    /* 使用动态分配避免栈溢出 */
+    ts_ssh_host_config_t *configs = heap_caps_malloc(
+        sizeof(ts_ssh_host_config_t) * TS_SSH_HOSTS_MAX, 
+        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!configs) {
+        configs = malloc(sizeof(ts_ssh_host_config_t) * TS_SSH_HOSTS_MAX);
+    }
+    
     size_t count = 0;
     
-    if (ts_ssh_hosts_config_list(configs, TS_SSH_HOSTS_MAX, &count) == ESP_OK) {
+    if (configs && ts_ssh_hosts_config_list(configs, TS_SSH_HOSTS_MAX, &count) == ESP_OK) {
         for (size_t i = 0; i < count; i++) {
             cJSON *item = cJSON_CreateObject();
             cJSON_AddStringToObject(item, "id", configs[i].id);
@@ -1012,6 +1209,10 @@ static esp_err_t api_ssh_hosts_list(const cJSON *params, ts_api_result_t *result
             cJSON_AddNumberToObject(item, "last_used", configs[i].last_used_time);
             cJSON_AddItemToArray(hosts_arr, item);
         }
+    }
+    
+    if (configs) {
+        free(configs);
     }
     
     cJSON_AddNumberToObject(data, "count", (int)count);
@@ -1180,6 +1381,20 @@ static const ts_api_endpoint_t ssh_endpoints[] = {
         .category = TS_API_CAT_SECURITY,
         .handler = api_ssh_exec,
         .requires_auth = true,
+    },
+    {
+        .name = "ssh.exec_stream",
+        .description = "Execute remote command with streaming output via WebSocket",
+        .category = TS_API_CAT_SECURITY,
+        .handler = api_ssh_exec_stream,
+        .requires_auth = true,
+    },
+    {
+        .name = "ssh.cancel",
+        .description = "Cancel running SSH exec session",
+        .category = TS_API_CAT_SECURITY,
+        .handler = api_ssh_cancel,
+        .requires_auth = false,
     },
     {
         .name = "ssh.test",

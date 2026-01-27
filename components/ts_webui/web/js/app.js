@@ -154,6 +154,15 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // 启动 WebSocket
     setupWebSocket();
+    
+    // 全局键盘快捷键
+    document.addEventListener('keydown', (e) => {
+        // Esc 键取消 SSH 命令执行
+        if (e.key === 'Escape' && typeof currentExecSessionId !== 'undefined' && currentExecSessionId) {
+            e.preventDefault();
+            cancelExecution();
+        }
+    });
 });
 
 // =========================================================================
@@ -336,6 +345,11 @@ function handleEvent(msg) {
     // 处理电压保护事件
     if (msg.type === 'power_event') {
         handlePowerEvent(msg);
+    }
+    
+    // 处理 SSH Exec 流式输出消息
+    if (msg.type && msg.type.startsWith('ssh_exec_')) {
+        handleSshExecMessage(msg);
     }
 }
 
@@ -4415,12 +4429,53 @@ function saveSshCommands() {
     }
 }
 
+/**
+ * 预创建 SSH 命令相关的变量
+ * 命令创建/保存时调用，确保变量立即存在（值为空默认）
+ * @param {string} varName - 变量名前缀（如 "ping_test"）
+ */
+async function preCreateCommandVariables(varName) {
+    if (!varName) return;
+    
+    // 7 个标准变量及其类型
+    const varDefs = [
+        { suffix: 'status', type: 'string', defaultValue: '' },
+        { suffix: 'exit_code', type: 'int', defaultValue: 0 },
+        { suffix: 'extracted', type: 'string', defaultValue: '' },
+        { suffix: 'expect_matched', type: 'bool', defaultValue: false },
+        { suffix: 'fail_matched', type: 'bool', defaultValue: false },
+        { suffix: 'host', type: 'string', defaultValue: '' },
+        { suffix: 'timestamp', type: 'int', defaultValue: 0 }
+    ];
+    
+    for (const def of varDefs) {
+        const fullName = `${varName}.${def.suffix}`;
+        try {
+            // 使用 automation.variables.set API 创建/更新变量
+            // 如果变量已存在，不会覆盖有值的变量（后端逻辑）
+            await api.call('automation.variables.set', {
+                name: fullName,
+                value: def.defaultValue,
+                create_only: true  // 告诉后端：仅在不存在时创建
+            });
+        } catch (e) {
+            // 忽略单个变量创建失败，继续其他
+            console.debug(`Variable ${fullName} may already exist:`, e.message);
+        }
+    }
+    
+    console.log(`Pre-created variables for command: ${varName}.*`);
+}
+
 async function loadCommandsPage() {
     clearInterval(refreshInterval);
     
     if (subscriptionManager) {
         subscriptionManager.unsubscribe('system.dashboard');
     }
+    
+    // 重置执行状态（防止页面切换后状态残留）
+    currentExecSessionId = null;
     
     // 加载已保存的指令
     loadSshCommands();
@@ -4457,10 +4512,44 @@ async function loadCommandsPage() {
                 <div class="section-header">
                     <h2>📤 执行结果</h2>
                     <div class="section-actions">
+                        <button id="cancel-exec-btn" class="btn btn-sm" onclick="cancelExecution()" style="display:none;background:#dc3545;color:white">⏹️ 取消 (Esc)</button>
                         <button class="btn btn-sm" onclick="clearExecResult()">🗑️ 清除</button>
                     </div>
                 </div>
                 <pre id="exec-result" class="exec-result"></pre>
+                
+                <!-- 模式匹配结果面板 -->
+                <div id="match-result-panel" class="match-result-panel" style="display:none">
+                    <div class="match-panel-header">
+                        <h3>🎯 匹配结果</h3>
+                        <span class="match-status" id="match-status-badge"></span>
+                    </div>
+                    <div class="match-result-grid">
+                        <div class="match-result-item">
+                            <div class="match-label">✅ 成功匹配</div>
+                            <div class="match-value" id="match-expect-result">-</div>
+                            <code class="match-var">msg.expect_matched</code>
+                        </div>
+                        <div class="match-result-item">
+                            <div class="match-label">❌ 失败匹配</div>
+                            <div class="match-value" id="match-fail-result">-</div>
+                            <code class="match-var">msg.fail_matched</code>
+                        </div>
+                        <div class="match-result-item">
+                            <div class="match-label">📋 提取内容</div>
+                            <div class="match-value match-extracted" id="match-extracted-result">-</div>
+                            <code class="match-var">msg.extracted</code>
+                        </div>
+                        <div class="match-result-item">
+                            <div class="match-label">🏷️ 最终状态</div>
+                            <div class="match-value" id="match-final-status">-</div>
+                            <code class="match-var">msg.status</code>
+                        </div>
+                    </div>
+                    <div class="match-api-hint">
+                        <small>💡 WebSocket 消息字段可在 <code>handleSshExecMessage(msg)</code> 回调中使用</small>
+                    </div>
+                </div>
             </div>
         </div>
         
@@ -4496,6 +4585,46 @@ async function loadCommandsPage() {
                             </div>
                             <input type="hidden" id="cmd-icon" value="🚀">
                         </div>
+                        
+                        <!-- 高级选项 -->
+                        <details class="advanced-options">
+                            <summary>⚙️ 高级选项（模式匹配）</summary>
+                            <div class="advanced-content">
+                                <div class="form-group">
+                                    <label>✅ 成功匹配模式</label>
+                                    <input type="text" id="cmd-expect-pattern" placeholder="例如：active (running)" oninput="updateTimeoutState()">
+                                    <small>输出中包含此文本时标记为成功</small>
+                                </div>
+                                <div class="form-group">
+                                    <label>❌ 失败匹配模式</label>
+                                    <input type="text" id="cmd-fail-pattern" placeholder="例如：failed|error" oninput="updateTimeoutState()">
+                                    <small>输出中包含此文本时标记为失败</small>
+                                </div>
+                                <div class="form-group">
+                                    <label>📋 提取模式</label>
+                                    <input type="text" id="cmd-extract-pattern" placeholder="例如：version: (.*)">
+                                    <small>从输出中提取匹配内容，使用 (.*) 捕获组</small>
+                                </div>
+                                <div class="form-group">
+                                    <label>📝 存储变量名</label>
+                                    <input type="text" id="cmd-var-name" placeholder="例如：ping_test">
+                                    <small>执行结果将存储为 \${变量名.status}、\${变量名.extracted} 等，可在后续命令中引用</small>
+                                </div>
+                                <div class="form-group">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="cmd-stop-on-match" onchange="updateTimeoutState()">
+                                        <span>⏹️ 匹配后自动停止</span>
+                                    </label>
+                                    <small>适用于 ping 等持续运行的命令，匹配成功后自动终止</small>
+                                </div>
+                                <div class="form-group" id="cmd-timeout-group">
+                                    <label>⏱️ 超时（秒）</label>
+                                    <input type="number" id="cmd-timeout" value="30" min="5" max="300" step="5">
+                                    <small id="cmd-timeout-hint">超时仅在设置了成功/失败模式或勾选了"匹配后停止"时有效</small>
+                                </div>
+                            </div>
+                        </details>
+                        
                         <div class="form-actions">
                             <button type="button" class="btn" onclick="closeCommandModal()">取消</button>
                             <button type="submit" class="btn btn-primary" onclick="saveCommand()">保存</button>
@@ -4551,56 +4680,125 @@ function addCommandsPageStyles() {
         }
         
         .commands-list {
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 12px;
         }
         .command-card {
             background: var(--bg-secondary);
             border: 1px solid var(--border-color);
             border-radius: 8px;
-            padding: 15px;
+            padding: 12px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .command-card .cmd-header {
             display: flex;
             align-items: center;
-            gap: 15px;
+            gap: 10px;
         }
         .command-card .cmd-icon {
-            font-size: 2em;
-            width: 50px;
-            text-align: center;
-        }
-        .command-card .cmd-info {
-            flex: 1;
+            font-size: 1.5em;
         }
         .command-card .cmd-name {
             font-weight: bold;
-            font-size: 1.1em;
-            margin-bottom: 4px;
+            font-size: 1em;
+            flex: 1;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
         }
         .command-card .cmd-desc {
             color: #666;
-            font-size: 0.9em;
-            margin-bottom: 6px;
+            font-size: 0.85em;
+            line-height: 1.3;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
         }
         .command-card .cmd-code {
             font-family: monospace;
-            font-size: 0.85em;
+            font-size: 0.8em;
             color: #888;
             background: rgba(0,0,0,0.1);
             padding: 4px 8px;
             border-radius: 4px;
-            max-width: 400px;
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
         }
         .command-card .cmd-actions {
             display: flex;
-            gap: 8px;
+            gap: 6px;
+            margin-top: auto;
         }
         .command-card .btn-exec {
             background: var(--success);
             color: white;
+            flex: 1;
+        }
+        .command-card .btn-sm {
+            padding: 4px 8px;
+            font-size: 0.85em;
+        }
+        
+        /* 模式匹配标签 */
+        .cmd-patterns {
+            display: flex;
+            gap: 4px;
+            margin-left: auto;
+        }
+        .pattern-tag {
+            font-size: 0.9em;
+            cursor: help;
+            opacity: 0.7;
+        }
+        .pattern-tag:hover {
+            opacity: 1;
+        }
+        
+        /* 高级选项折叠面板 */
+        .advanced-options {
+            margin-top: 15px;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        .advanced-options summary {
+            padding: 10px 15px;
+            background: var(--bg-secondary);
+            cursor: pointer;
+            font-weight: 500;
+            user-select: none;
+        }
+        .advanced-options summary:hover {
+            background: rgba(var(--primary-rgb), 0.1);
+        }
+        .advanced-content {
+            padding: 15px;
+            border-top: 1px solid var(--border-color);
+        }
+        .advanced-content .form-group {
+            margin-bottom: 12px;
+        }
+        .advanced-content small {
+            display: block;
+            color: #888;
+            font-size: 0.8em;
+            margin-top: 4px;
+        }
+        .checkbox-label {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            cursor: pointer;
+        }
+        .checkbox-label input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            cursor: pointer;
         }
         
         .exec-result {
@@ -4614,6 +4812,106 @@ function addCommandsPageStyles() {
             overflow: auto;
             white-space: pre-wrap;
             word-break: break-all;
+        }
+        
+        /* 匹配结果面板 */
+        .match-result-panel {
+            margin-top: 15px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 15px;
+        }
+        .match-panel-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 12px;
+        }
+        .match-panel-header h3 {
+            margin: 0;
+            font-size: 1em;
+        }
+        .match-status {
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 0.85em;
+            font-weight: 500;
+        }
+        .match-status.success {
+            background: rgba(40, 167, 69, 0.2);
+            color: #28a745;
+        }
+        .match-status.failed {
+            background: rgba(220, 53, 69, 0.2);
+            color: #dc3545;
+        }
+        .match-status.timeout {
+            background: rgba(255, 193, 7, 0.2);
+            color: #ffc107;
+        }
+        .match-status.extracting {
+            background: rgba(0, 123, 255, 0.2);
+            color: #007bff;
+            animation: pulse 1.5s infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.6; }
+        }
+        .match-result-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 12px;
+        }
+        .match-result-item {
+            background: var(--bg-primary);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 10px 12px;
+        }
+        .match-label {
+            font-size: 0.85em;
+            color: #888;
+            margin-bottom: 4px;
+        }
+        .match-value {
+            font-weight: 600;
+            font-size: 1em;
+            margin-bottom: 6px;
+            word-break: break-all;
+        }
+        .match-value.true {
+            color: #28a745;
+        }
+        .match-value.false {
+            color: #dc3545;
+        }
+        .match-extracted {
+            font-family: monospace;
+            font-size: 0.9em;
+            max-height: 60px;
+            overflow: auto;
+        }
+        .match-var {
+            display: block;
+            font-size: 0.75em;
+            color: #6c757d;
+            background: rgba(0,0,0,0.1);
+            padding: 2px 6px;
+            border-radius: 3px;
+        }
+        .match-api-hint {
+            margin-top: 12px;
+            padding-top: 10px;
+            border-top: 1px solid var(--border-color);
+            color: #888;
+        }
+        .match-api-hint code {
+            background: rgba(0,0,0,0.1);
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 0.85em;
         }
         
         .icon-picker {
@@ -4718,21 +5016,33 @@ function refreshCommandsList() {
         return;
     }
     
-    container.innerHTML = hostCommands.map((cmd, idx) => `
-        <div class="command-card">
-            <div class="cmd-icon">${cmd.icon || '🚀'}</div>
-            <div class="cmd-info">
-                <div class="cmd-name">${escapeHtml(cmd.name)}</div>
-                ${cmd.desc ? `<div class="cmd-desc">${escapeHtml(cmd.desc)}</div>` : ''}
-                <div class="cmd-code">${escapeHtml(cmd.command.split('\n')[0])}${cmd.command.includes('\n') ? ' ...' : ''}</div>
+    container.innerHTML = hostCommands.map((cmd, idx) => {
+        // 构建模式匹配标签
+        const hasPatternsConfig = cmd.expectPattern || cmd.failPattern || cmd.extractPattern;
+        const patternsHtml = hasPatternsConfig ? `
+            <div class="cmd-patterns">
+                ${cmd.expectPattern ? '<span class="pattern-tag success" title="成功模式: ' + escapeHtml(cmd.expectPattern) + '">✅</span>' : ''}
+                ${cmd.failPattern ? '<span class="pattern-tag fail" title="失败模式: ' + escapeHtml(cmd.failPattern) + '">❌</span>' : ''}
+                ${cmd.extractPattern ? '<span class="pattern-tag extract" title="提取模式: ' + escapeHtml(cmd.extractPattern) + '">📋</span>' : ''}
             </div>
+        ` : '';
+        
+        return `
+        <div class="command-card">
+            <div class="cmd-header">
+                <span class="cmd-icon">${cmd.icon || '🚀'}</span>
+                <span class="cmd-name" title="${escapeHtml(cmd.name)}">${escapeHtml(cmd.name)}</span>
+                ${patternsHtml}
+            </div>
+            ${cmd.desc ? `<div class="cmd-desc" title="${escapeHtml(cmd.desc)}">${escapeHtml(cmd.desc)}</div>` : ''}
+            <div class="cmd-code" title="${escapeHtml(cmd.command)}">${escapeHtml(cmd.command.split('\n')[0])}${cmd.command.includes('\n') ? ' ...' : ''}</div>
             <div class="cmd-actions">
-                <button class="btn btn-sm btn-exec" onclick="executeCommand(${idx})" title="执行">▶️ 执行</button>
+                <button class="btn btn-sm btn-exec" onclick="executeCommand(${idx})" title="执行">▶️</button>
                 <button class="btn btn-sm" onclick="editCommand(${idx})" title="编辑">✏️</button>
                 <button class="btn btn-sm" onclick="deleteCommand(${idx})" title="删除" style="background:#dc3545;color:white">🗑️</button>
             </div>
         </div>
-    `).join('');
+    `}).join('');
 }
 
 function showAddCommandModal() {
@@ -4748,15 +5058,57 @@ function showAddCommandModal() {
     document.getElementById('cmd-desc').value = '';
     document.getElementById('cmd-icon').value = '🚀';
     
+    // 重置高级选项
+    document.getElementById('cmd-expect-pattern').value = '';
+    document.getElementById('cmd-fail-pattern').value = '';
+    document.getElementById('cmd-extract-pattern').value = '';
+    document.getElementById('cmd-var-name').value = '';
+    document.getElementById('cmd-timeout').value = 30;
+    document.getElementById('cmd-stop-on-match').checked = false;
+    
+    // 折叠高级选项面板
+    const advDetails = document.querySelector('.advanced-options');
+    if (advDetails) advDetails.open = false;
+    
     // 重置图标选中状态
     document.querySelectorAll('.icon-btn').forEach(btn => btn.classList.remove('selected'));
     document.querySelector('.icon-btn')?.classList.add('selected');
     
     document.getElementById('command-modal').classList.remove('hidden');
+    
+    // 更新超时输入框状态
+    updateTimeoutState();
 }
 
 function closeCommandModal() {
     document.getElementById('command-modal').classList.add('hidden');
+}
+
+/* 更新超时输入框的启用状态 */
+function updateTimeoutState() {
+    const expectPattern = document.getElementById('cmd-expect-pattern')?.value?.trim();
+    const failPattern = document.getElementById('cmd-fail-pattern')?.value?.trim();
+    const stopOnMatch = document.getElementById('cmd-stop-on-match')?.checked;
+    
+    const timeoutGroup = document.getElementById('cmd-timeout-group');
+    const timeoutInput = document.getElementById('cmd-timeout');
+    const timeoutHint = document.getElementById('cmd-timeout-hint');
+    
+    /* 超时在以下情况有效：设定了成功/失败条件，或勾选了匹配后停止 */
+    const isTimeoutEffective = stopOnMatch || expectPattern || failPattern;
+    
+    if (timeoutGroup) {
+        timeoutGroup.style.opacity = isTimeoutEffective ? '1' : '0.5';
+    }
+    if (timeoutInput) {
+        timeoutInput.disabled = !isTimeoutEffective;
+    }
+    if (timeoutHint) {
+        timeoutHint.textContent = isTimeoutEffective 
+            ? '匹配超时后命令将被终止' 
+            : '超时仅在设置了成功/失败模式或勾选了"匹配后停止"时有效';
+        timeoutHint.style.color = isTimeoutEffective ? '' : 'var(--text-muted)';
+    }
 }
 
 function selectCmdIcon(icon) {
@@ -4766,11 +5118,17 @@ function selectCmdIcon(icon) {
     });
 }
 
-function saveCommand() {
+async function saveCommand() {
     const name = document.getElementById('cmd-name').value.trim();
     const command = document.getElementById('cmd-command').value.trim();
     const desc = document.getElementById('cmd-desc').value.trim();
     const icon = document.getElementById('cmd-icon').value;
+    const expectPattern = document.getElementById('cmd-expect-pattern').value.trim();
+    const failPattern = document.getElementById('cmd-fail-pattern').value.trim();
+    const extractPattern = document.getElementById('cmd-extract-pattern').value.trim();
+    const varName = document.getElementById('cmd-var-name').value.trim();
+    const timeout = parseInt(document.getElementById('cmd-timeout').value) || 30;
+    const stopOnMatch = document.getElementById('cmd-stop-on-match').checked;
     const editId = document.getElementById('cmd-edit-id').value;
     
     if (!name || !command) {
@@ -4782,7 +5140,16 @@ function saveCommand() {
         sshCommands[selectedHostId] = [];
     }
     
-    const cmdData = { name, command, desc, icon };
+    const cmdData = { 
+        name, command, desc, icon,
+        // 高级选项（仅在有值时保存）
+        ...(expectPattern && { expectPattern }),
+        ...(failPattern && { failPattern }),
+        ...(extractPattern && { extractPattern }),
+        ...(varName && { varName }),
+        ...(timeout !== 30 && { timeout }),
+        ...(stopOnMatch && { stopOnMatch })
+    };
     
     if (editId !== '') {
         // 编辑模式
@@ -4795,6 +5162,14 @@ function saveCommand() {
     }
     
     saveSshCommands();
+    
+    // 如果设置了变量名，预创建变量（后台执行，不阻塞 UI）
+    if (varName) {
+        preCreateCommandVariables(varName).catch(e => {
+            console.warn('Failed to pre-create variables:', e);
+        });
+    }
+    
     closeCommandModal();
     refreshCommandsList();
 }
@@ -4810,12 +5185,29 @@ function editCommand(idx) {
     document.getElementById('cmd-desc').value = cmd.desc || '';
     document.getElementById('cmd-icon').value = cmd.icon || '🚀';
     
+    // 高级选项
+    document.getElementById('cmd-expect-pattern').value = cmd.expectPattern || '';
+    document.getElementById('cmd-fail-pattern').value = cmd.failPattern || '';
+    document.getElementById('cmd-extract-pattern').value = cmd.extractPattern || '';
+    document.getElementById('cmd-var-name').value = cmd.varName || '';
+    document.getElementById('cmd-timeout').value = cmd.timeout || 30;
+    document.getElementById('cmd-stop-on-match').checked = cmd.stopOnMatch || false;
+    
+    // 如果有高级选项，展开面板
+    const advDetails = document.querySelector('.advanced-options');
+    if (advDetails && (cmd.expectPattern || cmd.failPattern || cmd.extractPattern || cmd.varName || cmd.timeout !== 30 || cmd.stopOnMatch)) {
+        advDetails.open = true;
+    }
+    
     // 更新图标选中状态
     document.querySelectorAll('.icon-btn').forEach(btn => {
         btn.classList.toggle('selected', btn.textContent === (cmd.icon || '🚀'));
     });
     
     document.getElementById('command-modal').classList.remove('hidden');
+    
+    // 更新超时输入框状态
+    updateTimeoutState();
 }
 
 function deleteCommand(idx) {
@@ -4830,6 +5222,9 @@ function deleteCommand(idx) {
     showToast('指令已删除', 'success');
 }
 
+/* 当前执行中的会话 ID */
+let currentExecSessionId = null;
+
 async function executeCommand(idx) {
     const cmd = sshCommands[selectedHostId]?.[idx];
     if (!cmd) return;
@@ -4840,52 +5235,337 @@ async function executeCommand(idx) {
         return;
     }
     
+    // 检查是否有正在运行的命令
+    if (currentExecSessionId) {
+        showToast('有命令正在执行中，请先取消或等待完成', 'warning');
+        return;
+    }
+    
     // 显示结果区域
     const resultSection = document.getElementById('exec-result-section');
     const resultPre = document.getElementById('exec-result');
+    const cancelBtn = document.getElementById('cancel-exec-btn');
     resultSection.style.display = 'block';
-    resultPre.textContent = `⏳ 正在执行: ${cmd.name}\n主机: ${host.username}@${host.host}:${host.port}\n命令: ${cmd.command}\n\n--- 等待响应 ---\n`;
+    cancelBtn.style.display = 'inline-block';
+    cancelBtn.disabled = false;
+    
+    // 构建状态信息
+    let statusInfo = `⏳ 正在连接: ${cmd.name}\n主机: ${host.username}@${host.host}:${host.port}\n命令: ${cmd.command}\n`;
+    if (cmd.expectPattern || cmd.failPattern || cmd.extractPattern) {
+        statusInfo += `\n📋 模式匹配配置:\n`;
+        if (cmd.expectPattern) statusInfo += `  ✅ 成功模式: ${cmd.expectPattern}\n`;
+        if (cmd.failPattern) statusInfo += `  ❌ 失败模式: ${cmd.failPattern}\n`;
+        if (cmd.extractPattern) statusInfo += `  📋 提取模式: ${cmd.extractPattern}\n`;
+        if (cmd.stopOnMatch) statusInfo += `  ⏹️ 匹配后自动停止: 是\n`;
+        if (cmd.varName) statusInfo += `  📝 存储变量: \${${cmd.varName}.*}\n`;
+    }
+    statusInfo += `\n`;
+    resultPre.textContent = statusInfo;
     
     // 滚动到结果区域
     resultSection.scrollIntoView({ behavior: 'smooth' });
     
     try {
-        const result = await api.call('ssh.exec', {
+        // 构建 API 参数
+        const params = {
             host: host.host,
             port: host.port,
-            username: host.username,
+            user: host.username,
             keyid: host.keyid,
             command: cmd.command
-        });
+        };
         
-        const data = result.data || {};
-        let output = `✅ 执行完成\n`;
-        output += `退出码: ${data.exit_code}\n`;
-        output += `耗时: ${data.exec_time_ms || 0}ms\n`;
-        output += `\n--- 输出 ---\n`;
-        output += data.stdout || '(无输出)';
+        // 添加高级选项
+        if (cmd.expectPattern) params.expect_pattern = cmd.expectPattern;
+        if (cmd.failPattern) params.fail_pattern = cmd.failPattern;
+        if (cmd.extractPattern) params.extract_pattern = cmd.extractPattern;
+        if (cmd.varName) params.var_name = cmd.varName;
+        if (cmd.timeout) params.timeout = cmd.timeout * 1000; // 转为毫秒
+        if (cmd.stopOnMatch) params.stop_on_match = true;
         
-        if (data.stderr) {
-            output += `\n\n--- 错误输出 ---\n${data.stderr}`;
-        }
+        // 使用流式执行 API
+        const result = await api.call('ssh.exec_stream', params);
         
-        resultPre.textContent = output;
+        currentExecSessionId = result.data?.session_id;
+        resultPre.textContent += `会话 ID: ${currentExecSessionId}\n等待输出...\n\n`;
         
-        if (data.exit_code === 0) {
-            showToast(`指令「${cmd.name}」执行成功`, 'success');
-        } else {
-            showToast(`指令执行完成，退出码: ${data.exit_code}`, 'warning');
-        }
+        // 输出将通过 WebSocket 实时推送
         
     } catch (e) {
-        resultPre.textContent = `❌ 执行失败\n\n${e.message}`;
-        showToast('执行失败: ' + e.message, 'error');
+        resultPre.textContent = `❌ 启动执行失败\n\n${e.message}`;
+        showToast('启动执行失败: ' + e.message, 'error');
+        cancelBtn.style.display = 'none';
+        currentExecSessionId = null;
+    }
+}
+
+async function cancelExecution() {
+    if (!currentExecSessionId) {
+        showToast('没有正在执行的命令', 'info');
+        return;
+    }
+    
+    const cancelBtn = document.getElementById('cancel-exec-btn');
+    cancelBtn.disabled = true;
+    cancelBtn.textContent = '取消中...';
+    
+    try {
+        await api.call('ssh.cancel', { session_id: currentExecSessionId });
+        showToast('取消请求已发送', 'info');
+    } catch (e) {
+        showToast('取消失败: ' + e.message, 'error');
+        cancelBtn.disabled = false;
+        cancelBtn.textContent = '⏹️ 取消 (Esc)';
+    }
+}
+
+/* 处理 SSH Exec WebSocket 消息 */
+function handleSshExecMessage(msg) {
+    const resultPre = document.getElementById('exec-result');
+    const cancelBtn = document.getElementById('cancel-exec-btn');
+    const matchPanel = document.getElementById('match-result-panel');
+    
+    if (!resultPre) return;
+    
+    switch (msg.type) {
+        case 'ssh_exec_start':
+            // 从 WebSocket 消息中获取 session_id
+            // 总是更新 session_id，因为这是新执行的开始
+            if (msg.session_id) {
+                currentExecSessionId = msg.session_id;
+                console.log('[SSH] Session ID from ssh_exec_start:', currentExecSessionId);
+            }
+            resultPre.textContent += `--- 开始执行 ---\n`;
+            // 隐藏匹配结果面板（新执行开始）
+            if (matchPanel) matchPanel.style.display = 'none';
+            break;
+            
+        case 'ssh_exec_output':
+            // 接受消息如果：session_id 匹配，或者我们还没有 session_id（等待 API 返回）
+            if (msg.session_id === currentExecSessionId || 
+                (currentExecSessionId === null && msg.session_id)) {
+                // 如果还没有 session_id，从消息中获取
+                if (currentExecSessionId === null) {
+                    currentExecSessionId = msg.session_id;
+                    console.log('[SSH] Session ID from ssh_exec_output:', currentExecSessionId);
+                }
+                // 追加输出
+                if (msg.is_stderr) {
+                    resultPre.textContent += msg.data;
+                } else {
+                    resultPre.textContent += msg.data;
+                }
+                // 自动滚动到底部
+                resultPre.scrollTop = resultPre.scrollHeight;
+            }
+            break;
+            
+        case 'ssh_exec_match':
+            /* 实时匹配结果 */
+            if (msg.session_id === currentExecSessionId) {
+                const isFinal = msg.is_final === true;  /* 是否为终止匹配（expect/fail 匹配）*/
+                const isExtractOnly = !msg.expect_matched && !msg.fail_matched && msg.extracted;
+                
+                if (isFinal) {
+                    /* 终止匹配（expect/fail 模式匹配成功）*/
+                    resultPre.textContent += `\n🎯 模式匹配成功!\n`;
+                    if (msg.expect_matched) {
+                        resultPre.textContent += `  ✅ 期望模式匹配: 是\n`;
+                    }
+                    if (msg.fail_matched) {
+                        resultPre.textContent += `  ❌ 失败模式匹配: 是\n`;
+                    }
+                    if (msg.extracted) {
+                        resultPre.textContent += `  📋 提取内容: ${msg.extracted}\n`;
+                    }
+                    showToast('模式匹配成功', msg.fail_matched ? 'error' : 'success');
+                } else if (isExtractOnly) {
+                    /* 仅提取更新（持续提取场景）*/
+                    /* 不在输出区显示，只更新面板 */
+                }
+                
+                // 更新匹配结果面板
+                updateMatchResultPanel(msg, isExtractOnly);
+            }
+            break;
+            
+        case 'ssh_exec_done':
+            if (msg.session_id === currentExecSessionId) {
+                resultPre.textContent += `\n--- 执行完成 ---\n`;
+                resultPre.textContent += `退出码: ${msg.exit_code}\n`;
+                
+                // 显示模式匹配结果
+                if (msg.status) {
+                    const statusMap = {
+                        'running': '⏳ 运行中',
+                        'success': '✅ 成功',
+                        'failed': '❌ 失败',
+                        'timeout': '⏱️ 超时',
+                        'cancelled': '⏹️ 已取消',
+                        'match_success': '✅ 模式匹配成功',
+                        'match_failed': '❌ 模式匹配失败'
+                    };
+                    resultPre.textContent += `状态: ${statusMap[msg.status] || msg.status}\n`;
+                }
+                
+                // 显示期望模式匹配结果
+                if (msg.expect_matched !== undefined) {
+                    resultPre.textContent += `期望模式匹配: ${msg.expect_matched ? '✅ 是' : '❌ 否'}\n`;
+                }
+                
+                // 显示失败模式匹配结果
+                if (msg.fail_matched !== undefined) {
+                    resultPre.textContent += `失败模式匹配: ${msg.fail_matched ? '⚠️ 是' : '✅ 否'}\n`;
+                }
+                
+                // 显示提取的内容
+                if (msg.extracted) {
+                    resultPre.textContent += `\n📋 提取内容:\n${msg.extracted}\n`;
+                }
+                
+                // 更新匹配结果面板
+                console.log('ssh_exec_done received:', JSON.stringify(msg, null, 2));
+                updateMatchResultPanel(msg);
+                
+                if (cancelBtn) {
+                    cancelBtn.style.display = 'none';
+                }
+                currentExecSessionId = null;
+                
+                // 根据状态显示 Toast
+                if (msg.status === 'match_success' || (msg.exit_code === 0 && !msg.fail_matched)) {
+                    showToast('命令执行成功', 'success');
+                } else if (msg.status === 'match_failed' || msg.fail_matched) {
+                    showToast('命令执行完成，模式匹配失败', 'warning');
+                } else if (msg.status === 'timeout') {
+                    showToast('命令执行超时', 'warning');
+                } else if (msg.exit_code === 0) {
+                    showToast('命令执行成功', 'success');
+                } else {
+                    showToast(`命令执行完成，退出码: ${msg.exit_code}`, 'warning');
+                }
+            }
+            break;
+            
+        case 'ssh_exec_error':
+            if (msg.session_id === currentExecSessionId) {
+                resultPre.textContent += `\n❌ 错误: ${msg.error}\n`;
+                if (cancelBtn) {
+                    cancelBtn.style.display = 'none';
+                }
+                currentExecSessionId = null;
+                showToast('执行出错: ' + msg.error, 'error');
+            }
+            break;
+            
+        case 'ssh_exec_cancelled':
+            if (msg.session_id === currentExecSessionId) {
+                resultPre.textContent += `\n⏹️ 已取消执行\n`;
+                if (cancelBtn) {
+                    cancelBtn.style.display = 'none';
+                }
+                currentExecSessionId = null;
+                showToast('命令已取消', 'info');
+            }
+            break;
+    }
+}
+
+/* 更新匹配结果面板 */
+function updateMatchResultPanel(msg, isExtractOnly = false) {
+    const panel = document.getElementById('match-result-panel');
+    if (!panel) {
+        console.warn('match-result-panel not found');
+        return;
+    }
+    
+    console.log('updateMatchResultPanel called with:', msg, 'isExtractOnly:', isExtractOnly);
+    
+    // 始终显示面板（只要有匹配就显示）
+    panel.style.display = 'block';
+    
+    // 更新状态徽章
+    const statusBadge = document.getElementById('match-status-badge');
+    if (statusBadge) {
+        if (isExtractOnly) {
+            // 持续提取模式 - 显示"提取中"
+            statusBadge.textContent = '提取中...';
+            statusBadge.className = 'match-status extracting';
+        } else {
+            const statusConfig = {
+                'success': { text: '成功', class: 'success' },
+                'match_success': { text: '匹配成功', class: 'success' },
+                'failed': { text: '失败', class: 'failed' },
+                'match_failed': { text: '匹配失败', class: 'failed' },
+                'timeout': { text: '超时', class: 'timeout' },
+                'cancelled': { text: '已取消', class: 'failed' }
+            };
+            const config = statusConfig[msg.status] || { text: msg.status || '完成', class: 'success' };
+            statusBadge.textContent = config.text;
+            statusBadge.className = `match-status ${config.class}`;
+        }
+    }
+    
+    // 更新成功匹配结果
+    const expectResult = document.getElementById('match-expect-result');
+    if (expectResult) {
+        if (msg.expect_matched !== undefined) {
+            expectResult.textContent = msg.expect_matched ? '✅ true' : '❌ false';
+            expectResult.className = `match-value ${msg.expect_matched ? 'true' : 'false'}`;
+        } else {
+            expectResult.textContent = '未配置';
+            expectResult.className = 'match-value';
+        }
+    }
+    
+    // 更新失败匹配结果
+    const failResult = document.getElementById('match-fail-result');
+    if (failResult) {
+        if (msg.fail_matched !== undefined) {
+            failResult.textContent = msg.fail_matched ? '⚠️ true (检测到错误)' : '✅ false';
+            failResult.className = `match-value ${msg.fail_matched ? 'false' : 'true'}`;
+        } else {
+            failResult.textContent = '未配置';
+            failResult.className = 'match-value';
+        }
+    }
+    
+    // 更新提取内容
+    const extractedResult = document.getElementById('match-extracted-result');
+    if (extractedResult) {
+        if (msg.extracted) {
+            extractedResult.textContent = msg.extracted;
+            extractedResult.title = msg.extracted;
+        } else {
+            extractedResult.textContent = '无';
+        }
+    }
+    
+    // 更新最终状态
+    const finalStatus = document.getElementById('match-final-status');
+    if (finalStatus) {
+        const statusMap = {
+            'running': '运行中',
+            'success': '成功',
+            'failed': '失败',
+            'timeout': '超时',
+            'cancelled': '已取消',
+            'match_success': '匹配成功',
+            'match_failed': '匹配失败'
+        };
+        finalStatus.textContent = `"${msg.status || 'success'}"`;
+        finalStatus.title = statusMap[msg.status] || msg.status;
     }
 }
 
 function clearExecResult() {
     document.getElementById('exec-result-section').style.display = 'none';
     document.getElementById('exec-result').textContent = '';
+    document.getElementById('cancel-exec-btn').style.display = 'none';
+    // 隐藏匹配结果面板
+    const matchPanel = document.getElementById('match-result-panel');
+    if (matchPanel) matchPanel.style.display = 'none';
+    currentExecSessionId = null;
 }
 
 // =========================================================================
@@ -7089,6 +7769,7 @@ window.saveCommand = saveCommand;
 window.editCommand = editCommand;
 window.deleteCommand = deleteCommand;
 window.executeCommand = executeCommand;
+window.cancelExecution = cancelExecution;
 window.clearExecResult = clearExecResult;
 // Security page functions
 window.refreshSshHostsList = refreshSshHostsList;
@@ -10252,6 +10933,9 @@ function showAddSourceModal() {
                     <button type="button" class="modal-tab" data-type="socketio" onclick="switchSourceType('socketio')">
                         ⚡ Socket.IO
                     </button>
+                    <button type="button" class="modal-tab" data-type="variable" onclick="switchSourceType('variable')">
+                        📦 指令变量
+                    </button>
                 </div>
                 <input type="hidden" id="source-type" value="rest">
                 
@@ -10396,6 +11080,56 @@ function showAddSourceModal() {
                     <small style="color:var(--text-light);display:block;margin-top:-10px;margin-bottom:10px;padding-left:24px">
                         关闭后仅使用上方选中的字段作为变量
                     </small>
+                </div>
+                
+                <!-- 指令变量数据源配置 -->
+                <div id="source-variable-config" class="config-section" style="display:none">
+                    <div class="config-title">🔌 SSH 指令变量</div>
+                    
+                    <!-- SSH 主机选择 -->
+                    <div class="form-group">
+                        <label>SSH 主机 <span class="required">*</span></label>
+                        <select id="source-ssh-host" class="input" onchange="onSshHostChangeForSource()">
+                            <option value="">-- 加载中... --</option>
+                        </select>
+                        <small style="color:var(--text-light)">选择已配置的 SSH 主机（在 SSH 页面添加）</small>
+                    </div>
+                    
+                    <!-- 选择已创建的命令 -->
+                    <div class="form-group">
+                        <label>选择指令 <span class="required">*</span></label>
+                        <select id="source-ssh-cmd" class="input" onchange="onSshCmdChange()">
+                            <option value="">-- 先选择主机 --</option>
+                        </select>
+                        <small style="color:var(--text-light)">选择要监视的指令（在 SSH 页面创建）</small>
+                    </div>
+                    
+                    <!-- 选中命令的详情预览 -->
+                    <div id="source-ssh-cmd-preview" class="ssh-cmd-preview" style="display:none">
+                        <div class="preview-title">📋 指令详情</div>
+                        <div class="preview-content">
+                            <div class="preview-row"><span class="preview-label">命令:</span> <code id="preview-command">-</code></div>
+                            <div class="preview-row"><span class="preview-label">描述:</span> <span id="preview-desc">-</span></div>
+                            <div class="preview-row"><span class="preview-label">超时:</span> <span id="preview-timeout">30</span> 秒</div>
+                        </div>
+                    </div>
+                    
+                    <!-- 变量预览 -->
+                    <div class="form-group">
+                        <div class="ssh-vars-preview">
+                            <div class="preview-title">📦 将监视以下变量（需先执行指令）：</div>
+                            <div id="ssh-vars-list" class="ssh-vars-list">
+                                <span class="text-muted">请先选择 SSH 主机和指令</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- 检测间隔 -->
+                    <div class="form-group">
+                        <label>检测间隔 (秒)</label>
+                        <input type="number" id="source-var-interval" class="input" value="5" min="1" max="3600">
+                        <small style="color:var(--text-light)">定期读取变量值的间隔</small>
+                    </div>
                 </div>
                 
                 <!-- 启用选项 -->
@@ -10759,6 +11493,31 @@ function switchSourceType(type) {
     document.getElementById('source-websocket-config').style.display = type === 'websocket' ? 'block' : 'none';
     const sioConfig = document.getElementById('source-socketio-config');
     if (sioConfig) sioConfig.style.display = type === 'socketio' ? 'block' : 'none';
+    const varConfig = document.getElementById('source-variable-config');
+    if (varConfig) {
+        varConfig.style.display = type === 'variable' ? 'block' : 'none';
+        // 切换到指令变量类型时自动加载主机列表
+        if (type === 'variable') {
+            loadSshHostsForSource();
+        }
+    }
+    
+    // 处理数据源 ID 输入框的只读状态
+    const sourceIdInput = document.getElementById('source-id');
+    if (sourceIdInput) {
+        if (type === 'variable') {
+            // 指令变量类型：ID 由选择的命令决定，设为只读
+            sourceIdInput.readOnly = true;
+            sourceIdInput.style.backgroundColor = 'var(--bg-color)';
+            sourceIdInput.placeholder = '由选择的指令自动填入';
+        } else {
+            // 其他类型：允许手动输入
+            sourceIdInput.readOnly = false;
+            sourceIdInput.style.backgroundColor = '';
+            sourceIdInput.placeholder = '如: agx_temp';
+            sourceIdInput.value = '';  // 清空之前可能由指令填入的值
+        }
+    }
 }
 
 /**
@@ -10770,6 +11529,155 @@ function updateSourceTypeFields() {
 }
 
 // updateBuiltinFields 函数已移除 - 内置数据源由系统自动注册，无需手动配置
+
+/**
+ * 加载 SSH 主机列表（用于数据源配置）
+ */
+async function loadSshHostsForSource() {
+    const hostSelect = document.getElementById('source-ssh-host');
+    if (!hostSelect) return;
+    
+    hostSelect.innerHTML = '<option value="">-- 加载中... --</option>';
+    
+    // 重置命令选择
+    const cmdSelect = document.getElementById('source-ssh-cmd');
+    if (cmdSelect) {
+        cmdSelect.innerHTML = '<option value="">-- 先选择主机 --</option>';
+    }
+    
+    // 隐藏命令预览
+    const preview = document.getElementById('source-ssh-cmd-preview');
+    if (preview) preview.style.display = 'none';
+    
+    // 重置变量预览
+    const varsListDiv = document.getElementById('ssh-vars-list');
+    if (varsListDiv) varsListDiv.innerHTML = '<span class="text-muted">请先选择 SSH 主机和指令</span>';
+    
+    try {
+        const result = await api.call('ssh.hosts.list');
+        if (result.code === 0 && result.data && result.data.hosts) {
+            const hosts = result.data.hosts;
+            
+            if (hosts.length === 0) {
+                hostSelect.innerHTML = '<option value="">-- 暂无主机，请先在 SSH 页面添加 --</option>';
+                return;
+            }
+            
+            let html = '<option value="">-- 请选择主机 --</option>';
+            hosts.forEach(h => {
+                const label = `${h.id} (${h.username}@${h.host}:${h.port || 22})`;
+                html += `<option value="${h.id}">${label}</option>`;
+            });
+            hostSelect.innerHTML = html;
+        } else {
+            hostSelect.innerHTML = `<option value="">-- 加载失败: ${result.message || '未知错误'} --</option>`;
+        }
+    } catch (error) {
+        hostSelect.innerHTML = `<option value="">-- 加载失败: ${error.message} --</option>`;
+    }
+}
+
+/**
+ * SSH 主机选择变化时的处理（数据源配置用）
+ */
+function onSshHostChangeForSource() {
+    const hostId = document.getElementById('source-ssh-host').value;
+    const cmdSelect = document.getElementById('source-ssh-cmd');
+    
+    if (!cmdSelect) return;
+    
+    // 隐藏命令预览
+    const preview = document.getElementById('source-ssh-cmd-preview');
+    if (preview) preview.style.display = 'none';
+    
+    // 重置变量预览
+    const varsListDiv = document.getElementById('ssh-vars-list');
+    if (varsListDiv) varsListDiv.innerHTML = '<span class="text-muted">请先选择指令</span>';
+    
+    if (!hostId) {
+        cmdSelect.innerHTML = '<option value="">-- 先选择主机 --</option>';
+        return;
+    }
+    
+    // 确保 sshCommands 已加载
+    if (typeof sshCommands === 'undefined') {
+        loadSshCommands();
+    }
+    
+    // 获取该主机下的命令列表
+    const commands = sshCommands[hostId] || [];
+    
+    if (commands.length === 0) {
+        cmdSelect.innerHTML = '<option value="">-- 该主机暂无指令，请在 SSH 页面添加 --</option>';
+        return;
+    }
+    
+    let html = '<option value="">-- 请选择指令 --</option>';
+    commands.forEach((cmd, idx) => {
+        const icon = cmd.icon || '🚀';
+        const label = `${icon} ${cmd.name}`;
+        html += `<option value="${idx}">${label}</option>`;
+    });
+    cmdSelect.innerHTML = html;
+}
+
+/**
+ * SSH 命令选择变化时的处理
+ */
+function onSshCmdChange() {
+    const hostId = document.getElementById('source-ssh-host').value;
+    const cmdIdx = document.getElementById('source-ssh-cmd').value;
+    const preview = document.getElementById('source-ssh-cmd-preview');
+    const varsListDiv = document.getElementById('ssh-vars-list');
+    const sourceIdInput = document.getElementById('source-id');
+    const sourceLabelInput = document.getElementById('source-label');
+    
+    if (!hostId || cmdIdx === '') {
+        if (preview) preview.style.display = 'none';
+        if (varsListDiv) varsListDiv.innerHTML = '<span class="text-muted">请先选择指令</span>';
+        return;
+    }
+    
+    // 获取选中的命令
+    const cmd = sshCommands[hostId]?.[parseInt(cmdIdx)];
+    if (!cmd) {
+        if (preview) preview.style.display = 'none';
+        if (varsListDiv) varsListDiv.innerHTML = '<span class="text-muted">指令不存在</span>';
+        return;
+    }
+    
+    // 显示命令详情预览
+    if (preview) {
+        preview.style.display = 'block';
+        document.getElementById('preview-command').textContent = cmd.command;
+        document.getElementById('preview-desc').textContent = cmd.desc || '无描述';
+        document.getElementById('preview-timeout').textContent = cmd.timeout || 30;
+    }
+    
+    // 更新变量预览
+    const varName = cmd.varName || cmd.name;  // 优先使用 varName，否则用 name
+    if (varsListDiv) {
+        varsListDiv.innerHTML = `
+            <div class="var-item-preview"><code>${varName}.status</code> - 执行状态 (success/failed/error)</div>
+            <div class="var-item-preview"><code>${varName}.exit_code</code> - 退出码</div>
+            <div class="var-item-preview"><code>${varName}.extracted</code> - 提取的值</div>
+            <div class="var-item-preview"><code>${varName}.expect_matched</code> - 成功模式匹配结果</div>
+            <div class="var-item-preview"><code>${varName}.fail_matched</code> - 失败模式匹配结果</div>
+            <div class="var-item-preview"><code>${varName}.host</code> - 执行主机</div>
+            <div class="var-item-preview"><code>${varName}.timestamp</code> - 执行时间戳</div>
+        `;
+    }
+    
+    // 自动填充数据源 ID 和显示名称（基于命令的 varName）
+    if (sourceIdInput) {
+        sourceIdInput.value = varName;
+        sourceIdInput.readOnly = true;  // 设为只读，因为必须与 varName 一致
+        sourceIdInput.style.backgroundColor = 'var(--bg-color)';
+    }
+    if (sourceLabelInput && !sourceLabelInput.value) {
+        sourceLabelInput.value = cmd.name || varName;
+    }
+}
 
 /**
  * 提交添加数据源
@@ -10827,6 +11735,44 @@ async function submitAddSource() {
             alert('请输入要监听的事件名称（可先通过测试按钮自动发现）');
             return;
         }
+    } else if (type === 'variable') {
+        // 指令变量数据源配置 - 选择已创建的指令
+        const hostId = document.getElementById('source-ssh-host').value;
+        const cmdIdx = document.getElementById('source-ssh-cmd').value;
+        
+        if (!hostId) {
+            alert('请选择 SSH 主机');
+            return;
+        }
+        if (cmdIdx === '') {
+            alert('请选择 SSH 指令');
+            return;
+        }
+        
+        // 获取选中的命令配置
+        const cmd = sshCommands[hostId]?.[parseInt(cmdIdx)];
+        if (!cmd) {
+            alert('指令不存在，请重新选择');
+            return;
+        }
+        
+        // 使用命令的 varName 或 name 作为变量前缀
+        const varName = cmd.varName || cmd.name;
+        
+        // SSH 命令配置 - 从已创建的指令中获取
+        params.ssh_host_id = hostId;
+        params.ssh_command = cmd.command;
+        params.var_prefix = varName + '.';  // 变量前缀
+        params.var_watch_all = true;         // 监视所有生成的变量
+        
+        // 高级选项（从命令配置中获取）
+        if (cmd.expectPattern) params.ssh_expect_pattern = cmd.expectPattern;
+        if (cmd.failPattern) params.ssh_fail_pattern = cmd.failPattern;
+        if (cmd.extractPattern) params.ssh_extract_pattern = cmd.extractPattern;
+        if (cmd.timeout && cmd.timeout !== 30) params.ssh_timeout = cmd.timeout;
+        
+        // 执行间隔（秒转毫秒）
+        params.poll_interval_ms = (parseInt(document.getElementById('source-var-interval').value) || 60) * 1000;
     }
     
     try {
@@ -11231,6 +12177,9 @@ window.deleteSource = deleteSource;
 window.showAddSourceModal = showAddSourceModal;
 window.switchSourceType = switchSourceType;
 window.updateSourceTypeFields = updateSourceTypeFields;
+window.loadSshHostsForSource = loadSshHostsForSource;
+window.onSshHostChangeForSource = onSshHostChangeForSource;
+window.onSshCmdChange = onSshCmdChange;
 window.submitAddSource = submitAddSource;
 window.showAddRuleModal = showAddRuleModal;
 window.addConditionRow = addConditionRow;

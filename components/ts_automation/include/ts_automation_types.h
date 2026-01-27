@@ -23,7 +23,7 @@ extern "C" {
 /*                           Constants                                        */
 /*===========================================================================*/
 
-#define TS_AUTO_NAME_MAX_LEN        32   /**< Max length for names/IDs */
+#define TS_AUTO_NAME_MAX_LEN        64   /**< Max length for names/IDs (increased for compound names like "source.suffix") */
 #define TS_AUTO_LABEL_MAX_LEN       48   /**< Max length for display labels */
 #define TS_AUTO_PATH_MAX_LEN        96   /**< Max length for paths */
 #define TS_AUTO_EXPR_MAX_LEN        64   /**< Max length for expressions */
@@ -70,6 +70,7 @@ typedef enum {
     TS_AUTO_SRC_WEBSOCKET,               /**< WebSocket endpoint */
     TS_AUTO_SRC_SOCKETIO,                /**< Socket.IO v4 endpoint */
     TS_AUTO_SRC_REST,                    /**< REST API endpoint */
+    TS_AUTO_SRC_VARIABLE,                /**< ts_var variable system */
 } ts_auto_source_type_t;
 
 /**
@@ -146,6 +147,28 @@ typedef struct {
 } ts_auto_rest_config_t;
 
 /**
+ * @brief Variable source configuration (ts_var integration)
+ *
+ * Two modes:
+ * 1. SSH Command Mode: Execute SSH command periodically, store results in variables
+ * 2. Watch Mode: Monitor existing variables for changes (deprecated)
+ */
+typedef struct {
+    /* SSH Command Mode (primary) */
+    char ssh_host_id[TS_AUTO_NAME_MAX_LEN];  /**< SSH host ID (from hosts config) */
+    char ssh_command[TS_AUTO_PATH_MAX_LEN];  /**< Command to execute */
+    char var_prefix[TS_AUTO_NAME_MAX_LEN];   /**< Variable prefix (command alias + ".") */
+    char expect_pattern[64];                  /**< Success match pattern */
+    char fail_pattern[64];                    /**< Failure match pattern */
+    char extract_pattern[64];                 /**< Value extraction regex */
+    uint16_t timeout_sec;                     /**< Command timeout in seconds */
+    
+    /* Watch Mode (legacy) */
+    char var_name[TS_AUTO_NAME_MAX_LEN];     /**< Single variable to watch */
+    bool watch_all;                           /**< Watch all variables with prefix */
+} ts_auto_var_config_t;
+
+/**
  * @brief Data source definition
  */
 typedef struct {
@@ -163,6 +186,7 @@ typedef struct {
         ts_auto_ws_config_t websocket;
         ts_auto_sio_config_t socketio;   /**< Socket.IO config */
         ts_auto_rest_config_t rest;
+        ts_auto_var_config_t variable;   /**< Variable system config */
     };
 
     /* Data mappings: JSONPath -> Variable */

@@ -31,6 +31,194 @@
 | Phase 17: 自动化引擎实现 | ✅ 完成 | 100% | 2026-01-27 |
 | Phase 18: HTTPS 证书管理 | ✅ 完成 | 100% | 2026-01-27 |
 | Phase 19: 主机管理增强 | ✅ 完成 | 100% | 2026-01-27 |
+| Phase 20: 变量系统实现 | ✅ 完成 | 100% | 2026-01-27 |
+
+---
+
+## 📋 Phase 20: 变量系统统一 ✅
+
+**时间**：2026年1月27日  
+**目标**：统一变量存储系统，废弃旧 `ts_var` 组件，使用 `ts_variable`（位于 `ts_automation` 内）作为唯一变量系统
+
+### 系统概述
+
+变量系统是自动化引擎的核心数据层，提供：
+- **类型安全**：bool/int/float/string 四种类型
+- **SSH 结果存储**：自动保存 7 个标准变量（status/exit_code/extracted/expect_matched/fail_matched/host/timestamp）
+- **线程安全**：FreeRTOS mutex 保护
+- **PSRAM 优先**：大容量变量存储优先使用 PSRAM
+- **事件通知**：变量变化通过事件总线通知
+
+> **架构变更（2026-01-27）**：原 `ts_var` 组件已删除，统一使用 `ts_variable`（位于 `components/ts_automation/`）。
+
+### 组件实现
+
+#### ts_variable 统一变量系统 (`components/ts_automation/`)
+
+**文件结构**：
+```
+components/ts_automation/
+├── CMakeLists.txt
+├── include/
+│   └── ts_variable.h     # 统一变量 API
+└── src/
+    └── ts_variable.c     # 实现
+```
+
+> **注意**：原 `components/ts_var/` 目录已删除（2026-01-27）。
+
+**内存分配**：
+- 动态变量数量（最大 256 个，可配置）
+- **优先分配到 PSRAM**
+- 自动 fallback 到 DRAM（如 PSRAM 不可用）
+
+**变量类型**（类型安全）：
+| 类型 | 枚举值 | 说明 |
+|------|--------|------|
+| 布尔 | `TS_VAR_TYPE_BOOL` | true/false |
+| 整数 | `TS_VAR_TYPE_INT` | 32 位有符号整数 |
+| 浮点 | `TS_VAR_TYPE_FLOAT` | 单精度浮点 |
+| 字符串 | `TS_VAR_TYPE_STRING` | UTF-8 字符串 |
+
+**变量来源**（通过 source_id 分组）：
+- SSH 命令结果按 source_id 自动分组
+- 支持按 source_id 批量删除
+
+#### 核心 API
+
+```c
+#include "ts_variable.h"
+
+// 初始化（ts_automation 服务启动时自动调用）
+esp_err_t ts_variable_init(void);
+
+// 类型安全的设置 API
+esp_err_t ts_variable_set_string(const char *name, const char *value, const char *source_id);
+esp_err_t ts_variable_set_int(const char *name, int value, const char *source_id);
+esp_err_t ts_variable_set_float(const char *name, float value, const char *source_id);
+esp_err_t ts_variable_set_bool(const char *name, bool value, const char *source_id);
+
+// 类型安全的获取 API
+esp_err_t ts_variable_get(const char *name, ts_auto_value_t *value);
+const char* ts_variable_get_string(const char *name, const char *default_val);
+int ts_variable_get_int(const char *name, int default_val);
+float ts_variable_get_float(const char *name, float default_val);
+bool ts_variable_get_bool(const char *name, bool default_val);
+
+// 检查存在性
+bool ts_variable_exists(const char *name);
+
+// 枚举变量
+esp_err_t ts_variable_iterate(ts_variable_iterate_fn callback, void *user_data);
+
+// 按源删除
+esp_err_t ts_variable_delete_by_source(const char *source_id);
+```
+
+### SSH 命令结果存储
+
+SSH 命令执行后，WebUI 自动存储 7 个标准变量（通过 `source_id` 分组）：
+
+| 变量名 | 类型 | 说明 |
+|--------|------|------|
+| `<source_id>.status` | STRING | 执行状态：running/completed/cancelled/failed |
+| `<source_id>.exit_code` | INT | 退出码（0=成功） |
+| `<source_id>.extracted` | STRING | 正则提取的内容 |
+| `<source_id>.expect_matched` | BOOL | 是否匹配成功模式 |
+| `<source_id>.fail_matched` | BOOL | 是否匹配失败模式 |
+| `<source_id>.host` | STRING | 执行主机 |
+| `<source_id>.timestamp` | INT | 执行时间戳 |
+
+**WebUI SSH Exec 集成**：
+
+WebSocket 消息支持 `var_name` 字段：
+```json
+{
+  "action": "ssh_exec",
+  "host_id": "agx@10.10.99.100",
+  "command": "cat /sys/class/thermal/thermal_zone0/temp",
+  "var_name": "cpu_temp",
+  "expect_pattern": "\\d+",
+  "timeout_ms": 30000
+}
+```
+
+执行完成后自动创建：
+- `cpu_temp.extracted` = "45000" (STRING)
+- `cpu_temp.status` = "completed" (STRING)
+- `cpu_temp.exit_code` = 0 (INT)
+- `cpu_temp.expect_matched` = true (BOOL)
+
+### API 端点
+
+通过 `automation.variables.*` API 访问变量：
+
+| 端点 | 说明 | 参数 |
+|------|------|------|
+| `automation.variables.get` | 获取变量值 | `name` |
+| `automation.variables.set` | 设置变量 | `name`, `value`, `type` |
+| `automation.variables.delete` | 删除变量 | `name` |
+| `automation.variables.list` | 列出所有变量 | `prefix` (可选) |
+
+> **注意**：原 `var.*` API 已废弃（2026-01-27）。
+
+### 与自动化引擎集成
+
+ts_variable 是自动化引擎的核心数据层：
+
+#### 1. 数据源变量存储
+
+```c
+// ts_source_manager 将数据源值映射为变量
+ts_variable_set_float("agx.cpu_temp", temp_value, "agx_monitor");
+```
+
+#### 2. 规则引擎条件评估
+
+```c
+// ts_rule_engine 使用类型安全 API 获取值
+float temp = ts_variable_get_float("agx.cpu_temp", 0.0f);
+if (temp > 80.0f) {
+    // 触发动作
+}
+```
+
+### 架构变更记录（2026-01-27）
+
+#### 删除的文件
+
+| 文件/目录 | 说明 |
+|------|------|
+| `components/ts_var/` | 整个目录删除，功能统一到 ts_variable |
+| `components/ts_api/src/ts_api_var.c` | 旧 var.* API 处理器删除 |
+
+#### 修改的文件
+
+| 文件 | 修改内容 |
+|------|------|
+| `components/ts_webui/CMakeLists.txt` | 移除 ts_var 依赖 |
+| `components/ts_automation/CMakeLists.txt` | 移除 ts_var 依赖 |
+| `components/ts_api/CMakeLists.txt` | 移除 ts_api_var.c 和 ts_var 依赖 |
+| `components/ts_api/include/ts_api.h` | 移除 ts_api_var_register() 声明 |
+| `components/ts_api/src/ts_api.c` | 移除 ts_api_var_register() 调用 |
+| `components/ts_webui/src/ts_webui_ws.c` | 使用 ts_variable.h 替代 ts_var.h |
+| `components/ts_automation/src/ts_source_manager.c` | 重写 read_variable_source() 使用统一 API |
+
+### 新增/保留文件
+
+| 文件 | 描述 |
+|------|------|
+| `components/ts_automation/src/ts_variable.c` | 统一变量系统实现 |
+| `components/ts_automation/include/ts_variable.h` | 统一变量 API |
+| `components/ts_webui/www/pages/automation/variables.html` | 变量管理页面 |
+
+### 内存优化效果
+
+| 指标 | 优化前 | 优化后 |
+|------|--------|--------|
+| DRAM .bss | 59,952 bytes | 37,936 bytes |
+| PSRAM 使用 | - | +21,504 bytes |
+| 节省 DRAM | - | ~22KB |
 
 ---
 

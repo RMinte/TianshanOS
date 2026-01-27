@@ -13,6 +13,7 @@ idf_component_register(
         ts_security
         ts_storage
         ts_console
+        ts_automation
         esp_http_server
     PRIV_REQUIRES
         json

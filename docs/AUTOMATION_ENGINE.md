@@ -1152,29 +1152,32 @@ Dashboard 配置可完整导出为 JSON 文件：
 
 ### 8.1 组件列表
 
-| 组件 | 路径 | 职责 |
-|------|------|------|
-| `ts_automation` | `components/ts_automation/` | 核心引擎：配置加载、调度协调 |
-| `ts_source` | `components/ts_source/` | 数据源管理：内置/WS/REST 采集 |
-| `ts_rule` | `components/ts_rule/` | 规则引擎：条件解析、表达式求值 |
-| `ts_action` | `components/ts_action/` | 动作执行：统一动作接口 |
-| `ts_variable` | `components/ts_variable/` | 变量存储：数据点管理、变量引用 |
+| 组件 | 路径 | 职责 | 状态 |
+|------|------|------|------|
+| `ts_automation` | `components/ts_automation/` | 核心引擎：配置加载、调度协调、**变量存储** | ✅ 已实现 |
+| `ts_source_manager` | `components/ts_automation/src/` | 数据源管理：内置/WS/REST/SSH 采集 | ✅ 已实现 |
+| `ts_rule_engine` | `components/ts_automation/src/` | 规则引擎：条件解析、表达式求值 | ✅ 已实现 |
+| `ts_action_manager` | `components/ts_automation/src/` | 动作执行：统一动作接口 | ✅ 已实现 |
+| `ts_variable` | `components/ts_automation/src/` | 变量存储：统一数据点管理、变量引用 | ✅ 已实现 |
 
 ### 8.2 组件依赖
 
 ```
-ts_automation
-    ├── ts_source
+ts_automation (核心引擎)
+    ├── ts_source_manager (数据源管理)
     │   ├── ts_net (WS/HTTP 客户端)
-    │   └── ts_variable
-    ├── ts_rule
-    │   └── ts_variable
-    ├── ts_action
+    │   ├── ts_security (SSH)
+    │   └── ts_variable (变量存储) ✅
+    ├── ts_rule_engine (规则引擎)
+    │   └── ts_variable ✅
+    ├── ts_action_manager (动作执行)
     │   ├── ts_led (LED API)
     │   ├── ts_security (SSH)
-    │   └── ts_variable
+    │   └── ts_variable ✅
     └── ts_storage (配置持久化)
 ```
+
+> **注意**：`ts_var` 组件已废弃（2026-01-27），变量系统统一使用 `ts_variable`（位于 `ts_automation` 组件内）。
 
 ### 8.3 核心 API 设计
 
@@ -1266,40 +1269,169 @@ esp_err_t ts_action_register(const char *type, ts_action_handler_fn handler);
 esp_err_t ts_action_execute(const ts_action_t *action);
 ```
 
+### 8.4 ts_variable 统一变量系统（✅ 已实现）
+
+`ts_variable` 是自动化引擎的**唯一**变量存储层，提供类型安全的数据点管理和变量引用功能。
+
+> **历史变更**：原 `ts_var` 组件已于 2026-01-27 废弃并删除，所有功能统一到 `ts_variable`。
+
+#### 组件路径
+
+```
+components/ts_automation/
+├── CMakeLists.txt
+├── include/
+│   └── ts_variable.h     # 统一变量 API
+└── src/
+    └── ts_variable.c     # 实现（PSRAM 分配、类型安全）
+```
+
+#### 核心 API
+
+```c
+#include "ts_variable.h"
+
+// 初始化（ts_automation 服务启动时自动调用）
+esp_err_t ts_variable_init(void);
+
+// 类型安全的设置 API
+esp_err_t ts_variable_set_string(const char *name, const char *value, const char *source_id);
+esp_err_t ts_variable_set_int(const char *name, int value, const char *source_id);
+esp_err_t ts_variable_set_float(const char *name, float value, const char *source_id);
+esp_err_t ts_variable_set_bool(const char *name, bool value, const char *source_id);
+
+// 类型安全的获取 API
+esp_err_t ts_variable_get(const char *name, ts_auto_value_t *value);
+const char* ts_variable_get_string(const char *name, const char *default_val);
+int ts_variable_get_int(const char *name, int default_val);
+float ts_variable_get_float(const char *name, float default_val);
+bool ts_variable_get_bool(const char *name, bool default_val);
+
+// 检查存在性
+bool ts_variable_exists(const char *name);
+
+// 枚举变量
+esp_err_t ts_variable_iterate(ts_variable_iterate_fn callback, void *user_data);
+
+// 按源删除变量
+esp_err_t ts_variable_delete_by_source(const char *source_id);
+```
+
+#### SSH 命令结果变量
+
+SSH 命令执行后自动存储 7 个标准变量（通过 `source_id` 分组）：
+
+| 变量名 | 类型 | 描述 |
+|--------|------|------|
+| `<source_id>.status` | STRING | 执行状态：running/completed/cancelled/failed |
+| `<source_id>.exit_code` | INT | 退出码（0=成功） |
+| `<source_id>.extracted` | STRING | 正则提取的内容 |
+| `<source_id>.expect_matched` | BOOL | 是否匹配成功模式 |
+| `<source_id>.fail_matched` | BOOL | 是否匹配失败模式 |
+| `<source_id>.host` | STRING | 执行主机 |
+| `<source_id>.timestamp` | INT | 执行时间戳 |
+
+#### 数据源集成示例
+
+```c
+// ts_source_manager 将远程数据映射为变量
+void on_data_received(const char *source_id, cJSON *data) {
+    // 使用 JSONPath 提取值
+    double temp = ts_jsonpath_get_number(data, "temperature.cpu", 0.0);
+    
+    // 直接存储为 float 类型变量
+    ts_variable_set_float("agx.cpu_temp", (float)temp, source_id);
+}
+```
+
+#### 规则引擎集成示例
+
+```c
+// ts_rule_engine 评估条件表达式
+bool evaluate_condition(const char *expr) {
+    // 解析表达式: "agx.cpu_temp > 80"
+    char var_name[64], op[8];
+    double threshold;
+    parse_expression(expr, var_name, op, &threshold);
+    
+    // 使用类型安全的 API 获取值
+    float value = ts_variable_get_float(var_name, 0.0f);
+    
+    // 比较
+    return compare(value, op, threshold);
+}
+```
+
+#### 动作执行集成示例
+
+```c
+// ts_action_manager 执行 SSH 命令时使用变量引用
+esp_err_t execute_ssh_action(const ts_action_t *action) {
+    // 原始命令: "echo Temperature: ${agx.cpu_temp}"
+    // 获取变量值
+    const char *temp = ts_variable_get_string("agx.cpu_temp", "N/A");
+    
+    // 构建最终命令
+    char expanded[512];
+    snprintf(expanded, sizeof(expanded), "echo Temperature: %s", temp);
+    
+    return ts_ssh_execute(action->host, expanded, ...);
+}
+```
+
+#### 变量命名约定
+
+| 前缀 | 来源 | 示例 |
+|------|------|------|
+| `sys.*` | 系统内置 | `sys.time`, `sys.ip` |
+| `agx.*` | Jetson AGX 数据 | `agx.cpu_temp`, `agx.gpu_usage` |
+| `esp32.*` | ESP32 本地数据 | `esp32.heap_free`, `esp32.chip_temp` |
+| `last.*` | 最后一次 SSH 结果 | `last.extracted`, `last.status` |
+| `<cmd>.*` | 指定命令的结果 | `ping_test.exit_code` |
+
+#### 内存特性
+
+- 64 个变量槽位，每个约 336 字节
+- 总计约 21KB，优先分配到 **PSRAM**
+- 自动 fallback 到 DRAM
+
 ---
 
 ## 9. 实现计划
 
-### Phase 1: 核心框架 (预计 2 天)
+### Phase 1: 核心框架 ✅ **已完成**
 
 **目标**: 建立基本架构，配置加载
 
-- [ ] 创建 `ts_automation` 组件骨架
-- [ ] 定义配置 JSON Schema
-- [ ] 实现配置文件加载 (SD 卡 / NVS)
-- [ ] 实现配置验证
-- [ ] 创建 `ts_variable` 变量存储
+- [x] 创建 `ts_automation` 组件骨架 ✅
+- [x] 定义配置 JSON Schema ✅
+- [x] 实现配置文件加载 (SD 卡 / NVS) ✅
+- [x] 实现配置验证 ✅
+- [x] 创建 `ts_variable` 统一变量存储 ✅ (2026-01-27)
 
-**验收标准**: 能够加载并解析 JSON 配置文件
+> **注意**：原 `ts_var` 组件已废弃，统一使用 `ts_variable`。
 
-### Phase 2: 数据源系统 (预计 3 天)
+**验收标准**: 能够加载并解析 JSON 配置文件 ✅
+
+### Phase 2: 数据源系统 ✅ **已完成**
 
 **目标**: 实现数据采集
 
-- [ ] 创建 `ts_source` 组件
-- [ ] 实现内置数据源 (ESP32 系统/网络/ADC)
-- [ ] 实现 WebSocket 数据源
-- [ ] 实现 REST 数据源
-- [ ] JSON Path 字段提取
-- [ ] 数据更新事件发布
+- [x] 创建 `ts_source_manager` 组件 ✅
+- [x] 实现内置数据源 (ESP32 系统/网络/ADC) ✅
+- [x] 实现 WebSocket/Socket.IO 数据源 ✅
+- [x] 实现 REST 数据源 ✅
+- [x] 实现 SSH 命令数据源 ✅
+- [x] JSON Path 字段提取 ✅
+- [x] 数据更新事件发布 ✅
 
-**验收标准**: 能够采集 ESP32 本地数据和模拟的远程数据
+**验收标准**: 能够采集 ESP32 本地数据和远程数据 ✅
 
 ### Phase 3: 规则引擎 (预计 3 天)
 
 **目标**: 实现条件判断
 
-- [ ] 创建 `ts_rule` 组件
+- [x] 创建 `ts_rule_engine` 组件 ✅
 - [ ] 实现表达式解析器
 - [ ] 实现条件求值
 - [ ] 实现触发器类型 (condition/event/timer)
@@ -1312,9 +1444,9 @@ esp_err_t ts_action_execute(const ts_action_t *action);
 
 **目标**: 实现动作执行
 
-- [ ] 创建 `ts_action` 组件
+- [x] 创建 `ts_action_manager` 组件 ✅
 - [ ] 实现 LED 动作 (touch/board/matrix)
-- [ ] 实现 SSH 动作 (集成现有 API)
+- [x] 实现 SSH 动作 (集成现有 API) ✅
 - [ ] 实现日志/变量/延时动作
 - [ ] 条件动作支持
 - [ ] 动作链式执行

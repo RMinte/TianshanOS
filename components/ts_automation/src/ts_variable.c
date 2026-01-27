@@ -201,10 +201,13 @@ esp_err_t ts_variable_deinit(void)
 esp_err_t ts_variable_register(const ts_auto_variable_t *var)
 {
     if (!var || !var->name[0]) {
+        ESP_LOGE(TAG, "ts_variable_register: invalid arg (var=%p, name=%s)", 
+                 var, var ? var->name : "NULL");
         return ESP_ERR_INVALID_ARG;
     }
 
     if (!s_var_ctx.initialized) {
+        ESP_LOGE(TAG, "ts_variable_register: not initialized!");
         return ESP_ERR_INVALID_STATE;
     }
 
@@ -217,14 +220,15 @@ esp_err_t ts_variable_register(const ts_auto_variable_t *var)
         memcpy(&s_var_ctx.variables[idx], var, sizeof(ts_auto_variable_t));
         s_var_ctx.variables[idx].last_change_ms = esp_timer_get_time() / 1000;
         xSemaphoreGive(s_var_ctx.mutex);
-        ESP_LOGD(TAG, "Updated variable: %s", var->name);
+        ESP_LOGI(TAG, "Updated variable: %s (type=%d)", var->name, var->value.type);
         return ESP_OK;
     }
 
     // 检查容量
     if (s_var_ctx.count >= s_var_ctx.capacity) {
         xSemaphoreGive(s_var_ctx.mutex);
-        ESP_LOGE(TAG, "Variable storage full");
+        ESP_LOGE(TAG, "Variable storage full (count=%d, capacity=%d)", 
+                 s_var_ctx.count, s_var_ctx.capacity);
         return ESP_ERR_NO_MEM;
     }
 
@@ -235,7 +239,8 @@ esp_err_t ts_variable_register(const ts_auto_variable_t *var)
 
     xSemaphoreGive(s_var_ctx.mutex);
 
-    ESP_LOGD(TAG, "Registered variable: %s (total: %d)", var->name, s_var_ctx.count);
+    ESP_LOGI(TAG, "Registered variable: %s (type=%d, total: %d)", 
+             var->name, var->value.type, s_var_ctx.count);
     return ESP_OK;
 }
 

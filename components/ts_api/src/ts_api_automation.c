@@ -271,11 +271,19 @@ static esp_err_t api_automation_variables_get(const cJSON *params, ts_api_result
 
 /**
  * @brief automation.variables.set - Set a variable value
+ * 
+ * Params:
+ *   - name: Variable name (required)
+ *   - value: Value to set (required)
+ *   - create_only: If true, only create if not exists, don't overwrite (optional)
  */
 static esp_err_t api_automation_variables_set(const cJSON *params, ts_api_result_t *result)
 {
     cJSON *name_param = cJSON_GetObjectItem(params, "name");
     cJSON *value_param = cJSON_GetObjectItem(params, "value");
+    cJSON *create_only_param = cJSON_GetObjectItem(params, "create_only");
+    
+    bool create_only = create_only_param && cJSON_IsTrue(create_only_param);
 
     if (!name_param || !cJSON_IsString(name_param)) {
         result->code = TS_API_ERR_INVALID_ARG;
@@ -316,6 +324,23 @@ static esp_err_t api_automation_variables_set(const cJSON *params, ts_api_result
         return ESP_OK;
     }
 
+    // create_only 模式：只在变量不存在时创建
+    if (create_only) {
+        ts_auto_value_t existing = {0};
+        esp_err_t check_ret = ts_variable_get(name_param->valuestring, &existing);
+        if (check_ret == ESP_OK) {
+            // 变量已存在，不覆盖，直接返回成功
+            result->code = TS_API_OK;
+            result->message = strdup("Variable already exists (not overwritten)");
+            result->data = cJSON_CreateObject();
+            cJSON_AddStringToObject(result->data, "name", name_param->valuestring);
+            cJSON_AddItemToObject(result->data, "value", value_to_json(&existing));
+            cJSON_AddBoolToObject(result->data, "created", false);
+            return ESP_OK;
+        }
+        // 变量不存在，继续创建
+    }
+
     esp_err_t ret = ts_variable_set(name_param->valuestring, &value);
 
     if (ret == ESP_OK) {
@@ -324,12 +349,26 @@ static esp_err_t api_automation_variables_set(const cJSON *params, ts_api_result
         result->data = cJSON_CreateObject();
         cJSON_AddStringToObject(result->data, "name", name_param->valuestring);
         cJSON_AddItemToObject(result->data, "value", value_to_json(&value));
+        if (create_only) {
+            cJSON_AddBoolToObject(result->data, "created", false);  // 变量已存在被更新
+        }
     } else if (ret == ESP_ERR_NOT_FOUND) {
         // 如果变量不存在，创建它
         ts_auto_variable_t new_var = {0};
         strncpy(new_var.name, name_param->valuestring, sizeof(new_var.name) - 1);
         new_var.value = value;
         new_var.default_value = value;
+        
+        // 从变量名自动提取 source_id（取第一个 '.' 之前的部分）
+        // 例如: "ping_test.status" → source_id = "ping_test"
+        const char *dot = strchr(name_param->valuestring, '.');
+        if (dot) {
+            size_t prefix_len = dot - name_param->valuestring;
+            if (prefix_len > 0 && prefix_len < sizeof(new_var.source_id)) {
+                strncpy(new_var.source_id, name_param->valuestring, prefix_len);
+                new_var.source_id[prefix_len] = '\0';
+            }
+        }
         
         ret = ts_variable_register(&new_var);
         if (ret == ESP_OK) {
@@ -342,6 +381,7 @@ static esp_err_t api_automation_variables_set(const cJSON *params, ts_api_result
             result->data = cJSON_CreateObject();
             cJSON_AddStringToObject(result->data, "name", name_param->valuestring);
             cJSON_AddItemToObject(result->data, "value", value_to_json(&value));
+            cJSON_AddBoolToObject(result->data, "created", true);
         } else {
             result->code = TS_API_ERR_INTERNAL;
             result->message = strdup("Failed to create variable");
@@ -798,6 +838,7 @@ static esp_err_t api_automation_sources_list(const cJSON *params, ts_api_result_
             case TS_AUTO_SRC_WEBSOCKET: type_str = "websocket"; break;
             case TS_AUTO_SRC_SOCKETIO: type_str = "socketio"; break;
             case TS_AUTO_SRC_REST: type_str = "rest"; break;
+            case TS_AUTO_SRC_VARIABLE: type_str = "variable"; break;
             default: type_str = "unknown"; break;
         }
         cJSON_AddStringToObject(src_obj, "type", type_str);
@@ -846,6 +887,7 @@ static ts_auto_source_type_t parse_source_type(const char *type_str)
     if (strcmp(type_str, "websocket") == 0) return TS_AUTO_SRC_WEBSOCKET;
     if (strcmp(type_str, "socketio") == 0) return TS_AUTO_SRC_SOCKETIO;
     if (strcmp(type_str, "rest") == 0) return TS_AUTO_SRC_REST;
+    if (strcmp(type_str, "variable") == 0) return TS_AUTO_SRC_VARIABLE;
     return TS_AUTO_SRC_REST;
 }
 
@@ -1150,6 +1192,127 @@ static esp_err_t api_automation_sources_add(const cJSON *params, ts_api_result_t
                                 json_path->valuestring, var_name->valuestring);
                     }
                 }
+            }
+            break;
+        }
+        case TS_AUTO_SRC_VARIABLE: {
+            // SSH 指令变量数据源配置
+            cJSON *ssh_host = cJSON_GetObjectItem(params, "ssh_host_id");
+            if (ssh_host && cJSON_IsString(ssh_host)) {
+                strncpy(source->variable.ssh_host_id, ssh_host->valuestring, 
+                        sizeof(source->variable.ssh_host_id) - 1);
+            }
+            
+            cJSON *ssh_cmd = cJSON_GetObjectItem(params, "ssh_command");
+            if (ssh_cmd && cJSON_IsString(ssh_cmd)) {
+                strncpy(source->variable.ssh_command, ssh_cmd->valuestring, 
+                        sizeof(source->variable.ssh_command) - 1);
+            }
+            
+            cJSON *var_prefix = cJSON_GetObjectItem(params, "var_prefix");
+            if (var_prefix && cJSON_IsString(var_prefix)) {
+                strncpy(source->variable.var_prefix, var_prefix->valuestring, 
+                        sizeof(source->variable.var_prefix) - 1);
+            }
+            
+            // 高级选项
+            cJSON *expect = cJSON_GetObjectItem(params, "ssh_expect_pattern");
+            if (expect && cJSON_IsString(expect)) {
+                strncpy(source->variable.expect_pattern, expect->valuestring, 
+                        sizeof(source->variable.expect_pattern) - 1);
+            }
+            
+            cJSON *fail = cJSON_GetObjectItem(params, "ssh_fail_pattern");
+            if (fail && cJSON_IsString(fail)) {
+                strncpy(source->variable.fail_pattern, fail->valuestring, 
+                        sizeof(source->variable.fail_pattern) - 1);
+            }
+            
+            cJSON *extract = cJSON_GetObjectItem(params, "ssh_extract_pattern");
+            if (extract && cJSON_IsString(extract)) {
+                strncpy(source->variable.extract_pattern, extract->valuestring, 
+                        sizeof(source->variable.extract_pattern) - 1);
+            }
+            
+            cJSON *timeout = cJSON_GetObjectItem(params, "ssh_timeout");
+            source->variable.timeout_sec = timeout && cJSON_IsNumber(timeout) ? 
+                                           (uint16_t)timeout->valueint : 30;
+            
+            // watch_all 模式
+            cJSON *watch_all = cJSON_GetObjectItem(params, "var_watch_all");
+            source->variable.watch_all = watch_all && cJSON_IsTrue(watch_all);
+            
+            TS_LOGI(TAG, "Variable source: host=%s, cmd=%s, prefix=%s", 
+                    source->variable.ssh_host_id,
+                    source->variable.ssh_command,
+                    source->variable.var_prefix);
+            
+            // 预创建变量（值为空，等待指令执行后填充）
+            if (source->variable.var_prefix[0] != '\0') {
+                // 预创建标准变量，每个变量有不同的类型
+                typedef struct {
+                    const char *suffix;
+                    ts_auto_value_type_t type;
+                } var_def_t;
+                
+                const var_def_t var_defs[] = {
+                    {"status",         TS_AUTO_VAL_STRING},   // "success"/"failed"/"timeout"
+                    {"exit_code",      TS_AUTO_VAL_INT},      // 0, 1, 255, ...
+                    {"extracted",      TS_AUTO_VAL_STRING},   // 提取的内容
+                    {"expect_matched", TS_AUTO_VAL_BOOL},     // true/false
+                    {"fail_matched",   TS_AUTO_VAL_BOOL},     // true/false
+                    {"host",           TS_AUTO_VAL_STRING},   // 主机名/IP
+                    {"timestamp",      TS_AUTO_VAL_INT},      // Unix 时间戳
+                };
+                
+                int created_count = 0;
+                for (size_t i = 0; i < sizeof(var_defs) / sizeof(var_defs[0]); i++) {
+                    char var_name[TS_AUTO_NAME_MAX_LEN];
+                    int written = snprintf(var_name, sizeof(var_name), "%s.%s", source->id, var_defs[i].suffix);
+                    if (written < 0 || (size_t)written >= sizeof(var_name)) {
+                        TS_LOGW(TAG, "Variable name too long, skipping: %s.%s", source->id, var_defs[i].suffix);
+                        continue;
+                    }
+                    
+                    // 只在变量不存在时创建，避免覆盖 SSH 执行产生的有效值
+                    ts_auto_value_t existing_value = {0};
+                    if (ts_variable_get(var_name, &existing_value) == ESP_OK) {
+                        // 变量已存在，跳过
+                        TS_LOGD(TAG, "Variable already exists, skipping: %s", var_name);
+                        continue;
+                    }
+                    
+                    ts_auto_variable_t var = {0};
+                    strncpy(var.name, var_name, sizeof(var.name) - 1);
+                    strncpy(var.source_id, source->id, sizeof(var.source_id) - 1);
+                    var.value.type = var_defs[i].type;
+                    // 根据类型设置默认值
+                    switch (var_defs[i].type) {
+                        case TS_AUTO_VAL_STRING:
+                            var.value.str_val[0] = '\0';
+                            break;
+                        case TS_AUTO_VAL_INT:
+                            var.value.int_val = 0;
+                            break;
+                        case TS_AUTO_VAL_BOOL:
+                            var.value.bool_val = false;
+                            break;
+                        default:
+                            break;
+                    }
+                    var.flags = 0;  // 可读写
+                    
+                    esp_err_t reg_ret = ts_variable_register(&var);
+                    if (reg_ret == ESP_OK) {
+                        TS_LOGD(TAG, "Pre-created variable: %s (type=%d)", var.name, var_defs[i].type);
+                        created_count++;
+                    } else {
+                        TS_LOGW(TAG, "Failed to pre-create variable %s: %s", 
+                                var.name, esp_err_to_name(reg_ret));
+                    }
+                }
+                TS_LOGI(TAG, "Pre-created %d/%d variables for source '%s'", 
+                        created_count, (int)(sizeof(var_defs) / sizeof(var_defs[0])), source->id);
             }
             break;
         }

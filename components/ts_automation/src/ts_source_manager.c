@@ -16,6 +16,7 @@
 #include "ts_source_manager.h"
 #include "ts_variable.h"
 #include "ts_jsonpath.h"
+// ts_var.h 已废弃，统一使用 ts_variable.h（ts_automation 变量系统）
 
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -183,6 +184,30 @@ static char *source_to_json(const ts_auto_source_t *src)
             cJSON_AddStringToObject(root, "rest_method", src->rest.method);
             cJSON_AddStringToObject(root, "rest_auth", src->rest.auth_header);
             break;
+        case TS_AUTO_SRC_VARIABLE:
+            cJSON_AddStringToObject(root, "var_name", src->variable.var_name);
+            cJSON_AddStringToObject(root, "var_prefix", src->variable.var_prefix);
+            cJSON_AddBoolToObject(root, "var_watch_all", src->variable.watch_all);
+            // SSH 命令模式相关字段
+            if (src->variable.ssh_host_id[0] != '\0') {
+                cJSON_AddStringToObject(root, "ssh_host_id", src->variable.ssh_host_id);
+            }
+            if (src->variable.ssh_command[0] != '\0') {
+                cJSON_AddStringToObject(root, "ssh_command", src->variable.ssh_command);
+            }
+            if (src->variable.expect_pattern[0] != '\0') {
+                cJSON_AddStringToObject(root, "expect_pattern", src->variable.expect_pattern);
+            }
+            if (src->variable.fail_pattern[0] != '\0') {
+                cJSON_AddStringToObject(root, "fail_pattern", src->variable.fail_pattern);
+            }
+            if (src->variable.extract_pattern[0] != '\0') {
+                cJSON_AddStringToObject(root, "extract_pattern", src->variable.extract_pattern);
+            }
+            if (src->variable.timeout_sec > 0) {
+                cJSON_AddNumberToObject(root, "timeout_sec", src->variable.timeout_sec);
+            }
+            break;
         default:
             break;
     }
@@ -274,6 +299,36 @@ static esp_err_t json_to_source(const char *json_str, ts_auto_source_t *src)
             }
             if ((item = cJSON_GetObjectItem(root, "rest_auth")) && cJSON_IsString(item)) {
                 strncpy(src->rest.auth_header, item->valuestring, sizeof(src->rest.auth_header) - 1);
+            }
+            break;
+        case TS_AUTO_SRC_VARIABLE:
+            if ((item = cJSON_GetObjectItem(root, "var_name")) && cJSON_IsString(item)) {
+                strncpy(src->variable.var_name, item->valuestring, sizeof(src->variable.var_name) - 1);
+            }
+            if ((item = cJSON_GetObjectItem(root, "var_prefix")) && cJSON_IsString(item)) {
+                strncpy(src->variable.var_prefix, item->valuestring, sizeof(src->variable.var_prefix) - 1);
+            }
+            if ((item = cJSON_GetObjectItem(root, "var_watch_all"))) {
+                src->variable.watch_all = cJSON_IsTrue(item);
+            }
+            // SSH 命令模式相关字段
+            if ((item = cJSON_GetObjectItem(root, "ssh_host_id")) && cJSON_IsString(item)) {
+                strncpy(src->variable.ssh_host_id, item->valuestring, sizeof(src->variable.ssh_host_id) - 1);
+            }
+            if ((item = cJSON_GetObjectItem(root, "ssh_command")) && cJSON_IsString(item)) {
+                strncpy(src->variable.ssh_command, item->valuestring, sizeof(src->variable.ssh_command) - 1);
+            }
+            if ((item = cJSON_GetObjectItem(root, "expect_pattern")) && cJSON_IsString(item)) {
+                strncpy(src->variable.expect_pattern, item->valuestring, sizeof(src->variable.expect_pattern) - 1);
+            }
+            if ((item = cJSON_GetObjectItem(root, "fail_pattern")) && cJSON_IsString(item)) {
+                strncpy(src->variable.fail_pattern, item->valuestring, sizeof(src->variable.fail_pattern) - 1);
+            }
+            if ((item = cJSON_GetObjectItem(root, "extract_pattern")) && cJSON_IsString(item)) {
+                strncpy(src->variable.extract_pattern, item->valuestring, sizeof(src->variable.extract_pattern) - 1);
+            }
+            if ((item = cJSON_GetObjectItem(root, "timeout_sec")) && cJSON_IsNumber(item)) {
+                src->variable.timeout_sec = (uint16_t)item->valueint;
             }
             break;
         default:
@@ -651,7 +706,7 @@ static int auto_discover_json_fields(ts_auto_source_t *src, cJSON *json_data,
     }
 
     int count = 0;
-    char var_name[64];
+    char var_name[96];  /* 增大缓冲区以容纳完整变量名 */
     
     if (cJSON_IsObject(json_data)) {
         cJSON *item;
@@ -1034,6 +1089,132 @@ static esp_err_t read_rest_source(ts_auto_source_t *src, ts_auto_value_t *value)
     }
 
     return ret;
+}
+
+/**
+ * 读取变量数据源
+ * 
+ * 统一使用 ts_automation 变量系统（ts_variable API）
+ * 
+ * 两种模式：
+ * 1. 监视指令变量：基于前缀读取 SSH 命令执行结果
+ * 2. 读取单个变量：直接获取指定变量的值
+ */
+static esp_err_t read_variable_source(ts_auto_source_t *src, ts_auto_value_t *value)
+{
+    const char *var_prefix = src->variable.var_prefix;
+    const char *var_name = src->variable.var_name;
+    bool watch_all = src->variable.watch_all;
+
+    // 模式 1：监视指令变量（基于前缀）
+    // 数据源只读取已有变量，不执行 SSH 命令
+    // SSH 指令由其他机制触发执行（手动、定时任务等）
+    if (var_prefix[0] != '\0') {
+        int count = 0;
+        
+        // 从 var_prefix 提取命令别名（去掉末尾的 "."）
+        char alias[TS_AUTO_NAME_MAX_LEN];
+        strncpy(alias, var_prefix, sizeof(alias) - 1);
+        alias[sizeof(alias) - 1] = '\0';
+        size_t len = strlen(alias);
+        if (len > 0 && alias[len - 1] == '.') {
+            alias[len - 1] = '\0';
+        }
+        
+        // 读取 SSH 命令执行后产生的标准变量（使用 ts_automation 系统）
+        const char *suffixes[] = {"status", "exit_code", "extracted", "expect_matched", 
+                                   "fail_matched", "host", "timestamp", "output"};
+        for (size_t i = 0; i < sizeof(suffixes) / sizeof(suffixes[0]); i++) {
+            char full_name[96];
+            snprintf(full_name, sizeof(full_name), "%s.%s", alias, suffixes[i]);
+            
+            // 直接从 ts_automation 变量系统读取
+            ts_auto_value_t var_value = {0};
+            if (ts_variable_get(full_name, &var_value) == ESP_OK) {
+                // 如果数据源 ID 与变量前缀不同，则复制到数据源命名空间
+                if (strcmp(src->id, alias) != 0) {
+                    char auto_var_name[128];
+                    snprintf(auto_var_name, sizeof(auto_var_name), "%s.%s", src->id, suffixes[i]);
+                    ts_variable_set(auto_var_name, &var_value);
+                }
+                count++;
+            }
+        }
+        
+        ESP_LOGD(TAG, "Variable source '%s': read %d variables from prefix '%s'",
+                 src->id, count, alias);
+        
+        if (count > 0) {
+            // 返回主要状态变量
+            char status_var[96];
+            snprintf(status_var, sizeof(status_var), "%s.status", alias);
+            ts_auto_value_t status_value = {0};
+            if (ts_variable_get(status_var, &status_value) == ESP_OK) {
+                *value = status_value;
+            } else {
+                value->type = TS_AUTO_VAL_INT;
+                value->int_val = count;
+            }
+            return ESP_OK;
+        }
+        
+        // 变量不存在（指令可能尚未执行）
+        ESP_LOGD(TAG, "Variable source '%s': no variables found for prefix '%s' (command may not have been executed yet)",
+                 src->id, alias);
+        return ESP_ERR_NOT_FOUND;
+    }
+
+    // 模式 2：读取单个变量（直接使用 ts_automation 系统）
+    if (var_name[0] != '\0') {
+        ts_auto_value_t var_value = {0};
+        esp_err_t ret = ts_variable_get(var_name, &var_value);
+        
+        if (ret == ESP_OK) {
+            *value = var_value;
+            
+            // 同时更新自动化变量（如果有映射）
+            if (src->mapping_count > 0) {
+                ts_variable_set(src->mappings[0].var_name, &var_value);
+            }
+            
+            return ESP_OK;
+        }
+        return ret;
+    }
+
+    // 模式 3：监视前缀下的所有变量（使用 ts_automation 枚举）
+    if (watch_all && var_prefix[0] != '\0') {
+        int count = 0;
+        
+        // 使用 ts_variable_enumerate 遍历所有匹配前缀的变量
+        ts_variable_iterate_ctx_t ctx = {0};
+        ts_auto_variable_t var;
+        
+        while (ts_variable_iterate(&ctx, &var) == ESP_OK) {
+            // 检查变量名是否以 var_prefix 开头
+            if (strncmp(var.name, var_prefix, strlen(var_prefix)) == 0) {
+                // 如果数据源 ID 与前缀不同，复制到数据源命名空间
+                if (strncmp(src->id, var_prefix, strlen(src->id)) != 0) {
+                    char auto_var_name[128];
+                    const char *suffix = var.name + strlen(var_prefix);
+                    snprintf(auto_var_name, sizeof(auto_var_name), "%s%s", src->id, suffix);
+                    ts_variable_set(auto_var_name, &var.value);
+                }
+                count++;
+            }
+        }
+        
+        ESP_LOGD(TAG, "Variable source '%s': synced %d variables from prefix '%s'",
+                 src->id, count, var_prefix);
+        
+        if (count > 0) {
+            value->type = TS_AUTO_VAL_INT;
+            value->int_val = count;
+            return ESP_OK;
+        }
+    }
+
+    return ESP_ERR_NOT_FOUND;
 }
 
 /*===========================================================================*/
@@ -1493,6 +1674,11 @@ esp_err_t ts_source_poll(const char *id)
             ret = read_rest_source(src, &value);
             xSemaphoreTake(s_src_ctx.mutex, portMAX_DELAY);  // 重新获取锁
             s_src_ctx.stats.rest_requests++;
+            break;
+
+        case TS_AUTO_SRC_VARIABLE:
+            // 变量系统轮询
+            ret = read_variable_source(src, &value);
             break;
 
         default:
