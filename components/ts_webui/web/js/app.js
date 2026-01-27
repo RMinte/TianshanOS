@@ -4408,63 +4408,106 @@ const CONFIG_KEY_LABELS = {
 //                         指令页面
 // =========================================================================
 
-// SSH 指令存储（localStorage 持久化）
+// SSH 指令存储（ESP32 后端持久化，不再使用 localStorage）
 let sshCommands = {};
 
-function loadSshCommands() {
+/**
+ * 从 ESP32 后端加载 SSH 指令
+ * 所有指令都保存在 NVS 中，不同浏览器看到相同数据
+ */
+async function loadSshCommands() {
     try {
-        const saved = localStorage.getItem('ts_ssh_commands');
-        sshCommands = saved ? JSON.parse(saved) : {};
+        const result = await api.call('ssh.commands.list', {});
+        if (result && result.data && result.data.commands) {
+            // 按 host_id 组织
+            sshCommands = {};
+            for (const cmd of result.data.commands) {
+                if (!sshCommands[cmd.host_id]) {
+                    sshCommands[cmd.host_id] = [];
+                }
+                // 字段名与后端 API 返回一致 (camelCase)
+                sshCommands[cmd.host_id].push({
+                    id: cmd.id,
+                    name: cmd.name,
+                    command: cmd.command,
+                    desc: cmd.desc || '',
+                    icon: cmd.icon || '🚀',
+                    expectPattern: cmd.expectPattern || '',
+                    failPattern: cmd.failPattern || '',
+                    extractPattern: cmd.extractPattern || '',
+                    varName: cmd.varName || '',
+                    timeout: cmd.timeout || 30,
+                    stopOnMatch: cmd.stopOnMatch || false
+                });
+            }
+        }
     } catch (e) {
-        console.error('Failed to load SSH commands:', e);
+        console.error('Failed to load SSH commands from backend:', e);
         sshCommands = {};
     }
 }
 
-function saveSshCommands() {
-    try {
-        localStorage.setItem('ts_ssh_commands', JSON.stringify(sshCommands));
-    } catch (e) {
-        console.error('Failed to save SSH commands:', e);
+/**
+ * 保存单个 SSH 指令到后端
+ * @param {string} hostId - 主机 ID
+ * @param {object} cmdData - 指令数据
+ * @param {number|null} existingId - 已有指令 ID（编辑时传入）
+ * @returns {Promise<number>} 返回指令 ID
+ */
+async function saveSshCommandToBackend(hostId, cmdData, existingId = null) {
+    const params = {
+        host_id: hostId,
+        name: cmdData.name,
+        command: cmdData.command,
+        ...(cmdData.desc && { desc: cmdData.desc }),
+        ...(cmdData.icon && { icon: cmdData.icon }),
+        ...(cmdData.expectPattern && { expectPattern: cmdData.expectPattern }),
+        ...(cmdData.failPattern && { failPattern: cmdData.failPattern }),
+        ...(cmdData.extractPattern && { extractPattern: cmdData.extractPattern }),
+        ...(cmdData.varName && { varName: cmdData.varName }),
+        ...(cmdData.timeout && { timeout: cmdData.timeout }),
+        ...(cmdData.stopOnMatch !== undefined && { stopOnMatch: cmdData.stopOnMatch })
+    };
+    
+    // 编辑模式：传入 ID
+    if (existingId !== null) {
+        params.id = existingId;
     }
+    
+    const result = await api.call('ssh.commands.add', params);
+    if (result && result.data && result.data.id) {
+        return result.data.id;
+    }
+    throw new Error('Failed to save command');
 }
 
 /**
- * 预创建 SSH 命令相关的变量
- * 命令创建/保存时调用，确保变量立即存在（值为空默认）
+ * 从后端删除 SSH 指令
+ * @param {number} cmdId - 指令 ID
+ */
+async function deleteSshCommandFromBackend(cmdId) {
+    await api.call('ssh.commands.remove', { id: cmdId });
+}
+
+/**
+ * 预创建 SSH 命令相关的变量（保留用于兼容，实际由后端处理）
+ * 后端在保存指令时已自动创建变量
  * @param {string} varName - 变量名前缀（如 "ping_test"）
  */
 async function preCreateCommandVariables(varName) {
-    if (!varName) return;
-    
-    // 7 个标准变量及其类型
-    const varDefs = [
-        { suffix: 'status', type: 'string', defaultValue: '' },
-        { suffix: 'exit_code', type: 'int', defaultValue: 0 },
-        { suffix: 'extracted', type: 'string', defaultValue: '' },
-        { suffix: 'expect_matched', type: 'bool', defaultValue: false },
-        { suffix: 'fail_matched', type: 'bool', defaultValue: false },
-        { suffix: 'host', type: 'string', defaultValue: '' },
-        { suffix: 'timestamp', type: 'int', defaultValue: 0 }
-    ];
-    
-    for (const def of varDefs) {
-        const fullName = `${varName}.${def.suffix}`;
-        try {
-            // 使用 automation.variables.set API 创建/更新变量
-            // 如果变量已存在，不会覆盖有值的变量（后端逻辑）
-            await api.call('automation.variables.set', {
-                name: fullName,
-                value: def.defaultValue,
-                create_only: true  // 告诉后端：仅在不存在时创建
-            });
-        } catch (e) {
-            // 忽略单个变量创建失败，继续其他
-            console.debug(`Variable ${fullName} may already exist:`, e.message);
-        }
-    }
-    
-    console.log(`Pre-created variables for command: ${varName}.*`);
+    // 后端 ssh.commands.add API 在保存时已自动创建变量
+    // 此函数保留作为兼容占位符
+    console.debug(`Variables for ${varName}.* are managed by backend`);
+}
+
+/**
+ * 确保所有已保存指令的变量都已创建（保留用于兼容，实际由后端处理）
+ * 后端在 ESP32 启动时会自动预创建所有命令变量
+ */
+async function ensureAllCommandVariables() {
+    // 后端在 ts_automation_init() 时会调用 ts_ssh_commands_precreate_variables()
+    // 自动为 NVS 中保存的所有命令创建变量
+    console.debug('Command variables are pre-created by backend on ESP32 boot');
 }
 
 async function loadCommandsPage() {
@@ -4477,8 +4520,8 @@ async function loadCommandsPage() {
     // 重置执行状态（防止页面切换后状态残留）
     currentExecSessionId = null;
     
-    // 加载已保存的指令
-    loadSshCommands();
+    // 加载已保存的指令（从后端）
+    await loadSshCommands();
     
     const content = document.getElementById('page-content');
     content.innerHTML = `
@@ -4640,6 +4683,11 @@ async function loadCommandsPage() {
     
     // 加载主机列表
     await loadHostSelector();
+    
+    // 确保所有已保存指令的变量都已创建（后台执行，不阻塞 UI）
+    ensureAllCommandVariables().catch(e => {
+        console.warn('Failed to ensure command variables:', e);
+    });
 }
 
 function addCommandsPageStyles() {
@@ -5027,6 +5075,9 @@ function refreshCommandsList() {
             </div>
         ` : '';
         
+        // 变量按钮（仅当设置了 varName 时显示）
+        const varBtnHtml = cmd.varName ? `<button class="btn btn-sm" onclick="showCommandVariables('${escapeHtml(cmd.varName)}')" title="查看变量: ${escapeHtml(cmd.varName)}.*">📊</button>` : '';
+        
         return `
         <div class="command-card">
             <div class="cmd-header">
@@ -5038,6 +5089,7 @@ function refreshCommandsList() {
             <div class="cmd-code" title="${escapeHtml(cmd.command)}">${escapeHtml(cmd.command.split('\n')[0])}${cmd.command.includes('\n') ? ' ...' : ''}</div>
             <div class="cmd-actions">
                 <button class="btn btn-sm btn-exec" onclick="executeCommand(${idx})" title="执行">▶️</button>
+                ${varBtnHtml}
                 <button class="btn btn-sm" onclick="editCommand(${idx})" title="编辑">✏️</button>
                 <button class="btn btn-sm" onclick="deleteCommand(${idx})" title="删除" style="background:#dc3545;color:white">🗑️</button>
             </div>
@@ -5082,6 +5134,66 @@ function showAddCommandModal() {
 
 function closeCommandModal() {
     document.getElementById('command-modal').classList.add('hidden');
+}
+
+/**
+ * 显示指令变量
+ * @param {string} varName - 变量名前缀（不含 cmd.）
+ */
+async function showCommandVariables(varName) {
+    const modal = document.getElementById('source-variables-modal');
+    const body = document.getElementById('source-variables-body');
+    if (!modal || !body) return;
+    
+    // 更新标题
+    const header = modal.querySelector('.modal-header h2');
+    if (header) header.textContent = `📊 指令变量: ${varName}.*`;
+    
+    body.innerHTML = '<div class="loading">加载中...</div>';
+    modal.classList.remove('hidden');
+    
+    try {
+        const result = await api.call('automation.variables.list');
+        if (result.code === 0 && result.data && result.data.variables) {
+            // 过滤出属于该指令的变量
+            // SSH 指令变量的 source_id 就是 varName（不带 cmd. 前缀）
+            // 变量名格式为 varName.status, varName.exit_code, varName.extracted 等
+            const vars = result.data.variables.filter(v => 
+                v.source_id === varName || v.name.startsWith(varName + '.'));
+            
+            if (vars.length === 0) {
+                body.innerHTML = '<p style="text-align:center;color:var(--text-light);padding:20px">该指令暂无变量数据，请先执行一次</p>';
+                return;
+            }
+            
+            body.innerHTML = `
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>变量名</th>
+                            <th>类型</th>
+                            <th>当前值</th>
+                            <th>更新时间</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${vars.map(v => `
+                            <tr>
+                                <td><code class="variable-name">${v.name}</code></td>
+                                <td><span class="type-badge type-${v.type || 'unknown'}">${v.type || '-'}</span></td>
+                                <td class="variable-value">${formatVariableValue(v.value, v.type)}</td>
+                                <td class="variable-time">${v.updated_at ? formatTimeAgo(v.updated_at) : '-'}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            `;
+        } else {
+            body.innerHTML = `<p style="text-align:center;color:var(--danger-color)">⚠️ ${result.message || '获取变量失败'}</p>`;
+        }
+    } catch (error) {
+        body.innerHTML = `<p style="text-align:center;color:var(--danger-color)">❌ ${error.message}</p>`;
+    }
 }
 
 /* 更新超时输入框的启用状态 */
@@ -5151,27 +5263,35 @@ async function saveCommand() {
         ...(stopOnMatch && { stopOnMatch })
     };
     
-    if (editId !== '') {
-        // 编辑模式
-        sshCommands[selectedHostId][parseInt(editId)] = cmdData;
-        showToast('指令已更新', 'success');
-    } else {
-        // 新建模式
-        sshCommands[selectedHostId].push(cmdData);
-        showToast('指令已创建', 'success');
+    try {
+        // 获取已有指令的 ID（编辑模式）
+        let existingId = null;
+        if (editId !== '') {
+            const existingCmd = sshCommands[selectedHostId][parseInt(editId)];
+            existingId = existingCmd?.id || null;
+        }
+        
+        // 保存到后端
+        const newId = await saveSshCommandToBackend(selectedHostId, cmdData, existingId);
+        cmdData.id = newId;
+        
+        if (editId !== '') {
+            // 编辑模式：更新本地缓存
+            sshCommands[selectedHostId][parseInt(editId)] = cmdData;
+            showToast('指令已更新', 'success');
+        } else {
+            // 新建模式：添加到本地缓存
+            sshCommands[selectedHostId].push(cmdData);
+            showToast('指令已创建', 'success');
+        }
+        
+        closeCommandModal();
+        refreshCommandsList();
+        
+    } catch (e) {
+        console.error('Failed to save command:', e);
+        showToast('保存指令失败: ' + e.message, 'error');
     }
-    
-    saveSshCommands();
-    
-    // 如果设置了变量名，预创建变量（后台执行，不阻塞 UI）
-    if (varName) {
-        preCreateCommandVariables(varName).catch(e => {
-            console.warn('Failed to pre-create variables:', e);
-        });
-    }
-    
-    closeCommandModal();
-    refreshCommandsList();
 }
 
 function editCommand(idx) {
@@ -5210,16 +5330,26 @@ function editCommand(idx) {
     updateTimeoutState();
 }
 
-function deleteCommand(idx) {
+async function deleteCommand(idx) {
     const cmd = sshCommands[selectedHostId]?.[idx];
     if (!cmd) return;
     
     if (!confirm(`确定要删除指令「${cmd.name}」吗？`)) return;
     
-    sshCommands[selectedHostId].splice(idx, 1);
-    saveSshCommands();
-    refreshCommandsList();
-    showToast('指令已删除', 'success');
+    try {
+        // 从后端删除（需要指令 ID）
+        if (cmd.id) {
+            await deleteSshCommandFromBackend(cmd.id);
+        }
+        
+        // 从本地缓存删除
+        sshCommands[selectedHostId].splice(idx, 1);
+        refreshCommandsList();
+        showToast('指令已删除', 'success');
+    } catch (e) {
+        console.error('Failed to delete command:', e);
+        showToast('删除指令失败: ' + e.message, 'error');
+    }
 }
 
 /* 当前执行中的会话 ID */
@@ -9773,22 +9903,6 @@ async function loadAutomationPage() {
                 </div>
             </div>
             
-            <!-- 变量列表 -->
-            <div class="section">
-                <div class="section-header">
-                    <h2>📊 变量 <span id="variables-count" class="badge"></span></h2>
-                    <div class="section-actions">
-                        <input type="text" id="variable-filter" placeholder="搜索变量..." class="input input-sm" oninput="filterVariables()">
-                        <button class="btn btn-sm" onclick="refreshVariables()">🔄</button>
-                    </div>
-                </div>
-                <div class="card compact">
-                    <div id="variables-list" class="card-content variables-container">
-                        <div class="loading-small">加载中...</div>
-                    </div>
-                </div>
-            </div>
-            
             <!-- 动作模板管理 -->
             <div class="section">
                 <div class="section-header">
@@ -9804,95 +9918,6 @@ async function loadAutomationPage() {
                     </div>
                 </div>
             </div>
-            
-            <!-- 动作执行统计 -->
-            <div class="section">
-                <div class="section-header">
-                    <h2>📊 执行统计</h2>
-                    <div class="section-actions">
-                        <button class="btn btn-sm" onclick="refreshActionStats()">🔄</button>
-                        <button class="btn btn-sm btn-danger" onclick="resetActionStats()">🗑️ 重置</button>
-                    </div>
-                </div>
-                <div class="status-grid" id="action-stats">
-                    <div class="status-card loading">加载中...</div>
-                </div>
-            </div>
-            
-            <!-- 测试动作面板 -->
-            <div class="section">
-                <div class="section-header">
-                    <h2>🧪 测试执行器</h2>
-                </div>
-                <div class="test-panels">
-                    <!-- LED 测试 -->
-                    <div class="test-panel">
-                        <div class="test-panel-title">💡 LED</div>
-                        <div class="test-panel-body">
-                            <select id="led-device" class="input">
-                                <option value="board">Board</option>
-                                <option value="matrix">Matrix</option>
-                                <option value="touch">Touch</option>
-                            </select>
-                            <select id="led-operation" class="input">
-                                <option value="on">开启</option>
-                                <option value="off">关闭</option>
-                                <option value="blink">闪烁</option>
-                                <option value="effect">特效</option>
-                            </select>
-                            <input type="text" id="led-params" placeholder='{"color":"#FF0000"}' class="input">
-                            <button class="btn btn-primary btn-sm" onclick="testLed()">▶</button>
-                        </div>
-                    </div>
-                    
-                    <!-- GPIO 测试 -->
-                    <div class="test-panel">
-                        <div class="test-panel-title">🔌 GPIO</div>
-                        <div class="test-panel-body">
-                            <input type="number" id="gpio-pin" placeholder="Pin" class="input" value="48" style="width:60px">
-                            <select id="gpio-operation" class="input">
-                                <option value="set_high">高电平</option>
-                                <option value="set_low">低电平</option>
-                                <option value="toggle">翻转</option>
-                                <option value="pulse">脉冲</option>
-                            </select>
-                            <input type="text" id="gpio-params" placeholder='{"duration_ms":100}' class="input">
-                            <button class="btn btn-primary btn-sm" onclick="testGpio()">▶</button>
-                        </div>
-                    </div>
-                    
-                    <!-- Device 测试 -->
-                    <div class="test-panel">
-                        <div class="test-panel-title">🖥️ 设备</div>
-                        <div class="test-panel-body">
-                            <select id="device-id" class="input">
-                                <option value="agx_0">AGX 0</option>
-                                <option value="lpmu_0">LPMU 0</option>
-                            </select>
-                            <select id="device-operation" class="input">
-                                <option value="power_on">开机</option>
-                                <option value="power_off">关机</option>
-                                <option value="reset">重启</option>
-                                <option value="force_off">强制关机</option>
-                            </select>
-                            <button class="btn btn-primary btn-sm" onclick="testDevice()">▶</button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            
-            <!-- 执行结果 -->
-            <div class="section">
-                <div class="section-header">
-                    <h2>📜 执行日志</h2>
-                    <button class="btn btn-sm btn-danger" onclick="clearResults()">🗑️ 清空</button>
-                </div>
-                <div class="card compact">
-                    <div id="execution-results" class="result-log">
-                        <p class="empty-state">暂无执行记录</p>
-                    </div>
-                </div>
-            </div>
         </div>
     `;
     
@@ -9901,9 +9926,7 @@ async function loadAutomationPage() {
         refreshAutomationStatus(),
         refreshRules(),
         refreshSources(),
-        refreshVariables(),
-        refreshActions(),
-        refreshActionStats()
+        refreshActions()
     ]);
 }
 
@@ -9976,12 +9999,12 @@ function formatUptime(seconds) {
 async function automationControl(action) {
     try {
         const result = await api.call(`automation.${action}`);
-        addResult(result.code === 0, `${action}: ${result.message || 'OK'}`);
+        showToast(`${action}: ${result.message || 'OK'}`, result.code === 0 ? 'success' : 'error');
         if (result.code === 0) {
             await refreshAutomationStatus();
         }
     } catch (error) {
-        addResult(false, `${action} 失败: ${error.message}`);
+        showToast(`${action} 失败: ${error.message}`, 'error');
     }
 }
 
@@ -10049,12 +10072,12 @@ async function toggleRule(id, enable) {
     try {
         const action = enable ? 'automation.rules.enable' : 'automation.rules.disable';
         const result = await api.call(action, { id });
-        addResult(result.code === 0, `规则 ${id} ${enable ? '启用' : '禁用'}: ${result.message || 'OK'}`);
+        showToast(`规则 ${id} ${enable ? '启用' : '禁用'}: ${result.message || 'OK'}`, result.code === 0 ? 'success' : 'error');
         if (result.code === 0) {
             await refreshRules();
         }
     } catch (error) {
-        addResult(false, `切换规则状态失败: ${error.message}`);
+        showToast(`切换规则状态失败: ${error.message}`, 'error');
     }
 }
 
@@ -10064,9 +10087,9 @@ async function toggleRule(id, enable) {
 async function triggerRule(id) {
     try {
         const result = await api.call('automation.rules.trigger', { id });
-        addResult(result.code === 0, `触发规则 ${id}: ${result.message || 'OK'}`);
+        showToast(`触发规则 ${id}: ${result.message || 'OK'}`, result.code === 0 ? 'success' : 'error');
     } catch (error) {
-        addResult(false, `触发规则失败: ${error.message}`);
+        showToast(`触发规则失败: ${error.message}`, 'error');
     }
 }
 
@@ -10095,7 +10118,6 @@ async function refreshSources() {
                             <th>类型</th>
                             <th>状态</th>
                             <th>更新间隔</th>
-                            <th>最新值</th>
                             <th>操作</th>
                         </tr>
                     </thead>
@@ -10107,8 +10129,8 @@ async function refreshSources() {
                                 <td><span style="padding:2px 8px;background:var(--primary-color);color:white;border-radius:4px;font-size:0.85em">${s.type || 'unknown'}</span></td>
                                 <td><span class="status-badge ${s.enabled ? 'status-running' : 'status-stopped'}">${s.enabled ? '启用' : '禁用'}</span></td>
                                 <td>${s.poll_interval_ms ? (s.poll_interval_ms / 1000) + '秒' : '-'}</td>
-                                <td><code style="font-size:0.85em">${s.last_value !== undefined ? JSON.stringify(s.last_value) : '-'}</code></td>
                                 <td style="white-space:nowrap">
+                                    <button class="btn btn-sm" onclick="showSourceVariables('${s.id}')" title="查看变量">📊</button>
                                     <button class="btn btn-sm" onclick="toggleSource('${s.id}', ${!s.enabled})" title="${s.enabled ? '禁用' : '启用'}">${s.enabled ? '🔴' : '🟢'}</button>
                                     <button class="btn btn-sm btn-danger" onclick="deleteSource('${s.id}')" title="删除">🗑️</button>
                                 </td>
@@ -10272,72 +10294,6 @@ function formatTimeAgo(timestamp) {
 }
 
 /**
- * 测试 LED 动作
- */
-async function testLed() {
-    const device = document.getElementById('led-device').value;
-    const operation = document.getElementById('led-operation').value;
-    let params = document.getElementById('led-params').value.trim();
-    
-    try {
-        params = params ? JSON.parse(params) : {};
-    } catch (e) {
-        addResult(false, 'LED 参数 JSON 格式错误');
-        return;
-    }
-    
-    try {
-        const result = await api.call('automation.test.led', { device, operation, params });
-        addResult(result.code === 0, `LED 测试 (${device}.${operation}): ${result.message || 'OK'}`);
-    } catch (error) {
-        addResult(false, `LED 测试失败: ${error.message}`);
-    }
-}
-
-/**
- * 测试 GPIO 动作
- */
-async function testGpio() {
-    const pin = parseInt(document.getElementById('gpio-pin').value);
-    const operation = document.getElementById('gpio-operation').value;
-    let params = document.getElementById('gpio-params').value.trim();
-    
-    if (isNaN(pin)) {
-        addResult(false, '请输入有效的 GPIO 引脚号');
-        return;
-    }
-    
-    try {
-        params = params ? JSON.parse(params) : {};
-    } catch (e) {
-        addResult(false, 'GPIO 参数 JSON 格式错误');
-        return;
-    }
-    
-    try {
-        const result = await api.call('automation.test.gpio', { pin, operation, params });
-        addResult(result.code === 0, `GPIO 测试 (GPIO${pin}.${operation}): ${result.message || 'OK'}`);
-    } catch (error) {
-        addResult(false, `GPIO 测试失败: ${error.message}`);
-    }
-}
-
-/**
- * 测试设备控制动作
- */
-async function testDevice() {
-    const device = document.getElementById('device-id').value;
-    const operation = document.getElementById('device-operation').value;
-    
-    try {
-        const result = await api.call('automation.test.device', { device, operation });
-        addResult(result.code === 0, `设备测试 (${device}.${operation}): ${result.message || 'OK'}`);
-    } catch (error) {
-        addResult(false, `设备测试失败: ${error.message}`);
-    }
-}
-
-/**
  * HTML 转义
  */
 function escapeHtml(text) {
@@ -10355,7 +10311,7 @@ async function refreshActions() {
     
     try {
         const result = await api.call('automation.actions.list', {});
-        const actions = result.data?.actions || [];
+        const actions = result.data?.templates || [];
         
         if (actions.length === 0) {
             container.innerHTML = '<p style="text-align:center;color:var(--text-light)">暂无动作模板，点击"添加"创建</p>';
@@ -10436,51 +10392,104 @@ function showAddActionModal() {
     modal.innerHTML = `
         <div class="modal-content modal-lg">
             <div class="modal-header">
-                <h3>⚡ 添加动作模板</h3>
+                <h3>⚡ 新建动作模板</h3>
                 <button class="modal-close" onclick="closeModal('action-modal')">&times;</button>
             </div>
             <div class="modal-body">
-                <div class="form-row">
-                    <div class="form-group" style="flex:1">
-                        <label>动作 ID <span class="required">*</span></label>
-                        <input type="text" id="action-id" class="input" placeholder="唯一标识，如: restart_agx">
+                <!-- 第一步：选择动作类型 -->
+                <div class="action-section">
+                    <div class="section-title">1️⃣ 选择动作类型</div>
+                    <div class="action-type-grid">
+                        <label class="action-type-card" data-type="cli">
+                            <input type="radio" name="action-type" value="cli" checked>
+                            <div class="card-icon">⚡</div>
+                            <div class="card-title">CLI 命令</div>
+                            <div class="card-desc">执行本地控制台命令</div>
+                        </label>
+                        <label class="action-type-card" data-type="ssh_cmd_ref">
+                            <input type="radio" name="action-type" value="ssh_cmd_ref">
+                            <div class="card-icon">🔐</div>
+                            <div class="card-title">SSH 命令</div>
+                            <div class="card-desc">执行已配置的SSH命令</div>
+                        </label>
+                        <label class="action-type-card" data-type="led">
+                            <input type="radio" name="action-type" value="led">
+                            <div class="card-icon">💡</div>
+                            <div class="card-title">LED 控制</div>
+                            <div class="card-desc">控制 LED 颜色和效果</div>
+                        </label>
+                        <label class="action-type-card" data-type="log">
+                            <input type="radio" name="action-type" value="log">
+                            <div class="card-icon">📝</div>
+                            <div class="card-title">日志记录</div>
+                            <div class="card-desc">输出日志消息</div>
+                        </label>
+                        <label class="action-type-card" data-type="set_var">
+                            <input type="radio" name="action-type" value="set_var">
+                            <div class="card-icon">📊</div>
+                            <div class="card-title">设置变量</div>
+                            <div class="card-desc">修改系统变量值</div>
+                        </label>
+                        <label class="action-type-card" data-type="webhook">
+                            <input type="radio" name="action-type" value="webhook">
+                            <div class="card-icon">🌐</div>
+                            <div class="card-title">Webhook</div>
+                            <div class="card-desc">发送 HTTP 请求</div>
+                        </label>
                     </div>
-                    <div class="form-group" style="flex:1">
-                        <label>名称</label>
-                        <input type="text" id="action-name" class="input" placeholder="显示名称">
+                </div>
+                
+                <!-- 第二步：配置参数 -->
+                <div class="action-section">
+                    <div class="section-title">2️⃣ 配置参数</div>
+                    <div id="action-type-fields" class="action-params-container">
+                        <!-- 动态生成的类型特定字段 -->
                     </div>
                 </div>
-                <div class="form-group">
-                    <label>动作类型 <span class="required">*</span></label>
-                    <select id="action-type" class="input" onchange="updateActionTypeFields()">
-                        <option value="led">💡 LED 控制</option>
-                        <option value="ssh_cmd">🔐 SSH 命令</option>
-                        <option value="gpio">🔌 GPIO 控制</option>
-                        <option value="device_ctrl">🖥️ 设备控制</option>
-                        <option value="log">📝 日志记录</option>
-                        <option value="set_var">📊 设置变量</option>
-                        <option value="webhook">🌐 Webhook</option>
-                    </select>
-                </div>
-                <div id="action-type-fields">
-                    <!-- 动态生成的类型特定字段 -->
-                </div>
-                <div class="form-group">
-                    <label>描述</label>
-                    <input type="text" id="action-description" class="input" placeholder="动作说明">
-                </div>
-                <div class="form-group">
-                    <label>执行延迟 (ms)</label>
-                    <input type="number" id="action-delay" class="input" value="0" min="0">
+                
+                <!-- 第三步：基本信息 -->
+                <div class="action-section">
+                    <div class="section-title">3️⃣ 基本信息</div>
+                    <div class="form-row">
+                        <div class="form-group" style="flex:1">
+                            <label>动作 ID <span class="required">*</span></label>
+                            <input type="text" id="action-id" class="input" placeholder="唯一标识，如: restart_agx">
+                            <small class="form-hint">用于规则引用，只能包含字母、数字和下划线</small>
+                        </div>
+                        <div class="form-group" style="flex:1">
+                            <label>显示名称</label>
+                            <input type="text" id="action-name" class="input" placeholder="如: 重启 AGX">
+                            <small class="form-hint">留空则使用 ID</small>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group" style="flex:2">
+                            <label>描述</label>
+                            <input type="text" id="action-description" class="input" placeholder="动作说明（可选）">
+                        </div>
+                        <div class="form-group" style="flex:1">
+                            <label>执行延迟</label>
+                            <div class="input-with-unit">
+                                <input type="number" id="action-delay" class="input" value="0" min="0">
+                                <span class="unit">ms</span>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
             <div class="modal-footer">
                 <button class="btn" onclick="closeModal('action-modal')">取消</button>
-                <button class="btn btn-primary" onclick="submitAction()">保存</button>
+                <button class="btn btn-primary" onclick="submitAction()">💾 保存动作</button>
             </div>
         </div>
     `;
     document.body.appendChild(modal);
+    
+    // 绑定类型卡片点击事件
+    modal.querySelectorAll('.action-type-card input').forEach(radio => {
+        radio.addEventListener('change', updateActionTypeFields);
+    });
+    
     updateActionTypeFields();
 }
 
@@ -10488,149 +10497,210 @@ function showAddActionModal() {
  * 更新动作类型字段
  */
 function updateActionTypeFields() {
-    const type = document.getElementById('action-type').value;
+    const checked = document.querySelector('input[name="action-type"]:checked');
+    const type = checked ? checked.value : 'cli';
     const container = document.getElementById('action-type-fields');
     
+    // 更新卡片选中状态
+    document.querySelectorAll('.action-type-card').forEach(card => {
+        card.classList.toggle('selected', card.dataset.type === type);
+    });
+    
     const fields = {
+        cli: `
+            <div class="params-card">
+                <div class="params-header">
+                    <span class="params-icon">⚡</span>
+                    <span>CLI 命令配置</span>
+                </div>
+                <div class="form-group">
+                    <label>命令行 <span class="required">*</span></label>
+                    <input type="text" id="action-cli-command" class="input input-mono" placeholder="如: gpio --set 48 1">
+                    <small class="form-hint">支持所有控制台命令: gpio, device, fan, led, net 等</small>
+                </div>
+                <div class="quick-commands">
+                    <span class="quick-label">快捷命令:</span>
+                    <button type="button" class="quick-btn" onclick="setCliPreset('gpio --set 48 1')">GPIO</button>
+                    <button type="button" class="quick-btn" onclick="setCliPreset('device --power-on agx0')">AGX开机</button>
+                    <button type="button" class="quick-btn" onclick="setCliPreset('device --reset agx0')">AGX重启</button>
+                    <button type="button" class="quick-btn" onclick="setCliPreset('fan --set --id 0 --speed 80')">风扇</button>
+                    <button type="button" class="quick-btn" onclick="setCliPreset('led --effect --device board --name fire')">LED</button>
+                </div>
+                <details class="advanced-toggle">
+                    <summary>高级选项</summary>
+                    <div class="advanced-content">
+                        <div class="form-group">
+                            <label>结果变量</label>
+                            <input type="text" id="action-cli-var" class="input" placeholder="如: cli.result">
+                            <small class="form-hint">存储命令输出到变量</small>
+                        </div>
+                        <div class="form-group">
+                            <label>超时时间</label>
+                            <div class="input-with-unit">
+                                <input type="number" id="action-cli-timeout" class="input" value="5000">
+                                <span class="unit">ms</span>
+                            </div>
+                        </div>
+                    </div>
+                </details>
+            </div>
+        `,
+        ssh_cmd_ref: `
+            <div class="params-card">
+                <div class="params-header">
+                    <span class="params-icon">🔐</span>
+                    <span>SSH 命令配置</span>
+                </div>
+                <div class="form-group">
+                    <label>选择命令 <span class="required">*</span></label>
+                    <select id="action-ssh-cmd-id" class="input" onchange="updateSshCmdRefPreview()">
+                        <option value="">-- 加载中 --</option>
+                    </select>
+                    <small class="form-hint">选择已在 SSH 管理页面配置的命令</small>
+                </div>
+                <div id="ssh-cmd-preview" class="ssh-cmd-preview" style="display:none;">
+                    <div class="preview-title">📋 命令详情</div>
+                    <div class="preview-content">
+                        <div class="preview-row"><span class="preview-label">主机:</span> <span id="preview-host">-</span></div>
+                        <div class="preview-row"><span class="preview-label">命令:</span> <code id="preview-cmd">-</code></div>
+                        <div class="preview-row"><span class="preview-label">变量:</span> <span id="preview-var">-</span></div>
+                    </div>
+                </div>
+            </div>
+        `,
         led: `
-            <div class="form-row">
-                <div class="form-group" style="flex:1">
-                    <label>LED 设备</label>
-                    <select id="action-led-device" class="input">
-                        <option value="board">Board</option>
-                        <option value="matrix">Matrix</option>
-                        <option value="touch">Touch</option>
-                    </select>
+            <div class="params-card">
+                <div class="params-header">
+                    <span class="params-icon">💡</span>
+                    <span>LED 控制配置</span>
                 </div>
-                <div class="form-group" style="flex:1">
-                    <label>LED 索引</label>
-                    <input type="number" id="action-led-index" class="input" value="255" placeholder="255=全部">
-                </div>
-            </div>
-            <div class="form-row">
-                <div class="form-group" style="flex:1">
-                    <label>颜色</label>
-                    <input type="color" id="action-led-color" class="input" value="#FF0000">
-                </div>
-                <div class="form-group" style="flex:1">
-                    <label>特效</label>
-                    <input type="text" id="action-led-effect" class="input" placeholder="可选，如: blink, pulse">
-                </div>
-            </div>
-        `,
-        ssh_cmd: `
-            <div class="form-group">
-                <label>主机引用 <span class="required">*</span></label>
-                <input type="text" id="action-ssh-host" class="input" placeholder="变量名，如: hosts.agx0.ip 或直接 IP">
-                <small class="form-hint">支持变量引用 \${hosts.xxx.ip}</small>
-            </div>
-            <div class="form-group">
-                <label>命令 <span class="required">*</span></label>
-                <input type="text" id="action-ssh-command" class="input" placeholder="如: sudo reboot">
-            </div>
-            <div class="form-row">
-                <div class="form-group" style="flex:1">
-                    <label>超时 (ms)</label>
-                    <input type="number" id="action-ssh-timeout" class="input" value="30000">
-                </div>
-                <div class="form-group" style="flex:1">
-                    <label>异步执行</label>
-                    <select id="action-ssh-async" class="input">
-                        <option value="false">否 (等待结果)</option>
-                        <option value="true">是 (后台执行)</option>
-                    </select>
-                </div>
-            </div>
-        `,
-        gpio: `
-            <div class="form-row">
-                <div class="form-group" style="flex:1">
-                    <label>GPIO 引脚 <span class="required">*</span></label>
-                    <input type="number" id="action-gpio-pin" class="input" placeholder="如: 48">
-                </div>
-                <div class="form-group" style="flex:1">
-                    <label>电平</label>
-                    <select id="action-gpio-level" class="input">
-                        <option value="true">高电平 (1)</option>
-                        <option value="false">低电平 (0)</option>
-                    </select>
-                </div>
-            </div>
-            <div class="form-group">
-                <label>脉冲时长 (ms)</label>
-                <input type="number" id="action-gpio-pulse" class="input" value="0" placeholder="0=保持电平">
-            </div>
-        `,
-        device_ctrl: `
-            <div class="form-row">
-                <div class="form-group" style="flex:1">
+                <div class="form-group">
                     <label>设备 <span class="required">*</span></label>
-                    <select id="action-device-name" class="input">
-                        <option value="agx0">AGX 0</option>
-                        <option value="lpmu0">LPMU 0</option>
+                    <select id="action-led-device" class="input" onchange="updateActionLedOptions()">
+                        <option value="">-- 选择设备 --</option>
+                    </select>
+                    <small class="form-hint">选择要控制的 LED 设备</small>
+                </div>
+                
+                <!-- 控制类型选择 -->
+                <div class="form-group" id="action-led-type-group" style="display:none;">
+                    <label>控制类型 <span class="required">*</span></label>
+                    <select id="action-led-type" class="input" onchange="updateActionLedTypeFields()">
+                        <option value="fill">🎨 纯色填充</option>
+                        <option value="effect">🎬 特效动画</option>
+                        <option value="brightness">☀️ 仅调节亮度</option>
+                        <option value="off">⏹ 关闭</option>
                     </select>
                 </div>
-                <div class="form-group" style="flex:1">
-                    <label>操作 <span class="required">*</span></label>
-                    <select id="action-device-action" class="input">
-                        <option value="power_on">开机</option>
-                        <option value="power_off">关机</option>
-                        <option value="reset">重启</option>
-                        <option value="force_off">强制关机</option>
+                
+                <!-- Matrix 专属控制类型 -->
+                <div class="form-group" id="action-led-matrix-type-group" style="display:none;">
+                    <label>控制类型 <span class="required">*</span></label>
+                    <select id="action-led-matrix-type" class="input" onchange="updateActionLedTypeFields()">
+                        <option value="fill">🎨 纯色填充</option>
+                        <option value="effect">🎬 特效动画</option>
+                        <option value="text">📝 文本显示</option>
+                        <option value="image">📷 显示图像</option>
+                        <option value="qrcode">📱 显示QR码</option>
+                        <option value="filter">🎨 后处理滤镜</option>
+                        <option value="brightness">☀️ 仅调节亮度</option>
+                        <option value="off">⏹ 关闭</option>
                     </select>
                 </div>
+                
+                <!-- 动态参数区域 -->
+                <div id="action-led-params"></div>
             </div>
         `,
         log: `
-            <div class="form-row">
-                <div class="form-group" style="flex:1">
-                    <label>日志级别</label>
-                    <select id="action-log-level" class="input">
-                        <option value="3">INFO</option>
-                        <option value="2">WARN</option>
-                        <option value="1">ERROR</option>
-                        <option value="4">DEBUG</option>
-                    </select>
+            <div class="params-card">
+                <div class="params-header">
+                    <span class="params-icon">📝</span>
+                    <span>日志配置</span>
                 </div>
-            </div>
-            <div class="form-group">
-                <label>消息模板 <span class="required">*</span></label>
-                <input type="text" id="action-log-message" class="input" placeholder="支持变量 \${var_name}">
+                <div class="form-row">
+                    <div class="form-group" style="flex:1">
+                        <label>级别</label>
+                        <select id="action-log-level" class="input">
+                            <option value="3">ℹ️ INFO</option>
+                            <option value="2">⚠️ WARN</option>
+                            <option value="1">❌ ERROR</option>
+                            <option value="4">🔍 DEBUG</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>消息 <span class="required">*</span></label>
+                    <input type="text" id="action-log-message" class="input" placeholder="如: 设备状态变更: \${device.status}">
+                    <small class="form-hint">支持变量: \${变量名}</small>
+                </div>
             </div>
         `,
         set_var: `
-            <div class="form-group">
-                <label>变量名 <span class="required">*</span></label>
-                <input type="text" id="action-var-name" class="input" placeholder="如: system.flag">
-            </div>
-            <div class="form-group">
-                <label>值 <span class="required">*</span></label>
-                <input type="text" id="action-var-value" class="input" placeholder="支持表达式">
+            <div class="params-card">
+                <div class="params-header">
+                    <span class="params-icon">📊</span>
+                    <span>变量配置</span>
+                </div>
+                <div class="form-group">
+                    <label>变量名 <span class="required">*</span></label>
+                    <input type="text" id="action-var-name" class="input" placeholder="如: system.flag">
+                </div>
+                <div class="form-group">
+                    <label>值 <span class="required">*</span></label>
+                    <input type="text" id="action-var-value" class="input" placeholder="支持表达式和变量引用">
+                    <small class="form-hint">示例: true, 123, \${other_var}</small>
+                </div>
             </div>
         `,
         webhook: `
-            <div class="form-group">
-                <label>URL <span class="required">*</span></label>
-                <input type="text" id="action-webhook-url" class="input" placeholder="https://...">
-            </div>
-            <div class="form-row">
-                <div class="form-group" style="flex:1">
-                    <label>方法</label>
-                    <select id="action-webhook-method" class="input">
-                        <option value="POST">POST</option>
-                        <option value="GET">GET</option>
-                        <option value="PUT">PUT</option>
-                    </select>
+            <div class="params-card">
+                <div class="params-header">
+                    <span class="params-icon">🌐</span>
+                    <span>Webhook 配置</span>
                 </div>
-            </div>
-            <div class="form-group">
-                <label>Body 模板</label>
-                <input type="text" id="action-webhook-body" class="input" placeholder='{"event": "\${trigger}"}'>
+                <div class="form-group">
+                    <label>URL <span class="required">*</span></label>
+                    <input type="text" id="action-webhook-url" class="input" placeholder="https://api.example.com/webhook">
+                </div>
+                <div class="form-row">
+                    <div class="form-group" style="flex:1">
+                        <label>方法</label>
+                        <select id="action-webhook-method" class="input">
+                            <option value="POST">POST</option>
+                            <option value="GET">GET</option>
+                            <option value="PUT">PUT</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>请求体</label>
+                    <input type="text" id="action-webhook-body" class="input input-mono" placeholder='{"event": "\${trigger}"}'>
+                    <small class="form-hint">JSON 格式，支持变量</small>
+                </div>
             </div>
         `
     };
     
-    container.innerHTML = fields[type] || '';
+    container.innerHTML = fields[type] || '<div class="params-card"><p>请选择动作类型</p></div>';
+    
+    // SSH 命令类型时加载命令列表
+    if (type === 'ssh_cmd_ref') {
+        loadSshCommandsForAction();
+    }
+    
+    // LED 类型时加载设备列表
+    if (type === 'led') {
+        loadLedDevicesForAction();
+        // 亮度滑块实时更新
+        const slider = document.getElementById('action-led-brightness');
+        if (slider) {
+            slider.addEventListener('input', () => {
+                const val = document.getElementById('action-led-brightness-val');
+                if (val) val.textContent = slider.value;
+            });
+        }
+    }
 }
 
 /**
@@ -10639,12 +10709,17 @@ function updateActionTypeFields() {
 async function submitAction() {
     const id = document.getElementById('action-id').value.trim();
     const name = document.getElementById('action-name').value.trim();
-    const type = document.getElementById('action-type').value;
+    const checked = document.querySelector('input[name="action-type"]:checked');
+    const type = checked ? checked.value : '';
     const description = document.getElementById('action-description').value.trim();
     const delay = parseInt(document.getElementById('action-delay').value) || 0;
     
     if (!id) {
-        alert('请填写动作 ID');
+        showToast('请填写动作 ID', 'error');
+        return;
+    }
+    if (!type) {
+        showToast('请选择动作类型', 'error');
         return;
     }
     
@@ -10652,52 +10727,152 @@ async function submitAction() {
     
     // 根据类型收集特定字段
     switch (type) {
+        case 'cli':
+            const cliCmd = document.getElementById('action-cli-command')?.value?.trim();
+            if (!cliCmd) {
+                showToast('请填写命令行', 'error');
+                return;
+            }
+            data.cli = {
+                command: cliCmd,
+                var_name: document.getElementById('action-cli-var')?.value?.trim() || '',
+                timeout_ms: parseInt(document.getElementById('action-cli-timeout')?.value) || 5000
+            };
+            break;
+        case 'ssh_cmd_ref':
+            const cmdId = document.getElementById('action-ssh-cmd-id')?.value;
+            if (!cmdId) {
+                showToast('请选择 SSH 命令', 'error');
+                return;
+            }
+            data.ssh_ref = { cmd_id: cmdId };
+            break;
         case 'led':
+            const ledDevice = document.getElementById('action-led-device')?.value;
+            if (!ledDevice) {
+                showToast('请选择 LED 设备', 'error');
+                return;
+            }
+            const isMatrix = ledDevice === 'matrix';
+            const ledTypeSelect = isMatrix 
+                ? document.getElementById('action-led-matrix-type')
+                : document.getElementById('action-led-type');
+            const ledCtrlType = ledTypeSelect?.value || 'fill';
+            
             data.led = {
-                device: document.getElementById('action-led-device').value,
-                index: parseInt(document.getElementById('action-led-index').value) || 255,
-                color: document.getElementById('action-led-color').value,
-                effect: document.getElementById('action-led-effect').value
+                device: ledDevice,
+                ctrl_type: ledCtrlType
             };
-            break;
-        case 'ssh_cmd':
-            data.ssh = {
-                host_ref: document.getElementById('action-ssh-host').value,
-                command: document.getElementById('action-ssh-command').value,
-                timeout_ms: parseInt(document.getElementById('action-ssh-timeout').value) || 30000,
-                async: document.getElementById('action-ssh-async').value === 'true'
-            };
-            break;
-        case 'gpio':
-            data.gpio = {
-                pin: parseInt(document.getElementById('action-gpio-pin').value),
-                level: document.getElementById('action-gpio-level').value === 'true',
-                pulse_ms: parseInt(document.getElementById('action-gpio-pulse').value) || 0
-            };
-            break;
-        case 'device_ctrl':
-            data.device = {
-                device: document.getElementById('action-device-name').value,
-                action: document.getElementById('action-device-action').value
-            };
+            
+            // 根据控制类型收集参数
+            switch (ledCtrlType) {
+                case 'fill':
+                    data.led.color = document.getElementById('action-led-color')?.value || '#FF0000';
+                    data.led.brightness = parseInt(document.getElementById('action-led-brightness')?.value) || 128;
+                    data.led.index = parseInt(document.getElementById('action-led-index')?.value) || 255;
+                    break;
+                case 'effect':
+                    data.led.effect = document.getElementById('action-led-effect')?.value;
+                    data.led.speed = parseInt(document.getElementById('action-led-speed')?.value) || 50;
+                    data.led.color = document.getElementById('action-led-color')?.value || '#FF0000';
+                    if (!data.led.effect) {
+                        showToast('请选择特效', 'error');
+                        return;
+                    }
+                    break;
+                case 'brightness':
+                    data.led.brightness = parseInt(document.getElementById('action-led-brightness')?.value) || 128;
+                    break;
+                case 'off':
+                    // 无需额外参数
+                    break;
+                case 'text':
+                    data.led.text = document.getElementById('action-led-text')?.value?.trim();
+                    if (!data.led.text) {
+                        showToast('请输入文本内容', 'error');
+                        return;
+                    }
+                    data.led.font = document.getElementById('action-led-font')?.value || '';
+                    data.led.color = document.getElementById('action-led-color')?.value || '#00FF00';
+                    data.led.align = document.getElementById('action-led-align')?.value || 'center';
+                    data.led.scroll = document.getElementById('action-led-scroll')?.value || 'none';
+                    data.led.speed = parseInt(document.getElementById('action-led-speed')?.value) || 50;
+                    data.led.loop = document.getElementById('action-led-loop')?.checked || false;
+                    data.led.x = parseInt(document.getElementById('action-led-x')?.value) || 0;
+                    data.led.y = parseInt(document.getElementById('action-led-y')?.value) || 0;
+                    data.led.auto_pos = document.getElementById('action-led-auto-pos')?.checked || false;
+                    break;
+                case 'image':
+                    data.led.image_path = document.getElementById('action-led-image-path')?.value?.trim();
+                    if (!data.led.image_path) {
+                        showToast('请输入图像路径', 'error');
+                        return;
+                    }
+                    data.led.center = document.getElementById('action-led-center')?.checked || false;
+                    break;
+                case 'qrcode':
+                    data.led.qr_text = document.getElementById('action-led-qr-text')?.value?.trim();
+                    if (!data.led.qr_text) {
+                        showToast('请输入QR码内容', 'error');
+                        return;
+                    }
+                    data.led.qr_ecc = document.getElementById('action-led-qr-ecc')?.value || 'M';
+                    data.led.qr_fg = document.getElementById('action-led-qr-fg')?.value || '#FFFFFF';
+                    data.led.qr_bg_image = document.getElementById('action-led-qr-bg')?.value || '';
+                    break;
+                case 'filter':
+                    data.led.filter = document.getElementById('action-led-filter')?.value;
+                    if (!data.led.filter) {
+                        showToast('请选择滤镜', 'error');
+                        return;
+                    }
+                    // 根据滤镜类型收集对应参数
+                    const fConfig = filterConfig[data.led.filter];
+                    if (fConfig && fConfig.params) {
+                        data.led.filter_params = {};
+                        fConfig.params.forEach(param => {
+                            const el = document.getElementById(`action-filter-${param}`);
+                            if (el) {
+                                data.led.filter_params[param] = parseInt(el.value) || fConfig.defaults[param] || 50;
+                            }
+                        });
+                    }
+                    break;
+            }
             break;
         case 'log':
+            const logMsg = document.getElementById('action-log-message')?.value?.trim();
+            if (!logMsg) {
+                showToast('请填写日志消息', 'error');
+                return;
+            }
             data.log = {
                 level: parseInt(document.getElementById('action-log-level').value),
-                message: document.getElementById('action-log-message').value
+                message: logMsg
             };
             break;
         case 'set_var':
+            const varName = document.getElementById('action-var-name')?.value?.trim();
+            const varValue = document.getElementById('action-var-value')?.value?.trim();
+            if (!varName || !varValue) {
+                showToast('请填写变量名和值', 'error');
+                return;
+            }
             data.set_var = {
-                variable: document.getElementById('action-var-name').value,
-                value: document.getElementById('action-var-value').value
+                variable: varName,
+                value: varValue
             };
             break;
         case 'webhook':
+            const webhookUrl = document.getElementById('action-webhook-url')?.value?.trim();
+            if (!webhookUrl) {
+                showToast('请填写 Webhook URL', 'error');
+                return;
+            }
             data.webhook = {
-                url: document.getElementById('action-webhook-url').value,
+                url: webhookUrl,
                 method: document.getElementById('action-webhook-method').value,
-                body_template: document.getElementById('action-webhook-body').value
+                body_template: document.getElementById('action-webhook-body')?.value || ''
             };
             break;
     }
@@ -10705,15 +10880,567 @@ async function submitAction() {
     try {
         const result = await api.call('automation.actions.add', data);
         if (result.code === 0) {
-            addResult(true, `动作模板 ${id} 创建成功`);
+            showToast(`动作模板 ${id} 创建成功`, 'success');
             closeModal('action-modal');
             await refreshActions();
         } else {
-            alert(`创建失败: ${result.message}`);
+            showToast(`创建失败: ${result.message}`, 'error');
         }
     } catch (error) {
-        alert(`创建失败: ${error.message}`);
+        showToast(`创建失败: ${error.message}`, 'error');
     }
+}
+
+/**
+ * CLI 命令快捷填充
+ */
+function setCliPreset(cmd) {
+    const input = document.getElementById('action-cli-command');
+    if (input) {
+        input.value = cmd;
+        input.focus();
+    }
+}
+
+/**
+ * 加载 SSH 主机列表 (用于动作模板)
+ */
+async function loadSshHostsForAction() {
+    try {
+        const select = document.getElementById('action-ssh-host');
+        if (!select) return;
+        
+        const result = await api.call('ssh.hosts.list', {});
+        select.innerHTML = '<option value="">-- 选择主机 --</option>';
+        
+        if (result.code === 0 && result.data?.hosts) {
+            result.data.hosts.forEach(host => {
+                const opt = document.createElement('option');
+                opt.value = host.id;
+                opt.textContent = `${host.name || host.id} (${host.host}:${host.port || 22})`;
+                select.appendChild(opt);
+            });
+        }
+        
+        if (select.options.length === 1) {
+            // 没有配置主机，提示用户
+            select.innerHTML = '<option value="">-- 请先配置 SSH 主机 --</option>';
+        }
+    } catch (e) {
+        console.error('加载 SSH 主机列表失败:', e);
+        const select = document.getElementById('action-ssh-host');
+        if (select) {
+            select.innerHTML = '<option value="">-- 加载失败 --</option>';
+        }
+    }
+}
+
+/**
+ * 加载 SSH 指令列表 (用于动作模板) - 保留用于兼容
+ */
+async function loadSshCommandsForAction() {
+    try {
+        const select = document.getElementById('action-ssh-cmd-id');
+        if (!select) return;
+        
+        const result = await api.call('ssh.commands.list', {});
+        select.innerHTML = '<option value="">-- 选择指令 --</option>';
+        
+        if (result.code === 0 && result.data?.commands) {
+            result.data.commands.forEach(cmd => {
+                const opt = document.createElement('option');
+                opt.value = cmd.id;
+                opt.textContent = `${cmd.name || cmd.id} (${cmd.host_id || 'localhost'})`;
+                opt.dataset.host = cmd.host_id || '';
+                opt.dataset.command = cmd.command || '';
+                opt.dataset.varName = cmd.var_name || '';
+                select.appendChild(opt);
+            });
+        }
+    } catch (e) {
+        console.error('加载 SSH 指令列表失败:', e);
+    }
+}
+
+/**
+ * 更新 SSH 指令预览
+ */
+async function updateSshCmdRefPreview() {
+    const select = document.getElementById('action-ssh-cmd-id');
+    const preview = document.getElementById('ssh-cmd-preview');
+    if (!select || !preview) return;
+    
+    const cmdId = select.value;
+    if (!cmdId) {
+        preview.style.display = 'none';
+        return;
+    }
+    
+    // 从 API 获取完整指令信息
+    try {
+        const result = await api.call('ssh.commands.get', { id: cmdId });
+        console.log('SSH command get result:', result);
+        if (result.code === 0 && result.data) {
+            const cmd = result.data;
+            console.log('SSH command data:', cmd);
+            document.getElementById('preview-host').textContent = cmd.host_id || '-';
+            document.getElementById('preview-cmd').textContent = cmd.command || '-';
+            // varName 字段只在配置了变量名时才存在
+            const varName = cmd.varName || cmd.var_name || '';
+            document.getElementById('preview-var').textContent = varName || '(未配置)';
+            preview.style.display = 'block';
+        } else {
+            preview.style.display = 'none';
+        }
+    } catch (e) {
+        console.error('获取 SSH 指令详情失败:', e);
+        preview.style.display = 'none';
+    }
+}
+
+/**
+ * 加载 LED 设备列表 (用于动作模板)
+ */
+async function loadLedDevicesForAction() {
+    try {
+        const select = document.getElementById('action-led-device');
+        const effectSelect = document.getElementById('action-led-effect');
+        if (!select) return;
+        
+        const result = await api.ledList();
+        select.innerHTML = '<option value="">-- 选择设备 --</option>';
+        
+        if (result.data?.devices) {
+            result.data.devices.forEach(dev => {
+                const opt = document.createElement('option');
+                opt.value = dev.name;
+                opt.textContent = `${dev.name} (${dev.count || 0} LEDs)`;
+                opt.dataset.effects = JSON.stringify(dev.effects || []);
+                select.appendChild(opt);
+            });
+        }
+    } catch (e) {
+        console.error('加载 LED 设备列表失败:', e);
+    }
+}
+
+/**
+ * 更新动作 LED 选项（根据设备类型显示不同控制类型）
+ */
+function updateActionLedOptions() {
+    const deviceSelect = document.getElementById('action-led-device');
+    const typeGroup = document.getElementById('action-led-type-group');
+    const matrixTypeGroup = document.getElementById('action-led-matrix-type-group');
+    const paramsContainer = document.getElementById('action-led-params');
+    
+    if (!deviceSelect) return;
+    
+    const deviceName = deviceSelect.value;
+    const opt = deviceSelect.options[deviceSelect.selectedIndex];
+    const isMatrix = deviceName === 'matrix';
+    
+    // 显示对应的控制类型选择器
+    if (typeGroup) typeGroup.style.display = !deviceName ? 'none' : (isMatrix ? 'none' : 'block');
+    if (matrixTypeGroup) matrixTypeGroup.style.display = isMatrix ? 'block' : 'none';
+    
+    // 存储设备特效列表
+    if (opt && opt.dataset.effects) {
+        window._actionLedEffects = JSON.parse(opt.dataset.effects || '[]');
+    } else {
+        window._actionLedEffects = [];
+    }
+    
+    // 清空参数区域
+    if (paramsContainer) paramsContainer.innerHTML = '';
+    
+    // 如果选择了设备，自动更新参数
+    if (deviceName) {
+        updateActionLedTypeFields();
+    }
+}
+
+/**
+ * 根据控制类型更新 LED 参数字段
+ */
+function updateActionLedTypeFields() {
+    const deviceSelect = document.getElementById('action-led-device');
+    const paramsContainer = document.getElementById('action-led-params');
+    if (!deviceSelect || !paramsContainer) return;
+    
+    const deviceName = deviceSelect.value;
+    const isMatrix = deviceName === 'matrix';
+    const typeSelect = isMatrix 
+        ? document.getElementById('action-led-matrix-type')
+        : document.getElementById('action-led-type');
+    
+    if (!typeSelect) return;
+    const ledType = typeSelect.value;
+    const effects = window._actionLedEffects || [];
+    
+    let html = '';
+    
+    switch (ledType) {
+        case 'fill':
+            html = `
+                <div class="form-group">
+                    <label>颜色</label>
+                    <div class="led-color-config">
+                        <input type="color" value="#FF0000" id="action-led-color" class="led-color-picker-sm">
+                        <div class="color-presets-inline">
+                            <button type="button" class="color-dot" style="background:#ff0000" onclick="setActionLedColor('#ff0000')"></button>
+                            <button type="button" class="color-dot" style="background:#ff6600" onclick="setActionLedColor('#ff6600')"></button>
+                            <button type="button" class="color-dot" style="background:#ffff00" onclick="setActionLedColor('#ffff00')"></button>
+                            <button type="button" class="color-dot" style="background:#00ff00" onclick="setActionLedColor('#00ff00')"></button>
+                            <button type="button" class="color-dot" style="background:#00ffff" onclick="setActionLedColor('#00ffff')"></button>
+                            <button type="button" class="color-dot" style="background:#0066ff" onclick="setActionLedColor('#0066ff')"></button>
+                            <button type="button" class="color-dot" style="background:#ffffff" onclick="setActionLedColor('#ffffff')"></button>
+                        </div>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group" style="flex:1">
+                        <label>亮度</label>
+                        <div class="brightness-config">
+                            <input type="range" min="0" max="255" value="128" id="action-led-brightness" class="brightness-slider-sm" oninput="document.getElementById('action-led-brightness-val').textContent=this.value">
+                            <span class="brightness-val" id="action-led-brightness-val">128</span>
+                        </div>
+                    </div>
+                    <div class="form-group" style="flex:1">
+                        <label>索引</label>
+                        <input type="number" id="action-led-index" class="input" value="255" placeholder="255=全部">
+                    </div>
+                </div>
+            `;
+            break;
+            
+        case 'effect':
+            const effectOptions = effects.map(e => `<option value="${e}">${e}</option>`).join('');
+            html = `
+                <div class="form-group">
+                    <label>特效 <span class="required">*</span></label>
+                    <select id="action-led-effect" class="input">
+                        ${effectOptions || '<option value="">无可用特效</option>'}
+                    </select>
+                </div>
+                <div class="form-row">
+                    <div class="form-group" style="flex:1">
+                        <label>速度</label>
+                        <div class="brightness-config">
+                            <input type="range" min="1" max="100" value="50" id="action-led-speed" class="brightness-slider-sm" oninput="document.getElementById('action-led-speed-val').textContent=this.value">
+                            <span class="brightness-val" id="action-led-speed-val">50</span>
+                        </div>
+                    </div>
+                    <div class="form-group" style="flex:1">
+                        <label>颜色</label>
+                        <input type="color" value="#FF0000" id="action-led-color" class="led-color-picker-sm">
+                    </div>
+                </div>
+            `;
+            break;
+            
+        case 'brightness':
+            html = `
+                <div class="form-group">
+                    <label>亮度</label>
+                    <div class="brightness-config">
+                        <input type="range" min="0" max="255" value="128" id="action-led-brightness" class="brightness-slider-sm" oninput="document.getElementById('action-led-brightness-val').textContent=this.value">
+                        <span class="brightness-val" id="action-led-brightness-val">128</span>
+                    </div>
+                </div>
+            `;
+            break;
+            
+        case 'off':
+            html = `<div class="form-hint" style="padding:10px;color:var(--text-light);">关闭 LED 设备，无需额外参数</div>`;
+            break;
+            
+        case 'text':
+            html = `
+                <div class="form-group">
+                    <label>文本内容 <span class="required">*</span></label>
+                    <input type="text" id="action-led-text" class="input" placeholder="要显示的文本">
+                </div>
+                <div class="form-row">
+                    <div class="form-group" style="flex:1">
+                        <label>字体</label>
+                        <select id="action-led-font" class="input">
+                            <option value="">默认</option>
+                        </select>
+                    </div>
+                    <div class="form-group" style="flex:1">
+                        <label>颜色</label>
+                        <input type="color" value="#00FF00" id="action-led-color" class="led-color-picker-sm">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group" style="flex:1">
+                        <label>对齐</label>
+                        <select id="action-led-align" class="input">
+                            <option value="left">左对齐</option>
+                            <option value="center" selected>居中</option>
+                            <option value="right">右对齐</option>
+                        </select>
+                    </div>
+                    <div class="form-group" style="flex:1">
+                        <label>滚动</label>
+                        <select id="action-led-scroll" class="input">
+                            <option value="none">无滚动</option>
+                            <option value="left" selected>← 向左</option>
+                            <option value="right">→ 向右</option>
+                            <option value="up">↑ 向上</option>
+                            <option value="down">↓ 向下</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group" style="flex:0.5">
+                        <label>X</label>
+                        <input type="number" id="action-led-x" class="input" value="0" min="0" max="255">
+                    </div>
+                    <div class="form-group" style="flex:0.5">
+                        <label>Y</label>
+                        <input type="number" id="action-led-y" class="input" value="0" min="0" max="255">
+                    </div>
+                    <div class="form-group" style="flex:1">
+                        <label style="visibility:hidden;">自动</label>
+                        <label class="checkbox-label"><input type="checkbox" id="action-led-auto-pos" checked> 自动位置</label>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group" style="flex:1">
+                        <label>速度</label>
+                        <input type="number" id="action-led-speed" class="input" value="50" min="1" max="100">
+                    </div>
+                    <div class="form-group" style="flex:1">
+                        <label style="visibility:hidden;">循环</label>
+                        <label class="checkbox-label"><input type="checkbox" id="action-led-loop" checked> 循环滚动</label>
+                    </div>
+                </div>
+            `;
+            // 加载字体列表
+            setTimeout(loadActionLedFonts, 100);
+            break;
+            
+        case 'image':
+            html = `
+                <div class="form-group">
+                    <label>图像路径 <span class="required">*</span></label>
+                    <div class="input-with-btn">
+                        <input type="text" id="action-led-image-path" class="input" placeholder="/sdcard/images/xxx.png" value="/sdcard/images/">
+                        <button type="button" class="btn btn-sm" onclick="browseActionImages()">📁 浏览</button>
+                    </div>
+                    <small class="form-hint">支持 PNG、JPG、BMP 格式</small>
+                </div>
+                <div class="form-group">
+                    <label class="checkbox-label"><input type="checkbox" id="action-led-center" checked> 居中显示</label>
+                </div>
+            `;
+            break;
+            
+        case 'qrcode':
+            html = `
+                <div class="form-group">
+                    <label>编码内容 <span class="required">*</span></label>
+                    <input type="text" id="action-led-qr-text" class="input" placeholder="文本或URL">
+                </div>
+                <div class="form-row">
+                    <div class="form-group" style="flex:1">
+                        <label>纠错级别</label>
+                        <select id="action-led-qr-ecc" class="input">
+                            <option value="L">L - 7%</option>
+                            <option value="M" selected>M - 15%</option>
+                            <option value="Q">Q - 25%</option>
+                            <option value="H">H - 30%</option>
+                        </select>
+                    </div>
+                    <div class="form-group" style="flex:1">
+                        <label>前景色</label>
+                        <input type="color" value="#FFFFFF" id="action-led-qr-fg" class="led-color-picker-sm">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>背景图（可选）</label>
+                    <div class="input-with-btn">
+                        <input type="text" id="action-led-qr-bg" class="input" placeholder="无" readonly>
+                        <button type="button" class="btn btn-sm" onclick="browseActionQrBg()">📁 浏览</button>
+                        <button type="button" class="btn btn-sm" onclick="document.getElementById('action-led-qr-bg').value=''" title="清除">✕</button>
+                    </div>
+                </div>
+            `;
+            break;
+            
+        case 'filter':
+            html = `
+                <div class="form-group">
+                    <label>滤镜 <span class="required">*</span></label>
+                    <select id="action-led-filter" class="input" onchange="updateActionFilterParams()">
+                        <option value="pulse">💓 脉冲</option>
+                        <option value="breathing">💨 呼吸</option>
+                        <option value="blink">💡 闪烁</option>
+                        <option value="wave">🌊 波浪</option>
+                        <option value="scanline">📺 扫描线</option>
+                        <option value="glitch">⚡ 故障艺术</option>
+                        <option value="rainbow">🌈 彩虹</option>
+                        <option value="sparkle">✨ 闪耀</option>
+                        <option value="plasma">🎆 等离子体</option>
+                        <option value="sepia">🖼️ 怀旧</option>
+                        <option value="posterize">🎨 色阶分离</option>
+                        <option value="contrast">🔆 对比度</option>
+                        <option value="invert">🔄 反色</option>
+                        <option value="grayscale">⬜ 灰度</option>
+                    </select>
+                </div>
+                <div id="action-filter-params"></div>
+            `;
+            // 初始化滤镜参数
+            setTimeout(updateActionFilterParams, 50);
+            break;
+    }
+    
+    paramsContainer.innerHTML = html;
+}
+
+/**
+ * 加载动作 LED 字体列表
+ */
+async function loadActionLedFonts() {
+    const fontSelect = document.getElementById('action-led-font');
+    if (!fontSelect) return;
+    
+    try {
+        const result = await api.storageList('/sdcard/fonts');
+        const files = result.data?.entries || [];
+        const fontExts = ['.fnt', '.bdf', '.pcf'];
+        const fonts = files.filter(f => {
+            if (f.type === 'dir' || f.type === 'directory') return false;
+            const ext = f.name.toLowerCase().substring(f.name.lastIndexOf('.'));
+            return fontExts.includes(ext);
+        });
+        
+        fontSelect.innerHTML = '<option value="">默认</option>';
+        fonts.forEach(f => {
+            const option = document.createElement('option');
+            const baseName = f.name.substring(0, f.name.lastIndexOf('.'));
+            option.value = baseName;
+            option.textContent = f.name;
+            fontSelect.appendChild(option);
+        });
+    } catch (e) {
+        console.error('加载字体失败:', e);
+    }
+}
+
+/**
+ * 设置动作 LED 颜色
+ */
+function setActionLedColor(color) {
+    const picker = document.getElementById('action-led-color');
+    if (picker) picker.value = color;
+}
+
+/**
+ * 浏览图像文件 (动作模板用)
+ */
+async function browseActionImages() {
+    try {
+        const result = await api.storageList('/sdcard/images');
+        const files = result.data?.entries || [];
+        const imageExts = ['.png', '.jpg', '.jpeg', '.bmp'];
+        const images = files.filter(f => {
+            if (f.type === 'dir' || f.type === 'directory') return false;
+            const ext = f.name.toLowerCase().substring(f.name.lastIndexOf('.'));
+            return imageExts.includes(ext);
+        });
+        
+        if (images.length === 0) {
+            showToast('没有找到图像文件', 'warning');
+            return;
+        }
+        
+        // 简单使用 prompt 选择
+        const names = images.map(f => f.name);
+        const selected = prompt(`选择图像文件:\n${names.map((n, i) => `${i + 1}. ${n}`).join('\n')}\n\n输入序号:`, '1');
+        if (selected) {
+            const idx = parseInt(selected) - 1;
+            if (idx >= 0 && idx < images.length) {
+                document.getElementById('action-led-image-path').value = `/sdcard/images/${images[idx].name}`;
+            }
+        }
+    } catch (e) {
+        console.error('浏览图像失败:', e);
+        showToast('浏览图像失败', 'error');
+    }
+}
+
+/**
+ * 浏览 QR 背景图 (动作模板用)
+ */
+async function browseActionQrBg() {
+    try {
+        const result = await api.storageList('/sdcard/images');
+        const files = result.data?.entries || [];
+        const imageExts = ['.png', '.jpg', '.jpeg', '.bmp'];
+        const images = files.filter(f => {
+            if (f.type === 'dir' || f.type === 'directory') return false;
+            const ext = f.name.toLowerCase().substring(f.name.lastIndexOf('.'));
+            return imageExts.includes(ext);
+        });
+        
+        if (images.length === 0) {
+            showToast('没有找到图像文件', 'warning');
+            return;
+        }
+        
+        const names = images.map(f => f.name);
+        const selected = prompt(`选择背景图:\n${names.map((n, i) => `${i + 1}. ${n}`).join('\n')}\n\n输入序号:`, '1');
+        if (selected) {
+            const idx = parseInt(selected) - 1;
+            if (idx >= 0 && idx < images.length) {
+                document.getElementById('action-led-qr-bg').value = `/sdcard/images/${images[idx].name}`;
+            }
+        }
+    } catch (e) {
+        console.error('浏览图像失败:', e);
+        showToast('浏览图像失败', 'error');
+    }
+}
+
+/**
+ * 更新滤镜参数控件 (动作模板用)
+ */
+function updateActionFilterParams() {
+    const filterSelect = document.getElementById('action-led-filter');
+    const paramsContainer = document.getElementById('action-filter-params');
+    if (!filterSelect || !paramsContainer) return;
+    
+    const filter = filterSelect.value;
+    const config = filterConfig[filter];
+    
+    if (!config || !config.params || config.params.length === 0) {
+        paramsContainer.innerHTML = '<div class="form-hint" style="padding:10px;color:var(--text-light);">此滤镜无额外参数</div>';
+        return;
+    }
+    
+    let html = '';
+    config.params.forEach(param => {
+        const paramInfo = paramLabels[param];
+        if (!paramInfo) return;
+        
+        const defaultValue = config.defaults[param] || 50;
+        html += `
+            <div class="form-group">
+                <label>${paramInfo.label}</label>
+                <div class="brightness-config">
+                    <input type="range" min="${paramInfo.min}" max="${paramInfo.max}" value="${defaultValue}" 
+                           id="action-filter-${param}" class="brightness-slider-sm" 
+                           oninput="document.getElementById('action-filter-${param}-val').textContent=this.value+'${paramInfo.unit || ''}'">
+                    <span class="brightness-val" id="action-filter-${param}-val">${defaultValue}${paramInfo.unit || ''}</span>
+                </div>
+            </div>
+        `;
+    });
+    
+    paramsContainer.innerHTML = html;
 }
 
 /**
@@ -10721,11 +11448,11 @@ async function submitAction() {
  */
 async function testAction(id) {
     try {
-        addResult(true, `正在执行动作: ${id}...`);
+        showToast(`正在执行动作: ${id}...`, 'info');
         const result = await api.call('automation.actions.execute', { id });
-        addResult(result.code === 0, `动作 ${id}: ${result.message || 'OK'}`);
+        showToast(`动作 ${id}: ${result.message || 'OK'}`, result.code === 0 ? 'success' : 'error');
     } catch (error) {
-        addResult(false, `动作执行失败: ${error.message}`);
+        showToast(`动作执行失败: ${error.message}`, 'error');
     }
 }
 
@@ -10733,8 +11460,130 @@ async function testAction(id) {
  * 编辑动作
  */
 async function editAction(id) {
-    // TODO: 加载动作详情并显示编辑对话框
-    alert(`编辑功能开发中: ${id}`);
+    try {
+        const result = await api.call('automation.actions.get', { id });
+        if (result.code !== 0) {
+            showToast(`获取动作详情失败: ${result.message}`, 'error');
+            return;
+        }
+        
+        const tpl = result.data;
+        
+        // 打开添加对话框并填充数据
+        await showAddActionModal();
+        
+        // 等待 DOM 更新
+        await new Promise(r => setTimeout(r, 100));
+        
+        // 填充基本信息
+        document.getElementById('action-id').value = tpl.id;
+        document.getElementById('action-id').disabled = true; // ID 不可编辑
+        document.getElementById('action-name').value = tpl.name || '';
+        document.getElementById('action-description').value = tpl.description || '';
+        document.getElementById('action-delay').value = tpl.delay_ms || 0;
+        
+        // 选择类型
+        const typeRadio = document.querySelector(`input[name="action-type"][value="${tpl.type}"]`);
+        if (typeRadio) {
+            typeRadio.checked = true;
+            await updateActionTypeFields();
+            await new Promise(r => setTimeout(r, 100));
+            
+            // 根据类型填充字段
+            switch (tpl.type) {
+                case 'cli':
+                    if (tpl.cli) {
+                        document.getElementById('action-cli-command').value = tpl.cli.command || '';
+                        document.getElementById('action-cli-var').value = tpl.cli.var_name || '';
+                        document.getElementById('action-cli-timeout').value = tpl.cli.timeout_ms || 5000;
+                    }
+                    break;
+                case 'ssh_cmd_ref':
+                    if (tpl.ssh_ref) {
+                        await loadSshCommandsForAction();
+                        await new Promise(r => setTimeout(r, 100));
+                        document.getElementById('action-ssh-cmd-id').value = tpl.ssh_ref.cmd_id || '';
+                        updateSshCmdRefPreview();
+                    }
+                    break;
+                case 'led':
+                    if (tpl.led) {
+                        document.getElementById('action-led-device').value = tpl.led.device || 'board';
+                        await updateActionLedOptions();
+                        await new Promise(r => setTimeout(r, 100));
+                        // LED 详细参数需要根据控制类型填充
+                        if (tpl.led.color) {
+                            const colorEl = document.getElementById('action-led-color');
+                            if (colorEl) colorEl.value = tpl.led.color;
+                        }
+                        if (tpl.led.effect) {
+                            const effectEl = document.getElementById('action-led-effect');
+                            if (effectEl) effectEl.value = tpl.led.effect;
+                        }
+                    }
+                    break;
+                case 'log':
+                    if (tpl.log) {
+                        document.getElementById('action-log-level').value = tpl.log.level || 3;
+                        document.getElementById('action-log-message').value = tpl.log.message || '';
+                    }
+                    break;
+                case 'set_var':
+                    if (tpl.set_var) {
+                        document.getElementById('action-var-name').value = tpl.set_var.variable || '';
+                        document.getElementById('action-var-value').value = tpl.set_var.value || '';
+                    }
+                    break;
+                case 'webhook':
+                    if (tpl.webhook) {
+                        document.getElementById('action-webhook-url').value = tpl.webhook.url || '';
+                        document.getElementById('action-webhook-method').value = tpl.webhook.method || 'POST';
+                        document.getElementById('action-webhook-body').value = tpl.webhook.body_template || '';
+                    }
+                    break;
+            }
+        }
+        
+        // 更改模态框标题和按钮
+        const modalTitle = document.querySelector('#action-modal .modal-header h3');
+        if (modalTitle) modalTitle.textContent = '✏️ 编辑动作模板';
+        
+        const submitBtn = document.querySelector('#action-modal button[onclick="submitAction()"]');
+        if (submitBtn) {
+            submitBtn.textContent = '💾 更新';
+            submitBtn.setAttribute('onclick', `updateAction('${tpl.id}')`);
+        }
+        
+    } catch (error) {
+        showToast(`编辑动作失败: ${error.message}`, 'error');
+    }
+}
+
+/**
+ * 更新动作模板
+ */
+async function updateAction(originalId) {
+    // 先删除旧的，再创建新的（因为没有 update API）
+    try {
+        // 获取表单数据
+        const id = document.getElementById('action-id').value.trim();
+        
+        // 删除旧模板
+        const deleteResult = await api.call('automation.actions.delete', { id: originalId });
+        if (deleteResult.code !== 0) {
+            showToast(`更新失败: 无法删除旧模板`, 'error');
+            return;
+        }
+        
+        // 重新启用 ID 字段并提交
+        document.getElementById('action-id').disabled = false;
+        
+        // 调用添加逻辑
+        await submitAction();
+        
+    } catch (error) {
+        showToast(`更新失败: ${error.message}`, 'error');
+    }
 }
 
 /**
@@ -10745,108 +11594,12 @@ async function deleteAction(id) {
     
     try {
         const result = await api.call('automation.actions.delete', { id });
-        addResult(result.code === 0, `删除动作 ${id}: ${result.message || 'OK'}`);
+        showToast(`删除动作 ${id}: ${result.message || 'OK'}`, result.code === 0 ? 'success' : 'error');
         if (result.code === 0) {
             await refreshActions();
         }
     } catch (error) {
-        addResult(false, `删除失败: ${error.message}`);
-    }
-}
-
-/**
- * 刷新动作执行统计
- */
-async function refreshActionStats() {
-    const container = document.getElementById('action-stats');
-    
-    try {
-        const result = await api.call('automation.action.stats', {});
-        const stats = result.data || {};
-        
-        container.innerHTML = `
-            <div class="status-card">
-                <div class="status-value">${stats.total_executed || 0}</div>
-                <div class="status-label">总执行次数</div>
-            </div>
-            <div class="status-card success">
-                <div class="status-value">${stats.success_count || 0}</div>
-                <div class="status-label">成功</div>
-            </div>
-            <div class="status-card error">
-                <div class="status-value">${stats.failed_count || 0}</div>
-                <div class="status-label">失败</div>
-            </div>
-            <div class="status-card warning">
-                <div class="status-value">${stats.timeout_count || 0}</div>
-                <div class="status-label">超时</div>
-            </div>
-            <div class="status-card">
-                <div class="status-value">${stats.queue_pending || 0}</div>
-                <div class="status-label">队列待执行</div>
-            </div>
-            <div class="status-card ${stats.queue_running ? 'info' : ''}">
-                <div class="status-value">${stats.queue_running ? '⏳' : '✓'}</div>
-                <div class="status-label">执行状态</div>
-            </div>
-        `;
-    } catch (error) {
-        container.innerHTML = `<div class="status-card error"><div class="status-value">⚠</div><div class="status-label">${error.message}</div></div>`;
-    }
-}
-
-/**
- * 重置动作统计
- */
-async function resetActionStats() {
-    if (!confirm('确定要重置所有执行统计吗？')) return;
-    
-    try {
-        const result = await api.call('automation.action.stats.reset', {});
-        addResult(result.code === 0, `统计重置: ${result.message || 'OK'}`);
-        await refreshActionStats();
-    } catch (error) {
-        addResult(false, `重置统计失败: ${error.message}`);
-    }
-}
-
-
-
-/**
- * 添加执行结果
- */
-function addResult(success, message) {
-    const container = document.getElementById('execution-results');
-    if (!container) return;
-    
-    // 移除空状态提示
-    const emptyP = container.querySelector('.empty-state');
-    if (emptyP) emptyP.remove();
-    
-    const time = new Date().toLocaleTimeString();
-    const div = document.createElement('div');
-    div.className = `log-item ${success ? 'success' : 'error'}`;
-    div.innerHTML = `
-        <span class="log-time">[${time}]</span>
-        <span>${success ? '✅' : '❌'} ${message}</span>
-    `;
-    
-    // 插入到最前面
-    container.insertBefore(div, container.firstChild);
-    
-    // 最多保留 50 条记录
-    while (container.children.length > 50) {
-        container.removeChild(container.lastChild);
-    }
-}
-
-/**
- * 清空执行结果
- */
-function clearResults() {
-    const container = document.getElementById('execution-results');
-    if (container) {
-        container.innerHTML = '<p class="empty-state">暂无执行记录</p>';
+        showToast(`删除失败: ${error.message}`, 'error');
     }
 }
 
@@ -10857,12 +11610,12 @@ async function toggleSource(id, enable) {
     try {
         const action = enable ? 'automation.sources.enable' : 'automation.sources.disable';
         const result = await api.call(action, { id });
-        addResult(result.code === 0, `数据源 ${id} ${enable ? '启用' : '禁用'}: ${result.message || 'OK'}`);
+        showToast(`数据源 ${id} ${enable ? '启用' : '禁用'}: ${result.message || 'OK'}`, result.code === 0 ? 'success' : 'error');
         if (result.code === 0) {
             await refreshSources();
         }
     } catch (error) {
-        addResult(false, `切换数据源状态失败: ${error.message}`);
+        showToast(`切换数据源状态失败: ${error.message}`, 'error');
     }
 }
 
@@ -10876,13 +11629,77 @@ async function deleteSource(id) {
     
     try {
         const result = await api.call('automation.sources.delete', { id });
-        addResult(result.code === 0, `删除数据源 ${id}: ${result.message || 'OK'}`);
+        showToast(`删除数据源 ${id}: ${result.message || 'OK'}`, result.code === 0 ? 'success' : 'error');
         if (result.code === 0) {
             await Promise.all([refreshSources(), refreshAutomationStatus()]);
         }
     } catch (error) {
-        addResult(false, `删除数据源失败: ${error.message}`);
+        showToast(`删除数据源失败: ${error.message}`, 'error');
     }
+}
+
+/**
+ * 显示数据源的变量列表
+ */
+async function showSourceVariables(sourceId) {
+    const modal = document.getElementById('source-variables-modal');
+    const body = document.getElementById('source-variables-body');
+    if (!modal || !body) return;
+    
+    // 更新标题
+    const header = modal.querySelector('.modal-header h2');
+    if (header) header.textContent = `📊 ${sourceId} 变量`;
+    
+    body.innerHTML = '<div class="loading">加载中...</div>';
+    modal.classList.remove('hidden');
+    
+    try {
+        const result = await api.call('automation.variables.list');
+        if (result.code === 0 && result.data && result.data.variables) {
+            // 过滤出属于该数据源的变量
+            const vars = result.data.variables.filter(v => v.source_id === sourceId);
+            
+            if (vars.length === 0) {
+                body.innerHTML = '<p style="text-align:center;color:var(--text-light);padding:20px">该数据源暂无变量数据</p>';
+                return;
+            }
+            
+            body.innerHTML = `
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>变量名</th>
+                            <th>类型</th>
+                            <th>当前值</th>
+                            <th>更新时间</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${vars.map(v => `
+                            <tr>
+                                <td><code class="variable-name">${v.name}</code></td>
+                                <td><span class="type-badge type-${v.type || 'unknown'}">${v.type || '-'}</span></td>
+                                <td class="variable-value">${formatVariableValue(v.value, v.type)}</td>
+                                <td class="variable-time">${v.updated_at ? formatTimeAgo(v.updated_at) : '-'}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            `;
+        } else {
+            body.innerHTML = `<p style="text-align:center;color:var(--danger-color)">⚠️ ${result.message || '获取变量失败'}</p>`;
+        }
+    } catch (error) {
+        body.innerHTML = `<p style="text-align:center;color:var(--danger-color)">❌ ${error.message}</p>`;
+    }
+}
+
+/**
+ * 关闭数据源变量模态框
+ */
+function closeSourceVariablesModal() {
+    const modal = document.getElementById('source-variables-modal');
+    if (modal) modal.classList.add('hidden');
 }
 
 /**
@@ -10895,12 +11712,12 @@ async function deleteRule(id) {
     
     try {
         const result = await api.call('automation.rules.delete', { id });
-        addResult(result.code === 0, `删除规则 ${id}: ${result.message || 'OK'}`);
+        showToast(`删除规则 ${id}: ${result.message || 'OK'}`, result.code === 0 ? 'success' : 'error');
         if (result.code === 0) {
             await Promise.all([refreshRules(), refreshAutomationStatus()]);
         }
     } catch (error) {
-        addResult(false, `删除规则失败: ${error.message}`);
+        showToast(`删除规则失败: ${error.message}`, 'error');
     }
 }
 
@@ -11580,7 +12397,7 @@ async function loadSshHostsForSource() {
 /**
  * SSH 主机选择变化时的处理（数据源配置用）
  */
-function onSshHostChangeForSource() {
+async function onSshHostChangeForSource() {
     const hostId = document.getElementById('source-ssh-host').value;
     const cmdSelect = document.getElementById('source-ssh-cmd');
     
@@ -11599,9 +12416,10 @@ function onSshHostChangeForSource() {
         return;
     }
     
-    // 确保 sshCommands 已加载
-    if (typeof sshCommands === 'undefined') {
-        loadSshCommands();
+    // 确保 sshCommands 已加载（异步操作）
+    if (typeof sshCommands === 'undefined' || Object.keys(sshCommands).length === 0) {
+        cmdSelect.innerHTML = '<option value="">-- 加载中... --</option>';
+        await loadSshCommands();
     }
     
     // 获取该主机下的命令列表
@@ -11778,14 +12596,14 @@ async function submitAddSource() {
     try {
         const result = await api.call('automation.sources.add', params);
         if (result.code === 0) {
-            addResult(true, `数据源 ${id} 创建成功`);
+            showToast(`数据源 ${id} 创建成功`, 'success');
             closeModal('add-source-modal');
             await Promise.all([refreshSources(), refreshAutomationStatus()]);
         } else {
-            addResult(false, `创建数据源失败: ${result.message}`);
+            showToast(`创建数据源失败: ${result.message}`, 'error');
         }
     } catch (error) {
-        addResult(false, `创建数据源失败: ${error.message}`);
+        showToast(`创建数据源失败: ${error.message}`, 'error');
     }
 }
 
@@ -12142,14 +12960,14 @@ async function submitAddRule() {
     try {
         const result = await api.call('automation.rules.add', params);
         if (result.code === 0) {
-            addResult(true, `规则 ${id} 创建成功`);
+            showToast(`规则 ${id} 创建成功`, 'success');
             closeModal('add-rule-modal');
             await Promise.all([refreshRules(), refreshAutomationStatus()]);
         } else {
-            addResult(false, `创建规则失败: ${result.message}`);
+            showToast(`创建规则失败: ${result.message}`, 'error');
         }
     } catch (error) {
-        addResult(false, `创建规则失败: ${error.message}`);
+        showToast(`创建规则失败: ${error.message}`, 'error');
     }
 }
 
@@ -12187,13 +13005,6 @@ window.addActionRow = addActionRow;
 window.updateActionFields = updateActionFields;
 window.submitAddRule = submitAddRule;
 window.closeModal = closeModal;
-window.testLed = testLed;
-window.testGpio = testGpio;
-window.testDevice = testDevice;
-window.addResult = addResult;
-window.clearResults = clearResults;
-window.refreshActionStats = refreshActionStats;
-window.resetActionStats = resetActionStats;
 // 动作模板管理
 window.refreshActions = refreshActions;
 window.showAddActionModal = showAddActionModal;

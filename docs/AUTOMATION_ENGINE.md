@@ -456,7 +456,82 @@ exists(agx.cpu_temp) AND agx.cpu_temp > 80
 
 ## 5. 动作系统
 
-### 5.1 动作类型概览
+### 5.1 动作模板系统（2026-01-28 新增）
+
+动作模板是可复用的动作配置，支持手动执行和规则触发。
+
+#### 5.1.1 模板结构
+
+```json
+{
+  "id": "action_001",
+  "name": "AGX 重启命令",
+  "description": "安全重启 AGX Orin",
+  "type": "ssh_cmd_ref",
+  "enabled": true,
+  "delay_ms": 0,
+  "ssh_ref": {
+    "cmd_id": "agx_reboot"
+  }
+}
+```
+
+#### 5.1.2 支持的动作类型
+
+| 类型 | 说明 | 配置参数 |
+|------|------|----------|
+| `cli` | 本地 CLI 命令 | `command`, `var_name`, `timeout_ms` |
+| `ssh_cmd_ref` | SSH 命令引用 | `cmd_id`（引用已配置的 SSH 命令） |
+| `led` | LED 控制 | `device`, `color`, `effect`, `brightness` |
+| `log` | 日志记录 | `level`, `message` |
+| `set_var` | 设置变量 | `variable`, `value` |
+| `webhook` | HTTP 请求 | `url`, `method`, `body_template` |
+
+#### 5.1.3 SSH 命令引用机制
+
+动作模板通过 `cmd_id` 引用 SSH 管理页面中已配置的命令：
+
+```
+┌─────────────────────┐     ┌─────────────────────┐     ┌─────────────────────┐
+│  SSH 命令配置       │     │  动作模板           │     │  执行时             │
+│  (ts_ssh_commands)  │────▶│  (ssh_cmd_ref)      │────▶│  (ts_action_exec)   │
+│                     │     │                     │     │                     │
+│  id: agx_reboot     │     │  cmd_id: agx_reboot │     │  查找命令配置       │
+│  host: agx0         │     │                     │     │  获取主机信息       │
+│  command: reboot    │     │                     │     │  keystore 认证      │
+│  var_name: result   │     │                     │     │  执行并存储结果     │
+└─────────────────────┘     └─────────────────────┘     └─────────────────────┘
+```
+
+#### 5.1.4 NVS 持久化
+
+动作模板自动保存到 NVS（`action_tpl` namespace）：
+
+```c
+// 初始化时加载
+esp_err_t ts_action_manager_init(void) {
+    // ... 初始化 ...
+    ts_action_templates_load();  // 从 NVS 恢复
+}
+
+// 修改时自动保存
+esp_err_t ts_action_template_add(...) {
+    // ... 添加 ...
+    ts_action_templates_save();  // 持久化到 NVS
+}
+```
+
+#### 5.1.5 API 端点
+
+| 端点 | 说明 |
+|------|------|
+| `automation.actions.list` | 列出所有动作模板 |
+| `automation.actions.add` | 创建模板 |
+| `automation.actions.get` | 获取模板详情 |
+| `automation.actions.delete` | 删除模板 |
+| `automation.actions.execute` | 执行模板 |
+
+### 5.2 动作类型概览
 
 | 类型 | 说明 | 示例 |
 |------|------|------|

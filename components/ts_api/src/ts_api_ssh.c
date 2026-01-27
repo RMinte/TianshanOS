@@ -26,6 +26,7 @@
 #include "ts_keystore.h"
 #include "ts_known_hosts.h"
 #include "ts_ssh_hosts_config.h"
+#include "ts_ssh_commands_config.h"
 #include "ts_webui.h"
 #include "ts_log.h"
 #include "esp_heap_caps.h"
@@ -1371,6 +1372,261 @@ static esp_err_t api_ssh_hosts_get(const cJSON *params, ts_api_result_t *result)
 }
 
 /*===========================================================================*/
+/*                       SSH Command Config APIs                              */
+/*===========================================================================*/
+
+/**
+ * @brief ssh.commands.list - 列出所有 SSH 指令配置
+ * 
+ * Params: {
+ *   "host_id": "agx0" (可选，按主机过滤)
+ * }
+ */
+static esp_err_t api_ssh_commands_list(const cJSON *params, ts_api_result_t *result)
+{
+    const cJSON *host_id = params ? cJSON_GetObjectItem(params, "host_id") : NULL;
+    
+    cJSON *data = cJSON_CreateObject();
+    cJSON *commands_arr = cJSON_AddArrayToObject(data, "commands");
+    
+    /* 使用 PSRAM 分配 */
+    ts_ssh_command_config_t *configs = heap_caps_malloc(
+        sizeof(ts_ssh_command_config_t) * TS_SSH_COMMANDS_MAX,
+        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!configs) {
+        configs = malloc(sizeof(ts_ssh_command_config_t) * TS_SSH_COMMANDS_MAX);
+    }
+    
+    size_t count = 0;
+    esp_err_t ret;
+    
+    if (host_id && cJSON_IsString(host_id) && host_id->valuestring[0]) {
+        ret = ts_ssh_commands_config_list_by_host(host_id->valuestring, 
+                                                   configs, TS_SSH_COMMANDS_MAX, &count);
+    } else {
+        ret = ts_ssh_commands_config_list(configs, TS_SSH_COMMANDS_MAX, &count);
+    }
+    
+    if (configs && ret == ESP_OK) {
+        for (size_t i = 0; i < count; i++) {
+            cJSON *item = cJSON_CreateObject();
+            cJSON_AddStringToObject(item, "id", configs[i].id);
+            cJSON_AddStringToObject(item, "host_id", configs[i].host_id);
+            cJSON_AddStringToObject(item, "name", configs[i].name);
+            cJSON_AddStringToObject(item, "command", configs[i].command);
+            cJSON_AddStringToObject(item, "desc", configs[i].desc);
+            cJSON_AddStringToObject(item, "icon", configs[i].icon);
+            if (configs[i].expect_pattern[0]) {
+                cJSON_AddStringToObject(item, "expectPattern", configs[i].expect_pattern);
+            }
+            if (configs[i].fail_pattern[0]) {
+                cJSON_AddStringToObject(item, "failPattern", configs[i].fail_pattern);
+            }
+            if (configs[i].extract_pattern[0]) {
+                cJSON_AddStringToObject(item, "extractPattern", configs[i].extract_pattern);
+            }
+            if (configs[i].var_name[0]) {
+                cJSON_AddStringToObject(item, "varName", configs[i].var_name);
+            }
+            cJSON_AddNumberToObject(item, "timeout", configs[i].timeout_sec);
+            cJSON_AddBoolToObject(item, "stopOnMatch", configs[i].stop_on_match);
+            cJSON_AddBoolToObject(item, "enabled", configs[i].enabled);
+            cJSON_AddNumberToObject(item, "created", configs[i].created_time);
+            cJSON_AddNumberToObject(item, "lastExec", configs[i].last_exec_time);
+            cJSON_AddItemToArray(commands_arr, item);
+        }
+    }
+    
+    if (configs) {
+        free(configs);
+    }
+    
+    cJSON_AddNumberToObject(data, "count", (int)count);
+    ts_api_result_ok(result, data);
+    return ESP_OK;
+}
+
+/**
+ * @brief ssh.commands.add - 添加 SSH 指令配置
+ */
+static esp_err_t api_ssh_commands_add(const cJSON *params, ts_api_result_t *result)
+{
+    if (!params) {
+        ts_api_result_error(result, TS_API_ERR_INVALID_ARG, "Missing parameters");
+        return ESP_OK;
+    }
+    
+    const cJSON *host_id = cJSON_GetObjectItem(params, "host_id");
+    const cJSON *name = cJSON_GetObjectItem(params, "name");
+    const cJSON *command = cJSON_GetObjectItem(params, "command");
+    const cJSON *id = cJSON_GetObjectItem(params, "id");
+    
+    if (!host_id || !cJSON_IsString(host_id) || !host_id->valuestring[0]) {
+        ts_api_result_error(result, TS_API_ERR_INVALID_ARG, "Missing 'host_id' parameter");
+        return ESP_OK;
+    }
+    if (!name || !cJSON_IsString(name) || !name->valuestring[0]) {
+        ts_api_result_error(result, TS_API_ERR_INVALID_ARG, "Missing 'name' parameter");
+        return ESP_OK;
+    }
+    if (!command || !cJSON_IsString(command) || !command->valuestring[0]) {
+        ts_api_result_error(result, TS_API_ERR_INVALID_ARG, "Missing 'command' parameter");
+        return ESP_OK;
+    }
+    
+    ts_ssh_command_config_t config = {
+        .timeout_sec = 30,
+        .stop_on_match = false,
+        .enabled = true,
+    };
+    
+    /* 可选 ID（用于更新） */
+    if (id && cJSON_IsString(id)) {
+        strncpy(config.id, id->valuestring, sizeof(config.id) - 1);
+    }
+    
+    strncpy(config.host_id, host_id->valuestring, sizeof(config.host_id) - 1);
+    strncpy(config.name, name->valuestring, sizeof(config.name) - 1);
+    strncpy(config.command, command->valuestring, sizeof(config.command) - 1);
+    
+    /* 可选字段 */
+    const cJSON *desc = cJSON_GetObjectItem(params, "desc");
+    const cJSON *icon = cJSON_GetObjectItem(params, "icon");
+    const cJSON *expect_pattern = cJSON_GetObjectItem(params, "expectPattern");
+    const cJSON *fail_pattern = cJSON_GetObjectItem(params, "failPattern");
+    const cJSON *extract_pattern = cJSON_GetObjectItem(params, "extractPattern");
+    const cJSON *var_name = cJSON_GetObjectItem(params, "varName");
+    const cJSON *timeout = cJSON_GetObjectItem(params, "timeout");
+    const cJSON *stop_on_match = cJSON_GetObjectItem(params, "stopOnMatch");
+    
+    if (desc && cJSON_IsString(desc)) {
+        strncpy(config.desc, desc->valuestring, sizeof(config.desc) - 1);
+    }
+    if (icon && cJSON_IsString(icon)) {
+        strncpy(config.icon, icon->valuestring, sizeof(config.icon) - 1);
+    } else {
+        strncpy(config.icon, "🚀", sizeof(config.icon) - 1);
+    }
+    if (expect_pattern && cJSON_IsString(expect_pattern)) {
+        strncpy(config.expect_pattern, expect_pattern->valuestring, sizeof(config.expect_pattern) - 1);
+    }
+    if (fail_pattern && cJSON_IsString(fail_pattern)) {
+        strncpy(config.fail_pattern, fail_pattern->valuestring, sizeof(config.fail_pattern) - 1);
+    }
+    if (extract_pattern && cJSON_IsString(extract_pattern)) {
+        strncpy(config.extract_pattern, extract_pattern->valuestring, sizeof(config.extract_pattern) - 1);
+    }
+    if (var_name && cJSON_IsString(var_name)) {
+        strncpy(config.var_name, var_name->valuestring, sizeof(config.var_name) - 1);
+    }
+    if (timeout && cJSON_IsNumber(timeout)) {
+        config.timeout_sec = (uint16_t)timeout->valueint;
+    }
+    if (stop_on_match && cJSON_IsBool(stop_on_match)) {
+        config.stop_on_match = cJSON_IsTrue(stop_on_match);
+    }
+    
+    char out_id[TS_SSH_CMD_ID_MAX] = {0};
+    esp_err_t ret = ts_ssh_commands_config_add(&config, out_id, sizeof(out_id));
+    
+    if (ret == ESP_OK) {
+        cJSON *data = cJSON_CreateObject();
+        cJSON_AddStringToObject(data, "id", out_id);
+        cJSON_AddStringToObject(data, "name", config.name);
+        ts_api_result_ok(result, data);
+    } else if (ret == ESP_ERR_NO_MEM) {
+        ts_api_result_error(result, TS_API_ERR_INTERNAL, "Max commands reached");
+    } else {
+        ts_api_result_error(result, TS_API_ERR_INTERNAL, "Failed to add command");
+    }
+    
+    return ESP_OK;
+}
+
+/**
+ * @brief ssh.commands.remove - 删除 SSH 指令配置
+ */
+static esp_err_t api_ssh_commands_remove(const cJSON *params, ts_api_result_t *result)
+{
+    if (!params) {
+        ts_api_result_error(result, TS_API_ERR_INVALID_ARG, "Missing parameters");
+        return ESP_OK;
+    }
+    
+    const cJSON *id = cJSON_GetObjectItem(params, "id");
+    if (!id || !cJSON_IsString(id) || !id->valuestring[0]) {
+        ts_api_result_error(result, TS_API_ERR_INVALID_ARG, "Missing 'id' parameter");
+        return ESP_OK;
+    }
+    
+    esp_err_t ret = ts_ssh_commands_config_remove(id->valuestring);
+    
+    if (ret == ESP_OK) {
+        ts_api_result_ok(result, NULL);
+    } else if (ret == ESP_ERR_NOT_FOUND) {
+        ts_api_result_error(result, TS_API_ERR_NOT_FOUND, "Command not found");
+    } else {
+        ts_api_result_error(result, TS_API_ERR_INTERNAL, "Failed to remove command");
+    }
+    
+    return ESP_OK;
+}
+
+/**
+ * @brief ssh.commands.get - 获取 SSH 指令配置
+ */
+static esp_err_t api_ssh_commands_get(const cJSON *params, ts_api_result_t *result)
+{
+    if (!params) {
+        ts_api_result_error(result, TS_API_ERR_INVALID_ARG, "Missing parameters");
+        return ESP_OK;
+    }
+    
+    const cJSON *id = cJSON_GetObjectItem(params, "id");
+    if (!id || !cJSON_IsString(id) || !id->valuestring[0]) {
+        ts_api_result_error(result, TS_API_ERR_INVALID_ARG, "Missing 'id' parameter");
+        return ESP_OK;
+    }
+    
+    ts_ssh_command_config_t config;
+    esp_err_t ret = ts_ssh_commands_config_get(id->valuestring, &config);
+    
+    if (ret == ESP_OK) {
+        cJSON *data = cJSON_CreateObject();
+        cJSON_AddStringToObject(data, "id", config.id);
+        cJSON_AddStringToObject(data, "host_id", config.host_id);
+        cJSON_AddStringToObject(data, "name", config.name);
+        cJSON_AddStringToObject(data, "command", config.command);
+        cJSON_AddStringToObject(data, "desc", config.desc);
+        cJSON_AddStringToObject(data, "icon", config.icon);
+        if (config.expect_pattern[0]) {
+            cJSON_AddStringToObject(data, "expectPattern", config.expect_pattern);
+        }
+        if (config.fail_pattern[0]) {
+            cJSON_AddStringToObject(data, "failPattern", config.fail_pattern);
+        }
+        if (config.extract_pattern[0]) {
+            cJSON_AddStringToObject(data, "extractPattern", config.extract_pattern);
+        }
+        if (config.var_name[0]) {
+            cJSON_AddStringToObject(data, "varName", config.var_name);
+        }
+        cJSON_AddNumberToObject(data, "timeout", config.timeout_sec);
+        cJSON_AddBoolToObject(data, "stopOnMatch", config.stop_on_match);
+        cJSON_AddBoolToObject(data, "enabled", config.enabled);
+        cJSON_AddNumberToObject(data, "created", config.created_time);
+        cJSON_AddNumberToObject(data, "lastExec", config.last_exec_time);
+        ts_api_result_ok(result, data);
+    } else if (ret == ESP_ERR_NOT_FOUND) {
+        ts_api_result_error(result, TS_API_ERR_NOT_FOUND, "Command not found");
+    } else {
+        ts_api_result_error(result, TS_API_ERR_INTERNAL, "Failed to get command");
+    }
+    
+    return ESP_OK;
+}
+
+/*===========================================================================*/
 /*                          Registration                                      */
 /*===========================================================================*/
 
@@ -1451,6 +1707,35 @@ static const ts_api_endpoint_t ssh_endpoints[] = {
         .description = "Get SSH host configuration by ID",
         .category = TS_API_CAT_SECURITY,
         .handler = api_ssh_hosts_get,
+        .requires_auth = false,
+    },
+    /* SSH Command Config APIs */
+    {
+        .name = "ssh.commands.list",
+        .description = "List all SSH command configurations",
+        .category = TS_API_CAT_SECURITY,
+        .handler = api_ssh_commands_list,
+        .requires_auth = false,
+    },
+    {
+        .name = "ssh.commands.add",
+        .description = "Add or update SSH command configuration",
+        .category = TS_API_CAT_SECURITY,
+        .handler = api_ssh_commands_add,
+        .requires_auth = true,
+    },
+    {
+        .name = "ssh.commands.remove",
+        .description = "Remove SSH command configuration",
+        .category = TS_API_CAT_SECURITY,
+        .handler = api_ssh_commands_remove,
+        .requires_auth = true,
+    },
+    {
+        .name = "ssh.commands.get",
+        .description = "Get SSH command configuration by ID",
+        .category = TS_API_CAT_SECURITY,
+        .handler = api_ssh_commands_get,
         .requires_auth = false,
     },
 };

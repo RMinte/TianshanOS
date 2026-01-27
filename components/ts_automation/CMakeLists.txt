@@ -18,6 +18,7 @@ idf_component_register(
         ts_net
         ts_drivers
         ts_security
+        ts_console
         ts_jsonpath
         esp_http_client
         espressif__esp_websocket_client

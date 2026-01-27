@@ -16,10 +16,14 @@
 #include "ts_variable.h"
 #include "ts_event.h"
 #include "ts_ssh_client.h"
+#include "ts_ssh_commands_config.h"
+#include "ts_ssh_hosts_config.h"
+#include "ts_keystore.h"
 #include "ts_led.h"
 #include "ts_led_preset.h"
 #include "ts_hal.h"
 #include "ts_core.h"
+#include "ts_console.h"
 
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -28,6 +32,9 @@
 #include "freertos/task.h"
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
+#include "nvs_flash.h"
+#include "nvs.h"
+#include "cJSON.h"
 
 #include <string.h>
 #include <stdlib.h>
@@ -48,6 +55,15 @@ static const char *TAG = "ts_action_mgr";
 
 /** Action executor task priority */
 #define ACTION_TASK_PRIORITY        5
+
+/** NVS namespace for action templates */
+#define NVS_NAMESPACE               "action_tpl"
+
+/** NVS key for template count */
+#define NVS_KEY_COUNT               "count"
+
+/** NVS key prefix for templates */
+#define NVS_KEY_PREFIX              "tpl_"
 
 /*===========================================================================*/
 /*                              Internal State                                */
@@ -138,6 +154,10 @@ esp_err_t ts_action_manager_init(void)
     }
     
     s_ctx->initialized = true;
+    
+    /* Load saved templates from NVS */
+    ts_action_templates_load();
+    
     ESP_LOGI(TAG, "Action manager initialized");
     return ESP_OK;
     
@@ -257,6 +277,7 @@ esp_err_t ts_action_get_ssh_host(const char *host_id, ts_action_ssh_host_t *host
         return ESP_ERR_INVALID_ARG;
     }
     
+    /* First, try to find in internal list */
     xSemaphoreTake(s_ctx->ssh_hosts_mutex, portMAX_DELAY);
     
     for (int i = 0; i < s_ctx->ssh_host_count; i++) {
@@ -268,6 +289,26 @@ esp_err_t ts_action_get_ssh_host(const char *host_id, ts_action_ssh_host_t *host
     }
     
     xSemaphoreGive(s_ctx->ssh_hosts_mutex);
+    
+    /* Fallback: try to get from SSH hosts config system */
+    ts_ssh_host_config_t config;
+    esp_err_t ret = ts_ssh_hosts_config_get(host_id, &config);
+    if (ret == ESP_OK) {
+        /* Convert ts_ssh_host_config_t to ts_action_ssh_host_t */
+        memset(host_out, 0, sizeof(ts_action_ssh_host_t));
+        strncpy(host_out->id, config.id, sizeof(host_out->id) - 1);
+        strncpy(host_out->host, config.host, sizeof(host_out->host) - 1);
+        host_out->port = config.port;
+        strncpy(host_out->username, config.username, sizeof(host_out->username) - 1);
+        host_out->use_key_auth = (config.auth_type == TS_SSH_HOST_AUTH_KEY);
+        /* Store keyid in key_path field - will be resolved at connection time */
+        if (host_out->use_key_auth && config.keyid[0]) {
+            strncpy(host_out->key_path, config.keyid, sizeof(host_out->key_path) - 1);
+        }
+        ESP_LOGD(TAG, "Got SSH host '%s' from config system", host_id);
+        return ESP_OK;
+    }
+    
     return ESP_ERR_NOT_FOUND;
 }
 
@@ -448,16 +489,42 @@ esp_err_t ts_action_exec_ssh(const ts_auto_action_ssh_t *ssh,
     config.username = host.username;
     config.timeout_ms = ssh->timeout_ms > 0 ? ssh->timeout_ms : TS_ACTION_SSH_TIMEOUT_MS;
     
+    /* Load SSH key from keystore if using key auth */
+    char *key_data = NULL;
+    size_t key_len = 0;
+    esp_err_t ret;
+    
     if (host.use_key_auth && host.key_path[0]) {
-        config.auth_method = TS_SSH_AUTH_PUBLICKEY;
-        config.auth.key.private_key_path = host.key_path;
+        /* host.key_path actually contains the keyid */
+        const char *keyid = host.key_path;
+        
+        /* Try to load from keystore first */
+        ret = ts_keystore_load_private_key(keyid, &key_data, &key_len);
+        if (ret == ESP_OK && key_data && key_len > 0) {
+            config.auth_method = TS_SSH_AUTH_PUBLICKEY;
+            config.auth.key.private_key = (const uint8_t *)key_data;
+            config.auth.key.private_key_len = key_len;
+            config.auth.key.private_key_path = NULL;
+            ESP_LOGI(TAG, "Loaded SSH key '%s' from keystore (%zu bytes)", keyid, key_len);
+        } else {
+            /* Fallback: try as file path */
+            char full_path[128];
+            if (keyid[0] == '/') {
+                strncpy(full_path, keyid, sizeof(full_path) - 1);
+            } else {
+                snprintf(full_path, sizeof(full_path), "/sdcard/ssh/%s", keyid);
+            }
+            config.auth_method = TS_SSH_AUTH_PUBLICKEY;
+            config.auth.key.private_key_path = full_path;
+            ESP_LOGI(TAG, "Using SSH key file: %s", full_path);
+        }
     } else {
         config.auth_method = TS_SSH_AUTH_PASSWORD;
         config.auth.password = host.password;
     }
     
     ts_ssh_session_t session = NULL;
-    esp_err_t ret = ts_ssh_session_create(&config, &session);
+    ret = ts_ssh_session_create(&config, &session);
     if (ret != ESP_OK) {
         snprintf(result->output, sizeof(result->output), 
                  "SSH session create failed: %s", esp_err_to_name(ret));
@@ -513,6 +580,11 @@ esp_err_t ts_action_exec_ssh(const ts_auto_action_ssh_t *ssh,
     /* Cleanup */
     ts_ssh_disconnect(session);
     ts_ssh_session_destroy(session);
+    
+    /* Free key data if loaded from keystore */
+    if (key_data) {
+        free(key_data);
+    }
     
     result->duration_ms = (esp_timer_get_time() - start_time) / 1000;
     result->timestamp = esp_timer_get_time() / 1000;
@@ -772,6 +844,268 @@ esp_err_t ts_action_exec_device(const ts_auto_action_device_t *device,
     return ESP_OK;
 }
 
+esp_err_t ts_action_exec_ssh_ref(const ts_auto_action_ssh_ref_t *ssh_ref,
+                                  ts_action_result_t *result)
+{
+    if (!ssh_ref || !result) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    
+    int64_t start_time = esp_timer_get_time();
+    result->status = TS_ACTION_STATUS_RUNNING;
+    
+    /* Look up the SSH command configuration */
+    ts_ssh_command_config_t cmd_config;
+    esp_err_t ret = ts_ssh_commands_config_get(ssh_ref->cmd_id, &cmd_config);
+    if (ret != ESP_OK) {
+        snprintf(result->output, sizeof(result->output), 
+                 "SSH command '%s' not found", ssh_ref->cmd_id);
+        result->status = TS_ACTION_STATUS_FAILED;
+        ESP_LOGW(TAG, "SSH command ref not found: %s", ssh_ref->cmd_id);
+        return ESP_ERR_NOT_FOUND;
+    }
+    
+    if (!cmd_config.enabled) {
+        snprintf(result->output, sizeof(result->output), 
+                 "SSH command '%s' is disabled", ssh_ref->cmd_id);
+        result->status = TS_ACTION_STATUS_FAILED;
+        return ESP_ERR_INVALID_STATE;
+    }
+    
+    ESP_LOGI(TAG, "SSH ref [%s]: host=%s, cmd=%s", 
+             ssh_ref->cmd_id, cmd_config.host_id, cmd_config.command);
+    
+    /* Get SSH host config */
+    ts_action_ssh_host_t host;
+    if (ts_action_get_ssh_host(cmd_config.host_id, &host) != ESP_OK) {
+        snprintf(result->output, sizeof(result->output), 
+                 "SSH host '%s' not found for command '%s'", 
+                 cmd_config.host_id, ssh_ref->cmd_id);
+        result->status = TS_ACTION_STATUS_FAILED;
+        return ESP_ERR_NOT_FOUND;
+    }
+    
+    /* Expand variables in command */
+    char expanded_cmd[256];
+    ts_action_expand_variables(cmd_config.command, expanded_cmd, sizeof(expanded_cmd));
+    
+    /* Create SSH session */
+    ts_ssh_config_t config = TS_SSH_DEFAULT_CONFIG();
+    config.host = host.host;
+    config.port = host.port;
+    config.username = host.username;
+    config.timeout_ms = cmd_config.timeout_sec > 0 ? cmd_config.timeout_sec * 1000 : TS_ACTION_SSH_TIMEOUT_MS;
+    
+    /* Load SSH key from keystore if using key auth */
+    char *key_data = NULL;
+    size_t key_len = 0;
+    
+    if (host.use_key_auth && host.key_path[0]) {
+        /* host.key_path actually contains the keyid */
+        const char *keyid = host.key_path;
+        
+        /* Try to load from keystore first */
+        ret = ts_keystore_load_private_key(keyid, &key_data, &key_len);
+        if (ret == ESP_OK && key_data && key_len > 0) {
+            config.auth_method = TS_SSH_AUTH_PUBLICKEY;
+            config.auth.key.private_key = (const uint8_t *)key_data;
+            config.auth.key.private_key_len = key_len;
+            config.auth.key.private_key_path = NULL;
+            ESP_LOGI(TAG, "Loaded SSH key '%s' from keystore (%zu bytes)", keyid, key_len);
+        } else {
+            /* Fallback: try as file path */
+            char full_path[128];
+            if (keyid[0] == '/') {
+                strncpy(full_path, keyid, sizeof(full_path) - 1);
+            } else {
+                snprintf(full_path, sizeof(full_path), "/sdcard/ssh/%s", keyid);
+            }
+            config.auth_method = TS_SSH_AUTH_PUBLICKEY;
+            config.auth.key.private_key_path = full_path;
+            ESP_LOGI(TAG, "Using SSH key file: %s", full_path);
+        }
+    } else {
+        config.auth_method = TS_SSH_AUTH_PASSWORD;
+        config.auth.password = host.password;
+    }
+    
+    ts_ssh_session_t session = NULL;
+    ret = ts_ssh_session_create(&config, &session);
+    if (ret != ESP_OK) {
+        snprintf(result->output, sizeof(result->output), 
+                 "SSH session create failed: %s", esp_err_to_name(ret));
+        result->status = TS_ACTION_STATUS_FAILED;
+        return ret;
+    }
+    
+    /* Connect */
+    ret = ts_ssh_connect(session);
+    if (ret != ESP_OK) {
+        snprintf(result->output, sizeof(result->output), 
+                 "SSH connect failed: %s", esp_err_to_name(ret));
+        result->status = TS_ACTION_STATUS_FAILED;
+        ts_ssh_session_destroy(session);
+        return ret;
+    }
+    
+    /* Execute command */
+    ts_ssh_exec_result_t exec_result = {0};
+    ret = ts_ssh_exec(session, expanded_cmd, &exec_result);
+    
+    if (ret == ESP_OK) {
+        result->exit_code = exec_result.exit_code;
+        if (exec_result.stdout_data && exec_result.stdout_len > 0) {
+            size_t copy_len = exec_result.stdout_len < sizeof(result->output) - 1 
+                            ? exec_result.stdout_len 
+                            : sizeof(result->output) - 1;
+            memcpy(result->output, exec_result.stdout_data, copy_len);
+            result->output[copy_len] = '\0';
+        } else if (exec_result.stderr_data && exec_result.stderr_len > 0) {
+            size_t copy_len = exec_result.stderr_len < sizeof(result->output) - 1 
+                            ? exec_result.stderr_len 
+                            : sizeof(result->output) - 1;
+            memcpy(result->output, exec_result.stderr_data, copy_len);
+            result->output[copy_len] = '\0';
+        }
+        
+        result->status = (exec_result.exit_code == 0) 
+                       ? TS_ACTION_STATUS_SUCCESS 
+                       : TS_ACTION_STATUS_FAILED;
+        
+        /* Update variables if var_name is configured */
+        if (cmd_config.var_name[0]) {
+            char var_full[64];
+            
+            /* Set exit_code variable */
+            snprintf(var_full, sizeof(var_full), "%s.exit_code", cmd_config.var_name);
+            ts_variable_set_int(var_full, exec_result.exit_code);
+            
+            /* Set status variable */
+            snprintf(var_full, sizeof(var_full), "%s.status", cmd_config.var_name);
+            ts_variable_set_string(var_full, 
+                exec_result.exit_code == 0 ? "success" : "failed");
+            
+            /* Set timestamp variable */
+            snprintf(var_full, sizeof(var_full), "%s.timestamp", cmd_config.var_name);
+            ts_variable_set_int(var_full, (int32_t)(esp_timer_get_time() / 1000000));
+        }
+        
+        /* Free result strings */
+        if (exec_result.stdout_data) free(exec_result.stdout_data);
+        if (exec_result.stderr_data) free(exec_result.stderr_data);
+    } else {
+        snprintf(result->output, sizeof(result->output), 
+                 "SSH exec failed: %s", esp_err_to_name(ret));
+        result->status = (ret == ESP_ERR_TIMEOUT) 
+                       ? TS_ACTION_STATUS_TIMEOUT 
+                       : TS_ACTION_STATUS_FAILED;
+    }
+    
+    /* Cleanup */
+    ts_ssh_disconnect(session);
+    ts_ssh_session_destroy(session);
+    
+    /* Free key data if loaded from keystore */
+    if (key_data) {
+        free(key_data);
+    }
+    
+    result->duration_ms = (esp_timer_get_time() - start_time) / 1000;
+    result->timestamp = esp_timer_get_time() / 1000;
+    
+    /* Update command execution time */
+    ts_ssh_commands_config_update_exec_time(ssh_ref->cmd_id);
+    
+    /* Update statistics */
+    xSemaphoreTake(s_ctx->stats_mutex, portMAX_DELAY);
+    s_ctx->stats.ssh_commands++;
+    xSemaphoreGive(s_ctx->stats_mutex);
+    
+    ESP_LOGD(TAG, "SSH ref result: cmd=%s, exit=%d, duration=%lu ms", 
+             ssh_ref->cmd_id, result->exit_code, result->duration_ms);
+    
+    return ret;
+}
+
+/**
+ * @brief Execute CLI command action
+ */
+esp_err_t ts_action_exec_cli(const ts_auto_action_cli_t *cli,
+                              ts_action_result_t *result)
+{
+    if (!cli || !result) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    
+    memset(result, 0, sizeof(*result));
+    result->status = TS_ACTION_STATUS_RUNNING;
+    
+    int64_t start_time = esp_timer_get_time();
+    
+    if (!cli->command[0]) {
+        snprintf(result->output, sizeof(result->output), "Empty CLI command");
+        result->status = TS_ACTION_STATUS_FAILED;
+        return ESP_ERR_INVALID_ARG;
+    }
+    
+    ESP_LOGI(TAG, "Executing CLI command: %s", cli->command);
+    
+    /* Execute CLI command using ts_console_exec */
+    ts_cmd_result_t cmd_result = {0};
+    esp_err_t ret = ts_console_exec(cli->command, &cmd_result);
+    
+    result->duration_ms = (esp_timer_get_time() - start_time) / 1000;
+    result->timestamp = esp_timer_get_time() / 1000;
+    result->exit_code = cmd_result.code;
+    
+    if (ret == ESP_OK) {
+        result->status = (cmd_result.code == 0) 
+                       ? TS_ACTION_STATUS_SUCCESS 
+                       : TS_ACTION_STATUS_FAILED;
+        
+        /* Copy message to output */
+        if (cmd_result.message) {
+            strncpy(result->output, cmd_result.message, sizeof(result->output) - 1);
+            free(cmd_result.message);
+        } else {
+            snprintf(result->output, sizeof(result->output), 
+                     "CLI command completed (code=%d)", cmd_result.code);
+        }
+        
+        /* Store to variable if configured */
+        if (cli->var_name[0]) {
+            char var_full[80];  /* var_name (max 64) + suffix (max 11) + null */
+            
+            /* Set exit_code variable */
+            snprintf(var_full, sizeof(var_full), "%.63s.exit_code", cli->var_name);
+            ts_variable_set_int(var_full, cmd_result.code);
+            
+            /* Set status variable */
+            snprintf(var_full, sizeof(var_full), "%.63s.status", cli->var_name);
+            ts_variable_set_string(var_full, 
+                cmd_result.code == 0 ? "success" : "failed");
+            
+            /* Set output variable */
+            snprintf(var_full, sizeof(var_full), "%.63s.output", cli->var_name);
+            ts_variable_set_string(var_full, result->output);
+        }
+    } else {
+        snprintf(result->output, sizeof(result->output), 
+                 "CLI exec failed: %s", esp_err_to_name(ret));
+        result->status = TS_ACTION_STATUS_FAILED;
+    }
+    
+    /* Free any allocated data */
+    if (cmd_result.data) {
+        free(cmd_result.data);
+    }
+    
+    ESP_LOGD(TAG, "CLI result: cmd=%s, exit=%d, duration=%lu ms", 
+             cli->command, result->exit_code, result->duration_ms);
+    
+    return ret;
+}
+
 /*===========================================================================*/
 /*                          Internal Execute                                  */
 /*===========================================================================*/
@@ -782,6 +1116,12 @@ static esp_err_t execute_action_internal(const ts_auto_action_t *action,
     switch (action->type) {
         case TS_AUTO_ACT_SSH_CMD:
             return ts_action_exec_ssh(&action->ssh, result);
+            
+        case TS_AUTO_ACT_SSH_CMD_REF:
+            return ts_action_exec_ssh_ref(&action->ssh_ref, result);
+            
+        case TS_AUTO_ACT_CLI:
+            return ts_action_exec_cli(&action->cli, result);
             
         case TS_AUTO_ACT_LED:
             return ts_action_exec_led(&action->led, result);
@@ -1048,6 +1388,8 @@ const char *ts_action_type_name(ts_auto_action_type_t type)
     switch (type) {
         case TS_AUTO_ACT_LED:         return "LED";
         case TS_AUTO_ACT_SSH_CMD:     return "SSH";
+        case TS_AUTO_ACT_SSH_CMD_REF: return "SSH-Ref";
+        case TS_AUTO_ACT_CLI:         return "CLI";
         case TS_AUTO_ACT_GPIO:        return "GPIO";
         case TS_AUTO_ACT_WEBHOOK:     return "Webhook";
         case TS_AUTO_ACT_LOG:         return "Log";
@@ -1104,6 +1446,9 @@ esp_err_t ts_action_template_add(const ts_action_template_t *tpl)
     
     xSemaphoreGive(s_ctx->templates_mutex);
     
+    /* Save to NVS */
+    ts_action_templates_save();
+    
     ESP_LOGI(TAG, "Added action template: %s (%s)", tpl->id, tpl->name);
     return ESP_OK;
 }
@@ -1126,6 +1471,9 @@ esp_err_t ts_action_template_remove(const char *id)
             }
             s_ctx->template_count--;
             xSemaphoreGive(s_ctx->templates_mutex);
+            
+            /* Save to NVS */
+            ts_action_templates_save();
             
             ESP_LOGI(TAG, "Removed action template: %s", id);
             return ESP_OK;
@@ -1255,6 +1603,9 @@ esp_err_t ts_action_template_update(const char *id, const ts_action_template_t *
             
             xSemaphoreGive(s_ctx->templates_mutex);
             
+            /* Save to NVS */
+            ts_action_templates_save();
+            
             ESP_LOGI(TAG, "Updated action template: %s", id);
             return ESP_OK;
         }
@@ -1262,4 +1613,393 @@ esp_err_t ts_action_template_update(const char *id, const ts_action_template_t *
     
     xSemaphoreGive(s_ctx->templates_mutex);
     return ESP_ERR_NOT_FOUND;
+}
+
+/*===========================================================================*/
+/*                       Action Template Persistence                          */
+/*===========================================================================*/
+
+/**
+ * @brief Convert action type enum to string for storage
+ */
+static const char *action_type_to_str(ts_auto_action_type_t type)
+{
+    switch (type) {
+        case TS_AUTO_ACT_CLI: return "cli";
+        case TS_AUTO_ACT_LED: return "led";
+        case TS_AUTO_ACT_SSH_CMD: return "ssh_cmd";
+        case TS_AUTO_ACT_SSH_CMD_REF: return "ssh_cmd_ref";
+        case TS_AUTO_ACT_GPIO: return "gpio";
+        case TS_AUTO_ACT_WEBHOOK: return "webhook";
+        case TS_AUTO_ACT_LOG: return "log";
+        case TS_AUTO_ACT_SET_VAR: return "set_var";
+        case TS_AUTO_ACT_DEVICE_CTRL: return "device_ctrl";
+        default: return "unknown";
+    }
+}
+
+/**
+ * @brief Convert string to action type enum
+ */
+static ts_auto_action_type_t str_to_action_type(const char *str)
+{
+    if (!str) return TS_AUTO_ACT_LOG;
+    if (strcmp(str, "cli") == 0) return TS_AUTO_ACT_CLI;
+    if (strcmp(str, "led") == 0) return TS_AUTO_ACT_LED;
+    if (strcmp(str, "ssh_cmd") == 0) return TS_AUTO_ACT_SSH_CMD;
+    if (strcmp(str, "ssh_cmd_ref") == 0) return TS_AUTO_ACT_SSH_CMD_REF;
+    if (strcmp(str, "gpio") == 0) return TS_AUTO_ACT_GPIO;
+    if (strcmp(str, "webhook") == 0) return TS_AUTO_ACT_WEBHOOK;
+    if (strcmp(str, "log") == 0) return TS_AUTO_ACT_LOG;
+    if (strcmp(str, "set_var") == 0) return TS_AUTO_ACT_SET_VAR;
+    if (strcmp(str, "device_ctrl") == 0) return TS_AUTO_ACT_DEVICE_CTRL;
+    return TS_AUTO_ACT_LOG;
+}
+
+/**
+ * @brief Serialize action template to JSON string
+ */
+static char *template_to_json(const ts_action_template_t *tpl)
+{
+    cJSON *root = cJSON_CreateObject();
+    if (!root) return NULL;
+    
+    cJSON_AddStringToObject(root, "id", tpl->id);
+    cJSON_AddStringToObject(root, "name", tpl->name);
+    cJSON_AddStringToObject(root, "description", tpl->description);
+    cJSON_AddBoolToObject(root, "enabled", tpl->enabled);
+    cJSON_AddStringToObject(root, "type", action_type_to_str(tpl->action.type));
+    cJSON_AddNumberToObject(root, "delay_ms", tpl->action.delay_ms);
+    cJSON_AddNumberToObject(root, "created_at", tpl->created_at);
+    cJSON_AddNumberToObject(root, "use_count", tpl->use_count);
+    
+    /* Serialize type-specific data */
+    switch (tpl->action.type) {
+        case TS_AUTO_ACT_CLI: {
+            cJSON *cli = cJSON_AddObjectToObject(root, "cli");
+            cJSON_AddStringToObject(cli, "command", tpl->action.cli.command);
+            cJSON_AddStringToObject(cli, "var_name", tpl->action.cli.var_name);
+            cJSON_AddNumberToObject(cli, "timeout_ms", tpl->action.cli.timeout_ms);
+            break;
+        }
+        case TS_AUTO_ACT_SSH_CMD_REF: {
+            cJSON *ssh_ref = cJSON_AddObjectToObject(root, "ssh_ref");
+            cJSON_AddStringToObject(ssh_ref, "cmd_id", tpl->action.ssh_ref.cmd_id);
+            break;
+        }
+        case TS_AUTO_ACT_LED: {
+            cJSON *led = cJSON_AddObjectToObject(root, "led");
+            cJSON_AddStringToObject(led, "device", tpl->action.led.device);
+            cJSON_AddNumberToObject(led, "index", tpl->action.led.index);
+            cJSON_AddNumberToObject(led, "r", tpl->action.led.r);
+            cJSON_AddNumberToObject(led, "g", tpl->action.led.g);
+            cJSON_AddNumberToObject(led, "b", tpl->action.led.b);
+            cJSON_AddStringToObject(led, "effect", tpl->action.led.effect);
+            cJSON_AddNumberToObject(led, "duration_ms", tpl->action.led.duration_ms);
+            break;
+        }
+        case TS_AUTO_ACT_LOG: {
+            cJSON *log_obj = cJSON_AddObjectToObject(root, "log");
+            cJSON_AddNumberToObject(log_obj, "level", tpl->action.log.level);
+            cJSON_AddStringToObject(log_obj, "message", tpl->action.log.message);
+            break;
+        }
+        case TS_AUTO_ACT_SET_VAR: {
+            cJSON *set_var = cJSON_AddObjectToObject(root, "set_var");
+            cJSON_AddStringToObject(set_var, "variable", tpl->action.set_var.variable);
+            /* Store value as string for simplicity */
+            if (tpl->action.set_var.value.type == TS_AUTO_VAL_STRING) {
+                cJSON_AddStringToObject(set_var, "value", tpl->action.set_var.value.str_val);
+            }
+            break;
+        }
+        case TS_AUTO_ACT_WEBHOOK: {
+            cJSON *webhook = cJSON_AddObjectToObject(root, "webhook");
+            cJSON_AddStringToObject(webhook, "url", tpl->action.webhook.url);
+            cJSON_AddStringToObject(webhook, "method", tpl->action.webhook.method);
+            cJSON_AddStringToObject(webhook, "body_template", tpl->action.webhook.body_template);
+            break;
+        }
+        default:
+            break;
+    }
+    
+    char *json = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    return json;
+}
+
+/**
+ * @brief Parse JSON string to action template
+ */
+static esp_err_t json_to_template(const char *json, ts_action_template_t *tpl)
+{
+    cJSON *root = cJSON_Parse(json);
+    if (!root) return ESP_ERR_INVALID_ARG;
+    
+    memset(tpl, 0, sizeof(ts_action_template_t));
+    
+    cJSON *item;
+    if ((item = cJSON_GetObjectItem(root, "id")) && cJSON_IsString(item)) {
+        strncpy(tpl->id, item->valuestring, sizeof(tpl->id) - 1);
+    }
+    if ((item = cJSON_GetObjectItem(root, "name")) && cJSON_IsString(item)) {
+        strncpy(tpl->name, item->valuestring, sizeof(tpl->name) - 1);
+    }
+    if ((item = cJSON_GetObjectItem(root, "description")) && cJSON_IsString(item)) {
+        strncpy(tpl->description, item->valuestring, sizeof(tpl->description) - 1);
+    }
+    if ((item = cJSON_GetObjectItem(root, "enabled"))) {
+        tpl->enabled = cJSON_IsTrue(item);
+    } else {
+        tpl->enabled = true;
+    }
+    if ((item = cJSON_GetObjectItem(root, "type")) && cJSON_IsString(item)) {
+        tpl->action.type = str_to_action_type(item->valuestring);
+    }
+    if ((item = cJSON_GetObjectItem(root, "delay_ms")) && cJSON_IsNumber(item)) {
+        tpl->action.delay_ms = (uint16_t)item->valueint;
+    }
+    if ((item = cJSON_GetObjectItem(root, "created_at")) && cJSON_IsNumber(item)) {
+        tpl->created_at = (int64_t)item->valuedouble;
+    }
+    if ((item = cJSON_GetObjectItem(root, "use_count")) && cJSON_IsNumber(item)) {
+        tpl->use_count = (uint32_t)item->valueint;
+    }
+    
+    /* Parse type-specific data */
+    switch (tpl->action.type) {
+        case TS_AUTO_ACT_CLI: {
+            cJSON *cli = cJSON_GetObjectItem(root, "cli");
+            if (cli) {
+                if ((item = cJSON_GetObjectItem(cli, "command")) && cJSON_IsString(item)) {
+                    strncpy(tpl->action.cli.command, item->valuestring, 
+                            sizeof(tpl->action.cli.command) - 1);
+                }
+                if ((item = cJSON_GetObjectItem(cli, "var_name")) && cJSON_IsString(item)) {
+                    strncpy(tpl->action.cli.var_name, item->valuestring, 
+                            sizeof(tpl->action.cli.var_name) - 1);
+                }
+                if ((item = cJSON_GetObjectItem(cli, "timeout_ms")) && cJSON_IsNumber(item)) {
+                    tpl->action.cli.timeout_ms = (uint32_t)item->valueint;
+                }
+            }
+            break;
+        }
+        case TS_AUTO_ACT_SSH_CMD_REF: {
+            cJSON *ssh_ref = cJSON_GetObjectItem(root, "ssh_ref");
+            if (ssh_ref) {
+                if ((item = cJSON_GetObjectItem(ssh_ref, "cmd_id")) && cJSON_IsString(item)) {
+                    strncpy(tpl->action.ssh_ref.cmd_id, item->valuestring, 
+                            sizeof(tpl->action.ssh_ref.cmd_id) - 1);
+                }
+            }
+            break;
+        }
+        case TS_AUTO_ACT_LED: {
+            cJSON *led = cJSON_GetObjectItem(root, "led");
+            if (led) {
+                if ((item = cJSON_GetObjectItem(led, "device")) && cJSON_IsString(item)) {
+                    strncpy(tpl->action.led.device, item->valuestring, 
+                            sizeof(tpl->action.led.device) - 1);
+                }
+                if ((item = cJSON_GetObjectItem(led, "index")) && cJSON_IsNumber(item)) {
+                    tpl->action.led.index = (uint8_t)item->valueint;
+                }
+                if ((item = cJSON_GetObjectItem(led, "r")) && cJSON_IsNumber(item)) {
+                    tpl->action.led.r = (uint8_t)item->valueint;
+                }
+                if ((item = cJSON_GetObjectItem(led, "g")) && cJSON_IsNumber(item)) {
+                    tpl->action.led.g = (uint8_t)item->valueint;
+                }
+                if ((item = cJSON_GetObjectItem(led, "b")) && cJSON_IsNumber(item)) {
+                    tpl->action.led.b = (uint8_t)item->valueint;
+                }
+                if ((item = cJSON_GetObjectItem(led, "effect")) && cJSON_IsString(item)) {
+                    strncpy(tpl->action.led.effect, item->valuestring, 
+                            sizeof(tpl->action.led.effect) - 1);
+                }
+                if ((item = cJSON_GetObjectItem(led, "duration_ms")) && cJSON_IsNumber(item)) {
+                    tpl->action.led.duration_ms = (uint16_t)item->valueint;
+                }
+            }
+            break;
+        }
+        case TS_AUTO_ACT_LOG: {
+            cJSON *log_obj = cJSON_GetObjectItem(root, "log");
+            if (log_obj) {
+                if ((item = cJSON_GetObjectItem(log_obj, "level")) && cJSON_IsNumber(item)) {
+                    tpl->action.log.level = (uint8_t)item->valueint;
+                }
+                if ((item = cJSON_GetObjectItem(log_obj, "message")) && cJSON_IsString(item)) {
+                    strncpy(tpl->action.log.message, item->valuestring, 
+                            sizeof(tpl->action.log.message) - 1);
+                }
+            }
+            break;
+        }
+        case TS_AUTO_ACT_SET_VAR: {
+            cJSON *set_var = cJSON_GetObjectItem(root, "set_var");
+            if (set_var) {
+                if ((item = cJSON_GetObjectItem(set_var, "variable")) && cJSON_IsString(item)) {
+                    strncpy(tpl->action.set_var.variable, item->valuestring, 
+                            sizeof(tpl->action.set_var.variable) - 1);
+                }
+                if ((item = cJSON_GetObjectItem(set_var, "value")) && cJSON_IsString(item)) {
+                    tpl->action.set_var.value.type = TS_AUTO_VAL_STRING;
+                    strncpy(tpl->action.set_var.value.str_val, item->valuestring, 
+                            sizeof(tpl->action.set_var.value.str_val) - 1);
+                }
+            }
+            break;
+        }
+        case TS_AUTO_ACT_WEBHOOK: {
+            cJSON *webhook = cJSON_GetObjectItem(root, "webhook");
+            if (webhook) {
+                if ((item = cJSON_GetObjectItem(webhook, "url")) && cJSON_IsString(item)) {
+                    strncpy(tpl->action.webhook.url, item->valuestring, 
+                            sizeof(tpl->action.webhook.url) - 1);
+                }
+                if ((item = cJSON_GetObjectItem(webhook, "method")) && cJSON_IsString(item)) {
+                    strncpy(tpl->action.webhook.method, item->valuestring, 
+                            sizeof(tpl->action.webhook.method) - 1);
+                }
+                if ((item = cJSON_GetObjectItem(webhook, "body_template")) && cJSON_IsString(item)) {
+                    strncpy(tpl->action.webhook.body_template, item->valuestring, 
+                            sizeof(tpl->action.webhook.body_template) - 1);
+                }
+            }
+            break;
+        }
+        default:
+            break;
+    }
+    
+    cJSON_Delete(root);
+    return ESP_OK;
+}
+
+/**
+ * @brief Save all action templates to NVS
+ */
+esp_err_t ts_action_templates_save(void)
+{
+    if (!s_ctx) return ESP_ERR_INVALID_STATE;
+    
+    nvs_handle_t handle;
+    esp_err_t ret = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &handle);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to open NVS: %s", esp_err_to_name(ret));
+        return ret;
+    }
+    
+    /* Erase old data first */
+    nvs_erase_all(handle);
+    
+    xSemaphoreTake(s_ctx->templates_mutex, portMAX_DELAY);
+    
+    /* Save count */
+    ret = nvs_set_u8(handle, NVS_KEY_COUNT, (uint8_t)s_ctx->template_count);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to save template count: %s", esp_err_to_name(ret));
+        xSemaphoreGive(s_ctx->templates_mutex);
+        nvs_close(handle);
+        return ret;
+    }
+    
+    /* Save each template */
+    for (int i = 0; i < s_ctx->template_count; i++) {
+        char key[16];
+        snprintf(key, sizeof(key), "%s%d", NVS_KEY_PREFIX, i);
+        
+        char *json = template_to_json(&s_ctx->templates[i]);
+        if (!json) {
+            ESP_LOGW(TAG, "Failed to serialize template %d", i);
+            continue;
+        }
+        
+        ret = nvs_set_str(handle, key, json);
+        free(json);
+        
+        if (ret != ESP_OK) {
+            ESP_LOGW(TAG, "Failed to save template %d: %s", i, esp_err_to_name(ret));
+        }
+    }
+    
+    xSemaphoreGive(s_ctx->templates_mutex);
+    
+    ret = nvs_commit(handle);
+    nvs_close(handle);
+    
+    ESP_LOGI(TAG, "Saved %d action templates to NVS", s_ctx->template_count);
+    return ret;
+}
+
+/**
+ * @brief Load all action templates from NVS
+ */
+esp_err_t ts_action_templates_load(void)
+{
+    if (!s_ctx) return ESP_ERR_INVALID_STATE;
+    
+    nvs_handle_t handle;
+    esp_err_t ret = nvs_open(NVS_NAMESPACE, NVS_READONLY, &handle);
+    if (ret == ESP_ERR_NVS_NOT_FOUND) {
+        ESP_LOGI(TAG, "No saved action templates found");
+        return ESP_OK;
+    }
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to open NVS: %s", esp_err_to_name(ret));
+        return ret;
+    }
+    
+    /* Read count */
+    uint8_t count = 0;
+    ret = nvs_get_u8(handle, NVS_KEY_COUNT, &count);
+    if (ret != ESP_OK || count == 0) {
+        nvs_close(handle);
+        return ESP_OK;
+    }
+    
+    ESP_LOGI(TAG, "Loading %d action templates from NVS", count);
+    
+    xSemaphoreTake(s_ctx->templates_mutex, portMAX_DELAY);
+    
+    /* Load each template */
+    for (int i = 0; i < count && s_ctx->template_count < TS_ACTION_TEMPLATE_MAX; i++) {
+        char key[16];
+        snprintf(key, sizeof(key), "%s%d", NVS_KEY_PREFIX, i);
+        
+        /* Get string length first */
+        size_t len = 0;
+        ret = nvs_get_str(handle, key, NULL, &len);
+        if (ret != ESP_OK || len == 0) {
+            continue;
+        }
+        
+        char *json = malloc(len);
+        if (!json) {
+            ESP_LOGW(TAG, "Failed to allocate memory for template %d", i);
+            continue;
+        }
+        
+        ret = nvs_get_str(handle, key, json, &len);
+        if (ret == ESP_OK) {
+            ts_action_template_t tpl;
+            if (json_to_template(json, &tpl) == ESP_OK) {
+                memcpy(&s_ctx->templates[s_ctx->template_count], &tpl, 
+                       sizeof(ts_action_template_t));
+                s_ctx->template_count++;
+                ESP_LOGD(TAG, "Loaded template: %s", tpl.id);
+            }
+        }
+        
+        free(json);
+    }
+    
+    xSemaphoreGive(s_ctx->templates_mutex);
+    nvs_close(handle);
+    
+    ESP_LOGI(TAG, "Loaded %d action templates from NVS", s_ctx->template_count);
+    return ESP_OK;
 }

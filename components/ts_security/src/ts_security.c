@@ -6,6 +6,7 @@
 #include "ts_security.h"
 #include "ts_crypto.h"
 #include "ts_ssh_hosts_config.h"
+#include "ts_ssh_commands_config.h"
 #include "ts_core.h"  /* TS_MALLOC_PSRAM */
 #include "ts_log.h"
 #include "nvs_flash.h"
@@ -43,6 +44,13 @@ esp_err_t ts_security_init(void)
     ret = ts_ssh_hosts_config_init();
     if (ret != ESP_OK) {
         TS_LOGW(TAG, "Failed to init SSH hosts config: %s", esp_err_to_name(ret));
+        // 非致命错误，继续运行
+    }
+    
+    // 初始化 SSH 指令配置模块
+    ret = ts_ssh_commands_config_init();
+    if (ret != ESP_OK) {
+        TS_LOGW(TAG, "Failed to init SSH commands config: %s", esp_err_to_name(ret));
         // 非致命错误，继续运行
     }
     

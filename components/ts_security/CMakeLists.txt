@@ -11,10 +11,12 @@ idf_component_register(
         "src/ts_ssh_shell.c"
         "src/ts_keystore.c"
         "src/ts_ssh_hosts_config.c"
+        "src/ts_ssh_commands_config.c"
     INCLUDE_DIRS
         "include"
     REQUIRES
         ts_core
+        ts_automation
         mbedtls
         nvs_flash
         lwip

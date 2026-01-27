@@ -1797,8 +1797,10 @@ static ts_auto_action_type_t action_type_from_string(const char *str)
 {
     if (!str) return TS_AUTO_ACT_LOG;
     
+    if (strcmp(str, "cli") == 0) return TS_AUTO_ACT_CLI;
     if (strcmp(str, "led") == 0) return TS_AUTO_ACT_LED;
     if (strcmp(str, "ssh_cmd") == 0) return TS_AUTO_ACT_SSH_CMD;
+    if (strcmp(str, "ssh_cmd_ref") == 0) return TS_AUTO_ACT_SSH_CMD_REF;
     if (strcmp(str, "gpio") == 0) return TS_AUTO_ACT_GPIO;
     if (strcmp(str, "webhook") == 0) return TS_AUTO_ACT_WEBHOOK;
     if (strcmp(str, "log") == 0) return TS_AUTO_ACT_LOG;
@@ -1814,8 +1816,10 @@ static ts_auto_action_type_t action_type_from_string(const char *str)
 static const char *action_type_to_string(ts_auto_action_type_t type)
 {
     switch (type) {
+        case TS_AUTO_ACT_CLI: return "cli";
         case TS_AUTO_ACT_LED: return "led";
         case TS_AUTO_ACT_SSH_CMD: return "ssh_cmd";
+        case TS_AUTO_ACT_SSH_CMD_REF: return "ssh_cmd_ref";
         case TS_AUTO_ACT_GPIO: return "gpio";
         case TS_AUTO_ACT_WEBHOOK: return "webhook";
         case TS_AUTO_ACT_LOG: return "log";
@@ -2053,6 +2057,36 @@ static esp_err_t api_automation_actions_add(const cJSON *params, ts_api_result_t
             }
             break;
         }
+        case TS_AUTO_ACT_SSH_CMD_REF: {
+            cJSON *ssh_ref = cJSON_GetObjectItem(params, "ssh_ref");
+            if (ssh_ref) {
+                cJSON *cmd_id = cJSON_GetObjectItem(ssh_ref, "cmd_id");
+                if (cmd_id && cJSON_IsString(cmd_id)) {
+                    strncpy(tpl.action.ssh_ref.cmd_id, cmd_id->valuestring, 
+                            sizeof(tpl.action.ssh_ref.cmd_id) - 1);
+                }
+            }
+            break;
+        }
+        case TS_AUTO_ACT_CLI: {
+            cJSON *cli = cJSON_GetObjectItem(params, "cli");
+            if (cli) {
+                cJSON *command = cJSON_GetObjectItem(cli, "command");
+                cJSON *var_name = cJSON_GetObjectItem(cli, "var_name");
+                cJSON *timeout = cJSON_GetObjectItem(cli, "timeout_ms");
+                if (command && cJSON_IsString(command)) {
+                    strncpy(tpl.action.cli.command, command->valuestring, 
+                            sizeof(tpl.action.cli.command) - 1);
+                }
+                if (var_name && cJSON_IsString(var_name)) {
+                    strncpy(tpl.action.cli.var_name, var_name->valuestring, 
+                            sizeof(tpl.action.cli.var_name) - 1);
+                }
+                tpl.action.cli.timeout_ms = timeout && cJSON_IsNumber(timeout) ? 
+                                             timeout->valueint : 5000;
+            }
+            break;
+        }
         default:
             break;
     }
@@ -2073,6 +2107,91 @@ static esp_err_t api_automation_actions_add(const cJSON *params, ts_api_result_t
         result->message = strdup("Failed to create template");
     }
     
+    return ESP_OK;
+}
+
+/**
+ * @brief automation.actions.get - Get a single action template by ID
+ */
+static esp_err_t api_automation_actions_get(const cJSON *params, ts_api_result_t *result)
+{
+    cJSON *id = cJSON_GetObjectItem(params, "id");
+    
+    if (!id || !cJSON_IsString(id)) {
+        result->code = TS_API_ERR_INVALID_ARG;
+        result->message = strdup("Missing 'id' parameter");
+        return ESP_OK;
+    }
+    
+    ts_action_template_t tpl;
+    esp_err_t ret = ts_action_template_get(id->valuestring, &tpl);
+    
+    if (ret != ESP_OK) {
+        result->code = TS_API_ERR_NOT_FOUND;
+        result->message = strdup("Template not found");
+        return ESP_OK;
+    }
+    
+    result->data = cJSON_CreateObject();
+    cJSON_AddStringToObject(result->data, "id", tpl.id);
+    cJSON_AddStringToObject(result->data, "name", tpl.name);
+    cJSON_AddStringToObject(result->data, "description", tpl.description);
+    cJSON_AddStringToObject(result->data, "type", action_type_to_string(tpl.action.type));
+    cJSON_AddBoolToObject(result->data, "enabled", tpl.enabled);
+    cJSON_AddNumberToObject(result->data, "delay_ms", tpl.action.delay_ms);
+    
+    /* Add type-specific data */
+    switch (tpl.action.type) {
+        case TS_AUTO_ACT_CLI: {
+            cJSON *cli = cJSON_AddObjectToObject(result->data, "cli");
+            cJSON_AddStringToObject(cli, "command", tpl.action.cli.command);
+            cJSON_AddStringToObject(cli, "var_name", tpl.action.cli.var_name);
+            cJSON_AddNumberToObject(cli, "timeout_ms", tpl.action.cli.timeout_ms);
+            break;
+        }
+        case TS_AUTO_ACT_SSH_CMD_REF: {
+            cJSON *ssh_ref = cJSON_AddObjectToObject(result->data, "ssh_ref");
+            cJSON_AddStringToObject(ssh_ref, "cmd_id", tpl.action.ssh_ref.cmd_id);
+            break;
+        }
+        case TS_AUTO_ACT_LED: {
+            cJSON *led = cJSON_AddObjectToObject(result->data, "led");
+            cJSON_AddStringToObject(led, "device", tpl.action.led.device);
+            cJSON_AddNumberToObject(led, "index", tpl.action.led.index);
+            char color_str[8];
+            snprintf(color_str, sizeof(color_str), "#%02X%02X%02X", 
+                     tpl.action.led.r, tpl.action.led.g, tpl.action.led.b);
+            cJSON_AddStringToObject(led, "color", color_str);
+            cJSON_AddStringToObject(led, "effect", tpl.action.led.effect);
+            cJSON_AddNumberToObject(led, "duration_ms", tpl.action.led.duration_ms);
+            break;
+        }
+        case TS_AUTO_ACT_LOG: {
+            cJSON *log_obj = cJSON_AddObjectToObject(result->data, "log");
+            cJSON_AddNumberToObject(log_obj, "level", tpl.action.log.level);
+            cJSON_AddStringToObject(log_obj, "message", tpl.action.log.message);
+            break;
+        }
+        case TS_AUTO_ACT_SET_VAR: {
+            cJSON *set_var = cJSON_AddObjectToObject(result->data, "set_var");
+            cJSON_AddStringToObject(set_var, "variable", tpl.action.set_var.variable);
+            if (tpl.action.set_var.value.type == TS_AUTO_VAL_STRING) {
+                cJSON_AddStringToObject(set_var, "value", tpl.action.set_var.value.str_val);
+            }
+            break;
+        }
+        case TS_AUTO_ACT_WEBHOOK: {
+            cJSON *webhook = cJSON_AddObjectToObject(result->data, "webhook");
+            cJSON_AddStringToObject(webhook, "url", tpl.action.webhook.url);
+            cJSON_AddStringToObject(webhook, "method", tpl.action.webhook.method);
+            cJSON_AddStringToObject(webhook, "body_template", tpl.action.webhook.body_template);
+            break;
+        }
+        default:
+            break;
+    }
+    
+    result->code = TS_API_OK;
     return ESP_OK;
 }
 
@@ -3546,6 +3665,15 @@ esp_err_t ts_api_automation_register(void)
         .requires_auth = false,
     };
     ts_api_register(&ep_actions_list);
+
+    ts_api_endpoint_t ep_actions_get = {
+        .name = "automation.actions.get",
+        .description = "Get action template by ID",
+        .category = TS_API_CAT_SYSTEM,
+        .handler = api_automation_actions_get,
+        .requires_auth = false,
+    };
+    ts_api_register(&ep_actions_get);
 
     ts_api_endpoint_t ep_actions_add = {
         .name = "automation.actions.add",

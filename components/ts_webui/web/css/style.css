@@ -4469,6 +4469,375 @@ body {
     word-break: break-all;
 }
 
+/* ==========================================
+   动作模板 Modal 新布局
+   ========================================== */
+
+/* 动作模板模态框需要更宽的布局 */
+#action-modal .modal-content {
+    width: 800px;
+    max-width: 95vw;
+}
+
+@media (max-width: 840px) {
+    #action-modal .modal-content {
+        width: 95vw;
+    }
+}
+
+/* Modal 内容区 section */
+.action-section {
+    margin-bottom: 24px;
+    padding-bottom: 20px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.action-section:last-of-type {
+    border-bottom: none;
+    margin-bottom: 0;
+    padding-bottom: 0;
+}
+
+.section-title {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--text-color);
+    margin-bottom: 16px;
+}
+
+.section-title .step-num {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    background: var(--primary-color);
+    color: white;
+    font-size: 0.85rem;
+    font-weight: 700;
+}
+
+/* 动作类型卡片网格 */
+.action-type-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+}
+
+@media (max-width: 600px) {
+    .action-type-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+.action-type-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 14px 10px;
+    border: 2px solid var(--border-color);
+    border-radius: 10px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    background: white;
+    text-align: center;
+}
+
+.action-type-card:hover {
+    border-color: var(--primary-color);
+    background: rgba(59, 130, 246, 0.04);
+    transform: translateY(-2px);
+}
+
+.action-type-card.selected,
+.action-type-card:has(input:checked) {
+    border-color: var(--primary-color);
+    background: rgba(59, 130, 246, 0.08);
+    box-shadow: 0 4px 12px rgba(59, 130, 246, 0.2);
+}
+
+.action-type-card input[type="radio"] {
+    position: absolute;
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.action-type-card .card-icon {
+    font-size: 1.8rem;
+    margin-bottom: 6px;
+}
+
+.action-type-card .card-title {
+    font-weight: 600;
+    font-size: 0.9rem;
+    color: var(--text-color);
+    margin-bottom: 4px;
+}
+
+.action-type-card .card-desc {
+    font-size: 0.75rem;
+    color: var(--text-light);
+    line-height: 1.3;
+}
+
+/* 参数配置卡片 */
+.params-card {
+    background: var(--bg-color);
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    padding: 16px;
+}
+
+.params-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 600;
+    font-size: 0.95rem;
+    color: var(--text-color);
+    margin-bottom: 14px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.params-header .params-icon {
+    font-size: 1.2rem;
+}
+
+/* 快捷命令按钮组 */
+.quick-commands {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px dashed var(--border-color);
+}
+
+.quick-label {
+    font-size: 0.8rem;
+    color: var(--text-light);
+    font-weight: 500;
+}
+
+.quick-btn {
+    padding: 5px 12px;
+    font-size: 0.8rem;
+    background: white;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.quick-btn:hover {
+    background: var(--primary-color);
+    color: white;
+    border-color: var(--primary-color);
+}
+
+/* 带单位的输入框 */
+.input-with-unit {
+    display: flex;
+    align-items: stretch;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    overflow: hidden;
+    background: white;
+}
+
+.input-with-unit input {
+    flex: 1;
+    border: none;
+    padding: 8px 12px;
+    font-size: 0.95rem;
+    outline: none;
+}
+
+.input-with-unit input:focus {
+    box-shadow: inset 0 0 0 2px rgba(59, 130, 246, 0.2);
+}
+
+.input-with-unit .unit {
+    display: flex;
+    align-items: center;
+    padding: 0 12px;
+    background: var(--bg-color);
+    color: var(--text-light);
+    font-size: 0.85rem;
+    border-left: 1px solid var(--border-color);
+}
+
+/* 等宽字体输入框 */
+.input-mono {
+    font-family: 'Monaco', 'Consolas', 'Courier New', monospace !important;
+}
+
+/* 高级选项折叠 */
+.advanced-toggle {
+    margin-top: 14px;
+}
+
+.advanced-toggle summary {
+    padding: 8px 12px;
+    background: rgba(0, 0, 0, 0.02);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.85rem;
+    color: var(--text-light);
+    user-select: none;
+}
+
+.advanced-toggle summary:hover {
+    background: rgba(59, 130, 246, 0.05);
+}
+
+.advanced-toggle[open] summary {
+    border-radius: 6px 6px 0 0;
+    border-bottom: none;
+}
+
+.advanced-content {
+    padding: 12px;
+    border: 1px solid var(--border-color);
+    border-top: none;
+    border-radius: 0 0 6px 6px;
+    background: rgba(0, 0, 0, 0.01);
+}
+
+.advanced-content .form-group {
+    margin-bottom: 12px;
+}
+
+.advanced-content .form-group:last-child {
+    margin-bottom: 0;
+}
+
+/* LED 配置专用样式 */
+.led-color-config {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.led-color-picker-sm {
+    width: 50px;
+    height: 38px;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 2px;
+    cursor: pointer;
+}
+
+.color-presets-inline {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+.color-presets-inline .color-dot {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    border: 2px solid rgba(0, 0, 0, 0.1);
+    cursor: pointer;
+    transition: transform 0.15s, box-shadow 0.15s;
+}
+
+.color-presets-inline .color-dot:hover {
+    transform: scale(1.15);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+.brightness-config {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.brightness-slider-sm {
+    flex: 1;
+    height: 6px;
+    -webkit-appearance: none;
+    appearance: none;
+    background: linear-gradient(to right, #333, #fff);
+    border-radius: 3px;
+    outline: none;
+}
+
+.brightness-slider-sm::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: var(--primary-color);
+    cursor: pointer;
+    border: 2px solid white;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+}
+
+.brightness-val {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-color);
+    min-width: 30px;
+    text-align: right;
+}
+
+/* 基本信息区域的紧凑表单 */
+.compact-form-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+}
+
+@media (max-width: 480px) {
+    .compact-form-row {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* 表单提示文字 */
+.form-hint {
+    display: block;
+    font-size: 0.78rem;
+    color: var(--text-light);
+    margin-top: 4px;
+}
+
+/* 必填标记 */
+.required {
+    color: #ef4444;
+}
+
+/* CLI 预设按钮组 */
+.cli-presets {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 6px;
+}
+
+.cli-presets .btn {
+    font-size: 0.8rem;
+    padding: 4px 10px;
+    background: var(--bg-hover);
+    border: 1px solid var(--border-color);
+}
+
+.cli-presets .btn:hover {
+    background: var(--primary-color);
+    color: white;
+    border-color: var(--primary-color);
+}
+
 /* 高级选项折叠面板 */
 .advanced-options {
     margin-top: 15px;

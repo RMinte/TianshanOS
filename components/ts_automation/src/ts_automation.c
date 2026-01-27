@@ -16,6 +16,7 @@
 #include "ts_variable.h"
 #include "ts_rule_engine.h"
 #include "ts_source_manager.h"
+#include "ts_action_manager.h"
 
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -129,6 +130,12 @@ esp_err_t ts_automation_init(const ts_automation_config_t *config)
         goto cleanup;
     }
 
+    ret = ts_action_manager_init();
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to init action manager: %s", esp_err_to_name(ret));
+        goto cleanup;
+    }
+
     // 加载配置
     ret = load_config(s_ctx.config_path);
     if (ret == ESP_ERR_NOT_FOUND) {
@@ -142,6 +149,14 @@ esp_err_t ts_automation_init(const ts_automation_config_t *config)
 
     s_ctx.state = TS_AUTO_STATE_INITIALIZED;
     s_ctx.start_time_ms = esp_timer_get_time() / 1000;
+
+    // 预创建 SSH 命令变量（从 NVS 配置读取）
+    extern esp_err_t ts_ssh_commands_precreate_variables(void);
+    esp_err_t precreate_ret = ts_ssh_commands_precreate_variables();
+    if (precreate_ret != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to precreate SSH command variables: %s", esp_err_to_name(precreate_ret));
+        // 不影响启动
+    }
 
     ESP_LOGI(TAG, "Automation engine initialized");
 
@@ -172,6 +187,7 @@ esp_err_t ts_automation_deinit(void)
     ts_automation_stop();
 
     // 反初始化子模块
+    ts_action_manager_deinit();
     ts_rule_engine_deinit();
     ts_source_manager_deinit();
     ts_variable_deinit();

@@ -4,7 +4,38 @@
  * 统一的 Core API 调用客户端，支持所有已注册的 API 端点
  */
 
+// 开发模式配置：如果通过本地代理（如 VS Code Live Server）访问，
+// 需要设置 ESP32 的实际 IP 地址
+// 生产环境下留空，将自动使用 window.location.host
+const DEV_ESP32_HOST = '';  // 例如: '192.168.0.152' 或 '192.168.1.100:80'
+
+// 获取实际的 API 主机地址
+function getApiHost() {
+    // 如果设置了开发模式主机，使用它
+    if (DEV_ESP32_HOST) {
+        return DEV_ESP32_HOST;
+    }
+    // 检测是否是本地开发环境（localhost 或 127.0.0.1）
+    const host = window.location.host;
+    if (host.startsWith('localhost') || host.startsWith('127.0.0.1')) {
+        console.warn('WebUI running on localhost - WebSocket/API may not work. Set DEV_ESP32_HOST in api.js if needed.');
+    }
+    return host;
+}
+
 const API_BASE = '/api/v1';
+
+// 获取完整的 API URL（支持开发模式跨域）
+function getApiUrl(endpoint) {
+    const host = getApiHost();
+    // 如果是开发模式（设置了 DEV_ESP32_HOST），使用完整 URL
+    if (DEV_ESP32_HOST) {
+        const protocol = window.location.protocol;
+        return `${protocol}//${host}${API_BASE}${endpoint}`;
+    }
+    // 生产环境使用相对路径
+    return `${API_BASE}${endpoint}`;
+}
 
 class TianShanAPI {
     constructor() {
@@ -33,7 +64,7 @@ class TianShanAPI {
         }
         
         try {
-            const response = await fetch(`${API_BASE}${endpoint}`, options);
+            const response = await fetch(getApiUrl(endpoint), options);
             const json = await response.json();
             
             // 返回 JSON 响应，即使是错误码也返回（让调用者决定如何处理）
@@ -434,8 +465,9 @@ class TianShanWS {
     }
     
     connect() {
+        const host = getApiHost();
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const url = `${protocol}//${window.location.host}/ws`;
+        const url = `${protocol}//${host}/ws`;
         
         try {
             this.ws = new WebSocket(url);

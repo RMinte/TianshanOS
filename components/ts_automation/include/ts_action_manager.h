@@ -310,6 +310,32 @@ esp_err_t ts_action_exec_set_var(const ts_auto_action_set_var_t *set_var,
 esp_err_t ts_action_exec_device(const ts_auto_action_device_t *device,
                                  ts_action_result_t *result);
 
+/**
+ * @brief Execute SSH command reference action
+ * 
+ * Looks up a pre-registered SSH command by ID and executes it.
+ * This allows actions to reference commands created in the SSH management UI.
+ * 
+ * @param ssh_ref SSH command reference parameters (contains cmd_id)
+ * @param result Output result
+ * @return ESP_OK on success, ESP_ERR_NOT_FOUND if command not found
+ */
+esp_err_t ts_action_exec_ssh_ref(const ts_auto_action_ssh_ref_t *ssh_ref,
+                                  ts_action_result_t *result);
+
+/**
+ * @brief Execute CLI command action
+ * 
+ * Executes a TianShanOS CLI command locally. This is the unified method
+ * for hardware control (GPIO, device power, fan, LED, etc.)
+ * 
+ * @param cli CLI command parameters
+ * @param result Output result
+ * @return ESP_OK on success
+ */
+esp_err_t ts_action_exec_cli(const ts_auto_action_cli_t *cli,
+                              ts_action_result_t *result);
+
 /*===========================================================================*/
 /*                          Status & Statistics                               */
 /*===========================================================================*/
@@ -460,6 +486,24 @@ esp_err_t ts_action_template_execute(const char *id, ts_action_result_t *result)
  * @return ESP_OK on success
  */
 esp_err_t ts_action_template_update(const char *id, const ts_action_template_t *tpl);
+
+/*===========================================================================*/
+/*                       Persistence Functions                                */
+/*===========================================================================*/
+
+/**
+ * @brief Save all action templates to NVS
+ * 
+ * @return ESP_OK on success
+ */
+esp_err_t ts_action_templates_save(void);
+
+/**
+ * @brief Load all action templates from NVS
+ * 
+ * @return ESP_OK on success
+ */
+esp_err_t ts_action_templates_load(void);
 
 #ifdef __cplusplus
 }

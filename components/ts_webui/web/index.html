@@ -125,6 +125,22 @@
         </div>
     </div>
     
+    <!-- 数据源变量模态框 -->
+    <div id="source-variables-modal" class="modal hidden">
+        <div class="modal-content" style="max-width:700px">
+            <div class="modal-header">
+                <h2>📊 数据源变量</h2>
+                <button class="modal-close" onclick="closeSourceVariablesModal()">&times;</button>
+            </div>
+            <div class="modal-body" id="source-variables-body">
+                <div class="loading">加载中...</div>
+            </div>
+            <div class="modal-footer" style="margin-top:16px;padding-top:12px;border-top:1px solid var(--border-color);display:flex;justify-content:flex-end">
+                <button class="btn" onclick="closeSourceVariablesModal()">关闭</button>
+            </div>
+        </div>
+    </div>
+    
     <script src="/js/api.js"></script>
     <script src="/js/router.js"></script>
     <script src="/js/terminal.js"></script>

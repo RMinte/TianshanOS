@@ -278,12 +278,14 @@ typedef struct {
  */
 typedef enum {
     TS_AUTO_ACT_LED = 0,                /**< LED control */
-    TS_AUTO_ACT_SSH_CMD,                 /**< SSH command execution */
-    TS_AUTO_ACT_GPIO,                    /**< GPIO output control */
+    TS_AUTO_ACT_SSH_CMD,                 /**< SSH command execution (direct) - deprecated */
+    TS_AUTO_ACT_GPIO,                    /**< GPIO output control - deprecated, use CLI */
     TS_AUTO_ACT_WEBHOOK,                 /**< HTTP webhook call */
     TS_AUTO_ACT_LOG,                     /**< Log message */
     TS_AUTO_ACT_SET_VAR,                 /**< Set variable value */
-    TS_AUTO_ACT_DEVICE_CTRL,             /**< Device control (AGX/LPMU) */
+    TS_AUTO_ACT_DEVICE_CTRL,             /**< Device control - deprecated, use CLI */
+    TS_AUTO_ACT_SSH_CMD_REF,             /**< SSH command reference (from registered commands) */
+    TS_AUTO_ACT_CLI,                     /**< TianShanOS CLI command execution */
 } ts_auto_action_type_t;
 
 /**
@@ -350,6 +352,28 @@ typedef struct {
 } ts_auto_action_device_t;
 
 /**
+ * @brief SSH command reference action parameters
+ * 
+ * References a pre-registered SSH command from ts_ssh_commands_config.
+ * The command ID is used to look up the full command configuration at runtime.
+ */
+typedef struct {
+    char cmd_id[TS_AUTO_NAME_MAX_LEN];  /**< SSH command ID (from ts_ssh_commands_config) */
+} ts_auto_action_ssh_ref_t;
+
+/**
+ * @brief CLI command action parameters
+ * 
+ * Executes a TianShanOS CLI command locally.
+ * Supports all registered console commands like gpio, device, fan, led, etc.
+ */
+typedef struct {
+    char command[TS_AUTO_PATH_MAX_LEN]; /**< CLI command line (e.g., "gpio --set 48 1") */
+    char var_name[TS_AUTO_NAME_MAX_LEN]; /**< Variable to store output (optional) */
+    uint32_t timeout_ms;                 /**< Execution timeout in ms */
+} ts_auto_action_cli_t;
+
+/**
  * @brief Action definition
  */
 typedef struct {
@@ -364,6 +388,8 @@ typedef struct {
         ts_auto_action_log_t log;
         ts_auto_action_set_var_t set_var;
         ts_auto_action_device_t device;
+        ts_auto_action_ssh_ref_t ssh_ref; /**< SSH command reference */
+        ts_auto_action_cli_t cli;         /**< CLI command */
     };
 } ts_auto_action_t;
 

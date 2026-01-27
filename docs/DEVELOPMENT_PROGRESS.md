@@ -2,7 +2,7 @@
 
 > **项目**：TianShanOS（天山操作系统）  
 > **版本**：0.3.0  
-> **最后更新**：2026年1月27日  
+> **最后更新**：2026年1月28日  
 > **代码统计**：110+ 个 C 源文件，80+ 个头文件
 
 ---
@@ -32,6 +32,112 @@
 | Phase 18: HTTPS 证书管理 | ✅ 完成 | 100% | 2026-01-27 |
 | Phase 19: 主机管理增强 | ✅ 完成 | 100% | 2026-01-27 |
 | Phase 20: 变量系统实现 | ✅ 完成 | 100% | 2026-01-27 |
+| Phase 21: 动作模板系统 | ✅ 完成 | 100% | 2026-01-28 |
+
+---
+
+## 📋 Phase 21: 动作模板系统 ✅
+
+**时间**：2026年1月28日  
+**目标**：实现动作模板管理系统，支持创建、执行、持久化可复用的自动化动作
+
+### 功能概述
+
+动作模板是自动化引擎的核心功能之一，允许用户：
+- **创建动作模板**：定义可复用的动作配置
+- **执行动作**：手动触发或由规则引擎自动触发
+- **持久化存储**：模板保存到 NVS，重启后自动恢复
+
+### 支持的动作类型
+
+| 类型 | 说明 | 配置参数 |
+|------|------|----------|
+| **CLI** | 执行本地控制台命令 | command, var_name, timeout_ms |
+| **SSH** | 执行已配置的 SSH 命令 | cmd_id（引用 SSH 命令配置） |
+| **LED** | 控制 LED 设备 | device, color, effect, brightness |
+| **Log** | 记录日志消息 | level, message |
+| **Set Variable** | 设置变量值 | variable, value |
+| **Webhook** | 发送 HTTP 请求 | url, method, body_template |
+
+### SSH 命令执行流程
+
+**设计理念**：动作模板引用已配置的 SSH 命令，而非重复配置
+
+```
+SSH 管理页面配置命令 → 动作模板引用命令 → 执行时查找并运行
+      (主机+命令+变量)        (cmd_id)          (keystore 认证)
+```
+
+**SSH 认证机制**：
+- 自动从 `ts_keystore` 加载私钥到内存
+- 使用内存认证而非文件路径
+- 支持 fallback 到文件认证
+
+### API 端点
+
+| 端点 | 说明 | 参数 |
+|------|------|------|
+| `automation.actions.list` | 列出所有动作模板 | - |
+| `automation.actions.add` | 创建动作模板 | id, name, type, ... |
+| `automation.actions.get` | 获取模板详情 | id |
+| `automation.actions.delete` | 删除模板 | id |
+| `automation.actions.execute` | 执行模板 | id |
+
+### NVS 持久化
+
+动作模板自动保存到 NVS（`action_tpl` namespace）：
+- **添加模板**：立即保存
+- **删除模板**：立即更新
+- **更新模板**：立即保存
+- **初始化时**：自动从 NVS 加载
+
+**存储格式**：
+```
+NVS Namespace: action_tpl
+├── count     → 模板数量 (uint8_t)
+├── tpl_0     → 第一个模板 JSON
+├── tpl_1     → 第二个模板 JSON
+└── ...
+```
+
+### WebUI 集成
+
+**自动化页面新增"动作模板"区域**：
+- 卡片式动作类型选择
+- 类型特定的配置表单
+- SSH 命令下拉选择（引用已配置命令）
+- LED 设备配置（支持 touch/board/matrix）
+- 实时执行与结果反馈
+
+### 修改的文件
+
+| 文件 | 修改内容 |
+|------|----------|
+| `ts_action_manager.c` | 添加 NVS 持久化功能 |
+| `ts_action_manager.h` | 添加 save/load 函数声明 |
+| `ts_api_automation.c` | 添加 actions.get API |
+| `app.js` | 动作模板 UI（创建/编辑/执行） |
+
+### 核心代码变更
+
+**ts_action_manager.c 新增功能**：
+```c
+// NVS 持久化
+esp_err_t ts_action_templates_save(void);  // 保存所有模板到 NVS
+esp_err_t ts_action_templates_load(void);  // 从 NVS 加载模板
+
+// 初始化时自动加载
+esp_err_t ts_action_manager_init(void) {
+    // ... 创建 mutex/queue/task ...
+    ts_action_templates_load();  // 从 NVS 恢复模板
+}
+
+// 添加/删除/更新后自动保存
+esp_err_t ts_action_template_add(...) {
+    // ... 添加模板 ...
+    ts_action_templates_save();  // 持久化
+}
+```
 
 ---
 
