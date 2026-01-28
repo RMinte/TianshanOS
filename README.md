@@ -24,7 +24,7 @@
 
 ## 🚀 项目概述
 
-TianShanOS 是一个**面向配置而非面向代码**的嵌入式操作系统框架，基于 ESP-IDF v5.5+ 开发，用于 NVIDIA Jetson AGX 载板的机架管理。
+TianShanOS 是一个**面向配置而非面向代码**的嵌入式操作系统框架，基于 ESP-IDF v5.5+ 开发，用于 NVIDIA Jetson AGX + DFRobot LattePanda Mu 载板的机架管理。
 
 ### 核心特性
 
@@ -192,12 +192,6 @@ idf.py -p /dev/ttyACM0 flash monitor
 - **显式持久化**：CLI 修改默认临时，`--save` 显式持久化
 
 查看 [开发进度](docs/DEVELOPMENT_PROGRESS.md) 了解详细状态。
-
----
-
-## 📄 许可证
-
-*待定*
 
 ---
 
