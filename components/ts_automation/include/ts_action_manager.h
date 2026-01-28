@@ -25,6 +25,8 @@
 
 #include "esp_err.h"
 #include "ts_automation_types.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -58,7 +60,8 @@ typedef enum {
     TS_ACTION_STATUS_SUCCESS,        /**< Completed successfully */
     TS_ACTION_STATUS_FAILED,         /**< Execution failed */
     TS_ACTION_STATUS_TIMEOUT,        /**< Execution timed out */
-    TS_ACTION_STATUS_CANCELLED       /**< Cancelled */
+    TS_ACTION_STATUS_CANCELLED,      /**< Cancelled */
+    TS_ACTION_STATUS_QUEUED          /**< Queued for async execution */
 } ts_action_status_t;
 
 /**
@@ -101,6 +104,9 @@ typedef struct {
     void *user_data;                     /**< User data for callback */
     uint8_t priority;                    /**< Priority (0=highest) */
     int64_t enqueue_time;                /**< When queued */
+    /* Sync execution support */
+    SemaphoreHandle_t done_sem;          /**< Signaled when done (sync mode) */
+    ts_action_result_t *result_ptr;      /**< Where to store result (sync mode) */
 } ts_action_queue_entry_t;
 
 /**
@@ -115,6 +121,7 @@ typedef struct {
     char description[64];                 /**< Optional description */
     ts_auto_action_t action;              /**< Action configuration */
     bool enabled;                         /**< Is template enabled */
+    bool async;                           /**< Execute asynchronously (non-blocking) */
     int64_t created_at;                   /**< Creation timestamp */
     int64_t last_used_at;                 /**< Last execution timestamp */
     uint32_t use_count;                   /**< Total execution count */

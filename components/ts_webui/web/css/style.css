@@ -3124,6 +3124,7 @@ body {
     margin-bottom: 12px;
 }
 
+.section-header h2,
 .section-header h3 {
     margin: 0;
     font-size: 1rem;
@@ -4674,6 +4675,102 @@ body {
     border-left: 1px solid var(--border-color);
 }
 
+/* 执行模式选项 - 异步/同步开关 */
+.execution-mode-option {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-top: 16px;
+    padding: 14px 16px;
+    background: linear-gradient(135deg, rgba(59, 130, 246, 0.04), rgba(139, 92, 246, 0.04));
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    transition: all 0.2s ease;
+}
+
+.execution-mode-option:hover {
+    border-color: var(--primary-color);
+    background: linear-gradient(135deg, rgba(59, 130, 246, 0.08), rgba(139, 92, 246, 0.08));
+}
+
+.execution-mode-option:has(input:checked) {
+    border-color: var(--primary-color);
+    background: linear-gradient(135deg, rgba(59, 130, 246, 0.12), rgba(139, 92, 246, 0.1));
+}
+
+.mode-switch {
+    position: relative;
+    width: 52px;
+    height: 28px;
+    flex-shrink: 0;
+}
+
+.mode-switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.mode-slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: var(--border-color);
+    border-radius: 28px;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.mode-slider:before {
+    position: absolute;
+    content: "";
+    height: 22px;
+    width: 22px;
+    left: 3px;
+    bottom: 3px;
+    background: white;
+    border-radius: 50%;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 2px 4px rgba(0,0,0,0.15);
+}
+
+.mode-switch input:checked + .mode-slider {
+    background: linear-gradient(135deg, var(--primary-color), #8b5cf6);
+}
+
+.mode-switch input:checked + .mode-slider:before {
+    transform: translateX(24px);
+}
+
+.mode-switch input:focus + .mode-slider {
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
+}
+
+.mode-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    flex: 1;
+}
+
+.mode-title {
+    font-weight: 600;
+    font-size: 0.95rem;
+    color: var(--text-color);
+}
+
+.mode-desc {
+    font-size: 0.8rem;
+    color: var(--text-light);
+    line-height: 1.4;
+}
+
+.execution-mode-option:has(input:checked) .mode-title {
+    color: var(--primary-color);
+}
+
 /* 等宽字体输入框 */
 .input-mono {
     font-family: 'Monaco', 'Consolas', 'Courier New', monospace !important;
@@ -5221,4 +5318,265 @@ body {
     font-size: 0.8em;
     font-weight: 500;
     margin-left: 8px;
+}
+
+/* ===== SSH Command Icon Picker ===== */
+
+/* Icon type tabs */
+.icon-type-tabs {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 12px;
+}
+
+.icon-tab {
+    padding: 8px 16px;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background: var(--card-bg);
+    color: var(--text-color);
+    cursor: pointer;
+    font-size: 0.95em;
+    transition: all 0.2s;
+}
+
+.icon-tab:hover {
+    border-color: var(--primary-color);
+    color: var(--primary-color);
+}
+
+.icon-tab.active {
+    background: var(--primary-color);
+    border-color: var(--primary-color);
+    color: white;
+}
+
+/* Emoji icon picker */
+.icon-picker {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 12px;
+    background: var(--bg-color);
+    border-radius: 8px;
+    max-height: 180px;
+    overflow-y: auto;
+    align-items: center;
+}
+
+.emoji-custom-input {
+    flex-basis: 100%;
+    margin-bottom: 8px;
+}
+
+.emoji-custom-input input {
+    font-size: 1.3em;
+}
+
+.icon-btn {
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.4em;
+    border: 2px solid transparent;
+    border-radius: 8px;
+    background: var(--card-bg);
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.icon-btn:hover {
+    transform: scale(1.1);
+    border-color: var(--primary-color);
+}
+
+.icon-btn.selected {
+    border-color: var(--primary-color);
+    background: rgba(52, 152, 219, 0.15);
+    box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.2);
+}
+
+/* Image icon picker */
+.icon-image-picker {
+    padding: 12px;
+    background: var(--bg-color);
+    border-radius: 8px;
+}
+
+.icon-preview-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.icon-image-preview {
+    width: 64px;
+    height: 64px;
+    border: 2px dashed var(--border-color);
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--card-bg);
+    overflow: hidden;
+    flex-shrink: 0;
+}
+
+.icon-image-preview img {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+}
+
+.icon-image-preview .placeholder-text {
+    color: var(--text-light);
+    font-size: 0.75em;
+    text-align: center;
+}
+
+.icon-path-input {
+    flex: 1;
+    display: flex;
+    gap: 8px;
+}
+
+.icon-path-input input {
+    flex: 1;
+    padding: 8px 12px;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    font-size: 0.9em;
+    background: var(--card-bg);
+}
+
+.icon-path-input input:read-only {
+    background: var(--bg-color);
+    color: var(--text-light);
+}
+
+.icon-path-input button {
+    padding: 8px 12px;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background: var(--card-bg);
+    cursor: pointer;
+    transition: all 0.2s;
+    white-space: nowrap;
+}
+
+.icon-path-input button:hover {
+    border-color: var(--primary-color);
+    color: var(--primary-color);
+}
+
+/* Command card icon display */
+.cmd-icon {
+    font-size: 1.8em;
+    width: 48px;
+    height: 48px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg-color);
+    border-radius: 12px;
+    flex-shrink: 0;
+}
+
+.cmd-icon img {
+    max-width: 36px;
+    max-height: 36px;
+    object-fit: contain;
+}
+
+/* ===== Quick Actions Panel (System Page) ===== */
+
+.quick-actions-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+    gap: 12px;
+    padding: 10px 0;
+}
+
+.quick-action-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 16px 12px;
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    text-align: center;
+    min-height: 100px;
+}
+
+.quick-action-card:hover {
+    border-color: var(--primary-color);
+    box-shadow: 0 4px 12px rgba(52, 152, 219, 0.15);
+    transform: translateY(-2px);
+}
+
+.quick-action-card:active,
+.quick-action-card.triggering {
+    transform: scale(0.95);
+    background: rgba(52, 152, 219, 0.1);
+}
+
+.quick-action-icon {
+    font-size: 2em;
+    margin-bottom: 8px;
+    width: 48px;
+    height: 48px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.quick-action-icon img {
+    max-width: 40px;
+    max-height: 40px;
+    object-fit: contain;
+}
+
+.quick-action-name {
+    font-size: 0.85em;
+    font-weight: 500;
+    color: var(--text-color);
+    margin-bottom: 4px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 100%;
+}
+
+.quick-action-count {
+    font-size: 0.75em;
+    color: var(--text-light);
+}
+
+.quick-actions-empty {
+    grid-column: 1 / -1;
+    text-align: center;
+    padding: 30px 20px;
+    color: var(--text-light);
+}
+
+.quick-actions-empty span {
+    font-size: 2em;
+    display: block;
+    margin-bottom: 8px;
+}
+
+.quick-actions-empty p {
+    margin: 0 0 4px;
+    font-size: 0.95em;
+}
+
+.quick-actions-empty small {
+    font-size: 0.8em;
+    opacity: 0.7;
 }

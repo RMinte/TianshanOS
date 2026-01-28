@@ -2395,11 +2395,11 @@ esp_err_t ts_source_sio_connect(const char *id)
     }
     conn->pending_json = NULL;
 
-    // 启动连接任务（使用 PSRAM 栈，8KB 足够处理深层 JSON）
+    // 启动连接任务（使用 PSRAM 栈，6KB 用于 WebSocket + JSON 解析）
     char task_name[32];
     snprintf(task_name, sizeof(task_name), "sio_%s", id);
 
-    if (xTaskCreateWithCaps(sio_connection_task, task_name, 8192, conn, 5, 
+    if (xTaskCreateWithCaps(sio_connection_task, task_name, 6144, conn, 5, 
                             &conn->task_handle, MALLOC_CAP_SPIRAM) != pdPASS) {
         ESP_LOGE(TAG, "Failed to create SIO task for %s", id);
         vSemaphoreDelete(conn->pending_mutex);

@@ -410,9 +410,9 @@ static void handle_ssh_connect(httpd_req_t *req, cJSON *params)
     // 发送连接成功状态
     ssh_send_status("connected", "SSH shell ready");
     
-    // 启动轮询任务（栈需要足够大以容纳 libssh2 缓冲区）
+    // 启动轮询任务（栈需要足够大以容纳 libssh2 缓冲区，使用 PSRAM）
     s_ssh_running = true;
-    xTaskCreate(ssh_poll_task, "ssh_poll", 4096, NULL, 5, &s_ssh_poll_task);
+    xTaskCreateWithCaps(ssh_poll_task, "ssh_poll", 4096, NULL, 5, &s_ssh_poll_task, MALLOC_CAP_SPIRAM);
 }
 
 /* 处理 SSH Shell 输入 */
@@ -2093,7 +2093,9 @@ esp_err_t ts_webui_ssh_exec_start(const char *host, uint16_t port,
     s_exec_running = true;
     s_exec_params = params;  /* 设置全局指针供回调访问 */
     
-    /* 创建任务 */
+    /* 创建任务 - MUST use DRAM stack because keystore access requires NVS.
+     * SPI Flash operations disable cache, and PSRAM access requires cache.
+     */
     BaseType_t ret = xTaskCreate(ssh_exec_task, "ssh_exec", 8192, params, 5, &s_exec_task);
     if (ret != pdPASS) {
         TS_LOGE(TAG, "Failed to create SSH exec task");
@@ -2290,7 +2292,9 @@ esp_err_t ts_webui_ssh_exec_start_ex(const char *host, uint16_t port,
         TS_LOGI(TAG, "Initialized variables for %s (status=running)", params->var_name);
     }
     
-    /* 创建任务 */
+    /* 创建任务 - MUST use DRAM stack because keystore access requires NVS.
+     * SPI Flash operations disable cache, and PSRAM access requires cache.
+     */
     BaseType_t ret = xTaskCreate(ssh_exec_task, "ssh_exec", 8192, params, 5, &s_exec_task);
     if (ret != pdPASS) {
         TS_LOGE(TAG, "Failed to create SSH exec task");

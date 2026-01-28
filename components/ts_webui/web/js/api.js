@@ -45,7 +45,7 @@ class TianShanAPI {
     /**
      * 通用 API 请求方法
      */
-    async request(endpoint, method = 'GET', data = null) {
+    async request(endpoint, method = 'GET', data = null, timeout = 30000) {
         const headers = {
             'Content-Type': 'application/json'
         };
@@ -54,17 +54,25 @@ class TianShanAPI {
             headers['Authorization'] = `Bearer ${this.token}`;
         }
         
+        // 创建超时控制器
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), timeout);
+        
         const options = {
             method,
-            headers
+            headers,
+            signal: controller.signal
         };
         
         if (data && method !== 'GET') {
             options.body = JSON.stringify(data);
+            // 调试：打印请求体大小
+            console.debug(`API ${method} ${endpoint}: body size = ${options.body.length} bytes`);
         }
         
         try {
             const response = await fetch(getApiUrl(endpoint), options);
+            clearTimeout(timeoutId);
             const json = await response.json();
             
             // 返回 JSON 响应，即使是错误码也返回（让调用者决定如何处理）
@@ -75,10 +83,13 @@ class TianShanAPI {
             
             return json;
         } catch (error) {
+            clearTimeout(timeoutId);
             // 只对非预期错误打印日志
-            if (error.name !== 'AbortError') {
-                console.error(`API Error: ${endpoint}`, error);
+            if (error.name === 'AbortError') {
+                console.error(`API Timeout: ${endpoint} (>${timeout}ms)`);
+                throw new Error('Request timeout');
             }
+            console.error(`API Error: ${endpoint}`, error);
             throw error;
         }
     }
@@ -256,14 +267,14 @@ class TianShanAPI {
     async natSave() { return this.call('nat.save', null, 'POST'); }
     
     // =====================================================================
-    //                         设备 API (device.*, agx.*, fan.*)
+    //                         设备 API (device.*, monitor.*, fan.*)
     // =====================================================================
     
     async deviceStatus(name = null) { return this.call('device.status', name ? { name } : null); }
     async devicePower(name, on) { return this.call('device.power', { name, on }, 'POST'); }
     async deviceReset(name) { return this.call('device.reset', { name }, 'POST'); }
-    async agxStatus() { return this.call('agx.status'); }
-    async agxData() { return this.call('agx.data'); }
+    async agxStatus() { return this.call('monitor.status'); }
+    async agxData() { return this.call('monitor.data'); }
     async fanStatus(id = null) { return this.call('fan.status', id !== null ? { id } : null); }
     async fanSet(id, duty) { return this.call('fan.set', { id, duty }, 'POST'); }
     async fanMode(id, mode) { return this.call('fan.mode', { id, mode }, 'POST'); }

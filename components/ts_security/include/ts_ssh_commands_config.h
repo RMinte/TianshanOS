@@ -38,7 +38,7 @@ extern "C" {
 #define TS_SSH_CMD_NAME_MAX       64   /**< 指令名称最大长度 */
 #define TS_SSH_CMD_COMMAND_MAX   256   /**< SSH 命令最大长度 */
 #define TS_SSH_CMD_DESC_MAX      128   /**< 描述最大长度 */
-#define TS_SSH_CMD_ICON_MAX        8   /**< 图标最大长度（emoji） */
+#define TS_SSH_CMD_ICON_MAX       64   /**< 图标最大长度（emoji 或 SD 卡路径） */
 #define TS_SSH_CMD_PATTERN_MAX    64   /**< 模式匹配最大长度 */
 #define TS_SSH_CMD_VARNAME_MAX    32   /**< 变量名最大长度 */
 #define TS_SSH_CMD_HOST_ID_MAX    32   /**< 主机 ID 最大长度 */
@@ -57,7 +57,7 @@ typedef struct {
     char name[TS_SSH_CMD_NAME_MAX];          /**< 指令名称 */
     char command[TS_SSH_CMD_COMMAND_MAX];    /**< SSH 命令 */
     char desc[TS_SSH_CMD_DESC_MAX];          /**< 描述 */
-    char icon[TS_SSH_CMD_ICON_MAX];          /**< 图标（emoji） */
+    char icon[TS_SSH_CMD_ICON_MAX];          /**< 图标（emoji 或 /sdcard/images/xxx.png 路径） */
     
     /* 模式匹配配置 */
     char expect_pattern[TS_SSH_CMD_PATTERN_MAX];   /**< 成功匹配模式 */

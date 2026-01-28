@@ -289,14 +289,46 @@ typedef enum {
 } ts_auto_action_type_t;
 
 /**
+ * @brief LED control type
+ */
+typedef enum {
+    TS_LED_CTRL_FILL = 0,       /**< Fill with solid color */
+    TS_LED_CTRL_EFFECT,         /**< Run effect animation */
+    TS_LED_CTRL_BRIGHTNESS,     /**< Adjust brightness only */
+    TS_LED_CTRL_OFF,            /**< Turn off */
+    TS_LED_CTRL_TEXT,           /**< Display text (matrix only) */
+    TS_LED_CTRL_IMAGE,          /**< Display image (matrix only) */
+    TS_LED_CTRL_QRCODE,         /**< Display QR code (matrix only) */
+    TS_LED_CTRL_FILTER,         /**< Apply post-processing filter (matrix only) */
+    TS_LED_CTRL_FILTER_STOP,    /**< Stop filter (matrix only) */
+    TS_LED_CTRL_TEXT_STOP,      /**< Stop text overlay (matrix only) */
+} ts_led_ctrl_type_t;
+
+/**
  * @brief LED action parameters
  */
 typedef struct {
     char device[TS_AUTO_NAME_MAX_LEN];  /**< LED device (board/touch/matrix) */
+    ts_led_ctrl_type_t ctrl_type;       /**< Control type */
     uint8_t index;                       /**< LED index or 0xFF for all */
     uint8_t r, g, b;                     /**< RGB color */
-    char effect[TS_AUTO_NAME_MAX_LEN];  /**< Effect name or empty */
+    uint8_t brightness;                  /**< Brightness (0-255) */
+    char effect[TS_AUTO_NAME_MAX_LEN];  /**< Effect name (for EFFECT type) */
     uint16_t duration_ms;                /**< Duration, 0 = permanent */
+    uint8_t speed;                       /**< Speed parameter (0-100) */
+    
+    /* Matrix advanced features */
+    char text[128];                      /**< Text content (for TEXT type) */
+    char font[32];                       /**< Font name (for TEXT type) */
+    char image_path[128];                /**< Image path (for IMAGE type) */
+    char qr_text[256];                   /**< QR code content (for QRCODE type) */
+    char qr_ecc;                         /**< QR ECC level: L/M/Q/H */
+    char filter[32];                     /**< Filter name (for FILTER type) */
+    bool center;                         /**< Center image/text */
+    bool loop;                           /**< Loop text scroll */
+    char scroll[16];                     /**< Scroll direction: none/left/right/up/down */
+    char align[16];                      /**< Text alignment: left/center/right */
+    int16_t x, y;                        /**< Position offset */
 } ts_auto_action_led_t;
 
 /**
@@ -374,11 +406,42 @@ typedef struct {
 } ts_auto_action_cli_t;
 
 /**
+ * @brief Repeat execution mode for rule actions
+ */
+typedef enum {
+    TS_AUTO_REPEAT_ONCE = 0,            /**< Execute once */
+    TS_AUTO_REPEAT_WHILE_TRUE,           /**< Repeat while condition is true */
+    TS_AUTO_REPEAT_COUNT,                /**< Repeat specified count times */
+} ts_auto_repeat_mode_t;
+
+/**
+ * @brief Action-level condition (optional, for conditional execution within a rule)
+ */
+typedef struct {
+    bool has_condition;                  /**< Whether this action has a condition */
+    char variable[TS_AUTO_NAME_MAX_LEN]; /**< Variable name to check */
+    ts_auto_operator_t op;               /**< Comparison operator */
+    ts_auto_value_t value;               /**< Comparison value */
+} ts_auto_action_condition_t;
+
+/**
  * @brief Action definition
  */
 typedef struct {
     ts_auto_action_type_t type;          /**< Action type */
     uint16_t delay_ms;                   /**< Delay before execution */
+    bool async;                          /**< Execute asynchronously (non-blocking) */
+    
+    /* Repeat execution options (for rule actions) */
+    ts_auto_repeat_mode_t repeat_mode;   /**< Repeat mode */
+    uint8_t repeat_count;                /**< Repeat count (for REPEAT_COUNT mode) */
+    uint16_t repeat_interval_ms;         /**< Interval between repeats */
+    
+    /* Action-level condition (optional) */
+    ts_auto_action_condition_t condition; /**< Execute only if condition is met */
+    
+    /* Template reference (for rule actions) */
+    char template_id[TS_AUTO_NAME_MAX_LEN]; /**< Source template ID (optional, for tracing) */
 
     union {
         ts_auto_action_led_t led;
@@ -399,7 +462,9 @@ typedef struct {
 typedef struct {
     char id[TS_AUTO_NAME_MAX_LEN];      /**< Unique rule ID */
     char name[TS_AUTO_LABEL_MAX_LEN];   /**< Display name */
+    char icon[64];                       /**< Display icon (emoji or /sdcard/images/xxx.png) */
     bool enabled;                        /**< Is rule enabled */
+    bool manual_trigger;                 /**< Can be manually triggered from UI */
     uint32_t cooldown_ms;                /**< Min time between triggers */
 
     ts_auto_condition_group_t conditions; /**< Trigger conditions */

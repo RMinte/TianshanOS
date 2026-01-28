@@ -600,12 +600,16 @@ static void process_glitch(ts_led_rgb_t *buffer, size_t count,
 
 /**
  * @brief Process rainbow effect
+ * 
+ * Shifts hue over time to create rainbow color cycling effect.
+ * Saturation parameter controls how much to boost the saturation (0-255).
+ * 255 = maximum saturation boost, 0 = keep original saturation.
  */
 static void process_rainbow(ts_led_rgb_t *buffer, size_t count,
                             const ts_led_effect_config_t *config, uint32_t time_ms)
 {
     float speed = config->params.rainbow.speed;
-    uint8_t sat = config->params.rainbow.saturation;
+    uint8_t sat_boost = config->params.rainbow.saturation;
     
     float hue_offset = fmodf(speed * time_ms / 1000.0f, 360.0f);
     
@@ -616,8 +620,11 @@ static void process_rainbow(ts_led_rgb_t *buffer, size_t count,
         rgb_to_hsv(buffer[i], &h, &s, &v);
         
         // Shift hue
-        h = (uint16_t)((h + hue_offset)) % 360;
-        s = (s * sat) >> 8;
+        h = (uint16_t)((h + (int)hue_offset)) % 360;
+        
+        // Boost saturation: blend original with full saturation
+        // sat_boost=255 means full saturation, sat_boost=0 means keep original
+        s = s + (((255 - s) * sat_boost) >> 8);
         
         // Convert back to RGB
         buffer[i] = hsv_to_rgb(h, s, v);

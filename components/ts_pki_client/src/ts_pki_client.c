@@ -20,6 +20,7 @@
 #include "esp_mac.h"
 #include "esp_http_client.h"
 #include "esp_crt_bundle.h"
+#include "esp_heap_caps.h"
 #include "cJSON.h"
 
 #include "ts_pki_client.h"
@@ -530,6 +531,9 @@ esp_err_t ts_pki_client_start_auto_enroll(ts_pki_enroll_callback_t callback,
     s_client.callback_data = user_data;
     s_client.stop_requested = false;
     
+    /* MUST use DRAM stack - PKI operations access NVS (SPI Flash).
+     * SPI Flash operations disable cache, and PSRAM access requires cache.
+     */
     BaseType_t ret = xTaskCreate(auto_enroll_task, "pki_enroll", 8192,
                                   NULL, 5, &s_client.enroll_task);
     if (ret != pdPASS) {

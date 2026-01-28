@@ -144,7 +144,9 @@ esp_err_t ts_ota_www_start(const char *url, bool skip_cert_verify,
     s_www_config.progress_cb = progress_cb;
     s_www_config.user_data = user_data;
     
-    // Create task
+    /* Create task - MUST use DRAM stack because OTA writes to SPI Flash.
+     * SPI Flash operations disable cache, and PSRAM access requires cache.
+     */
     BaseType_t ret = xTaskCreate(
         www_ota_task,
         "ota_www",
@@ -459,7 +461,9 @@ esp_err_t ts_ota_www_start_sdcard(const char *filepath,
     s_www_config.progress_cb = progress_cb;
     s_www_config.user_data = user_data;
     
-    // Create task
+    /* Create task - MUST use DRAM stack because OTA writes to SPI Flash.
+     * SPI Flash operations disable cache, and PSRAM access requires cache.
+     */
     BaseType_t ret = xTaskCreate(
         www_ota_sdcard_task,
         "ota_www_sd",

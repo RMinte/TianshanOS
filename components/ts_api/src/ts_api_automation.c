@@ -415,7 +415,9 @@ static esp_err_t api_automation_rules_list(const cJSON *params, ts_api_result_t 
         cJSON *rule_obj = cJSON_CreateObject();
         cJSON_AddStringToObject(rule_obj, "id", rule.id);
         cJSON_AddStringToObject(rule_obj, "name", rule.name);
+        cJSON_AddStringToObject(rule_obj, "icon", rule.icon[0] ? rule.icon : "⚡");
         cJSON_AddBoolToObject(rule_obj, "enabled", rule.enabled);
+        cJSON_AddBoolToObject(rule_obj, "manual_trigger", rule.manual_trigger);
         cJSON_AddNumberToObject(rule_obj, "trigger_count", rule.trigger_count);
         cJSON_AddNumberToObject(rule_obj, "last_trigger_ms", (double)rule.last_trigger_ms);
         cJSON_AddNumberToObject(rule_obj, "cooldown_ms", rule.cooldown_ms);
@@ -555,7 +557,11 @@ static esp_err_t api_automation_rules_get(const cJSON *params, ts_api_result_t *
     result->data = cJSON_CreateObject();
     cJSON_AddStringToObject(result->data, "id", rule->id);
     cJSON_AddStringToObject(result->data, "name", rule->name);
+    if (rule->icon[0]) {
+        cJSON_AddStringToObject(result->data, "icon", rule->icon);
+    }
     cJSON_AddBoolToObject(result->data, "enabled", rule->enabled);
+    cJSON_AddBoolToObject(result->data, "manual_trigger", rule->manual_trigger);
     cJSON_AddNumberToObject(result->data, "cooldown_ms", rule->cooldown_ms);
     cJSON_AddStringToObject(result->data, "logic", 
                             rule->conditions.logic == TS_AUTO_LOGIC_OR ? "or" : "and");
@@ -606,17 +612,84 @@ static esp_err_t api_automation_rules_get(const cJSON *params, ts_api_result_t *
         }
     }
 
-    // 添加动作数组 - 查找匹配的动作模板
+    // 添加动作数组 - 完整序列化
     cJSON *actions = cJSON_AddArrayToObject(result->data, "actions");
     for (int i = 0; i < rule->action_count; i++) {
         const ts_auto_action_t *a = &rule->actions[i];
         cJSON *act = cJSON_CreateObject();
         
+        // 添加动作类型
+        const char *type_str = "log";
+        switch (a->type) {
+            case TS_AUTO_ACT_LED: type_str = "led"; break;
+            case TS_AUTO_ACT_GPIO: type_str = "gpio"; break;
+            case TS_AUTO_ACT_DEVICE_CTRL: type_str = "device"; break;
+            case TS_AUTO_ACT_CLI: type_str = "cli"; break;
+            case TS_AUTO_ACT_LOG: type_str = "log"; break;
+            case TS_AUTO_ACT_SET_VAR: type_str = "set_var"; break;
+            case TS_AUTO_ACT_WEBHOOK: type_str = "webhook"; break;
+            case TS_AUTO_ACT_SSH_CMD: type_str = "ssh"; break;
+            default: type_str = "log"; break;
+        }
+        cJSON_AddStringToObject(act, "type", type_str);
+        cJSON_AddNumberToObject(act, "delay_ms", a->delay_ms);
+        
+        // 添加重复执行选项
+        if (a->repeat_mode != TS_AUTO_REPEAT_ONCE) {
+            const char *repeat_mode_str = "once";
+            switch (a->repeat_mode) {
+                case TS_AUTO_REPEAT_WHILE_TRUE: repeat_mode_str = "while_true"; break;
+                case TS_AUTO_REPEAT_COUNT: repeat_mode_str = "count"; break;
+                default: break;
+            }
+            cJSON_AddStringToObject(act, "repeat_mode", repeat_mode_str);
+            cJSON_AddNumberToObject(act, "repeat_interval_ms", a->repeat_interval_ms);
+            if (a->repeat_mode == TS_AUTO_REPEAT_COUNT) {
+                cJSON_AddNumberToObject(act, "repeat_count", a->repeat_count);
+            }
+        }
+        
+        // 如果有模板 ID，添加它
+        if (a->template_id[0]) {
+            cJSON_AddStringToObject(act, "template_id", a->template_id);
+        }
+        
+        // 根据类型添加特定字段
+        switch (a->type) {
+            case TS_AUTO_ACT_LED:
+                cJSON_AddStringToObject(act, "device", a->led.device);
+                cJSON_AddNumberToObject(act, "index", a->led.index);
+                cJSON_AddNumberToObject(act, "r", a->led.r);
+                cJSON_AddNumberToObject(act, "g", a->led.g);
+                cJSON_AddNumberToObject(act, "b", a->led.b);
+                if (a->led.effect[0]) {
+                    cJSON_AddStringToObject(act, "effect", a->led.effect);
+                }
+                cJSON_AddNumberToObject(act, "duration_ms", a->led.duration_ms);
+                break;
+            case TS_AUTO_ACT_GPIO:
+                cJSON_AddNumberToObject(act, "pin", a->gpio.pin);
+                cJSON_AddBoolToObject(act, "level", a->gpio.level);
+                cJSON_AddNumberToObject(act, "pulse_ms", a->gpio.pulse_ms);
+                break;
+            case TS_AUTO_ACT_DEVICE_CTRL:
+                cJSON_AddStringToObject(act, "device", a->device.device);
+                cJSON_AddStringToObject(act, "action", a->device.action);
+                break;
+            case TS_AUTO_ACT_CLI:
+                cJSON_AddStringToObject(act, "command", a->cli.command);
+                break;
+            case TS_AUTO_ACT_LOG:
+                cJSON_AddStringToObject(act, "message", a->log.message);
+                cJSON_AddNumberToObject(act, "level", a->log.level);
+                break;
+            default:
+                break;
+        }
+        
         // 尝试通过动作配置查找匹配的模板 ID
-        const char *found_template_id = NULL;
         for (int j = 0; j < tpl_count && templates; j++) {
             ts_action_template_t *tpl = &templates[j];
-            // 比较动作类型和关键字段
             if (tpl->action.type == a->type) {
                 bool match = false;
                 switch (a->type) {
@@ -630,20 +703,42 @@ static esp_err_t api_automation_rules_get(const cJSON *params, ts_api_result_t *
                         match = (strcmp(tpl->action.log.message, a->log.message) == 0);
                         break;
                     default:
-                        match = true; // 其他类型简单匹配
+                        match = true;
                         break;
                 }
                 if (match) {
-                    found_template_id = tpl->id;
+                    cJSON_AddStringToObject(act, "template_id", tpl->id);
                     break;
                 }
             }
         }
         
-        if (found_template_id) {
-            cJSON_AddStringToObject(act, "template_id", found_template_id);
+        // 序列化动作级别的条件
+        if (a->condition.has_condition) {
+            cJSON *action_cond = cJSON_CreateObject();
+            cJSON_AddStringToObject(action_cond, "variable", a->condition.variable);
+            cJSON_AddStringToObject(action_cond, "operator", operator_to_string(a->condition.op));
+            
+            switch (a->condition.value.type) {
+                case TS_AUTO_VAL_BOOL:
+                    cJSON_AddBoolToObject(action_cond, "value", a->condition.value.bool_val);
+                    break;
+                case TS_AUTO_VAL_INT:
+                    cJSON_AddNumberToObject(action_cond, "value", a->condition.value.int_val);
+                    break;
+                case TS_AUTO_VAL_FLOAT:
+                    cJSON_AddNumberToObject(action_cond, "value", a->condition.value.float_val);
+                    break;
+                case TS_AUTO_VAL_STRING:
+                    cJSON_AddStringToObject(action_cond, "value", a->condition.value.str_val);
+                    break;
+                default:
+                    cJSON_AddNullToObject(action_cond, "value");
+                    break;
+            }
+            
+            cJSON_AddItemToObject(act, "condition", action_cond);
         }
-        cJSON_AddNumberToObject(act, "delay_ms", a->delay_ms);
         
         cJSON_AddItemToArray(actions, act);
     }
@@ -717,9 +812,21 @@ static esp_err_t api_automation_rules_add(const cJSON *params, ts_api_result_t *
     strncpy(rule.id, id_param->valuestring, sizeof(rule.id) - 1);
     strncpy(rule.name, name_param->valuestring, sizeof(rule.name) - 1);
     
+    // 图标（可选）
+    cJSON *icon = cJSON_GetObjectItem(params, "icon");
+    if (icon && cJSON_IsString(icon)) {
+        strncpy(rule.icon, icon->valuestring, sizeof(rule.icon) - 1);
+    } else {
+        strncpy(rule.icon, "⚡", sizeof(rule.icon) - 1);
+    }
+    
     // 可选参数
     cJSON *enabled = cJSON_GetObjectItem(params, "enabled");
     rule.enabled = enabled ? cJSON_IsTrue(enabled) : true;
+    
+    // 手动触发标记
+    cJSON *manual_trigger = cJSON_GetObjectItem(params, "manual_trigger");
+    rule.manual_trigger = manual_trigger ? cJSON_IsTrue(manual_trigger) : false;
     
     cJSON *cooldown = cJSON_GetObjectItem(params, "cooldown_ms");
     rule.cooldown_ms = cooldown && cJSON_IsNumber(cooldown) ? (uint32_t)cooldown->valueint : 0;
@@ -799,14 +906,73 @@ static esp_err_t api_automation_rules_add(const cJSON *params, ts_api_result_t *
                             // 复制动作配置
                             memcpy(a, &tpl.action, sizeof(ts_auto_action_t));
                             
+                            // 保存模板 ID 用于追踪
+                            strncpy(a->template_id, template_id->valuestring, sizeof(a->template_id) - 1);
+                            
                             // 如果提供了覆盖的 delay_ms，使用它
                             cJSON *delay = cJSON_GetObjectItem(act, "delay_ms");
                             if (delay && cJSON_IsNumber(delay)) {
                                 a->delay_ms = (uint16_t)delay->valueint;
                             }
                             
-                            TS_LOGI(TAG, "Rule action from template: %s (type=%d)", 
-                                     template_id->valuestring, a->type);
+                            // 解析重复执行选项
+                            cJSON *repeat_mode = cJSON_GetObjectItem(act, "repeat_mode");
+                            if (repeat_mode && cJSON_IsString(repeat_mode)) {
+                                if (strcmp(repeat_mode->valuestring, "while_true") == 0) {
+                                    a->repeat_mode = TS_AUTO_REPEAT_WHILE_TRUE;
+                                } else if (strcmp(repeat_mode->valuestring, "count") == 0) {
+                                    a->repeat_mode = TS_AUTO_REPEAT_COUNT;
+                                } else {
+                                    a->repeat_mode = TS_AUTO_REPEAT_ONCE;
+                                }
+                            }
+                            
+                            cJSON *repeat_count = cJSON_GetObjectItem(act, "repeat_count");
+                            if (repeat_count && cJSON_IsNumber(repeat_count)) {
+                                a->repeat_count = (uint8_t)repeat_count->valueint;
+                            }
+                            
+                            cJSON *repeat_interval = cJSON_GetObjectItem(act, "repeat_interval_ms");
+                            if (repeat_interval && cJSON_IsNumber(repeat_interval)) {
+                                a->repeat_interval_ms = (uint16_t)repeat_interval->valueint;
+                            }
+                            
+                            // 解析动作级别的条件
+                            cJSON *action_cond = cJSON_GetObjectItem(act, "condition");
+                            if (action_cond && cJSON_IsObject(action_cond)) {
+                                a->condition.has_condition = true;
+                                
+                                cJSON *cond_var = cJSON_GetObjectItem(action_cond, "variable");
+                                cJSON *cond_op = cJSON_GetObjectItem(action_cond, "operator");
+                                cJSON *cond_val = cJSON_GetObjectItem(action_cond, "value");
+                                
+                                if (cond_var && cJSON_IsString(cond_var)) {
+                                    strncpy(a->condition.variable, cond_var->valuestring, 
+                                            sizeof(a->condition.variable) - 1);
+                                }
+                                if (cond_op && cJSON_IsString(cond_op)) {
+                                    a->condition.op = parse_operator(cond_op->valuestring);
+                                }
+                                if (cond_val) {
+                                    if (cJSON_IsBool(cond_val)) {
+                                        a->condition.value.type = TS_AUTO_VAL_BOOL;
+                                        a->condition.value.bool_val = cJSON_IsTrue(cond_val);
+                                    } else if (cJSON_IsNumber(cond_val)) {
+                                        a->condition.value.type = TS_AUTO_VAL_FLOAT;
+                                        a->condition.value.float_val = cond_val->valuedouble;
+                                    } else if (cJSON_IsString(cond_val)) {
+                                        a->condition.value.type = TS_AUTO_VAL_STRING;
+                                        strncpy(a->condition.value.str_val, cond_val->valuestring, 
+                                                sizeof(a->condition.value.str_val) - 1);
+                                    }
+                                }
+                                
+                                TS_LOGI(TAG, "Action condition: %s %d ...", 
+                                         a->condition.variable, a->condition.op);
+                            }
+                            
+                            TS_LOGI(TAG, "Rule action from template: %s (type=%d, repeat=%d)", 
+                                     template_id->valuestring, a->type, a->repeat_mode);
                         } else {
                             TS_LOGW(TAG, "Action template not found: %s, using LOG action as placeholder", 
                                     template_id->valuestring);
@@ -837,6 +1003,8 @@ static esp_err_t api_automation_rules_add(const cJSON *params, ts_api_result_t *
                             cJSON *r = cJSON_GetObjectItem(act, "r");
                             cJSON *g = cJSON_GetObjectItem(act, "g");
                             cJSON *b = cJSON_GetObjectItem(act, "b");
+                            cJSON *effect = cJSON_GetObjectItem(act, "effect");
+                            cJSON *duration = cJSON_GetObjectItem(act, "duration");
                             
                             if (device && cJSON_IsString(device)) {
                                 strncpy(a->led.device, device->valuestring, sizeof(a->led.device) - 1);
@@ -845,6 +1013,12 @@ static esp_err_t api_automation_rules_add(const cJSON *params, ts_api_result_t *
                             a->led.r = r && cJSON_IsNumber(r) ? (uint8_t)r->valueint : 0;
                             a->led.g = g && cJSON_IsNumber(g) ? (uint8_t)g->valueint : 0;
                             a->led.b = b && cJSON_IsNumber(b) ? (uint8_t)b->valueint : 0;
+                            if (effect && cJSON_IsString(effect)) {
+                                strncpy(a->led.effect, effect->valuestring, sizeof(a->led.effect) - 1);
+                                TS_LOGI(TAG, "Parsed LED action: device=%s, effect=%s", 
+                                        a->led.device, a->led.effect);
+                            }
+                            a->led.duration_ms = duration && cJSON_IsNumber(duration) ? (uint16_t)duration->valueint : 0;
                             break;
                         }
                         case TS_AUTO_ACT_GPIO: {
@@ -920,6 +1094,37 @@ static esp_err_t api_automation_rules_add(const cJSON *params, ts_api_result_t *
                         }
                         default:
                             break;
+                    }
+                    
+                    // 解析内联动作的条件
+                    cJSON *action_cond = cJSON_GetObjectItem(act, "condition");
+                    if (action_cond && cJSON_IsObject(action_cond)) {
+                        a->condition.has_condition = true;
+                        
+                        cJSON *cond_var = cJSON_GetObjectItem(action_cond, "variable");
+                        cJSON *cond_op = cJSON_GetObjectItem(action_cond, "operator");
+                        cJSON *cond_val = cJSON_GetObjectItem(action_cond, "value");
+                        
+                        if (cond_var && cJSON_IsString(cond_var)) {
+                            strncpy(a->condition.variable, cond_var->valuestring, 
+                                    sizeof(a->condition.variable) - 1);
+                        }
+                        if (cond_op && cJSON_IsString(cond_op)) {
+                            a->condition.op = parse_operator(cond_op->valuestring);
+                        }
+                        if (cond_val) {
+                            if (cJSON_IsBool(cond_val)) {
+                                a->condition.value.type = TS_AUTO_VAL_BOOL;
+                                a->condition.value.bool_val = cJSON_IsTrue(cond_val);
+                            } else if (cJSON_IsNumber(cond_val)) {
+                                a->condition.value.type = TS_AUTO_VAL_FLOAT;
+                                a->condition.value.float_val = cond_val->valuedouble;
+                            } else if (cJSON_IsString(cond_val)) {
+                                a->condition.value.type = TS_AUTO_VAL_STRING;
+                                strncpy(a->condition.value.str_val, cond_val->valuestring, 
+                                        sizeof(a->condition.value.str_val) - 1);
+                            }
+                        }
                     }
                     idx++;
                 }
@@ -2034,6 +2239,7 @@ static esp_err_t api_automation_actions_list(const cJSON *params, ts_api_result_
                     cJSON_AddStringToObject(tpl_obj, "type", 
                         action_type_to_string(templates[i].action.type));
                     cJSON_AddBoolToObject(tpl_obj, "enabled", templates[i].enabled);
+                    cJSON_AddBoolToObject(tpl_obj, "async", templates[i].async);
                     cJSON_AddNumberToObject(tpl_obj, "use_count", templates[i].use_count);
                     cJSON_AddNumberToObject(tpl_obj, "created_at", templates[i].created_at);
                     cJSON_AddNumberToObject(tpl_obj, "last_used_at", templates[i].last_used_at);
@@ -2073,8 +2279,12 @@ static esp_err_t api_automation_actions_add(const cJSON *params, ts_api_result_t
         return ESP_OK;
     }
     
+    /* Parse async mode at template level */
+    cJSON *async_tpl = cJSON_GetObjectItem(params, "async");
+    
     ts_action_template_t tpl = {
         .enabled = (enabled && cJSON_IsBool(enabled)) ? cJSON_IsTrue(enabled) : true,
+        .async = (async_tpl && cJSON_IsBool(async_tpl)) ? cJSON_IsTrue(async_tpl) : false,
     };
     
     strncpy(tpl.id, id->valuestring, sizeof(tpl.id) - 1);
@@ -2089,6 +2299,12 @@ static esp_err_t api_automation_actions_add(const cJSON *params, ts_api_result_t
     
     tpl.action.type = action_type_from_string(type->valuestring);
     
+    /* Parse delay_ms */
+    cJSON *delay_ms = cJSON_GetObjectItem(params, "delay_ms");
+    if (delay_ms && cJSON_IsNumber(delay_ms)) {
+        tpl.action.delay_ms = (uint16_t)delay_ms->valueint;
+    }
+    
     /* Parse type-specific parameters */
     switch (tpl.action.type) {
         case TS_AUTO_ACT_LED: {
@@ -2099,6 +2315,7 @@ static esp_err_t api_automation_actions_add(const cJSON *params, ts_api_result_t
                 cJSON *color = cJSON_GetObjectItem(led, "color");
                 cJSON *effect = cJSON_GetObjectItem(led, "effect");
                 cJSON *duration = cJSON_GetObjectItem(led, "duration_ms");
+                cJSON *ctrl_type = cJSON_GetObjectItem(led, "ctrl_type");
                 
                 if (device && cJSON_IsString(device)) {
                     strncpy(tpl.action.led.device, device->valuestring, 
@@ -2118,6 +2335,96 @@ static esp_err_t api_automation_actions_add(const cJSON *params, ts_api_result_t
                 }
                 tpl.action.led.duration_ms = (duration && cJSON_IsNumber(duration)) ?
                                              (uint16_t)duration->valueint : 0;
+                
+                /* 解析控制类型 */
+                if (ctrl_type && cJSON_IsString(ctrl_type)) {
+                    const char *ct = ctrl_type->valuestring;
+                    if (strcmp(ct, "fill") == 0) tpl.action.led.ctrl_type = TS_LED_CTRL_FILL;
+                    else if (strcmp(ct, "effect") == 0) tpl.action.led.ctrl_type = TS_LED_CTRL_EFFECT;
+                    else if (strcmp(ct, "brightness") == 0) tpl.action.led.ctrl_type = TS_LED_CTRL_BRIGHTNESS;
+                    else if (strcmp(ct, "off") == 0) tpl.action.led.ctrl_type = TS_LED_CTRL_OFF;
+                    else if (strcmp(ct, "text") == 0) tpl.action.led.ctrl_type = TS_LED_CTRL_TEXT;
+                    else if (strcmp(ct, "image") == 0) tpl.action.led.ctrl_type = TS_LED_CTRL_IMAGE;
+                    else if (strcmp(ct, "qrcode") == 0) tpl.action.led.ctrl_type = TS_LED_CTRL_QRCODE;
+                    else if (strcmp(ct, "filter") == 0) tpl.action.led.ctrl_type = TS_LED_CTRL_FILTER;
+                    else if (strcmp(ct, "filter_stop") == 0) tpl.action.led.ctrl_type = TS_LED_CTRL_FILTER_STOP;
+                    else if (strcmp(ct, "text_stop") == 0) tpl.action.led.ctrl_type = TS_LED_CTRL_TEXT_STOP;
+                }
+                
+                /* 解析 brightness 和 speed */
+                cJSON *brightness = cJSON_GetObjectItem(led, "brightness");
+                if (brightness && cJSON_IsNumber(brightness)) {
+                    tpl.action.led.brightness = (uint8_t)brightness->valueint;
+                }
+                cJSON *speed = cJSON_GetObjectItem(led, "speed");
+                if (speed && cJSON_IsNumber(speed)) {
+                    tpl.action.led.speed = (uint8_t)speed->valueint;
+                }
+                
+                /* 解析 Matrix 高级功能参数 */
+                cJSON *text = cJSON_GetObjectItem(led, "text");
+                if (text && cJSON_IsString(text)) {
+                    strncpy(tpl.action.led.text, text->valuestring, 
+                            sizeof(tpl.action.led.text) - 1);
+                }
+                cJSON *font = cJSON_GetObjectItem(led, "font");
+                if (font && cJSON_IsString(font)) {
+                    strncpy(tpl.action.led.font, font->valuestring, 
+                            sizeof(tpl.action.led.font) - 1);
+                }
+                cJSON *image_path = cJSON_GetObjectItem(led, "image_path");
+                if (image_path && cJSON_IsString(image_path)) {
+                    strncpy(tpl.action.led.image_path, image_path->valuestring, 
+                            sizeof(tpl.action.led.image_path) - 1);
+                }
+                cJSON *qr_text = cJSON_GetObjectItem(led, "qr_text");
+                if (qr_text && cJSON_IsString(qr_text)) {
+                    strncpy(tpl.action.led.qr_text, qr_text->valuestring, 
+                            sizeof(tpl.action.led.qr_text) - 1);
+                }
+                cJSON *qr_ecc = cJSON_GetObjectItem(led, "qr_ecc");
+                if (qr_ecc && cJSON_IsString(qr_ecc) && qr_ecc->valuestring[0]) {
+                    tpl.action.led.qr_ecc = qr_ecc->valuestring[0]; /* L/M/Q/H */
+                }
+                cJSON *filter = cJSON_GetObjectItem(led, "filter");
+                if (filter && cJSON_IsString(filter)) {
+                    strncpy(tpl.action.led.filter, filter->valuestring, 
+                            sizeof(tpl.action.led.filter) - 1);
+                }
+                cJSON *center = cJSON_GetObjectItem(led, "center");
+                if (center && cJSON_IsBool(center)) {
+                    tpl.action.led.center = cJSON_IsTrue(center);
+                }
+                cJSON *loop = cJSON_GetObjectItem(led, "loop");
+                if (loop && cJSON_IsBool(loop)) {
+                    tpl.action.led.loop = cJSON_IsTrue(loop);
+                }
+                cJSON *scroll = cJSON_GetObjectItem(led, "scroll");
+                if (scroll && cJSON_IsString(scroll)) {
+                    strncpy(tpl.action.led.scroll, scroll->valuestring, 
+                            sizeof(tpl.action.led.scroll) - 1);
+                }
+                cJSON *align = cJSON_GetObjectItem(led, "align");
+                if (align && cJSON_IsString(align)) {
+                    strncpy(tpl.action.led.align, align->valuestring, 
+                            sizeof(tpl.action.led.align) - 1);
+                }
+                cJSON *x = cJSON_GetObjectItem(led, "x");
+                if (x && cJSON_IsNumber(x)) {
+                    tpl.action.led.x = (int16_t)x->valueint;
+                }
+                cJSON *y = cJSON_GetObjectItem(led, "y");
+                if (y && cJSON_IsNumber(y)) {
+                    tpl.action.led.y = (int16_t)y->valueint;
+                }
+                
+                /* 解析 r/g/b 分离颜色参数 */
+                cJSON *r = cJSON_GetObjectItem(led, "r");
+                cJSON *g = cJSON_GetObjectItem(led, "g");
+                cJSON *b = cJSON_GetObjectItem(led, "b");
+                if (r && cJSON_IsNumber(r)) tpl.action.led.r = (uint8_t)r->valueint;
+                if (g && cJSON_IsNumber(g)) tpl.action.led.g = (uint8_t)g->valueint;
+                if (b && cJSON_IsNumber(b)) tpl.action.led.b = (uint8_t)b->valueint;
             }
             break;
         }
@@ -2334,13 +2641,62 @@ static esp_err_t api_automation_actions_get(const cJSON *params, ts_api_result_t
         case TS_AUTO_ACT_LED: {
             cJSON *led = cJSON_AddObjectToObject(result->data, "led");
             cJSON_AddStringToObject(led, "device", tpl.action.led.device);
+            /* 控制类型 */
+            const char *ctrl_type_str = "fill";
+            switch (tpl.action.led.ctrl_type) {
+                case TS_LED_CTRL_EFFECT: ctrl_type_str = "effect"; break;
+                case TS_LED_CTRL_BRIGHTNESS: ctrl_type_str = "brightness"; break;
+                case TS_LED_CTRL_OFF: ctrl_type_str = "off"; break;
+                case TS_LED_CTRL_TEXT: ctrl_type_str = "text"; break;
+                case TS_LED_CTRL_IMAGE: ctrl_type_str = "image"; break;
+                case TS_LED_CTRL_QRCODE: ctrl_type_str = "qrcode"; break;
+                case TS_LED_CTRL_FILTER: ctrl_type_str = "filter"; break;
+                case TS_LED_CTRL_FILTER_STOP: ctrl_type_str = "filter_stop"; break;
+                case TS_LED_CTRL_TEXT_STOP: ctrl_type_str = "text_stop"; break;
+                default: ctrl_type_str = "fill"; break;
+            }
+            cJSON_AddStringToObject(led, "ctrl_type", ctrl_type_str);
             cJSON_AddNumberToObject(led, "index", tpl.action.led.index);
             char color_str[8];
             snprintf(color_str, sizeof(color_str), "#%02X%02X%02X", 
                      tpl.action.led.r, tpl.action.led.g, tpl.action.led.b);
             cJSON_AddStringToObject(led, "color", color_str);
-            cJSON_AddStringToObject(led, "effect", tpl.action.led.effect);
+            cJSON_AddNumberToObject(led, "brightness", tpl.action.led.brightness);
+            if (tpl.action.led.effect[0]) {
+                cJSON_AddStringToObject(led, "effect", tpl.action.led.effect);
+            }
+            cJSON_AddNumberToObject(led, "speed", tpl.action.led.speed);
             cJSON_AddNumberToObject(led, "duration_ms", tpl.action.led.duration_ms);
+            /* Matrix 高级功能 */
+            if (tpl.action.led.text[0]) {
+                cJSON_AddStringToObject(led, "text", tpl.action.led.text);
+            }
+            if (tpl.action.led.font[0]) {
+                cJSON_AddStringToObject(led, "font", tpl.action.led.font);
+            }
+            if (tpl.action.led.image_path[0]) {
+                cJSON_AddStringToObject(led, "image_path", tpl.action.led.image_path);
+            }
+            if (tpl.action.led.qr_text[0]) {
+                cJSON_AddStringToObject(led, "qr_text", tpl.action.led.qr_text);
+            }
+            if (tpl.action.led.qr_ecc) {
+                char ecc_str[2] = { tpl.action.led.qr_ecc, '\0' };
+                cJSON_AddStringToObject(led, "qr_ecc", ecc_str);
+            }
+            if (tpl.action.led.filter[0]) {
+                cJSON_AddStringToObject(led, "filter", tpl.action.led.filter);
+            }
+            cJSON_AddBoolToObject(led, "center", tpl.action.led.center);
+            cJSON_AddBoolToObject(led, "loop", tpl.action.led.loop);
+            if (tpl.action.led.scroll[0]) {
+                cJSON_AddStringToObject(led, "scroll", tpl.action.led.scroll);
+            }
+            if (tpl.action.led.align[0]) {
+                cJSON_AddStringToObject(led, "align", tpl.action.led.align);
+            }
+            cJSON_AddNumberToObject(led, "x", tpl.action.led.x);
+            cJSON_AddNumberToObject(led, "y", tpl.action.led.y);
             break;
         }
         case TS_AUTO_ACT_LOG: {
@@ -2419,9 +2775,16 @@ static esp_err_t api_automation_actions_execute(const cJSON *params, ts_api_resu
     
     result->data = cJSON_CreateObject();
     
-    if (ret == ESP_OK && exec_result.status == TS_ACTION_STATUS_SUCCESS) {
+    /* Handle async (queued) execution */
+    if (ret == ESP_OK && exec_result.status == TS_ACTION_STATUS_QUEUED) {
+        result->code = TS_API_OK;
+        result->message = strdup("Action queued for async execution");
+        cJSON_AddBoolToObject(result->data, "async", true);
+        cJSON_AddStringToObject(result->data, "status", "queued");
+    } else if (ret == ESP_OK && exec_result.status == TS_ACTION_STATUS_SUCCESS) {
         result->code = TS_API_OK;
         result->message = strdup("Action executed successfully");
+        cJSON_AddBoolToObject(result->data, "async", false);
         cJSON_AddNumberToObject(result->data, "duration_ms", exec_result.duration_ms);
         if (exec_result.output[0]) {
             cJSON_AddStringToObject(result->data, "output", exec_result.output);
@@ -2437,7 +2800,6 @@ static esp_err_t api_automation_actions_execute(const cJSON *params, ts_api_resu
     
     return ESP_OK;
 }
-
 /*===========================================================================*/
 /*                        Action Statistics API                               */
 /*===========================================================================*/

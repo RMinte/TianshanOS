@@ -223,6 +223,8 @@ static esp_err_t api_monitor_stop(const cJSON *params, ts_api_result_t *result)
 
 esp_err_t ts_api_monitor_register(void)
 {
+    TS_LOGI(TAG, "Registering monitor APIs...");
+    
     static const ts_api_endpoint_t endpoints[] = {
         {
             .name = "monitor.status",
@@ -261,5 +263,11 @@ esp_err_t ts_api_monitor_register(void)
         },
     };
     
-    return ts_api_register_multiple(endpoints, sizeof(endpoints) / sizeof(endpoints[0]));
+    esp_err_t ret = ts_api_register_multiple(endpoints, sizeof(endpoints) / sizeof(endpoints[0]));
+    if (ret == ESP_OK) {
+        TS_LOGI(TAG, "Monitor APIs registered: %d endpoints", (int)(sizeof(endpoints) / sizeof(endpoints[0])));
+    } else {
+        TS_LOGE(TAG, "Failed to register monitor APIs: %s", esp_err_to_name(ret));
+    }
+    return ret;
 }

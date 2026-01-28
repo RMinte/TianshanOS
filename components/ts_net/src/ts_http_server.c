@@ -10,6 +10,7 @@
 #include "ts_log.h"
 #include "ts_storage.h"
 #include "esp_log.h"
+#include "esp_heap_caps.h"
 #include <string.h>
 
 #define TAG "ts_http"
@@ -67,7 +68,9 @@ esp_err_t ts_http_server_start(void)
     config.lru_purge_enable = true;  // 启用 LRU 清理，处理连接重置
     config.recv_wait_timeout = 5;    // 接收超时 5 秒
     config.send_wait_timeout = 5;    // 发送超时 5 秒
-    config.stack_size = 8192;        // 增加栈大小，支持终端命令执行
+    config.stack_size = 8192;        // 栈大小（处理大型 JSON 响应需要更多空间）
+    // 注意：任务栈必须在内部 RAM，因为 flash 操作时 PSRAM 不可用
+    config.task_caps = MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT;
     
     esp_err_t ret = httpd_start(&s_server, &config);
     if (ret == ESP_OK) {

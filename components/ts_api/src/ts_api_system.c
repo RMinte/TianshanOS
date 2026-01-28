@@ -711,6 +711,54 @@ static esp_err_t api_system_memory_detail(const cJSON *params, ts_api_result_t *
     return ESP_OK;
 }
 
+/**
+ * @brief system.apis - 列出所有已注册的 API（诊断用）
+ */
+static esp_err_t api_system_apis(const cJSON *params, ts_api_result_t *result)
+{
+    (void)params;
+    
+    cJSON *data = cJSON_CreateObject();
+    if (!data) {
+        ts_api_result_error(result, TS_API_ERR_NO_MEM, "Memory allocation failed");
+        return ESP_ERR_NO_MEM;
+    }
+    
+    // 获取所有 API 列表
+    cJSON *apis = ts_api_list(TS_API_CAT_MAX);  // TS_API_CAT_MAX = 所有类别
+    if (apis) {
+        cJSON_AddItemToObject(data, "apis", apis);
+    } else {
+        cJSON_AddArrayToObject(data, "apis");
+    }
+    
+    // 添加一些统计信息
+    int total = 0;
+    if (apis) {
+        total = cJSON_GetArraySize(apis);
+    }
+    cJSON_AddNumberToObject(data, "total", total);
+    
+    // 检查 monitor.* API 是否存在
+    bool has_monitor_status = false;
+    bool has_monitor_data = false;
+    if (apis) {
+        cJSON *item;
+        cJSON_ArrayForEach(item, apis) {
+            cJSON *name = cJSON_GetObjectItem(item, "name");
+            if (name && cJSON_IsString(name)) {
+                if (strcmp(name->valuestring, "monitor.status") == 0) has_monitor_status = true;
+                if (strcmp(name->valuestring, "monitor.data") == 0) has_monitor_data = true;
+            }
+        }
+    }
+    cJSON_AddBoolToObject(data, "has_monitor_status", has_monitor_status);
+    cJSON_AddBoolToObject(data, "has_monitor_data", has_monitor_data);
+    
+    ts_api_result_ok(result, data);
+    return ESP_OK;
+}
+
 /*===========================================================================*/
 /*                      Register System APIs                                  */
 /*===========================================================================*/
@@ -773,6 +821,14 @@ esp_err_t ts_api_system_register(void)
             .handler = api_system_log_level,
             .requires_auth = true,
             .permission = "system.config"
+        },
+        {
+            .name = "system.apis",
+            .description = "List all registered APIs",
+            .category = TS_API_CAT_SYSTEM,
+            .handler = api_system_apis,
+            .requires_auth = false,
+            .permission = NULL
         }
     };
     

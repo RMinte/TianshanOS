@@ -135,7 +135,6 @@ document.addEventListener('DOMContentLoaded', () => {
     router.register('/', loadSystemPage);
     router.register('/system', loadSystemPage);
     router.register('/network', loadNetworkPage);
-    router.register('/device', loadDevicePage);
     router.register('/ota', loadOtaPage);
     router.register('/files', loadFilesPage);
     // 日志页面已整合到终端页面模态框（重定向到终端并打开模态框）
@@ -482,6 +481,20 @@ async function loadSystemPage() {
                 </div>
             </div>
             
+            <!-- 快捷操作 - 放在首位，方便用户快速执行 -->
+            <div class="section">
+                <div class="section-header">
+                    <h2>⚡ 快捷操作</h2>
+                    <div class="section-actions">
+                        <button class="btn btn-sm" onclick="refreshQuickActions()">🔄 刷新</button>
+                        <button class="btn btn-sm" onclick="router.navigate('/automation')">⚙️ 管理</button>
+                    </div>
+                </div>
+                <div id="quick-actions-grid" class="quick-actions-grid">
+                    <div class="loading-inline">加载中...</div>
+                </div>
+            </div>
+            
             <!-- 风扇控制 -->
             <div class="section">
                 <h2>🌀 风扇控制</h2>
@@ -629,6 +642,9 @@ async function refreshSystemPageOnce() {
     
     // LED 设备
     await refreshSystemLeds();
+    
+    // 快捷操作
+    await refreshQuickActions();
 }
 
 // 更新系统信息
@@ -953,6 +969,89 @@ async function refreshSystemLeds() {
     }
 }
 
+// ==================== 快捷操作（手动触发规则） ====================
+
+/**
+ * 刷新快捷操作面板
+ */
+async function refreshQuickActions() {
+    const container = document.getElementById('quick-actions-grid');
+    if (!container) {
+        console.warn('refreshQuickActions: quick-actions-grid not found');
+        return;
+    }
+    
+    try {
+        console.log('refreshQuickActions: Fetching rules...');
+        const result = await api.call('automation.rules.list');
+        console.log('refreshQuickActions: API result:', result);
+        
+        if (result.code === 0 && result.data && result.data.rules) {
+            // 过滤出启用且标记为可手动触发的规则
+            const allRules = result.data.rules;
+            console.log('refreshQuickActions: All rules:', allRules.map(r => ({ id: r.id, enabled: r.enabled, manual_trigger: r.manual_trigger })));
+            const manualRules = allRules.filter(r => r.enabled && r.manual_trigger);
+            console.log('refreshQuickActions: Manual rules count:', manualRules.length);
+            
+            if (manualRules.length > 0) {
+                container.innerHTML = manualRules.map(rule => {
+                    const iconValue = rule.icon || '⚡';
+                    const iconHtml = iconValue.startsWith('/sdcard/') 
+                        ? `<img src="/api/v1/file/download?path=${encodeURIComponent(iconValue)}" alt="icon" onerror="this.textContent='⚡'">`
+                        : iconValue;
+                    
+                    return `
+                        <div class="quick-action-card" onclick="triggerQuickAction('${escapeHtml(rule.id)}')" title="${escapeHtml(rule.name)}">
+                            <div class="quick-action-icon">${iconHtml}</div>
+                            <div class="quick-action-name">${escapeHtml(rule.name)}</div>
+                            <div class="quick-action-count">${rule.trigger_count || 0}次</div>
+                        </div>
+                    `;
+                }).join('');
+            } else {
+                container.innerHTML = `
+                    <div class="quick-actions-empty">
+                        <span>🎯</span>
+                        <p>暂无快捷操作</p>
+                        <small>在自动化规则中启用"手动触发"选项</small>
+                    </div>
+                `;
+            }
+        } else {
+            container.innerHTML = '<p class="text-muted">无法加载快捷操作</p>';
+        }
+    } catch (e) {
+        console.error('Quick actions error:', e);
+        container.innerHTML = `<p class="text-muted">加载失败</p>`;
+    }
+}
+
+/**
+ * 触发快捷操作
+ */
+async function triggerQuickAction(ruleId) {
+    try {
+        // 添加按下效果
+        const card = event.currentTarget;
+        card.classList.add('triggering');
+        
+        const result = await api.call('automation.rules.trigger', { id: ruleId });
+        
+        if (result.code === 0) {
+            showToast('✅ 操作已执行', 'success');
+            // 刷新计数
+            setTimeout(() => refreshQuickActions(), 500);
+        } else {
+            showToast('❌ ' + (result.message || '执行失败'), 'error');
+        }
+        
+        card.classList.remove('triggering');
+    } catch (e) {
+        showToast('❌ 执行失败: ' + e.message, 'error');
+        event.currentTarget?.classList.remove('triggering');
+    }
+}
+
 // 时间同步功能
 async function syncTimeFromBrowser(silent = false) {
     try {
@@ -1223,13 +1322,13 @@ function generateLedDeviceCard(dev) {
                     </div>
                 </div>
                 
-                <!-- 快捷特效 -->
+                <!-- 快捷动画 -->
                 <div class="led-effects-row">
                     <div class="led-quick-effects">
                         ${quickEffectsHtml}
-                        ${deviceEffects.length > 4 ? `<button class="led-quick-effect more" onclick="openLedModal('${dev.name}', 'effect')" title="更多特效">+${deviceEffects.length - 4}</button>` : ''}
+                        ${deviceEffects.length > 4 ? `<button class="led-quick-effect more" onclick="openLedModal('${dev.name}', 'effect')" title="更多动画">+${deviceEffects.length - 4}</button>` : ''}
                     </div>
-                    <button class="led-stop-btn" onclick="stopEffect('${dev.name}')" title="停止特效">⏹</button>
+                    <button class="led-stop-btn" onclick="stopEffect('${dev.name}')" title="停止动画">⏹</button>
                 </div>
             </div>
             
@@ -1467,7 +1566,7 @@ function generateLedModalContent(device, type) {
                 const activeClass = isActive ? ' active' : '';
                 return `<button class="btn effect-btn${activeClass}" onclick="selectEffectInModal('${device}', '${eff}', this)">${getEffectIcon(eff)} ${eff}</button>`;
             }).join('')
-            : '<span class="empty">暂无可用特效</span>';
+            : '<span class="empty">暂无可用动画</span>';
         
         return `
             <div class="modal-section">
@@ -1500,7 +1599,7 @@ function generateLedModalContent(device, type) {
                 const activeClass = isActive ? ' active' : '';
                 return `<button class="btn effect-btn${activeClass}" onclick="selectEffectInModal('${device}', '${eff}', this)">${getEffectIcon(eff)} ${eff}</button>`;
             }).join('')
-            : '<span class="empty">暂无可用特效</span>';
+            : '<span class="empty">暂无可用动画</span>';
         
         return `
             <div class="modal-tabs">
@@ -1717,11 +1816,11 @@ function selectEffectInModal(device, effect, btn) {
     if (configEl) configEl.style.display = 'flex';
 }
 
-// 模态框内应用特效
+// 模态框内应用动画
 async function applyEffectFromModal(device) {
     const effect = selectedEffects[device];
     if (!effect) {
-        showToast('请先选择一个特效', 'warning');
+        showToast('请先选择一个动画', 'warning');
         return;
     }
     
@@ -1740,19 +1839,19 @@ async function applyEffectFromModal(device) {
         
         showToast(`${device}: ${effect} 已启动`, 'success');
     } catch (e) {
-        showToast(`启动特效失败: ${e.message}`, 'error');
+        showToast(`启动动画失败: ${e.message}`, 'error');
     }
 }
 
-// 模态框内停止特效
+// 模态框内停止动画
 async function stopEffectFromModal(device) {
     try {
         await api.ledEffectStop(device);
         delete selectedEffects[device];
         updateLedCardState(device, ledStates[device], null);
-        showToast(`${device} 特效已停止`, 'success');
+        showToast(`${device} 动画已停止`, 'success');
     } catch (e) {
-        showToast(`停止特效失败: ${e.message}`, 'error');
+        showToast(`停止动画失败: ${e.message}`, 'error');
     }
 }
 
@@ -2031,13 +2130,13 @@ function getEffectIcon(name) {
     return icons[name.toLowerCase()] || '🎯';
 }
 
-// 当前选中的特效
+// 当前选中的动画
 const selectedEffects = {};
 
-// 支持颜色参数的特效
+// 支持颜色参数的动画
 const colorSupportedEffects = ['breathing', 'solid', 'rain'];
 
-// 选择特效（旧版兼容，保留）
+// 选择动画（旧版兼容，保留）
 function selectEffect(device, effect, btn) {
     selectedEffects[device] = effect;
     
@@ -2055,7 +2154,7 @@ function showEffectConfig(device, effect) {
 async function applyEffect(device) {
     const effect = selectedEffects[device];
     if (!effect) {
-        showToast('请先选择一个特效', 'warning');
+        showToast('请先选择一个动画', 'warning');
         return;
     }
     
@@ -2064,7 +2163,7 @@ async function applyEffect(device) {
     
     try {
         const params = { speed };
-        // 只有支持颜色的特效才传递颜色参数
+        // 只有支持颜色的动画才传递颜色参数
         if (colorSupportedEffects.includes(effect)) {
             params.color = color;
         }
@@ -2085,7 +2184,7 @@ async function applyEffect(device) {
         
         showToast(`${device}: ${effect} 已启动`, 'success');
     } catch (e) {
-        showToast(`启动特效失败: ${e.message}`, 'error');
+        showToast(`启动动画失败: ${e.message}`, 'error');
     }
 }
 
@@ -2205,7 +2304,7 @@ async function startEffect(device, effect) {
         }
         showToast(`${device}: ${effect} 已启动`, 'success');
     } catch (e) {
-        showToast(`启动特效失败: ${e.message}`, 'error');
+        showToast(`启动动画失败: ${e.message}`, 'error');
     }
 }
 
@@ -2219,9 +2318,9 @@ async function stopEffect(device) {
         }
         // 清除选中状态
         delete selectedEffects[device];
-        showToast(`${device} 特效已停止`, 'success');
+        showToast(`${device} 动画已停止`, 'success');
     } catch (e) {
-        showToast(`停止特效失败: ${e.message}`, 'error');
+        showToast(`停止动画失败: ${e.message}`, 'error');
     }
 }
 
@@ -3462,169 +3561,6 @@ async function saveNatConfig() {
 }
 
 // =========================================================================
-//                         设备页面
-// =========================================================================
-
-async function loadDevicePage() {
-    clearInterval(refreshInterval);
-    
-    // 取消系统页面的订阅
-    if (subscriptionManager) {
-        subscriptionManager.unsubscribe('system.dashboard');
-    }
-    
-    // 取消之前的订阅
-    if (subscriptionManager) {
-        subscriptionManager.unsubscribe('device.status');
-    }
-    
-    const content = document.getElementById('page-content');
-    content.innerHTML = `
-        <div class="page-device">
-            <h1>🖲️ 监控控制</h1>
-            
-            <div class="cards">
-                <div class="card card-large">
-                    <h3>🖥️ AGX</h3>
-                    <div class="card-content">
-                        <div class="device-status-grid">
-                            <p><strong>电源状态:</strong> <span id="dev-agx-power" class="status-value">-</span></p>
-                            <p><strong>CPU 使用率:</strong> <span id="dev-agx-cpu">-</span></p>
-                            <p><strong>GPU 使用率:</strong> <span id="dev-agx-gpu">-</span></p>
-                            <p><strong>温度:</strong> <span id="dev-agx-temp">-</span></p>
-                        </div>
-                    </div>
-                    <div class="button-group">
-                        <button class="btn btn-success" onclick="devicePower('agx', true)">⏻ 开机</button>
-                        <button class="btn btn-danger" onclick="devicePower('agx', false)">⏼ 关机</button>
-                        <button class="btn btn-warning" onclick="deviceReset('agx')">🔄 重启</button>
-                        <button class="btn" onclick="deviceForceOff('agx')">⚡ 强制关机</button>
-                    </div>
-                </div>
-                
-                <div class="card card-large">
-                    <h3>🔋 LPMU</h3>
-                    <div class="card-content">
-                        <div class="device-status-grid">
-                            <p><strong>电源状态:</strong> <span id="dev-lpmu-power" class="status-value">-</span></p>
-                        </div>
-                    </div>
-                    <div class="button-group">
-                        <button class="btn btn-success" onclick="devicePower('lpmu', true)">⏻ 开机</button>
-                        <button class="btn btn-danger" onclick="devicePower('lpmu', false)">⏼ 关机</button>
-                    </div>
-                </div>
-            </div>
-        </div>
-    `;
-    
-    // 初始加载（HTTP API）
-    await refreshDevicePageOnce();
-    
-    // 订阅 WebSocket 实时更新（取代轮询）
-    if (subscriptionManager) {
-        subscriptionManager.subscribe('device.status', (data) => {
-            updateDeviceUI(data);
-        }, { interval: 2000 });
-    }
-}
-
-// 单次刷新（初始加载）
-async function refreshDevicePageOnce() {
-    // 设备状态
-    try {
-        const status = await api.deviceStatus();
-        if (status.data?.devices) {
-            updateDeviceUI(status.data);
-        }
-    } catch (e) { console.log('Device status error:', e); }
-    
-    // AGX 监控数据
-    try {
-        const agxData = await api.agxData();
-        if (agxData.code === 0 && agxData.data) {
-            updateAgxMonitorData(agxData.data);
-        }
-    } catch (e) { /* AGX 未连接时正常 */ }
-}
-
-// 更新设备 UI（统一处理 HTTP 和 WebSocket 数据）
-function updateDeviceUI(data) {
-    if (!data) return;
-    
-    // 处理 WebSocket 格式 (device: "agx", power: true, state: "on")
-    if (data.device) {
-        const deviceName = data.device;
-        const isPowered = data.power === true;
-        const powerEl = document.getElementById(`dev-${deviceName}-power`);
-        
-        if (powerEl) {
-            powerEl.textContent = isPowered ? '🟢 运行中' : '⚫ 关机';
-            powerEl.className = isPowered ? 'status-value status-on' : 'status-value status-off';
-        }
-        return;
-    }
-    
-    // 处理 HTTP API 格式 (devices: [{name, powered}, ...])
-    if (data.devices) {
-        const agx = data.devices.find(d => d.name === 'agx');
-        const lpmu = data.devices.find(d => d.name === 'lpmu');
-        
-        const agxPowerEl = document.getElementById('dev-agx-power');
-        const lpmuPowerEl = document.getElementById('dev-lpmu-power');
-        
-        if (agxPowerEl && agx) {
-            agxPowerEl.textContent = agx.powered ? '🟢 运行中' : '⚫ 关机';
-            agxPowerEl.className = agx.powered ? 'status-value status-on' : 'status-value status-off';
-        }
-        if (lpmuPowerEl && lpmu) {
-            lpmuPowerEl.textContent = lpmu.powered ? '🟢 运行中' : '⚫ 关机';
-            lpmuPowerEl.className = lpmu.powered ? 'status-value status-on' : 'status-value status-off';
-        }
-    }
-}
-
-// 更新 AGX 监控数据
-function updateAgxMonitorData(data) {
-    const cpuEl = document.getElementById('dev-agx-cpu');
-    const gpuEl = document.getElementById('dev-agx-gpu');
-    const tempEl = document.getElementById('dev-agx-temp');
-    
-    if (cpuEl) cpuEl.textContent = data.cpu_usage ? `${data.cpu_usage}%` : '-';
-    if (gpuEl) gpuEl.textContent = data.gpu_usage ? `${data.gpu_usage}%` : '-';
-    if (tempEl) tempEl.textContent = data.temperature ? `${data.temperature}°C` : '-';
-}
-
-async function devicePower(name, on) {
-    try {
-        await api.devicePower(name, on);
-        showToast(`${name.toUpperCase()} ${on ? '开机' : '关机'} 命令已发送`, 'success');
-        // WebSocket 会自动推送状态更新，但为了即时反馈也做一次 HTTP 查询
-        setTimeout(() => refreshDevicePageOnce(), 500);
-    } catch (e) { showToast('操作失败: ' + e.message, 'error'); }
-}
-
-async function deviceReset(name) {
-    if (confirm(`确定要重启 ${name.toUpperCase()} 吗？`)) {
-        try {
-            await api.deviceReset(name);
-            showToast(`${name.toUpperCase()} 重启命令已发送`, 'success');
-            setTimeout(() => refreshDevicePageOnce(), 500);
-        } catch (e) { showToast('操作失败: ' + e.message, 'error'); }
-    }
-}
-
-async function deviceForceOff(name) {
-    if (confirm(`确定要强制关闭 ${name.toUpperCase()} 吗？这可能导致数据丢失！`)) {
-        try {
-            await api.deviceForceOff(name);
-            showToast(`${name.toUpperCase()} 强制关机命令已发送`, 'success');
-            setTimeout(() => refreshDevicePageOnce(), 500);
-        } catch (e) { showToast('操作失败: ' + e.message, 'error'); }
-    }
-}
-
-// =========================================================================
 //                         文件管理页面
 // =========================================================================
 
@@ -4621,12 +4557,29 @@ async function loadCommandsPage() {
                         </div>
                         <div class="form-group">
                             <label>图标</label>
-                            <div class="icon-picker">
+                            <div class="icon-type-tabs">
+                                <button type="button" class="icon-tab active" onclick="switchCmdIconType('emoji')">😀 Emoji</button>
+                                <button type="button" class="icon-tab" onclick="switchCmdIconType('image')">🖼️ 图片</button>
+                            </div>
+                            <div id="icon-emoji-picker" class="icon-picker">
                                 ${['🚀', '🔄', '⚡', '🛠️', '📊', '🔍', '💾', '🗑️', '⏹️', '▶️', '📦', '🔧'].map(icon => 
                                     `<button type="button" class="icon-btn" onclick="selectCmdIcon('${icon}')">${icon}</button>`
                                 ).join('')}
                             </div>
+                            <div id="icon-image-picker" class="icon-image-picker hidden">
+                                <div class="icon-preview-row">
+                                    <div id="cmd-icon-preview" class="icon-image-preview">
+                                        <span class="preview-placeholder">无</span>
+                                    </div>
+                                    <div class="icon-path-input">
+                                        <input type="text" id="cmd-icon-path" class="input" placeholder="/sdcard/images/..." readonly>
+                                        <button type="button" class="btn btn-sm" onclick="browseCmdIconImage()">📂 浏览</button>
+                                        <button type="button" class="btn btn-sm btn-danger" onclick="clearCmdIconImage()" title="清除">✕</button>
+                                    </div>
+                                </div>
+                            </div>
                             <input type="hidden" id="cmd-icon" value="🚀">
+                            <input type="hidden" id="cmd-icon-type" value="emoji">
                         </div>
                         
                         <!-- 高级选项 -->
@@ -5078,10 +5031,16 @@ function refreshCommandsList() {
         // 变量按钮（仅当设置了 varName 时显示）
         const varBtnHtml = cmd.varName ? `<button class="btn btn-sm" onclick="showCommandVariables('${escapeHtml(cmd.varName)}')" title="查看变量: ${escapeHtml(cmd.varName)}.*">📊</button>` : '';
         
+        // 图标显示：支持 Emoji 或图片路径
+        const iconValue = cmd.icon || '🚀';
+        const iconHtml = iconValue.startsWith('/sdcard/') 
+            ? `<span class="cmd-icon"><img src="/api/v1/file/download?path=${encodeURIComponent(iconValue)}" alt="icon" onerror="this.parentElement.textContent='🚀'"></span>`
+            : `<span class="cmd-icon">${iconValue}</span>`;
+        
         return `
         <div class="command-card">
             <div class="cmd-header">
-                <span class="cmd-icon">${cmd.icon || '🚀'}</span>
+                ${iconHtml}
                 <span class="cmd-name" title="${escapeHtml(cmd.name)}">${escapeHtml(cmd.name)}</span>
                 ${patternsHtml}
             </div>
@@ -5109,6 +5068,12 @@ function showAddCommandModal() {
     document.getElementById('cmd-command').value = '';
     document.getElementById('cmd-desc').value = '';
     document.getElementById('cmd-icon').value = '🚀';
+    document.getElementById('cmd-icon-type').value = 'emoji';
+    document.getElementById('cmd-icon-path').value = '';
+    
+    // 重置图标选择 UI
+    switchCmdIconType('emoji');
+    updateCmdIconPreview(null);
     
     // 重置高级选项
     document.getElementById('cmd-expect-pattern').value = '';
@@ -5223,8 +5188,73 @@ function updateTimeoutState() {
     }
 }
 
+/**
+ * 切换图标类型（Emoji / 图片）
+ */
+function switchCmdIconType(type) {
+    const iconTypeInput = document.getElementById('cmd-icon-type');
+    iconTypeInput.value = type;
+    
+    // 更新 Tab 状态
+    document.querySelectorAll('.icon-type-tabs .icon-tab').forEach(tab => {
+        tab.classList.toggle('active', tab.textContent.includes(type === 'emoji' ? 'Emoji' : '图片'));
+    });
+    
+    // 切换面板显示
+    document.getElementById('icon-emoji-picker').classList.toggle('hidden', type !== 'emoji');
+    document.getElementById('icon-image-picker').classList.toggle('hidden', type !== 'image');
+    
+    // 如果切换到 Emoji 且当前是图片，恢复默认
+    if (type === 'emoji') {
+        const currentIcon = document.getElementById('cmd-icon').value;
+        if (currentIcon.startsWith('/sdcard/')) {
+            document.getElementById('cmd-icon').value = '🚀';
+            selectCmdIcon('🚀');
+        }
+    }
+}
+
+/**
+ * 浏览 SD 卡图像
+ */
+async function browseCmdIconImage() {
+    filePickerCurrentPath = '/sdcard/images';
+    filePickerSelectedFile = null;
+    filePickerCallback = (path) => {
+        document.getElementById('cmd-icon').value = path;
+        document.getElementById('cmd-icon-path').value = path;
+        updateCmdIconPreview(path);
+    };
+    document.getElementById('file-picker-modal').classList.remove('hidden');
+    await loadFilePickerDirectory(filePickerCurrentPath);
+}
+
+/**
+ * 更新图标图片预览
+ */
+function updateCmdIconPreview(path) {
+    const preview = document.getElementById('cmd-icon-preview');
+    if (path && path.startsWith('/sdcard/')) {
+        preview.innerHTML = `<img src="/api/v1/file/download?path=${encodeURIComponent(path)}" alt="icon" onerror="this.parentElement.innerHTML='<span class=\\'preview-placeholder\\'>加载失败</span>'">`;
+    } else {
+        preview.innerHTML = '<span class="preview-placeholder">无</span>';
+    }
+}
+
+/**
+ * 清除图标图片
+ */
+function clearCmdIconImage() {
+    document.getElementById('cmd-icon').value = '🚀';
+    document.getElementById('cmd-icon-path').value = '';
+    document.getElementById('cmd-icon-type').value = 'emoji';
+    updateCmdIconPreview(null);
+    switchCmdIconType('emoji');
+}
+
 function selectCmdIcon(icon) {
     document.getElementById('cmd-icon').value = icon;
+    document.getElementById('cmd-icon-type').value = 'emoji';
     document.querySelectorAll('.icon-btn').forEach(btn => {
         btn.classList.toggle('selected', btn.textContent === icon);
     });
@@ -5303,7 +5333,24 @@ function editCommand(idx) {
     document.getElementById('cmd-name').value = cmd.name;
     document.getElementById('cmd-command').value = cmd.command;
     document.getElementById('cmd-desc').value = cmd.desc || '';
-    document.getElementById('cmd-icon').value = cmd.icon || '🚀';
+    
+    // 处理图标：判断是 Emoji 还是图片路径
+    const icon = cmd.icon || '🚀';
+    document.getElementById('cmd-icon').value = icon;
+    
+    if (icon.startsWith('/sdcard/')) {
+        // 图片路径
+        document.getElementById('cmd-icon-type').value = 'image';
+        document.getElementById('cmd-icon-path').value = icon;
+        switchCmdIconType('image');
+        updateCmdIconPreview(icon);
+    } else {
+        // Emoji
+        document.getElementById('cmd-icon-type').value = 'emoji';
+        document.getElementById('cmd-icon-path').value = '';
+        switchCmdIconType('emoji');
+        updateCmdIconPreview(null);
+    }
     
     // 高级选项
     document.getElementById('cmd-expect-pattern').value = cmd.expectPattern || '';
@@ -9944,6 +9991,9 @@ async function refreshAutomationStatus() {
             const stateClass = d.state === 'running' ? 'running' : d.state === 'paused' ? 'paused' : 'stopped';
             const stateText = d.state === 'running' ? '运行中' : d.state === 'paused' ? '已暂停' : '已停止';
             
+            // 计算运行时间（API 返回 uptime_ms，转换为秒）
+            const uptimeSec = Math.floor((d.uptime_ms || 0) / 1000);
+            
             container.innerHTML = `
                 <div class="status-card primary">
                     <div class="status-icon state-${stateClass}">●</div>
@@ -9953,23 +10003,23 @@ async function refreshAutomationStatus() {
                     </div>
                 </div>
                 <div class="status-card">
-                    <div class="status-value">${d.rule_count || 0}</div>
+                    <div class="status-value">${d.rules_count || 0}</div>
                     <div class="status-label">规则</div>
                 </div>
                 <div class="status-card">
-                    <div class="status-value">${d.variable_count || 0}</div>
+                    <div class="status-value">${d.variables_count || 0}</div>
                     <div class="status-label">变量</div>
                 </div>
                 <div class="status-card">
-                    <div class="status-value">${d.source_count || 0}</div>
+                    <div class="status-value">${d.sources_count || 0}</div>
                     <div class="status-label">数据源</div>
                 </div>
                 <div class="status-card">
-                    <div class="status-value">${d.rules_executed || 0}</div>
-                    <div class="status-label">执行次数</div>
+                    <div class="status-value">${d.rule_triggers || 0}</div>
+                    <div class="status-label">触发次数</div>
                 </div>
                 <div class="status-card">
-                    <div class="status-value">${formatUptime(d.uptime_sec || 0)}</div>
+                    <div class="status-value">${formatUptime(uptimeSec)}</div>
                     <div class="status-label">运行时长</div>
                 </div>
             `;
@@ -10028,6 +10078,7 @@ async function refreshRules() {
                 <table class="data-table">
                     <thead>
                         <tr>
+                            <th style="width:40px"></th>
                             <th>ID</th>
                             <th>名称</th>
                             <th>状态</th>
@@ -10038,10 +10089,18 @@ async function refreshRules() {
                         </tr>
                     </thead>
                     <tbody>
-                        ${rules.map(r => `
+                        ${rules.map(r => {
+                            const iconValue = r.icon || '⚡';
+                            const iconHtml = iconValue.startsWith('/sdcard/') 
+                                ? `<img src="/api/v1/file/download?path=${encodeURIComponent(iconValue)}" style="width:24px;height:24px;object-fit:contain" onerror="this.textContent='⚡'">`
+                                : iconValue;
+                            const manualBadge = r.manual_trigger ? '<span class="badge" style="background:#27ae60;font-size:0.7em">手动</span>' : '';
+                            
+                            return `
                             <tr>
+                                <td style="font-size:1.2em;text-align:center">${iconHtml}</td>
                                 <td><code>${r.id}</code></td>
-                                <td>${r.name || r.id}</td>
+                                <td>${r.name || r.id} ${manualBadge}</td>
                                 <td><span class="status-badge ${r.enabled ? 'status-running' : 'status-stopped'}">${r.enabled ? '启用' : '禁用'}</span></td>
                                 <td>${r.conditions_count || 0}</td>
                                 <td>${r.actions_count || 0}</td>
@@ -10053,7 +10112,7 @@ async function refreshRules() {
                                     <button class="btn btn-sm btn-danger" onclick="deleteRule('${r.id}')" title="删除">🗑️</button>
                                 </td>
                             </tr>
-                        `).join('')}
+                        `}).join('')}
                     </tbody>
                 </table>
             `;
@@ -10324,6 +10383,7 @@ async function refreshActions() {
                             <th>ID</th>
                             <th>名称</th>
                             <th>类型</th>
+                            <th>模式</th>
                             <th>描述</th>
                             <th>操作</th>
                         </tr>
@@ -10334,6 +10394,7 @@ async function refreshActions() {
                                 <td><code>${a.id}</code></td>
                                 <td>${a.name || a.id}</td>
                                 <td><span class="badge badge-${getActionTypeBadge(a.type)}">${getActionTypeLabel(a.type)}</span></td>
+                                <td>${a.async ? '<span class="badge badge-warning">异步</span>' : '<span class="badge badge-light">同步</span>'}</td>
                                 <td class="text-muted">${a.description || '-'}</td>
                                 <td>
                                     <button class="btn btn-xs" onclick="testAction('${a.id}')" title="测试">▶️</button>
@@ -10476,6 +10537,18 @@ function showAddActionModal() {
                             </div>
                         </div>
                     </div>
+                    
+                    <!-- 执行模式选项 -->
+                    <div class="execution-mode-option">
+                        <label class="mode-switch">
+                            <input type="checkbox" id="action-async">
+                            <span class="mode-slider"></span>
+                        </label>
+                        <div class="mode-info">
+                            <span class="mode-title">异步执行</span>
+                            <span class="mode-desc">API 调用立即返回，动作在后台队列执行</span>
+                        </div>
+                    </div>
                 </div>
             </div>
             <div class="modal-footer">
@@ -10588,7 +10661,7 @@ function updateActionTypeFields() {
                     <label>控制类型 <span class="required">*</span></label>
                     <select id="action-led-type" class="input" onchange="updateActionLedTypeFields()">
                         <option value="fill">🎨 纯色填充</option>
-                        <option value="effect">🎬 特效动画</option>
+                        <option value="effect">🎬 程序动画</option>
                         <option value="brightness">☀️ 仅调节亮度</option>
                         <option value="off">⏹ 关闭</option>
                     </select>
@@ -10599,13 +10672,15 @@ function updateActionTypeFields() {
                     <label>控制类型 <span class="required">*</span></label>
                     <select id="action-led-matrix-type" class="input" onchange="updateActionLedTypeFields()">
                         <option value="fill">🎨 纯色填充</option>
-                        <option value="effect">🎬 特效动画</option>
+                        <option value="effect">🎬 程序动画</option>
                         <option value="text">📝 文本显示</option>
                         <option value="image">📷 显示图像</option>
                         <option value="qrcode">📱 显示QR码</option>
                         <option value="filter">🎨 后处理滤镜</option>
+                        <option value="filter_stop">⏹ 停止滤镜</option>
+                        <option value="text_stop">⏹ 停止文本</option>
                         <option value="brightness">☀️ 仅调节亮度</option>
-                        <option value="off">⏹ 关闭</option>
+                        <option value="off">⏹ 关闭设备</option>
                     </select>
                 </div>
                 
@@ -10714,6 +10789,7 @@ async function submitAction() {
     const type = checked ? checked.value : '';
     const description = document.getElementById('action-description').value.trim();
     const delay = parseInt(document.getElementById('action-delay').value) || 0;
+    const async = document.getElementById('action-async')?.checked || false;
     
     if (!id) {
         showToast('请填写动作 ID', 'error');
@@ -10724,7 +10800,7 @@ async function submitAction() {
         return;
     }
     
-    const data = { id, name: name || id, type, description, delay_ms: delay };
+    const data = { id, name: name || id, type, description, delay_ms: delay, async };
     
     // 根据类型收集特定字段
     switch (type) {
@@ -10777,7 +10853,7 @@ async function submitAction() {
                     data.led.speed = parseInt(document.getElementById('action-led-speed')?.value) || 50;
                     data.led.color = document.getElementById('action-led-color')?.value || '#FF0000';
                     if (!data.led.effect) {
-                        showToast('请选择特效', 'error');
+                        showToast('请选择动画', 'error');
                         return;
                     }
                     break;
@@ -11118,9 +11194,9 @@ function updateActionLedTypeFields() {
             const effectOptions = effects.map(e => `<option value="${e}">${e}</option>`).join('');
             html = `
                 <div class="form-group">
-                    <label>特效 <span class="required">*</span></label>
+                    <label>动画 <span class="required">*</span></label>
                     <select id="action-led-effect" class="input">
-                        ${effectOptions || '<option value="">无可用特效</option>'}
+                        ${effectOptions || '<option value="">无可用动画</option>'}
                     </select>
                 </div>
                 <div class="form-row">
@@ -11155,11 +11231,22 @@ function updateActionLedTypeFields() {
             html = `<div class="form-hint" style="padding:10px;color:var(--text-light);">关闭 LED 设备，无需额外参数</div>`;
             break;
             
+        case 'filter_stop':
+            html = `<div class="form-hint" style="padding:10px;color:var(--text-light);">⏹ 停止当前运行的滤镜效果，无需额外参数</div>`;
+            break;
+            
+        case 'text_stop':
+            html = `<div class="form-hint" style="padding:10px;color:var(--text-light);">⏹ 停止当前运行的文本覆盖层，无需额外参数</div>`;
+            break;
+            
         case 'text':
             html = `
                 <div class="form-group">
                     <label>文本内容 <span class="required">*</span></label>
-                    <input type="text" id="action-led-text" class="input" placeholder="要显示的文本">
+                    <div class="input-with-btn">
+                        <input type="text" id="action-led-text" class="input" placeholder="要显示的文本，支持 \${变量名}">
+                        <button type="button" class="btn btn-sm" onclick="showVariableSelectModal('action-led-text')" title="插入变量">📊</button>
+                    </div>
                 </div>
                 <div class="form-row">
                     <div class="form-group" style="flex:1">
@@ -11227,10 +11314,11 @@ function updateActionLedTypeFields() {
                 <div class="form-group">
                     <label>图像路径 <span class="required">*</span></label>
                     <div class="input-with-btn">
-                        <input type="text" id="action-led-image-path" class="input" placeholder="/sdcard/images/xxx.png" value="/sdcard/images/">
-                        <button type="button" class="btn btn-sm" onclick="browseActionImages()">📁 浏览</button>
+                        <input type="text" id="action-led-image-path" class="input" placeholder="/sdcard/images/xxx.png 或 \${变量名}" value="/sdcard/images/">
+                        <button type="button" class="btn btn-sm" onclick="browseActionImages()" title="浏览文件">📁</button>
+                        <button type="button" class="btn btn-sm" onclick="showVariableSelectModal('action-led-image-path')" title="插入变量">📊</button>
                     </div>
-                    <small class="form-hint">支持 PNG、JPG、BMP 格式</small>
+                    <small class="form-hint">支持 PNG、JPG、BMP、GIF 格式，路径支持变量</small>
                 </div>
                 <div class="form-group">
                     <label class="checkbox-label"><input type="checkbox" id="action-led-center" checked> 居中显示</label>
@@ -11242,7 +11330,10 @@ function updateActionLedTypeFields() {
             html = `
                 <div class="form-group">
                     <label>编码内容 <span class="required">*</span></label>
-                    <input type="text" id="action-led-qr-text" class="input" placeholder="文本或URL">
+                    <div class="input-with-btn">
+                        <input type="text" id="action-led-qr-text" class="input" placeholder="文本或URL，支持 \${变量名}">
+                        <button type="button" class="btn btn-sm" onclick="showVariableSelectModal('action-led-qr-text')" title="插入变量">📊</button>
+                    </div>
                 </div>
                 <div class="form-row">
                     <div class="form-group" style="flex:1">
@@ -11340,70 +11431,353 @@ function setActionLedColor(color) {
 }
 
 /**
- * 浏览图像文件 (动作模板用)
+ * 显示图像选择模态框
+ * @param {string} title - 模态框标题
+ * @param {function} onSelect - 选择回调，接收完整路径
  */
-async function browseActionImages() {
+async function showImageSelectModal(title, onSelect) {
+    // 创建模态框
+    const modal = document.createElement('div');
+    modal.id = 'image-select-modal';
+    modal.className = 'modal show';
+    modal.onclick = (e) => { if (e.target === modal) closeModal('image-select-modal'); };
+    
+    modal.innerHTML = `
+        <div class="modal-content" style="max-width:500px;">
+            <div class="modal-header">
+                <h3>📁 ${title}</h3>
+                <button class="modal-close" onclick="closeModal('image-select-modal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div id="image-select-loading" style="text-align:center;padding:20px;">
+                    <div class="spinner"></div>
+                    <p>加载中...</p>
+                </div>
+                <div id="image-select-list" style="display:none;max-height:400px;overflow-y:auto;"></div>
+                <div id="image-select-empty" style="display:none;text-align:center;padding:30px;color:var(--text-light);">
+                    <div style="font-size:48px;margin-bottom:10px;">📭</div>
+                    <p>没有找到图像文件</p>
+                    <small>支持 PNG、JPG、BMP、GIF 格式</small>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+    
+    // 加载图像列表
     try {
         const result = await api.storageList('/sdcard/images');
         const files = result.data?.entries || [];
-        const imageExts = ['.png', '.jpg', '.jpeg', '.bmp'];
+        const imageExts = ['.png', '.jpg', '.jpeg', '.bmp', '.gif'];
         const images = files.filter(f => {
             if (f.type === 'dir' || f.type === 'directory') return false;
             const ext = f.name.toLowerCase().substring(f.name.lastIndexOf('.'));
             return imageExts.includes(ext);
         });
         
+        document.getElementById('image-select-loading').style.display = 'none';
+        
         if (images.length === 0) {
-            showToast('没有找到图像文件', 'warning');
+            document.getElementById('image-select-empty').style.display = 'block';
             return;
         }
         
-        // 简单使用 prompt 选择
-        const names = images.map(f => f.name);
-        const selected = prompt(`选择图像文件:\n${names.map((n, i) => `${i + 1}. ${n}`).join('\n')}\n\n输入序号:`, '1');
-        if (selected) {
-            const idx = parseInt(selected) - 1;
-            if (idx >= 0 && idx < images.length) {
-                document.getElementById('action-led-image-path').value = `/sdcard/images/${images[idx].name}`;
-            }
-        }
+        // 按名称排序
+        images.sort((a, b) => a.name.localeCompare(b.name));
+        
+        const listEl = document.getElementById('image-select-list');
+        listEl.style.display = 'block';
+        listEl.innerHTML = images.map(img => {
+            const fullPath = `/sdcard/images/${img.name}`;
+            const icon = img.name.toLowerCase().endsWith('.gif') ? '🎞️' : '🖼️';
+            const size = formatFileSize(img.size);
+            return `
+                <div class="image-select-item" data-path="${fullPath}" style="
+                    display:flex;align-items:center;padding:12px;
+                    border-bottom:1px solid var(--border);cursor:pointer;
+                    transition:background 0.2s;"
+                    onmouseover="this.style.background='var(--bg-hover)'"
+                    onmouseout="this.style.background='transparent'"
+                    onclick="selectImageItem(this, '${fullPath.replace(/'/g, "\\'")}')">
+                    <span style="font-size:24px;margin-right:12px;">${icon}</span>
+                    <div style="flex:1;min-width:0;">
+                        <div style="font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${img.name}</div>
+                        <small style="color:var(--text-light);">${size}</small>
+                    </div>
+                    <span class="image-select-check" style="display:none;color:var(--success);font-size:20px;">✓</span>
+                </div>
+            `;
+        }).join('');
+        
+        // 存储回调
+        window._imageSelectCallback = onSelect;
+        
     } catch (e) {
-        console.error('浏览图像失败:', e);
-        showToast('浏览图像失败', 'error');
+        console.error('加载图像列表失败:', e);
+        document.getElementById('image-select-loading').innerHTML = `
+            <div style="color:var(--danger);">
+                <p>加载失败: ${e.message}</p>
+                <button class="btn btn-sm" onclick="closeModal('image-select-modal')">关闭</button>
+            </div>
+        `;
     }
+}
+
+/**
+ * 选择图像项目
+ */
+function selectImageItem(el, path) {
+    // 移除其他选中状态
+    document.querySelectorAll('.image-select-item').forEach(item => {
+        item.style.background = 'transparent';
+        item.querySelector('.image-select-check').style.display = 'none';
+    });
+    
+    // 选中当前项
+    el.style.background = 'var(--bg-hover)';
+    el.querySelector('.image-select-check').style.display = 'block';
+    
+    // 调用回调
+    if (window._imageSelectCallback) {
+        window._imageSelectCallback(path);
+    }
+    
+    // 关闭模态框
+    closeModal('image-select-modal');
+}
+
+/**
+ * 浏览图像文件 (动作模板用)
+ */
+async function browseActionImages() {
+    showImageSelectModal('选择图像文件', (path) => {
+        document.getElementById('action-led-image-path').value = path;
+    });
 }
 
 /**
  * 浏览 QR 背景图 (动作模板用)
  */
 async function browseActionQrBg() {
+    showImageSelectModal('选择背景图', (path) => {
+        document.getElementById('action-led-qr-bg').value = path;
+    });
+}
+
+/**
+ * 显示变量选择模态框
+ * @param {string} targetInputId - 目标输入框 ID
+ * @param {string} mode - 'insert' 插入 ${var} 或 'replace' 替换整个值
+ */
+async function showVariableSelectModal(targetInputId, mode = 'insert') {
+    const modal = document.createElement('div');
+    modal.id = 'variable-select-modal';
+    modal.className = 'modal show';
+    modal.onclick = (e) => { if (e.target === modal) closeModal('variable-select-modal'); };
+    
+    modal.innerHTML = `
+        <div class="modal-content" style="max-width:550px;">
+            <div class="modal-header">
+                <h3>📊 选择变量</h3>
+                <button class="modal-close" onclick="closeModal('variable-select-modal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div style="margin-bottom:12px;">
+                    <input type="text" id="var-search" class="input" placeholder="🔍 搜索变量..." 
+                           oninput="filterVariableList(this.value)" style="width:100%;">
+                </div>
+                <div id="variable-select-loading" style="text-align:center;padding:20px;">
+                    <div class="spinner"></div>
+                    <p>加载变量列表...</p>
+                </div>
+                <div id="variable-select-list" style="display:none;max-height:400px;overflow-y:auto;"></div>
+                <div id="variable-select-empty" style="display:none;text-align:center;padding:30px;color:var(--text-light);">
+                    <div style="font-size:48px;margin-bottom:10px;">📭</div>
+                    <p>没有可用的变量</p>
+                    <small>请先配置数据源并启用</small>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+    
+    // 保存目标信息
+    window._varSelectTarget = { inputId: targetInputId, mode: mode };
+    
+    // 加载变量列表
     try {
-        const result = await api.storageList('/sdcard/images');
-        const files = result.data?.entries || [];
-        const imageExts = ['.png', '.jpg', '.jpeg', '.bmp'];
-        const images = files.filter(f => {
-            if (f.type === 'dir' || f.type === 'directory') return false;
-            const ext = f.name.toLowerCase().substring(f.name.lastIndexOf('.'));
-            return imageExts.includes(ext);
-        });
+        const result = await api.call('automation.variables.list');
+        const variables = result.data?.variables || [];
         
-        if (images.length === 0) {
-            showToast('没有找到图像文件', 'warning');
+        document.getElementById('variable-select-loading').style.display = 'none';
+        
+        if (variables.length === 0) {
+            document.getElementById('variable-select-empty').style.display = 'block';
             return;
         }
         
-        const names = images.map(f => f.name);
-        const selected = prompt(`选择背景图:\n${names.map((n, i) => `${i + 1}. ${n}`).join('\n')}\n\n输入序号:`, '1');
-        if (selected) {
-            const idx = parseInt(selected) - 1;
-            if (idx >= 0 && idx < images.length) {
-                document.getElementById('action-led-qr-bg').value = `/sdcard/images/${images[idx].name}`;
-            }
+        // 按数据源分组
+        const grouped = {};
+        variables.forEach(v => {
+            const sourceId = v.source_id || '_system';
+            if (!grouped[sourceId]) grouped[sourceId] = [];
+            grouped[sourceId].push(v);
+        });
+        
+        const listEl = document.getElementById('variable-select-list');
+        listEl.style.display = 'block';
+        
+        let html = '';
+        for (const [sourceId, vars] of Object.entries(grouped)) {
+            const groupId = `var-group-${sourceId.replace(/[^a-zA-Z0-9]/g, '_')}`;
+            html += `<div class="var-group" data-source="${sourceId}">
+                <div class="var-group-header" style="padding:10px 12px;background:var(--bg-elevated);font-weight:600;border-bottom:1px solid var(--border);cursor:pointer;display:flex;align-items:center;justify-content:space-between;"
+                     onclick="toggleVarGroup('${groupId}')">
+                    <span>📦 ${sourceId === '_system' ? '系统变量' : sourceId} <span style="font-weight:normal;color:var(--text-light);">(${vars.length})</span></span>
+                    <span class="var-group-arrow" id="${groupId}-arrow" style="transition:transform 0.2s;">▶</span>
+                </div>
+                <div class="var-group-items" id="${groupId}" style="display:none;">`;
+            
+            vars.forEach(v => {
+                const typeIcon = { 'bool': '🔘', 'int': '🔢', 'float': '📊', 'string': '📝' }[v.type] || '📋';
+                const displayValue = v.value !== undefined ? String(v.value).substring(0, 30) : '-';
+                html += `
+                    <div class="var-select-item" data-name="${v.name}" data-source="${sourceId}" style="
+                        display:flex;align-items:center;padding:10px 12px;padding-left:24px;
+                        border-bottom:1px solid var(--border);cursor:pointer;
+                        transition:background 0.2s;"
+                        onmouseover="this.style.background='var(--bg-hover)'"
+                        onmouseout="this.style.background='transparent'"
+                        onclick="selectVariable('${v.name}')">
+                        <span style="font-size:18px;margin-right:10px;">${typeIcon}</span>
+                        <div style="flex:1;min-width:0;">
+                            <div style="font-weight:500;font-family:monospace;">\${${v.name}}</div>
+                            <small style="color:var(--text-light);">当前值: ${displayValue}${displayValue.length >= 30 ? '...' : ''}</small>
+                        </div>
+                        <span class="var-select-check" style="display:none;color:var(--success);font-size:20px;">✓</span>
+                    </div>
+                `;
+            });
+            html += '</div></div>';
         }
+        
+        listEl.innerHTML = html;
+        
+        // 聚焦搜索框
+        setTimeout(() => document.getElementById('var-search')?.focus(), 100);
+        
     } catch (e) {
-        console.error('浏览图像失败:', e);
-        showToast('浏览图像失败', 'error');
+        console.error('加载变量列表失败:', e);
+        document.getElementById('variable-select-loading').innerHTML = `
+            <div style="color:var(--danger);">
+                <p>加载失败: ${e.message}</p>
+                <button class="btn btn-sm" onclick="closeModal('variable-select-modal')">关闭</button>
+            </div>
+        `;
     }
+}
+
+/**
+ * 切换变量分组的折叠状态
+ */
+function toggleVarGroup(groupId) {
+    const itemsEl = document.getElementById(groupId);
+    const arrowEl = document.getElementById(groupId + '-arrow');
+    if (!itemsEl) return;
+    
+    const isHidden = itemsEl.style.display === 'none';
+    itemsEl.style.display = isHidden ? 'block' : 'none';
+    if (arrowEl) {
+        arrowEl.style.transform = isHidden ? 'rotate(90deg)' : 'rotate(0deg)';
+    }
+}
+
+/**
+ * 过滤变量列表
+ */
+function filterVariableList(keyword) {
+    const items = document.querySelectorAll('.var-select-item');
+    const kw = keyword.toLowerCase();
+    
+    // 如果有搜索关键词，展开所有分组并过滤
+    if (kw) {
+        items.forEach(item => {
+            const name = item.dataset.name.toLowerCase();
+            item.style.display = name.includes(kw) ? 'flex' : 'none';
+        });
+        
+        // 展开有匹配项的分组，隐藏没有匹配项的分组
+        document.querySelectorAll('.var-group').forEach(group => {
+            const itemsContainer = group.querySelector('.var-group-items');
+            const arrow = group.querySelector('.var-group-arrow');
+            const visibleItems = group.querySelectorAll('.var-select-item[style*="flex"]');
+            
+            if (visibleItems.length > 0) {
+                group.style.display = 'block';
+                if (itemsContainer) itemsContainer.style.display = 'block';
+                if (arrow) arrow.style.transform = 'rotate(90deg)';
+            } else {
+                group.style.display = 'none';
+            }
+        });
+    } else {
+        // 清空搜索时，显示所有项目但折叠分组
+        items.forEach(item => {
+            item.style.display = 'flex';
+        });
+        
+        document.querySelectorAll('.var-group').forEach(group => {
+            const itemsContainer = group.querySelector('.var-group-items');
+            const arrow = group.querySelector('.var-group-arrow');
+            group.style.display = 'block';
+            if (itemsContainer) itemsContainer.style.display = 'none';
+            if (arrow) arrow.style.transform = 'rotate(0deg)';
+        });
+    }
+}
+
+/**
+ * 选择变量
+ */
+function selectVariable(varName) {
+    // 检查是否是动作条件回调模式
+    const varSelectModal = document.getElementById('variable-select-modal');
+    if (varSelectModal && varSelectModal.dataset.callback === 'actionCondition') {
+        handleActionConditionVarSelect(varName);
+        delete varSelectModal.dataset.callback;
+        return;
+    }
+    
+    // 检查是否是触发条件回调模式
+    if (varSelectModal && varSelectModal.dataset.callback === 'ruleCondition') {
+        handleConditionVarSelect(varName);
+        delete varSelectModal.dataset.callback;
+        return;
+    }
+    
+    const target = window._varSelectTarget;
+    if (!target) return;
+    
+    const input = document.getElementById(target.inputId);
+    if (!input) return;
+    
+    if (target.mode === 'replace') {
+        // 替换整个值
+        input.value = `\${${varName}}`;
+    } else {
+        // 在光标位置插入
+        const start = input.selectionStart || input.value.length;
+        const end = input.selectionEnd || input.value.length;
+        const text = `\${${varName}}`;
+        input.value = input.value.substring(0, start) + text + input.value.substring(end);
+        // 移动光标到插入文本之后
+        input.selectionStart = input.selectionEnd = start + text.length;
+    }
+    
+    input.focus();
+    closeModal('variable-select-modal');
 }
 
 /**
@@ -11482,6 +11856,7 @@ async function editAction(id) {
         document.getElementById('action-name').value = tpl.name || '';
         document.getElementById('action-description').value = tpl.description || '';
         document.getElementById('action-delay').value = tpl.delay_ms || 0;
+        document.getElementById('action-async').checked = tpl.async || false;
         
         // 选择类型
         const typeRadio = document.querySelector(`input[name="action-type"][value="${tpl.type}"]`);
@@ -11509,17 +11884,140 @@ async function editAction(id) {
                     break;
                 case 'led':
                     if (tpl.led) {
-                        document.getElementById('action-led-device').value = tpl.led.device || 'board';
-                        await updateActionLedOptions();
+                        // 先等待设备列表加载完成
+                        await loadLedDevicesForAction();
                         await new Promise(r => setTimeout(r, 100));
-                        // LED 详细参数需要根据控制类型填充
-                        if (tpl.led.color) {
-                            const colorEl = document.getElementById('action-led-color');
-                            if (colorEl) colorEl.value = tpl.led.color;
+                        
+                        // 设置设备
+                        const deviceEl = document.getElementById('action-led-device');
+                        if (deviceEl) {
+                            deviceEl.value = tpl.led.device || 'board';
                         }
-                        if (tpl.led.effect) {
-                            const effectEl = document.getElementById('action-led-effect');
-                            if (effectEl) effectEl.value = tpl.led.effect;
+                        updateActionLedOptions();
+                        await new Promise(r => setTimeout(r, 100));
+                        
+                        // 设置控制类型
+                        const isMatrix = tpl.led.device === 'matrix';
+                        const ctrlTypeEl = isMatrix 
+                            ? document.getElementById('action-led-matrix-type')
+                            : document.getElementById('action-led-type');
+                        if (ctrlTypeEl && tpl.led.ctrl_type) {
+                            ctrlTypeEl.value = tpl.led.ctrl_type;
+                            updateActionLedTypeFields();
+                            // 等待字段渲染和异步加载（如字体列表）
+                            await new Promise(r => setTimeout(r, 300));
+                        }
+                        
+                        // 根据控制类型填充对应字段
+                        switch (tpl.led.ctrl_type) {
+                            case 'fill':
+                                if (tpl.led.color) {
+                                    const colorEl = document.getElementById('action-led-color');
+                                    if (colorEl) colorEl.value = tpl.led.color;
+                                }
+                                if (tpl.led.brightness !== undefined) {
+                                    const brEl = document.getElementById('action-led-brightness');
+                                    if (brEl) brEl.value = tpl.led.brightness;
+                                    const brVal = document.getElementById('action-led-brightness-val');
+                                    if (brVal) brVal.textContent = tpl.led.brightness;
+                                }
+                                if (tpl.led.index !== undefined && tpl.led.index !== 255) {
+                                    const idxEl = document.getElementById('action-led-index');
+                                    if (idxEl) idxEl.value = tpl.led.index;
+                                }
+                                break;
+                            case 'effect':
+                                if (tpl.led.effect) {
+                                    const effectEl = document.getElementById('action-led-effect');
+                                    if (effectEl) effectEl.value = tpl.led.effect;
+                                }
+                                if (tpl.led.color) {
+                                    const colorEl = document.getElementById('action-led-color');
+                                    if (colorEl) colorEl.value = tpl.led.color;
+                                }
+                                if (tpl.led.speed !== undefined) {
+                                    const speedEl = document.getElementById('action-led-speed');
+                                    if (speedEl) speedEl.value = tpl.led.speed;
+                                }
+                                break;
+                            case 'brightness':
+                                if (tpl.led.brightness !== undefined) {
+                                    const brEl = document.getElementById('action-led-brightness');
+                                    if (brEl) brEl.value = tpl.led.brightness;
+                                    const brVal = document.getElementById('action-led-brightness-val');
+                                    if (brVal) brVal.textContent = tpl.led.brightness;
+                                }
+                                break;
+                            case 'text':
+                                if (tpl.led.text) {
+                                    const textEl = document.getElementById('action-led-text');
+                                    if (textEl) textEl.value = tpl.led.text;
+                                }
+                                if (tpl.led.font) {
+                                    // 字体列表可能还在加载，设置一个延迟重试
+                                    const setFont = () => {
+                                        const fontEl = document.getElementById('action-led-font');
+                                        if (fontEl) {
+                                            fontEl.value = tpl.led.font;
+                                            // 如果字体选项还没加载，等待后重试
+                                            if (fontEl.value !== tpl.led.font && fontEl.options.length <= 1) {
+                                                setTimeout(setFont, 200);
+                                            }
+                                        }
+                                    };
+                                    setFont();
+                                }
+                                if (tpl.led.color) {
+                                    const colorEl = document.getElementById('action-led-color');
+                                    if (colorEl) colorEl.value = tpl.led.color;
+                                }
+                                if (tpl.led.scroll) {
+                                    const scrollEl = document.getElementById('action-led-scroll');
+                                    if (scrollEl) scrollEl.value = tpl.led.scroll;
+                                }
+                                if (tpl.led.speed !== undefined) {
+                                    const speedEl = document.getElementById('action-led-speed');
+                                    if (speedEl) speedEl.value = tpl.led.speed;
+                                }
+                                if (tpl.led.loop !== undefined) {
+                                    const loopEl = document.getElementById('action-led-loop');
+                                    if (loopEl) loopEl.checked = tpl.led.loop;
+                                }
+                                if (tpl.led.align) {
+                                    const alignEl = document.getElementById('action-led-align');
+                                    if (alignEl) alignEl.value = tpl.led.align;
+                                }
+                                break;
+                            case 'image':
+                                if (tpl.led.image_path) {
+                                    const imgEl = document.getElementById('action-led-image-path');
+                                    if (imgEl) imgEl.value = tpl.led.image_path;
+                                }
+                                if (tpl.led.center !== undefined) {
+                                    const centerEl = document.getElementById('action-led-center');
+                                    if (centerEl) centerEl.checked = tpl.led.center;
+                                }
+                                break;
+                            case 'qrcode':
+                                if (tpl.led.qr_text) {
+                                    const qrEl = document.getElementById('action-led-qr-text');
+                                    if (qrEl) qrEl.value = tpl.led.qr_text;
+                                }
+                                if (tpl.led.qr_ecc) {
+                                    const eccEl = document.getElementById('action-led-qr-ecc');
+                                    if (eccEl) eccEl.value = tpl.led.qr_ecc;
+                                }
+                                if (tpl.led.color) {
+                                    const fgEl = document.getElementById('action-led-qr-fg');
+                                    if (fgEl) fgEl.value = tpl.led.color;
+                                }
+                                break;
+                            case 'filter':
+                                if (tpl.led.filter) {
+                                    const filterEl = document.getElementById('action-led-filter');
+                                    if (filterEl) filterEl.value = tpl.led.filter;
+                                }
+                                break;
                         }
                     }
                     break;
@@ -12664,6 +13162,37 @@ function showAddRuleModal(ruleData = null) {
                     </div>
                 </div>
                 
+                <!-- 图标选择 -->
+                <div class="form-group">
+                    <label>图标</label>
+                    <div class="icon-type-tabs">
+                        <button type="button" class="icon-tab active" onclick="switchRuleIconType('emoji')">😀 Emoji</button>
+                        <button type="button" class="icon-tab" onclick="switchRuleIconType('image')">🖼️ 图片</button>
+                    </div>
+                    <div id="rule-icon-emoji-picker" class="icon-picker">
+                        <div class="emoji-custom-input">
+                            <input type="text" id="rule-emoji-input" class="input" placeholder="输入或粘贴 emoji" maxlength="8" onchange="selectRuleIconFromInput()" style="width:100px;text-align:center;font-size:1.2em">
+                        </div>
+                        ${['⚡','🔔','💡','🔌','🌡️','⏰','📊','🎯','🚀','⚙️','🔧','🎵','📱','🖥️','🌐','🔒','🛡️','📝','🎬','🔄'].map(e => 
+                            `<button type="button" class="icon-btn${e === '⚡' ? ' selected' : ''}" onclick="selectRuleIcon('${e}')">${e}</button>`
+                        ).join('')}
+                    </div>
+                    <div id="rule-icon-image-picker" class="icon-image-picker hidden">
+                        <div class="icon-preview-row">
+                            <div id="rule-icon-preview" class="icon-image-preview">
+                                <span class="preview-placeholder">无</span>
+                            </div>
+                            <div class="icon-path-input">
+                                <input type="text" id="rule-icon-path" readonly placeholder="选择图片...">
+                                <button type="button" class="btn btn-sm" onclick="browseRuleIconImage()">📂 浏览</button>
+                                <button type="button" class="btn btn-sm" onclick="clearRuleIconImage()">✕</button>
+                            </div>
+                        </div>
+                    </div>
+                    <input type="hidden" id="rule-icon" value="⚡">
+                    <input type="hidden" id="rule-icon-type" value="emoji">
+                </div>
+                
                 <div class="form-row three-col">
                     <div class="form-group">
                         <label>条件逻辑</label>
@@ -12731,15 +13260,30 @@ function showAddRuleModal(ruleData = null) {
         document.getElementById('rule-cooldown').value = ruleData.cooldown_ms || 0;
         document.getElementById('rule-enabled').checked = ruleData.enabled !== false;
         
+        // 填充图标
+        const icon = ruleData.icon || '⚡';
+        document.getElementById('rule-icon').value = icon;
+        if (icon.startsWith('/sdcard/')) {
+            document.getElementById('rule-icon-type').value = 'image';
+            document.getElementById('rule-icon-path').value = icon;
+            switchRuleIconType('image');
+            updateRuleIconPreview(icon);
+        } else {
+            document.getElementById('rule-icon-type').value = 'emoji';
+            selectRuleIcon(icon);
+        }
+        
         // 填充条件
         if (ruleData.conditions && ruleData.conditions.length > 0) {
             ruleData.conditions.forEach(cond => {
                 addConditionRow(cond.variable, cond.operator, cond.value);
             });
-        } else {
-            // 没有条件，勾选仅手动触发
+        }
+        
+        // 填充手动触发标记（在填充条件之后设置，以便正确更新 UI）
+        if (ruleData.manual_trigger) {
             document.getElementById('rule-manual-only').checked = true;
-            toggleManualOnly();
+            toggleManualOnly();  // 更新 UI 状态
         }
         
         // 填充动作
@@ -12747,7 +13291,14 @@ function showAddRuleModal(ruleData = null) {
             // 异步加载动作模板行
             (async () => {
                 for (const act of ruleData.actions) {
-                    await addActionTemplateRow(act.template_id, act.delay_ms);
+                    await addActionTemplateRow(
+                        act.template_id, 
+                        act.delay_ms || 0,
+                        act.repeat_mode || 'once',
+                        act.repeat_count || 1,
+                        act.repeat_interval_ms || 1000,
+                        act.condition || null
+                    );
                 }
             })();
         }
@@ -12773,6 +13324,79 @@ function toggleManualOnly() {
         addBtn.style.opacity = '1';
         container.innerHTML = '<p class="empty-hint">点击"添加"创建触发条件</p>';
     }
+}
+
+// ==================== 规则图标选择 ====================
+
+function switchRuleIconType(type) {
+    const emojiPicker = document.getElementById('rule-icon-emoji-picker');
+    const imagePicker = document.getElementById('rule-icon-image-picker');
+    const tabs = document.querySelectorAll('#add-rule-modal .icon-type-tabs .icon-tab');
+    
+    tabs.forEach(tab => tab.classList.remove('active'));
+    
+    if (type === 'image') {
+        emojiPicker.classList.add('hidden');
+        imagePicker.classList.remove('hidden');
+        tabs[1]?.classList.add('active');
+        document.getElementById('rule-icon-type').value = 'image';
+    } else {
+        emojiPicker.classList.remove('hidden');
+        imagePicker.classList.add('hidden');
+        tabs[0]?.classList.add('active');
+        document.getElementById('rule-icon-type').value = 'emoji';
+    }
+}
+
+function selectRuleIcon(icon) {
+    document.getElementById('rule-icon').value = icon;
+    document.getElementById('rule-icon-type').value = 'emoji';
+    document.getElementById('rule-emoji-input').value = icon;
+    document.querySelectorAll('#add-rule-modal .icon-btn').forEach(btn => {
+        btn.classList.toggle('selected', btn.textContent === icon);
+    });
+}
+
+function selectRuleIconFromInput() {
+    const input = document.getElementById('rule-emoji-input');
+    const icon = input.value.trim();
+    if (icon) {
+        document.getElementById('rule-icon').value = icon;
+        document.getElementById('rule-icon-type').value = 'emoji';
+        // 取消预设按钮的选中状态
+        document.querySelectorAll('#add-rule-modal .icon-btn').forEach(btn => {
+            btn.classList.remove('selected');
+        });
+    }
+}
+
+async function browseRuleIconImage() {
+    filePickerCurrentPath = '/sdcard/images';
+    filePickerSelectedFile = null;
+    filePickerCallback = (path) => {
+        document.getElementById('rule-icon').value = path;
+        document.getElementById('rule-icon-path').value = path;
+        updateRuleIconPreview(path);
+    };
+    document.getElementById('file-picker-modal').classList.remove('hidden');
+    await loadFilePickerDirectory(filePickerCurrentPath);
+}
+
+function updateRuleIconPreview(path) {
+    const preview = document.getElementById('rule-icon-preview');
+    if (path && path.startsWith('/sdcard/')) {
+        preview.innerHTML = `<img src="/api/v1/file/download?path=${encodeURIComponent(path)}" alt="icon" onerror="this.parentElement.innerHTML='<span class=\\'preview-placeholder\\'>加载失败</span>'">`;
+    } else {
+        preview.innerHTML = '<span class="preview-placeholder">无</span>';
+    }
+}
+
+function clearRuleIconImage() {
+    document.getElementById('rule-icon').value = '⚡';
+    document.getElementById('rule-icon-path').value = '';
+    document.getElementById('rule-icon-type').value = 'emoji';
+    updateRuleIconPreview(null);
+    switchRuleIconType('emoji');
 }
 
 // 条件行计数器
@@ -12806,11 +13430,18 @@ function addConditionRow(variable = '', operator = 'eq', value = '') {
         displayValue = value ? 'true' : 'false';
     }
     
+    const rowId = conditionRowCount;
     const row = document.createElement('div');
     row.className = 'condition-row';
-    row.id = `condition-row-${conditionRowCount}`;
+    row.id = `condition-row-${rowId}`;
     row.innerHTML = `
-        <input type="text" class="input cond-variable" placeholder="变量名 (如 gpio.btn1)" value="${variable}">
+        <button class="btn btn-sm btn-secondary cond-variable-btn" 
+                onclick="openConditionVarSelector(${rowId})" 
+                title="选择变量"
+                style="min-width:140px;text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+            ${variable || '📊 选择变量'}
+        </button>
+        <input type="hidden" class="cond-variable" value="${variable}">
         <select class="input cond-operator">
             <option value="eq" ${operator === 'eq' ? 'selected' : ''}>== 等于</option>
             <option value="ne" ${operator === 'ne' ? 'selected' : ''}>!= 不等于</option>
@@ -12827,6 +13458,147 @@ function addConditionRow(variable = '', operator = 'eq', value = '') {
     
     container.appendChild(row);
     conditionRowCount++;
+}
+
+// 用于存储当前正在配置的条件行 ID
+let currentConditionVarRowId = null;
+
+/**
+ * 打开触发条件变量选择器
+ */
+async function openConditionVarSelector(rowId) {
+    currentConditionVarRowId = rowId;
+    
+    // 移除旧的模态框
+    const oldModal = document.getElementById('variable-select-modal');
+    if (oldModal) oldModal.remove();
+    
+    const modal = document.createElement('div');
+    modal.id = 'variable-select-modal';
+    modal.className = 'modal show';
+    modal.dataset.callback = 'ruleCondition';
+    modal.onclick = (e) => { if (e.target === modal) closeModal('variable-select-modal'); };
+    
+    modal.innerHTML = `
+        <div class="modal-content" style="max-width:550px;">
+            <div class="modal-header">
+                <h3>📊 选择触发条件变量</h3>
+                <button class="modal-close" onclick="closeModal('variable-select-modal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div style="margin-bottom:12px;">
+                    <input type="text" id="var-search" class="input" placeholder="🔍 搜索变量..." 
+                           oninput="filterVariableList(this.value)" style="width:100%;">
+                </div>
+                <div id="variable-select-loading" style="text-align:center;padding:20px;">
+                    <div class="spinner"></div>
+                    <p>加载变量列表...</p>
+                </div>
+                <div id="variable-select-list" style="display:none;max-height:400px;overflow-y:auto;"></div>
+                <div id="variable-select-empty" style="display:none;text-align:center;padding:30px;color:var(--text-light);">
+                    <div style="font-size:48px;margin-bottom:10px;">📭</div>
+                    <p>没有可用的变量</p>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-sm" onclick="closeModal('variable-select-modal')">关闭</button>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+    
+    // 加载变量列表
+    try {
+        const result = await api.call('automation.variables.list');
+        const variables = result.data?.variables || [];
+        
+        document.getElementById('variable-select-loading').style.display = 'none';
+        
+        if (variables.length === 0) {
+            document.getElementById('variable-select-empty').style.display = 'block';
+            return;
+        }
+        
+        // 按数据源分组
+        const grouped = {};
+        variables.forEach(v => {
+            const sourceId = v.source_id || '_system';
+            if (!grouped[sourceId]) grouped[sourceId] = [];
+            grouped[sourceId].push(v);
+        });
+        
+        const listEl = document.getElementById('variable-select-list');
+        listEl.style.display = 'block';
+        
+        let html = '';
+        for (const [sourceId, vars] of Object.entries(grouped)) {
+            const groupId = `var-group-${sourceId.replace(/[^a-zA-Z0-9]/g, '_')}`;
+            html += `<div class="var-group" data-source="${sourceId}">
+                <div class="var-group-header" style="padding:10px 12px;background:var(--bg-elevated);font-weight:600;border-bottom:1px solid var(--border);cursor:pointer;display:flex;align-items:center;justify-content:space-between;"
+                     onclick="toggleVarGroup('${groupId}')">
+                    <span>📦 ${sourceId === '_system' ? '系统变量' : sourceId} <span style="font-weight:normal;color:var(--text-light);">(${vars.length})</span></span>
+                    <span class="var-group-arrow" id="${groupId}-arrow" style="transition:transform 0.2s;">▶</span>
+                </div>
+                <div class="var-group-items" id="${groupId}" style="display:none;">`;
+            
+            vars.forEach(v => {
+                const typeIcon = { 'bool': '🔘', 'int': '🔢', 'float': '📊', 'string': '📝' }[v.type] || '📋';
+                const displayValue = v.value !== undefined ? String(v.value).substring(0, 30) : '-';
+                html += `
+                    <div class="var-select-item" data-name="${v.name}" data-source="${sourceId}" style="
+                        display:flex;align-items:center;padding:10px 12px;padding-left:24px;
+                        border-bottom:1px solid var(--border);cursor:pointer;
+                        transition:background 0.2s;"
+                        onmouseover="this.style.background='var(--bg-hover)'"
+                        onmouseout="this.style.background='transparent'"
+                        onclick="selectVariable('${v.name}')">
+                        <span style="font-size:18px;margin-right:10px;">${typeIcon}</span>
+                        <div style="flex:1;min-width:0;">
+                            <div style="font-weight:500;font-family:monospace;">${v.name}</div>
+                            <small style="color:var(--text-light);">当前值: ${displayValue}${displayValue.length >= 30 ? '...' : ''}</small>
+                        </div>
+                    </div>
+                `;
+            });
+            html += '</div></div>';
+        }
+        
+        listEl.innerHTML = html;
+        
+        // 聚焦搜索框
+        setTimeout(() => document.getElementById('var-search')?.focus(), 100);
+        
+    } catch (e) {
+        console.error('加载变量列表失败:', e);
+        document.getElementById('variable-select-loading').innerHTML = `
+            <div style="color:var(--danger);">
+                <p>加载失败: ${e.message}</p>
+                <button class="btn btn-sm" onclick="closeModal('variable-select-modal')">关闭</button>
+            </div>
+        `;
+    }
+}
+
+/**
+ * 处理触发条件变量选择
+ */
+function handleConditionVarSelect(varName) {
+    if (currentConditionVarRowId === null) return;
+    
+    const row = document.getElementById(`condition-row-${currentConditionVarRowId}`);
+    if (!row) return;
+    
+    const varBtn = row.querySelector('.cond-variable-btn');
+    const varInput = row.querySelector('.cond-variable');
+    
+    if (varBtn) varBtn.textContent = varName;
+    if (varInput) varInput.value = varName;
+    
+    // 关闭模态框
+    closeModal('variable-select-modal');
+    
+    currentConditionVarRowId = null;
 }
 
 // 动作行计数器
@@ -12854,8 +13626,12 @@ async function loadActionTemplatesForRule() {
  * 添加动作模板选择行
  * @param {string} templateId - 预选中的模板 ID
  * @param {number} delayMs - 预填充的延迟时间
+ * @param {string} repeatMode - 重复模式: 'once' | 'while_true' | 'count'
+ * @param {number} repeatCount - 重复次数（当 repeatMode='count' 时）
+ * @param {number} repeatIntervalMs - 重复间隔毫秒
+ * @param {Object|null} condition - 动作条件配置 {variable, operator, value}
  */
-async function addActionTemplateRow(templateId = '', delayMs = 0) {
+async function addActionTemplateRow(templateId = '', delayMs = 0, repeatMode = 'once', repeatCount = 1, repeatIntervalMs = 1000, condition = null) {
     const container = document.getElementById('actions-container');
     
     // 先加载模板列表
@@ -12882,12 +13658,71 @@ async function addActionTemplateRow(templateId = '', delayMs = 0) {
         optionsHtml += `<option value="${tpl.id}" ${selected}>${tpl.name || tpl.id} (${typeLabel})</option>`;
     });
     
+    const rowId = actionRowCount;
+    const showRepeatOptions = repeatMode !== 'once';
+    const hasCondition = condition && condition.variable;
+    
     row.innerHTML = `
-        <select class="input action-template-id" onchange="updateActionTemplatePreview(this)" style="flex:2">
-            ${optionsHtml}
-        </select>
-        <input type="number" class="input action-delay" placeholder="延迟ms" value="${delayMs}" min="0" style="width:100px">
-        <button class="btn btn-sm btn-danger" onclick="this.parentElement.remove()">✕</button>
+        <div style="display:flex;flex-direction:column;gap:8px;flex:1;">
+            <div style="display:flex;gap:8px;align-items:center;">
+                <select class="input action-template-id" onchange="updateActionTemplatePreview(this)" style="flex:2">
+                    ${optionsHtml}
+                </select>
+                <button class="btn btn-sm btn-danger" onclick="this.closest('.action-row').remove()">✕</button>
+            </div>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                <label style="display:flex;align-items:center;gap:4px;font-size:12px;color:var(--text-light);">
+                    ⏱️ 延迟
+                    <input type="number" class="input action-delay" placeholder="0" value="${delayMs}" min="0" style="width:70px;padding:4px 6px;">
+                    <span>ms</span>
+                </label>
+                <label style="display:flex;align-items:center;gap:4px;font-size:12px;color:var(--text-light);">
+                    🔄 执行
+                    <select class="input action-repeat-mode" onchange="toggleRepeatOptions(${rowId})" style="padding:4px 6px;">
+                        <option value="once" ${repeatMode === 'once' ? 'selected' : ''}>单次</option>
+                        <option value="while_true" ${repeatMode === 'while_true' ? 'selected' : ''}>条件持续时重复</option>
+                        <option value="count" ${repeatMode === 'count' ? 'selected' : ''}>指定次数</option>
+                    </select>
+                </label>
+                <span class="repeat-options" id="repeat-options-${rowId}" style="display:${showRepeatOptions ? 'flex' : 'none'};gap:8px;align-items:center;">
+                    <label class="repeat-count-label" style="display:${repeatMode === 'count' ? 'flex' : 'none'};align-items:center;gap:4px;font-size:12px;color:var(--text-light);">
+                        次数
+                        <input type="number" class="input action-repeat-count" value="${repeatCount}" min="1" max="100" style="width:50px;padding:4px 6px;">
+                    </label>
+                    <label style="display:flex;align-items:center;gap:4px;font-size:12px;color:var(--text-light);">
+                        间隔
+                        <input type="number" class="input action-repeat-interval" value="${repeatIntervalMs}" min="100" style="width:70px;padding:4px 6px;">
+                        <span>ms</span>
+                    </label>
+                </span>
+            </div>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                <label style="display:flex;align-items:center;gap:4px;font-size:12px;color:var(--text-light);">
+                    <input type="checkbox" class="action-has-condition" onchange="toggleActionCondition(${rowId})" ${hasCondition ? 'checked' : ''}>
+                    🎯 执行条件
+                </label>
+                <span class="action-condition-fields" id="action-condition-${rowId}" style="display:${hasCondition ? 'flex' : 'none'};gap:6px;align-items:center;">
+                    <button class="btn btn-xs btn-secondary action-condition-var-btn" 
+                            onclick="openActionConditionVarSelector(${rowId})" 
+                            title="选择变量"
+                            style="padding:2px 6px;font-size:11px;">
+                        ${hasCondition && condition.variable ? condition.variable : '选择变量'}
+                    </button>
+                    <input type="hidden" class="action-condition-variable" value="${hasCondition ? condition.variable : ''}">
+                    <select class="input action-condition-operator" style="padding:4px 6px;width:80px;">
+                        <option value="eq" ${hasCondition && condition.operator === 'eq' ? 'selected' : ''}>=</option>
+                        <option value="ne" ${hasCondition && condition.operator === 'ne' ? 'selected' : ''}>≠</option>
+                        <option value="gt" ${hasCondition && condition.operator === 'gt' ? 'selected' : ''}>&gt;</option>
+                        <option value="ge" ${hasCondition && condition.operator === 'ge' ? 'selected' : ''}>≥</option>
+                        <option value="lt" ${hasCondition && condition.operator === 'lt' ? 'selected' : ''}>&lt;</option>
+                        <option value="le" ${hasCondition && condition.operator === 'le' ? 'selected' : ''}>≤</option>
+                    </select>
+                    <input type="text" class="input action-condition-value" 
+                           placeholder="值" value="${hasCondition ? condition.value : ''}" 
+                           style="width:80px;padding:4px 6px;">
+                </span>
+            </div>
+        </div>
     `;
     
     container.appendChild(row);
@@ -12912,6 +13747,31 @@ function getActionTypeLabel(type) {
 }
 
 /**
+ * 切换重复执行选项的显示
+ */
+function toggleRepeatOptions(rowId) {
+    const row = document.getElementById(`action-row-${rowId}`);
+    if (!row) return;
+    
+    const modeSelect = row.querySelector('.action-repeat-mode');
+    const repeatOptions = document.getElementById(`repeat-options-${rowId}`);
+    const countLabel = repeatOptions?.querySelector('.repeat-count-label');
+    
+    if (!modeSelect || !repeatOptions) return;
+    
+    const mode = modeSelect.value;
+    
+    if (mode === 'once') {
+        repeatOptions.style.display = 'none';
+    } else {
+        repeatOptions.style.display = 'flex';
+        if (countLabel) {
+            countLabel.style.display = mode === 'count' ? 'flex' : 'none';
+        }
+    }
+}
+
+/**
  * 更新动作模板预览（可选）
  */
 function updateActionTemplatePreview(selectElement) {
@@ -12922,6 +13782,175 @@ function updateActionTemplatePreview(selectElement) {
     if (tpl) {
         console.log('选择动作模板:', tpl);
     }
+}
+
+/**
+ * 切换动作条件配置的显示
+ */
+function toggleActionCondition(rowId) {
+    const row = document.getElementById(`action-row-${rowId}`);
+    if (!row) return;
+    
+    const checkbox = row.querySelector('.action-has-condition');
+    const conditionFields = document.getElementById(`action-condition-${rowId}`);
+    
+    if (!checkbox || !conditionFields) return;
+    
+    conditionFields.style.display = checkbox.checked ? 'flex' : 'none';
+}
+
+// 用于存储当前正在配置条件的动作行 ID
+let currentConditionRowId = null;
+
+/**
+ * 打开动作条件变量选择器
+ */
+async function openActionConditionVarSelector(rowId) {
+    currentConditionRowId = rowId;
+    
+    // 设置回调模式标记
+    window._actionConditionMode = true;
+    
+    // 复用现有的变量选择模态框（通过创建一个临时 input）
+    // showVariableSelectModal 需要一个 inputId，我们用特殊标记来识别
+    await showVariableSelectModalForCondition();
+}
+
+/**
+ * 为动作条件显示变量选择模态框
+ */
+async function showVariableSelectModalForCondition() {
+    // 移除旧的模态框
+    const oldModal = document.getElementById('variable-select-modal');
+    if (oldModal) oldModal.remove();
+    
+    const modal = document.createElement('div');
+    modal.id = 'variable-select-modal';
+    modal.className = 'modal show';
+    modal.dataset.callback = 'actionCondition';
+    modal.onclick = (e) => { if (e.target === modal) closeModal('variable-select-modal'); };
+    
+    modal.innerHTML = `
+        <div class="modal-content" style="max-width:550px;">
+            <div class="modal-header">
+                <h3>📊 选择条件变量</h3>
+                <button class="modal-close" onclick="closeModal('variable-select-modal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div style="margin-bottom:12px;">
+                    <input type="text" id="var-search" class="input" placeholder="🔍 搜索变量..." 
+                           oninput="filterVariableList(this.value)" style="width:100%;">
+                </div>
+                <div id="variable-select-loading" style="text-align:center;padding:20px;">
+                    <div class="spinner"></div>
+                    <p>加载变量列表...</p>
+                </div>
+                <div id="variable-select-list" style="display:none;max-height:400px;overflow-y:auto;"></div>
+                <div id="variable-select-empty" style="display:none;text-align:center;padding:30px;color:var(--text-light);">
+                    <div style="font-size:48px;margin-bottom:10px;">📭</div>
+                    <p>没有可用的变量</p>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-sm" onclick="closeModal('variable-select-modal')">关闭</button>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+    
+    // 加载变量列表
+    try {
+        const result = await api.call('automation.variables.list');
+        const variables = result.data?.variables || [];
+        
+        document.getElementById('variable-select-loading').style.display = 'none';
+        
+        if (variables.length === 0) {
+            document.getElementById('variable-select-empty').style.display = 'block';
+            return;
+        }
+        
+        // 按数据源分组
+        const grouped = {};
+        variables.forEach(v => {
+            const sourceId = v.source_id || '_system';
+            if (!grouped[sourceId]) grouped[sourceId] = [];
+            grouped[sourceId].push(v);
+        });
+        
+        const listEl = document.getElementById('variable-select-list');
+        listEl.style.display = 'block';
+        
+        let html = '';
+        for (const [sourceId, vars] of Object.entries(grouped)) {
+            const groupId = `var-group-${sourceId.replace(/[^a-zA-Z0-9]/g, '_')}`;
+            html += `<div class="var-group" data-source="${sourceId}">
+                <div class="var-group-header" style="padding:10px 12px;background:var(--bg-elevated);font-weight:600;border-bottom:1px solid var(--border);cursor:pointer;display:flex;align-items:center;justify-content:space-between;"
+                     onclick="toggleVarGroup('${groupId}')">
+                    <span>📦 ${sourceId === '_system' ? '系统变量' : sourceId} <span style="font-weight:normal;color:var(--text-light);">(${vars.length})</span></span>
+                    <span class="var-group-arrow" id="${groupId}-arrow" style="transition:transform 0.2s;">▶</span>
+                </div>
+                <div class="var-group-items" id="${groupId}" style="display:none;">`;
+            
+            vars.forEach(v => {
+                const typeIcon = { 'bool': '🔘', 'int': '🔢', 'float': '📊', 'string': '📝' }[v.type] || '📋';
+                const displayValue = v.value !== undefined ? String(v.value).substring(0, 30) : '-';
+                html += `
+                    <div class="var-select-item" data-name="${v.name}" data-source="${sourceId}" style="
+                        display:flex;align-items:center;padding:10px 12px;padding-left:24px;
+                        border-bottom:1px solid var(--border);cursor:pointer;
+                        transition:background 0.2s;"
+                        onmouseover="this.style.background='var(--bg-hover)'"
+                        onmouseout="this.style.background='transparent'"
+                        onclick="selectVariable('${v.name}')">
+                        <span style="font-size:18px;margin-right:10px;">${typeIcon}</span>
+                        <div style="flex:1;min-width:0;">
+                            <div style="font-weight:500;font-family:monospace;">${v.name}</div>
+                            <small style="color:var(--text-light);">当前值: ${displayValue}${displayValue.length >= 30 ? '...' : ''}</small>
+                        </div>
+                    </div>
+                `;
+            });
+            html += '</div></div>';
+        }
+        
+        listEl.innerHTML = html;
+        
+        // 聚焦搜索框
+        setTimeout(() => document.getElementById('var-search')?.focus(), 100);
+        
+    } catch (e) {
+        console.error('加载变量列表失败:', e);
+        document.getElementById('variable-select-loading').innerHTML = `
+            <div style="color:var(--danger);">
+                <p>加载失败: ${e.message}</p>
+                <button class="btn btn-sm" onclick="closeModal('variable-select-modal')">关闭</button>
+            </div>
+        `;
+    }
+}
+
+/**
+ * 处理动作条件变量选择
+ */
+function handleActionConditionVarSelect(varName) {
+    if (currentConditionRowId === null) return;
+    
+    const row = document.getElementById(`action-row-${currentConditionRowId}`);
+    if (!row) return;
+    
+    const varBtn = row.querySelector('.action-condition-var-btn');
+    const varInput = row.querySelector('.action-condition-variable');
+    
+    if (varBtn) varBtn.textContent = varName;
+    if (varInput) varInput.value = varName;
+    
+    // 关闭模态框
+    closeModal('variable-select-modal');
+    
+    currentConditionRowId = null;
+    window._actionConditionMode = false;
 }
 
 // 保留旧的 addActionRow 和 updateActionFields 用于兼容，但标记为废弃
@@ -13016,9 +14045,11 @@ async function submitAddRule(originalId = null) {
     const isEdit = !!originalId;
     const id = document.getElementById('rule-id').value.trim();
     const name = document.getElementById('rule-name').value.trim();
+    const icon = document.getElementById('rule-icon').value || '⚡';
     const logic = document.getElementById('rule-logic').value;
     const cooldown = parseInt(document.getElementById('rule-cooldown').value) || 0;
     const enabled = document.getElementById('rule-enabled').checked;
+    const manualTrigger = document.getElementById('rule-manual-only')?.checked || false;
     
     if (!id) {
         alert('请输入规则 ID');
@@ -13031,8 +14062,7 @@ async function submitAddRule(originalId = null) {
     
     // 收集条件（仅手动触发时为空数组）
     const conditions = [];
-    const manualOnly = document.getElementById('rule-manual-only')?.checked;
-    if (!manualOnly) {
+    if (!manualTrigger) {
         document.querySelectorAll('.condition-row').forEach(row => {
             const variable = row.querySelector('.cond-variable').value.trim();
             const operator = row.querySelector('.cond-operator').value;
@@ -13051,17 +14081,54 @@ async function submitAddRule(originalId = null) {
         });
     }
     
-    // 收集动作模板引用（只保存 template_id 和 delay_ms）
+    // 收集动作模板引用（包含 template_id、delay_ms、重复选项和动作条件）
     const actions = [];
     document.querySelectorAll('.action-row').forEach(row => {
         const templateId = row.querySelector('.action-template-id')?.value;
         const delay_ms = parseInt(row.querySelector('.action-delay')?.value) || 0;
+        const repeat_mode = row.querySelector('.action-repeat-mode')?.value || 'once';
+        const repeat_count = parseInt(row.querySelector('.action-repeat-count')?.value) || 1;
+        const repeat_interval_ms = parseInt(row.querySelector('.action-repeat-interval')?.value) || 1000;
+        
+        // 收集动作条件
+        const hasCondition = row.querySelector('.action-has-condition')?.checked;
+        const condVariable = row.querySelector('.action-condition-variable')?.value?.trim();
+        const condOperator = row.querySelector('.action-condition-operator')?.value;
+        const condValueRaw = row.querySelector('.action-condition-value')?.value?.trim();
         
         if (templateId) {
-            actions.push({
+            const actionRef = {
                 template_id: templateId,
                 delay_ms: delay_ms
-            });
+            };
+            
+            // 只有非单次执行时才添加重复参数
+            if (repeat_mode !== 'once') {
+                actionRef.repeat_mode = repeat_mode;
+                actionRef.repeat_interval_ms = repeat_interval_ms;
+                if (repeat_mode === 'count') {
+                    actionRef.repeat_count = repeat_count;
+                }
+            }
+            
+            // 添加动作条件
+            if (hasCondition && condVariable) {
+                // 尝试解析条件值
+                let condValue = condValueRaw;
+                try {
+                    condValue = JSON.parse(condValueRaw);
+                } catch (e) {
+                    // 保持字符串
+                }
+                
+                actionRef.condition = {
+                    variable: condVariable,
+                    operator: condOperator,
+                    value: condValue
+                };
+            }
+            
+            actions.push(actionRef);
         }
     });
     
@@ -13073,9 +14140,11 @@ async function submitAddRule(originalId = null) {
     const params = {
         id,
         name,
+        icon,
         logic,
         cooldown_ms: cooldown,
         enabled,
+        manual_trigger: manualTrigger,
         conditions,
         actions
     };
@@ -13130,11 +14199,18 @@ window.onSshCmdChange = onSshCmdChange;
 window.submitAddSource = submitAddSource;
 window.showAddRuleModal = showAddRuleModal;
 window.addConditionRow = addConditionRow;
+window.openConditionVarSelector = openConditionVarSelector;
+window.handleConditionVarSelect = handleConditionVarSelect;
 window.addActionRow = addActionRow;
 window.updateActionFields = updateActionFields;
 window.submitAddRule = submitAddRule;
 window.closeModal = closeModal;
 window.toggleManualOnly = toggleManualOnly;
+window.toggleRepeatOptions = toggleRepeatOptions;
+window.toggleActionCondition = toggleActionCondition;
+window.openActionConditionVarSelector = openActionConditionVarSelector;
+window.handleActionConditionVarSelect = handleActionConditionVarSelect;
+window.showVariableSelectModalForCondition = showVariableSelectModalForCondition;
 // 动作模板管理
 window.refreshActions = refreshActions;
 window.showAddActionModal = showAddActionModal;
@@ -13143,4 +14219,22 @@ window.submitAction = submitAction;
 window.testAction = testAction;
 window.editAction = editAction;
 window.deleteAction = deleteAction;
+window.showImageSelectModal = showImageSelectModal;
+window.selectImageItem = selectImageItem;
+window.browseActionImages = browseActionImages;
+window.browseActionQrBg = browseActionQrBg;
+window.showVariableSelectModal = showVariableSelectModal;
+window.filterVariableList = filterVariableList;
+window.selectVariable = selectVariable;
+window.toggleVarGroup = toggleVarGroup;
+// 规则图标相关
+window.switchRuleIconType = switchRuleIconType;
+window.selectRuleIcon = selectRuleIcon;
+window.selectRuleIconFromInput = selectRuleIconFromInput;
+window.browseRuleIconImage = browseRuleIconImage;
+window.clearRuleIconImage = clearRuleIconImage;
+window.updateRuleIconPreview = updateRuleIconPreview;
+// 快捷操作
+window.refreshQuickActions = refreshQuickActions;
+window.triggerQuickAction = triggerQuickAction;
 

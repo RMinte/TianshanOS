@@ -1,8 +1,8 @@
 # TianShanOS 开发进度跟踪
 
 > **项目**：TianShanOS（天山操作系统）  
-> **版本**：0.3.1  
-> **最后更新**：2026年1月28日  
+> **版本**：0.3.2  
+> **最后更新**：2026年1月29日  
 > **代码统计**：110+ 个 C 源文件，80+ 个头文件
 
 ---
@@ -34,6 +34,139 @@
 | Phase 20: 变量系统实现 | ✅ 完成 | 100% | 2026-01-27 |
 | Phase 21: 动作模板系统 | ✅ 完成 | 100% | 2026-01-28 |
 | Phase 22: 规则引擎增强 | ✅ 完成 | 100% | 2026-01-28 |
+| Phase 23: 自动化 UI 增强 & 代码清理 | ✅ 完成 | 100% | 2026-01-29 |
+
+---
+
+## 📋 Phase 23: 自动化 UI 增强 & 代码清理 ✅
+
+**时间**：2026年1月29日  
+**目标**：增强自动化模块 WebUI 体验，修复变量选择器、统计数据显示问题，清理冗余页面
+
+### 功能概述
+
+本阶段专注于自动化模块的 WebUI 优化和代码清理：
+- **变量选择器统一**：规则条件和动作条件都使用变量选择器
+- **统计数据修复**：修复自动化引擎顶部统计数据显示为零的问题
+- **监控页面移除**：删除冗余的设备监控页面，简化导航
+
+### 核心修复
+
+#### 1. 变量选择器 Modal ID 不匹配
+
+**问题**：点击变量选择器按钮无响应
+
+**原因**：
+```javascript
+// 错误：使用了不存在的 modal ID
+const modal = document.getElementById('variable-selector-modal');
+```
+
+**修复**：
+```javascript
+// 正确：使用实际存在的 modal ID
+const modal = document.getElementById('variable-select-modal');
+```
+
+#### 2. 触发条件变量选择器
+
+**问题**：规则的触发条件只有文本输入框，需要变量选择器
+
+**修复**：为条件行添加变量选择器按钮
+```javascript
+// addConditionRow() 修改
+<input type="hidden" class="cond-var-name" id="cond-var-${rowId}" value="">
+<button type="button" class="btn btn-sm btn-outline-secondary" 
+        onclick="openConditionVarSelector('${rowId}')">
+    <i class="bi bi-list-ul"></i> 选择变量
+</button>
+<span class="cond-var-display ms-2 text-muted" id="cond-var-display-${rowId}">
+    未选择变量
+</span>
+```
+
+**新增函数**：
+- `openConditionVarSelector(rowId)` - 打开条件变量选择器
+- `handleConditionVarSelect(varName)` - 处理条件变量选择结果
+
+#### 3. 自动化引擎统计数据全为零
+
+**问题**：自动化页面顶部的规则数、变量数、数据源数等统计全部显示为 0
+
+**原因**：前端字段名与 API 响应字段名不匹配
+```javascript
+// 错误：使用了错误的字段名
+data.rule_count     // API 返回的是 rules_count
+data.variable_count // API 返回的是 variables_count
+```
+
+**修复**：
+```javascript
+// 正确：使用正确的字段名
+document.getElementById('stat-rules').textContent = data.rules_count || 0;
+document.getElementById('stat-variables').textContent = data.variables_count || 0;
+document.getElementById('stat-sources').textContent = data.sources_count || 0;
+document.getElementById('stat-triggers').textContent = data.rule_triggers || 0;
+document.getElementById('stat-uptime').textContent = 
+    Math.floor((data.uptime_ms || 0) / 1000) + 's';
+```
+
+#### 4. 监控页面移除
+
+**删除内容**：
+- 导航链接：`<a href="#/device" class="nav-link">监控</a>`
+- 路由注册：`router.register('/device', loadDevicePage)`
+- 相关函数：`loadDevicePage()`, `refreshDevicePageOnce()`, `updateDeviceUI()`, 
+  `updateAgxMonitorData()`, `devicePower()`, `deviceReset()`, `deviceForceOff()`
+
+### 变量选择器回调机制
+
+使用 `modal.dataset.callback` 区分不同的选择场景：
+
+| 回调值 | 场景 | 处理函数 |
+|-------|------|----------|
+| `actionCondition` | 动作级条件变量选择 | `handleActionConditionVarSelect()` |
+| `ruleCondition` | 规则触发条件变量选择 | `handleConditionVarSelect()` |
+| (无) | 普通变量选择 | 默认处理逻辑 |
+
+```javascript
+function selectVariable(varName) {
+    const varSelectModal = document.getElementById('variable-select-modal');
+    const callback = varSelectModal?.dataset?.callback;
+    
+    if (callback === 'actionCondition') {
+        handleActionConditionVarSelect(varName);
+    } else if (callback === 'ruleCondition') {
+        handleConditionVarSelect(varName);
+    } else {
+        // 默认处理
+    }
+}
+```
+
+### 修改的文件
+
+| 文件 | 修改内容 |
+|------|----------|
+| `app.js` | 变量选择器修复、条件变量选择器、统计数据字段名修复、删除监控页面代码 |
+| `index.html` | 删除监控页面导航链接 |
+
+### 导航栏结构（更新后）
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  系统  │  网络  │  自动化  │  文件  │  终端  │  指令  │  安全  │
+└─────────────────────────────────────────────────────────────┘
+```
+
+已移除：~~监控~~
+
+### 窗口导出函数
+
+```javascript
+window.openConditionVarSelector = openConditionVarSelector;
+window.handleConditionVarSelect = handleConditionVarSelect;
+```
 
 ---
 

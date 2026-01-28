@@ -276,7 +276,9 @@ esp_err_t ts_rule_register(const ts_auto_rule_t *rule)
         // 复制基本数据
         strncpy(s_rule_ctx.rules[idx].id, rule->id, sizeof(s_rule_ctx.rules[idx].id) - 1);
         strncpy(s_rule_ctx.rules[idx].name, rule->name, sizeof(s_rule_ctx.rules[idx].name) - 1);
+        strncpy(s_rule_ctx.rules[idx].icon, rule->icon, sizeof(s_rule_ctx.rules[idx].icon) - 1);
         s_rule_ctx.rules[idx].enabled = rule->enabled;
+        s_rule_ctx.rules[idx].manual_trigger = rule->manual_trigger;
         s_rule_ctx.rules[idx].cooldown_ms = rule->cooldown_ms;
         s_rule_ctx.rules[idx].conditions.logic = rule->conditions.logic;
         s_rule_ctx.rules[idx].conditions.count = 0;
@@ -331,7 +333,9 @@ esp_err_t ts_rule_register(const ts_auto_rule_t *rule)
     // 复制基本数据
     strncpy(new_rule->id, rule->id, sizeof(new_rule->id) - 1);
     strncpy(new_rule->name, rule->name, sizeof(new_rule->name) - 1);
+    strncpy(new_rule->icon, rule->icon, sizeof(new_rule->icon) - 1);
     new_rule->enabled = rule->enabled;
+    new_rule->manual_trigger = rule->manual_trigger;
     new_rule->cooldown_ms = rule->cooldown_ms;
     new_rule->conditions.logic = rule->conditions.logic;
     
@@ -714,6 +718,22 @@ esp_err_t ts_rule_trigger(const char *id)
 /*===========================================================================*/
 
 /**
+ * @brief 解析 LED 设备名称（支持简短别名）
+ */
+static const char *resolve_led_device_name(const char *name)
+{
+    if (!name) return NULL;
+    
+    /* 支持简短别名 */
+    if (strcmp(name, "touch") == 0) return "led_touch";
+    if (strcmp(name, "board") == 0) return "led_board";
+    if (strcmp(name, "matrix") == 0) return "led_matrix";
+    
+    /* 也支持完整名 */
+    return name;
+}
+
+/**
  * @brief 执行 LED 动作
  */
 static esp_err_t execute_led_action(const ts_auto_action_t *action)
@@ -722,32 +742,45 @@ static esp_err_t execute_led_action(const ts_auto_action_t *action)
         return ESP_ERR_INVALID_ARG;
     }
 
-    ESP_LOGI(TAG, "LED action: device=%s, index=%d, color=#%02X%02X%02X",
-             action->led.device, action->led.index,
-             action->led.r, action->led.g, action->led.b);
+    // 解析设备名称
+    const char *device_name = resolve_led_device_name(action->led.device);
+
+    ESP_LOGI(TAG, "LED action: device=%s, index=%d, color=#%02X%02X%02X, effect=%s",
+             device_name, action->led.index,
+             action->led.r, action->led.g, action->led.b,
+             action->led.effect[0] ? action->led.effect : "(none)");
 
     // 获取设备句柄
-    ts_led_device_t device = ts_led_device_get(action->led.device);
+    ts_led_device_t device = ts_led_device_get(device_name);
     if (!device) {
-        ESP_LOGW(TAG, "LED device '%s' not found", action->led.device);
+        ESP_LOGW(TAG, "LED device '%s' not found", device_name);
         return ESP_ERR_NOT_FOUND;
+    }
+
+    // 获取默认 layer
+    ts_led_layer_t layer = ts_led_layer_get(device, 0);
+    if (!layer) {
+        ESP_LOGW(TAG, "LED layer not found for device '%s'", device_name);
+        return ESP_ERR_NOT_FOUND;
+    }
+
+    // 如果有效果名，启动效果动画
+    if (action->led.effect[0]) {
+        const ts_led_animation_def_t *anim = ts_led_animation_get_builtin(action->led.effect);
+        if (anim) {
+            ESP_LOGI(TAG, "Starting effect '%s' on device '%s'", action->led.effect, device_name);
+            return ts_led_animation_start(layer, anim);
+        } else {
+            ESP_LOGW(TAG, "Effect '%s' not found", action->led.effect);
+            // 继续尝试设置颜色
+        }
     }
 
     ts_led_rgb_t color = TS_LED_RGB(action->led.r, action->led.g, action->led.b);
 
     // index = 0xFF 表示填充整个设备（根据 ts_automation_types.h）
     if (action->led.index == 0xFF) {
-        // 获取默认 layer 并填充
-        ts_led_layer_t layer = ts_led_layer_get(device, 0);
-        if (layer) {
-            return ts_led_fill(layer, color);
-        }
-        // 如果没有 layer，直接设置每个像素
-        uint16_t count = ts_led_device_get_count(device);
-        for (uint16_t i = 0; i < count; i++) {
-            ts_led_device_set_pixel(device, i, color);
-        }
-        return ESP_OK;
+        return ts_led_fill(layer, color);
     }
 
     // 设置单个像素
@@ -798,7 +831,8 @@ static esp_err_t execute_gpio_action(const ts_auto_action_t *action)
 /**
  * @brief 执行 SSH 命令引用动作
  * 
- * 通过 cmd_id 查找已注册的 SSH 命令并执行
+ * 通过 cmd_id 查找已注册的 SSH 命令并通过队列异步执行
+ * 避免在 HTTP 任务中直接执行 SSH 操作导致栈溢出
  */
 static esp_err_t execute_ssh_ref_action(const ts_auto_action_t *action)
 {
@@ -807,25 +841,17 @@ static esp_err_t execute_ssh_ref_action(const ts_auto_action_t *action)
     }
 
     const char *cmd_id = action->ssh_ref.cmd_id;
-    ESP_LOGI(TAG, "SSH command ref action: cmd_id=%s", cmd_id);
+    ESP_LOGI(TAG, "SSH command ref action: cmd_id=%s (queued)", cmd_id);
 
     if (!cmd_id || cmd_id[0] == '\0') {
         ESP_LOGE(TAG, "Empty SSH command ID");
         return ESP_ERR_INVALID_ARG;
     }
 
-    // 使用 ts_action_exec_ssh_ref 执行命令
-    ts_action_result_t result = {0};
-    esp_err_t ret = ts_action_exec_ssh_ref(&action->ssh_ref, &result);
-
-    if (ret == ESP_OK) {
-        ESP_LOGI(TAG, "SSH command '%s' executed, exit_code=%d", cmd_id, result.exit_code);
-        if (result.output[0]) {
-            ESP_LOGD(TAG, "SSH output: %.200s%s", result.output, 
-                     strlen(result.output) > 200 ? "..." : "");
-        }
-    } else {
-        ESP_LOGE(TAG, "SSH command '%s' failed: %s", cmd_id, esp_err_to_name(ret));
+    // 通过 action_manager 队列异步执行，避免栈溢出
+    esp_err_t ret = ts_action_queue(action, NULL, NULL, 5);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to queue SSH action: %s", esp_err_to_name(ret));
     }
 
     return ret;
@@ -834,7 +860,7 @@ static esp_err_t execute_ssh_ref_action(const ts_auto_action_t *action)
 /**
  * @brief 执行 CLI 命令动作
  * 
- * 在本地执行 TianShanOS CLI 命令
+ * 通过队列异步执行 TianShanOS CLI 命令
  */
 static esp_err_t execute_cli_action(const ts_auto_action_t *action)
 {
@@ -843,30 +869,17 @@ static esp_err_t execute_cli_action(const ts_auto_action_t *action)
     }
 
     const char *command = action->cli.command;
-    ESP_LOGI(TAG, "CLI action: command=%s", command);
+    ESP_LOGI(TAG, "CLI action: command=%s (queued)", command);
 
     if (!command || command[0] == '\0') {
         ESP_LOGE(TAG, "Empty CLI command");
         return ESP_ERR_INVALID_ARG;
     }
 
-    // 使用 ts_action_exec_cli 执行 CLI 命令
-    ts_action_result_t result = {0};
-    esp_err_t ret = ts_action_exec_cli(&action->cli, &result);
-
-    if (ret == ESP_OK && result.exit_code == 0) {
-        ESP_LOGI(TAG, "CLI command executed successfully");
-    } else {
-        ESP_LOGW(TAG, "CLI command returned: %d", result.exit_code);
-    }
-
-    // 如果指定了变量名，存储执行结果
-    if (action->cli.var_name[0] != '\0') {
-        ts_auto_value_t val = {
-            .type = TS_AUTO_VAL_INT,
-            .int_val = result.exit_code
-        };
-        ts_variable_set(action->cli.var_name, &val);
+    // 通过 action_manager 队列异步执行
+    esp_err_t ret = ts_action_queue(action, NULL, NULL, 5);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to queue CLI action: %s", esp_err_to_name(ret));
     }
 
     return ret;
@@ -1128,6 +1141,113 @@ esp_err_t ts_action_execute(const ts_auto_action_t *action)
     return ret;
 }
 
+/**
+ * @brief Check if action's condition is met
+ */
+static bool check_action_condition(const ts_auto_action_t *action)
+{
+    if (!action->condition.has_condition) {
+        return true;  // 没有条件，直接执行
+    }
+    
+    // 构造条件结构并评估
+    ts_auto_condition_t cond = {
+        .op = action->condition.op,
+        .value = action->condition.value,
+    };
+    strncpy(cond.variable, action->condition.variable, sizeof(cond.variable) - 1);
+    
+    bool result = ts_rule_eval_condition(&cond);
+    
+    ESP_LOGD(TAG, "Action condition check: %s %d %s -> %s",
+             action->condition.variable, action->condition.op,
+             action->condition.value.type == TS_AUTO_VAL_STRING ? 
+                 action->condition.value.str_val : "(numeric)",
+             result ? "PASS" : "SKIP");
+    
+    return result;
+}
+
+/**
+ * @brief Execute a single action with repeat support
+ */
+static esp_err_t execute_action_with_repeat(const ts_auto_action_t *action,
+                                             ts_action_result_cb_t callback,
+                                             void *user_data)
+{
+    esp_err_t ret = ESP_OK;
+    
+    // 先检查动作级别的条件
+    if (!check_action_condition(action)) {
+        ESP_LOGI(TAG, "Action skipped: condition not met");
+        return ESP_OK;  // 条件不满足，跳过执行
+    }
+    
+    switch (action->repeat_mode) {
+        case TS_AUTO_REPEAT_ONCE:
+        default:
+            // 单次执行
+            ret = ts_action_execute(action);
+            if (callback) {
+                callback(action, ret, user_data);
+            }
+            break;
+            
+        case TS_AUTO_REPEAT_COUNT: {
+            // 指定次数重复
+            uint8_t count = action->repeat_count > 0 ? action->repeat_count : 1;
+            uint16_t interval = action->repeat_interval_ms > 0 ? action->repeat_interval_ms : 1000;
+            
+            ESP_LOGI(TAG, "Repeat action %d times, interval=%dms", count, interval);
+            
+            for (uint8_t i = 0; i < count; i++) {
+                // 每次重复前检查条件
+                if (!check_action_condition(action)) {
+                    ESP_LOGI(TAG, "Repeat stopped: condition no longer met");
+                    break;
+                }
+                
+                ret = ts_action_execute(action);
+                if (callback) {
+                    callback(action, ret, user_data);
+                }
+                
+                // 最后一次不需要等待
+                if (i < count - 1 && interval > 0) {
+                    vTaskDelay(pdMS_TO_TICKS(interval));
+                }
+            }
+            break;
+        }
+        
+        case TS_AUTO_REPEAT_WHILE_TRUE: {
+            // 条件持续时重复
+            uint16_t interval = action->repeat_interval_ms > 0 ? action->repeat_interval_ms : 1000;
+            uint8_t max_iterations = 100;  // 安全限制，防止无限循环
+            uint8_t iterations = 0;
+            
+            ESP_LOGI(TAG, "Repeat while condition true, interval=%dms, max=%d", interval, max_iterations);
+            
+            while (check_action_condition(action) && iterations < max_iterations) {
+                ret = ts_action_execute(action);
+                if (callback) {
+                    callback(action, ret, user_data);
+                }
+                iterations++;
+                
+                vTaskDelay(pdMS_TO_TICKS(interval));
+            }
+            
+            if (iterations >= max_iterations) {
+                ESP_LOGW(TAG, "Repeat stopped: max iterations reached (%d)", max_iterations);
+            }
+            break;
+        }
+    }
+    
+    return ret;
+}
+
 esp_err_t ts_action_execute_array(const ts_auto_action_t *actions, int count,
                                    ts_action_result_cb_t callback, void *user_data)
 {
@@ -1143,11 +1263,7 @@ esp_err_t ts_action_execute_array(const ts_auto_action_t *actions, int count,
             vTaskDelay(pdMS_TO_TICKS(actions[i].delay_ms));
         }
 
-        esp_err_t ret = ts_action_execute(&actions[i]);
-
-        if (callback) {
-            callback(&actions[i], ret, user_data);
-        }
+        execute_action_with_repeat(&actions[i], callback, user_data);
     }
 
     return ESP_OK;
@@ -1339,7 +1455,11 @@ static char *rule_to_json(const ts_auto_rule_t *rule)
     // 基本信息
     cJSON_AddStringToObject(root, "id", rule->id);
     cJSON_AddStringToObject(root, "name", rule->name);
+    if (rule->icon[0]) {
+        cJSON_AddStringToObject(root, "icon", rule->icon);
+    }
     cJSON_AddBoolToObject(root, "enabled", rule->enabled);
+    cJSON_AddBoolToObject(root, "manual_trigger", rule->manual_trigger);
     cJSON_AddNumberToObject(root, "cooldown_ms", rule->cooldown_ms);
     
     // 条件组
@@ -1376,6 +1496,10 @@ static char *rule_to_json(const ts_auto_rule_t *rule)
                 cJSON_AddNumberToObject(action, "r", a->led.r);
                 cJSON_AddNumberToObject(action, "g", a->led.g);
                 cJSON_AddNumberToObject(action, "b", a->led.b);
+                if (a->led.effect[0]) {
+                    cJSON_AddStringToObject(action, "effect", a->led.effect);
+                }
+                cJSON_AddNumberToObject(action, "duration_ms", a->led.duration_ms);
                 break;
                 
             case TS_AUTO_ACT_GPIO:
@@ -1448,8 +1572,14 @@ static esp_err_t json_to_rule(const char *json_str, ts_auto_rule_t *rule)
     if ((item = cJSON_GetObjectItem(root, "name")) && cJSON_IsString(item)) {
         strncpy(rule->name, item->valuestring, sizeof(rule->name) - 1);
     }
+    if ((item = cJSON_GetObjectItem(root, "icon")) && cJSON_IsString(item)) {
+        strncpy(rule->icon, item->valuestring, sizeof(rule->icon) - 1);
+    }
     if ((item = cJSON_GetObjectItem(root, "enabled"))) {
         rule->enabled = cJSON_IsTrue(item);
+    }
+    if ((item = cJSON_GetObjectItem(root, "manual_trigger"))) {
+        rule->manual_trigger = cJSON_IsTrue(item);
     }
     if ((item = cJSON_GetObjectItem(root, "cooldown_ms")) && cJSON_IsNumber(item)) {
         rule->cooldown_ms = (uint32_t)item->valueint;
@@ -1532,6 +1662,12 @@ static esp_err_t json_to_rule(const char *json_str, ts_auto_rule_t *rule)
                             }
                             if ((item = cJSON_GetObjectItem(act_item, "b")) && cJSON_IsNumber(item)) {
                                 a->led.b = (uint8_t)item->valueint;
+                            }
+                            if ((item = cJSON_GetObjectItem(act_item, "effect")) && cJSON_IsString(item)) {
+                                strncpy(a->led.effect, item->valuestring, sizeof(a->led.effect) - 1);
+                            }
+                            if ((item = cJSON_GetObjectItem(act_item, "duration_ms")) && cJSON_IsNumber(item)) {
+                                a->led.duration_ms = (uint16_t)item->valueint;
                             }
                             break;
                             

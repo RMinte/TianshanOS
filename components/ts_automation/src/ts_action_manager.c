@@ -21,6 +21,7 @@
 #include "ts_keystore.h"
 #include "ts_led.h"
 #include "ts_led_preset.h"
+#include "ts_led_animation.h"
 #include "ts_hal.h"
 #include "ts_core.h"
 #include "ts_console.h"
@@ -32,9 +33,11 @@
 #include "freertos/task.h"
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
+#include "freertos/idf_additions.h"  /* For xTaskCreateWithCaps */
 #include "nvs_flash.h"
 #include "nvs.h"
 #include "cJSON.h"
+#include "esp_heap_caps.h"           /* For MALLOC_CAP_INTERNAL */
 
 #include <string.h>
 #include <stdlib.h>
@@ -50,7 +53,11 @@ static const char *TAG = "ts_action_mgr";
 /** Maximum SSH hosts */
 #define MAX_SSH_HOSTS               8
 
-/** Action executor task stack size */
+/** Action executor task stack size
+ * CRITICAL: Must use DRAM stack (not PSRAM) because this task performs
+ * NVS/Flash operations. SPI Flash operations disable cache, and accessing
+ * PSRAM with cache disabled causes a crash.
+ */
 #define ACTION_TASK_STACK_SIZE      8192
 
 /** Action executor task priority */
@@ -140,14 +147,20 @@ esp_err_t ts_action_manager_init(void)
         goto cleanup;
     }
     
-    /* Start executor task */
+    /* Start executor task
+     * CRITICAL: Must use DRAM stack (not PSRAM) because this task performs
+     * NVS/Flash operations. SPI Flash operations disable cache, and accessing
+     * PSRAM (external SPI RAM) with cache disabled causes a crash.
+     * Use xTaskCreateWithCaps to explicitly allocate stack in DRAM.
+     */
     s_ctx->running = true;
-    BaseType_t ret = xTaskCreate(action_executor_task,
-                                  "action_exec",
-                                  ACTION_TASK_STACK_SIZE,
-                                  NULL,
-                                  ACTION_TASK_PRIORITY,
-                                  &s_ctx->executor_task);
+    BaseType_t ret = xTaskCreateWithCaps(action_executor_task,
+                                          "action_exec",
+                                          ACTION_TASK_STACK_SIZE,
+                                          NULL,
+                                          ACTION_TASK_PRIORITY,
+                                          &s_ctx->executor_task,
+                                          MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     if (ret != pdPASS) {
         ESP_LOGE(TAG, "Failed to create executor task");
         goto cleanup;
@@ -352,6 +365,13 @@ esp_err_t ts_action_get_ssh_hosts(ts_action_ssh_host_t *hosts_out,
 /*                          Action Execution                                  */
 /*===========================================================================*/
 
+/**
+ * Execute action synchronously via the executor task (DRAM stack).
+ * 
+ * This function queues the action and waits for completion. This ensures
+ * the action executes in the executor task context, which has a DRAM stack
+ * and can safely perform NVS/Flash operations.
+ */
 esp_err_t ts_action_manager_execute(const ts_auto_action_t *action, 
                                      ts_action_result_t *result)
 {
@@ -359,29 +379,56 @@ esp_err_t ts_action_manager_execute(const ts_auto_action_t *action,
         return ESP_ERR_INVALID_ARG;
     }
     
+    if (!s_ctx->running || !s_ctx->executor_task) {
+        ESP_LOGE(TAG, "Executor task not running");
+        return ESP_ERR_INVALID_STATE;
+    }
+    
     ts_action_result_t local_result = {0};
     ts_action_result_t *res = result ? result : &local_result;
     
-    /* Handle delay before execution */
-    if (action->delay_ms > 0) {
-        vTaskDelay(pdMS_TO_TICKS(action->delay_ms));
+    /* Create semaphore for sync execution */
+    SemaphoreHandle_t done_sem = xSemaphoreCreateBinary();
+    if (!done_sem) {
+        ESP_LOGE(TAG, "Failed to create sync semaphore");
+        return ESP_ERR_NO_MEM;
     }
     
-    esp_err_t ret = execute_action_internal(action, res);
+    /* Queue the action with sync fields */
+    ts_action_queue_entry_t entry = {
+        .action = *action,
+        .callback = NULL,
+        .user_data = NULL,
+        .priority = 0,
+        .enqueue_time = esp_timer_get_time() / 1000,
+        .done_sem = done_sem,
+        .result_ptr = res
+    };
     
-    /* Update statistics */
-    xSemaphoreTake(s_ctx->stats_mutex, portMAX_DELAY);
-    s_ctx->stats.total_executed++;
-    if (res->status == TS_ACTION_STATUS_SUCCESS) {
-        s_ctx->stats.total_success++;
-    } else if (res->status == TS_ACTION_STATUS_TIMEOUT) {
-        s_ctx->stats.total_timeout++;
-    } else {
-        s_ctx->stats.total_failed++;
+    if (xQueueSend(s_ctx->action_queue, &entry, pdMS_TO_TICKS(100)) != pdTRUE) {
+        ESP_LOGW(TAG, "Action queue full");
+        vSemaphoreDelete(done_sem);
+        return ESP_ERR_NO_MEM;
     }
-    xSemaphoreGive(s_ctx->stats_mutex);
     
-    return ret;
+    /* Wait for completion (timeout based on action type) */
+    uint32_t timeout_ms = 30000; /* Default 30s */
+    if (action->type == TS_AUTO_ACT_SSH_CMD || action->type == TS_AUTO_ACT_SSH_CMD_REF) {
+        timeout_ms = 60000; /* SSH commands may take longer */
+    }
+    
+    if (xSemaphoreTake(done_sem, pdMS_TO_TICKS(timeout_ms)) != pdTRUE) {
+        ESP_LOGE(TAG, "Action execution timeout");
+        res->status = TS_ACTION_STATUS_TIMEOUT;
+        snprintf(res->output, sizeof(res->output), "Execution timeout");
+        vSemaphoreDelete(done_sem);
+        return ESP_ERR_TIMEOUT;
+    }
+    
+    vSemaphoreDelete(done_sem);
+    
+    /* Stats are updated by executor task */
+    return (res->status == TS_ACTION_STATUS_SUCCESS) ? ESP_OK : ESP_FAIL;
 }
 
 esp_err_t ts_action_queue(const ts_auto_action_t *action,
@@ -398,7 +445,9 @@ esp_err_t ts_action_queue(const ts_auto_action_t *action,
         .callback = callback,
         .user_data = user_data,
         .priority = priority,
-        .enqueue_time = esp_timer_get_time() / 1000
+        .enqueue_time = esp_timer_get_time() / 1000,
+        .done_sem = NULL,      /* Async mode: no sync semaphore */
+        .result_ptr = NULL     /* Async mode: no result pointer */
     };
     
     if (xQueueSend(s_ctx->action_queue, &entry, pdMS_TO_TICKS(100)) != pdTRUE) {
@@ -600,6 +649,18 @@ esp_err_t ts_action_exec_ssh(const ts_auto_action_ssh_t *ssh,
     return ret;
 }
 
+/**
+ * @brief 辅助函数：解析设备名称短名到完整名称
+ */
+static const char *action_resolve_led_device_name(const char *name)
+{
+    if (!name) return NULL;
+    if (strcmp(name, "touch") == 0) return "led_touch";
+    if (strcmp(name, "board") == 0) return "led_board";
+    if (strcmp(name, "matrix") == 0) return "led_matrix";
+    return name;  // 返回原名（可能已经是完整名称）
+}
+
 esp_err_t ts_action_exec_led(const ts_auto_action_led_t *led,
                               ts_action_result_t *result)
 {
@@ -607,78 +668,271 @@ esp_err_t ts_action_exec_led(const ts_auto_action_led_t *led,
         return ESP_ERR_INVALID_ARG;
     }
     
+    /* 创建本地副本以支持变量展开 */
+    ts_auto_action_led_t led_expanded;
+    memcpy(&led_expanded, led, sizeof(ts_auto_action_led_t));
+    
+    /* 展开字符串字段中的变量 */
+    char expanded_buf[128];
+    
+    if (led->text[0]) {
+        ts_action_expand_variables(led->text, expanded_buf, sizeof(expanded_buf));
+        strncpy(led_expanded.text, expanded_buf, sizeof(led_expanded.text) - 1);
+    }
+    if (led->image_path[0]) {
+        ts_action_expand_variables(led->image_path, expanded_buf, sizeof(expanded_buf));
+        strncpy(led_expanded.image_path, expanded_buf, sizeof(led_expanded.image_path) - 1);
+    }
+    if (led->qr_text[0]) {
+        ts_action_expand_variables(led->qr_text, expanded_buf, sizeof(expanded_buf));
+        strncpy(led_expanded.qr_text, expanded_buf, sizeof(led_expanded.qr_text) - 1);
+    }
+    if (led->filter[0]) {
+        ts_action_expand_variables(led->filter, expanded_buf, sizeof(expanded_buf));
+        strncpy(led_expanded.filter, expanded_buf, sizeof(led_expanded.filter) - 1);
+    }
+    if (led->effect[0]) {
+        ts_action_expand_variables(led->effect, expanded_buf, sizeof(expanded_buf));
+        strncpy(led_expanded.effect, expanded_buf, sizeof(led_expanded.effect) - 1);
+    }
+    
+    /* 使用展开后的结构 */
+    const ts_auto_action_led_t *led_final = &led_expanded;
+    
     result->status = TS_ACTION_STATUS_RUNNING;
     int64_t start_time = esp_timer_get_time();
     esp_err_t ret = ESP_OK;
     
-    ESP_LOGD(TAG, "LED action: device=%s, color=(%d,%d,%d), effect=%s",
-             led->device, led->r, led->g, led->b, led->effect);
+    /* 解析设备名称（支持短名和完整名） */
+    const char *device_name = action_resolve_led_device_name(led_final->device);
     
-    ts_led_rgb_t color = TS_LED_RGB(led->r, led->g, led->b);
+    ESP_LOGI(TAG, "LED action: device=%s, ctrl_type=%d", device_name, led_final->ctrl_type);
     
-    /* Determine device and execute */
-    if (strcmp(led->device, "board") == 0) {
-        /* Board LED - use preset API or direct control */
-        ts_led_device_t device = ts_led_board_get();
-        if (device) {
-            if (led->effect[0]) {
-                /* Effect-based control - get layer and apply effect */
-                ts_led_layer_t layer = ts_led_layer_get(device, 0);
-                if (layer) {
-                    if (strcmp(led->effect, "blink") == 0) {
-                        /* TODO: implement blink through layer effect */
-                    } else if (strcmp(led->effect, "pulse") == 0) {
-                        /* TODO: implement pulse */
-                    }
-                }
-            } else {
-                /* Direct color set */
-                ret = ts_led_device_fill(device, color);
-            }
-        } else {
-            ret = ESP_ERR_NOT_FOUND;
-        }
-    } else if (strcmp(led->device, "touch") == 0) {
-        /* Touch screen LED */
-        ts_led_device_t device = ts_led_touch_get();
-        if (device) {
-            if (led->index == 0xFF) {
-                ret = ts_led_device_fill(device, color);
-            } else {
-                ret = ts_led_device_set_pixel(device, led->index, color);
-            }
-        } else {
-            ret = ESP_ERR_NOT_FOUND;
-        }
-    } else if (strcmp(led->device, "matrix") == 0) {
-        /* Matrix display */
-        ts_led_device_t device = ts_led_matrix_get();
-        if (device) {
-            if (led->effect[0]) {
-                /* Start named effect/animation */
-                /* TODO: lookup and start animation by name */
-                ESP_LOGW(TAG, "Matrix effect '%s' not yet implemented", led->effect);
-            } else {
-                ret = ts_led_device_fill(device, color);
-            }
-        } else {
-            ret = ESP_ERR_NOT_FOUND;
-        }
-    } else {
-        ESP_LOGW(TAG, "Unknown LED device: %s", led->device);
+    /* 获取设备句柄 */
+    ts_led_device_t device = ts_led_device_get(device_name);
+    if (!device) {
+        ESP_LOGW(TAG, "LED device '%s' not found", device_name);
         ret = ESP_ERR_NOT_FOUND;
+        goto done;
     }
     
+    /* 获取默认 layer */
+    ts_led_layer_t layer = ts_led_layer_get(device, 0);
+    if (!layer) {
+        ESP_LOGW(TAG, "LED layer not found for device '%s'", device_name);
+        ret = ESP_ERR_NOT_FOUND;
+        goto done;
+    }
+    
+    /* 根据控制类型执行对应操作 */
+    switch (led_final->ctrl_type) {
+        case TS_LED_CTRL_OFF:
+            /* 关闭 LED */
+            ts_led_animation_stop(layer);
+            ret = ts_led_fill(layer, TS_LED_RGB(0, 0, 0));
+            snprintf(result->output, sizeof(result->output), "LED %s turned off", led->device);
+            break;
+            
+        case TS_LED_CTRL_BRIGHTNESS:
+            /* 仅调节亮度 */
+            ret = ts_led_device_set_brightness(device, led_final->brightness);
+            snprintf(result->output, sizeof(result->output), "LED %s brightness=%d", led->device, led_final->brightness);
+            break;
+            
+        case TS_LED_CTRL_EFFECT:
+            /* 启动效果动画 */
+            if (led_final->effect[0]) {
+                const ts_led_animation_def_t *anim = ts_led_animation_get_builtin(led_final->effect);
+                if (anim) {
+                    ESP_LOGI(TAG, "Starting effect '%s' on device '%s'", led_final->effect, device_name);
+                    ret = ts_led_animation_start(layer, anim);
+                    snprintf(result->output, sizeof(result->output), "LED %s effect=%.32s started", led->device, led_final->effect);
+                } else {
+                    ESP_LOGW(TAG, "Effect '%s' not found", led_final->effect);
+                    ret = ESP_ERR_NOT_FOUND;
+                    snprintf(result->output, sizeof(result->output), "Effect '%.32s' not found", led_final->effect);
+                }
+            } else {
+                ret = ESP_ERR_INVALID_ARG;
+                snprintf(result->output, sizeof(result->output), "No effect specified");
+            }
+            break;
+            
+        case TS_LED_CTRL_FILL:
+        default:
+            /* 纯色填充（默认行为，兼容旧版本） */
+            /* 如果有效果名（旧版兼容），优先启动效果 */
+            if (led_final->effect[0]) {
+                const ts_led_animation_def_t *anim = ts_led_animation_get_builtin(led_final->effect);
+                if (anim) {
+                    ret = ts_led_animation_start(layer, anim);
+                    snprintf(result->output, sizeof(result->output), "LED %s effect=%.32s started", led->device, led_final->effect);
+                    break;
+                }
+            }
+            
+            ts_led_rgb_t color = TS_LED_RGB(led_final->r, led_final->g, led_final->b);
+            if (led_final->index == 0xFF) {
+                ret = ts_led_fill(layer, color);
+            } else {
+                ret = ts_led_device_set_pixel(device, (uint16_t)led_final->index, color);
+            }
+            snprintf(result->output, sizeof(result->output), "LED %s filled with color", led->device);
+            break;
+            
+        case TS_LED_CTRL_TEXT:
+            /* 显示文本（仅 Matrix）- 通过 CLI 执行 */
+            if (strcmp(device_name, "led_matrix") != 0) {
+                ret = ESP_ERR_NOT_SUPPORTED;
+                snprintf(result->output, sizeof(result->output), "Text display only supported on matrix");
+                break;
+            }
+            if (led_final->text[0]) {
+                /* 构建 CLI 命令 */
+                char cmd[512];
+                int len = snprintf(cmd, sizeof(cmd), "led --draw-text --device matrix --text \"%s\"", led_final->text);
+                if (led_final->font[0]) {
+                    len += snprintf(cmd + len, sizeof(cmd) - len, " --font %s", led_final->font);
+                } else {
+                    len += snprintf(cmd + len, sizeof(cmd) - len, " --font pixel9x9");
+                }
+                if (led_final->r || led_final->g || led_final->b) {
+                    len += snprintf(cmd + len, sizeof(cmd) - len, " --color #%02X%02X%02X", led_final->r, led_final->g, led_final->b);
+                }
+                if (led_final->scroll[0] && strcmp(led_final->scroll, "none") != 0) {
+                    len += snprintf(cmd + len, sizeof(cmd) - len, " --scroll %s", led_final->scroll);
+                    if (led_final->loop) {
+                        len += snprintf(cmd + len, sizeof(cmd) - len, " --loop");
+                    }
+                }
+                if (led_final->speed > 0) {
+                    len += snprintf(cmd + len, sizeof(cmd) - len, " --speed %d", led_final->speed);
+                }
+                
+                ESP_LOGI(TAG, "Executing LED text CLI: %s", cmd);
+                ret = ts_console_exec(cmd, NULL);
+                snprintf(result->output, sizeof(result->output), "LED text: %.200s%s", led_final->text, strlen(led_final->text) > 200 ? "..." : "");
+            } else {
+                ret = ESP_ERR_INVALID_ARG;
+                snprintf(result->output, sizeof(result->output), "No text specified");
+            }
+            break;
+            
+        case TS_LED_CTRL_IMAGE:
+            /* 显示图像（仅 Matrix）- 通过 CLI 执行 */
+            if (strcmp(device_name, "led_matrix") != 0) {
+                ret = ESP_ERR_NOT_SUPPORTED;
+                snprintf(result->output, sizeof(result->output), "Image display only supported on matrix");
+                break;
+            }
+            if (led_final->image_path[0]) {
+                char cmd[512];
+                snprintf(cmd, sizeof(cmd), "led --image --device matrix --file %.256s%s", 
+                         led_final->image_path, led_final->center ? " --center content" : "");
+                
+                ESP_LOGI(TAG, "Executing LED image CLI: %s", cmd);
+                ret = ts_console_exec(cmd, NULL);
+                snprintf(result->output, sizeof(result->output), "LED image: %.200s%s", led_final->image_path, strlen(led_final->image_path) > 200 ? "..." : "");
+            } else {
+                ret = ESP_ERR_INVALID_ARG;
+                snprintf(result->output, sizeof(result->output), "No image path specified");
+            }
+            break;
+            
+        case TS_LED_CTRL_QRCODE:
+            /* 显示 QR 码（仅 Matrix）- 通过 CLI 执行 */
+            if (strcmp(device_name, "led_matrix") != 0) {
+                ret = ESP_ERR_NOT_SUPPORTED;
+                snprintf(result->output, sizeof(result->output), "QR code only supported on matrix");
+                break;
+            }
+            if (led_final->qr_text[0]) {
+                char cmd[512];
+                int len = snprintf(cmd, sizeof(cmd), "led --qrcode --device matrix --text \"%s\"", led_final->qr_text);
+                if (led_final->qr_ecc) {
+                    len += snprintf(cmd + len, sizeof(cmd) - len, " --ecc %c", led_final->qr_ecc);
+                }
+                if (led_final->r || led_final->g || led_final->b) {
+                    len += snprintf(cmd + len, sizeof(cmd) - len, " --color #%02X%02X%02X", led_final->r, led_final->g, led_final->b);
+                }
+                
+                ESP_LOGI(TAG, "Executing LED QR CLI: %s", cmd);
+                ret = ts_console_exec(cmd, NULL);
+                snprintf(result->output, sizeof(result->output), "LED QR: %.200s%s", 
+                         led_final->qr_text, strlen(led_final->qr_text) > 200 ? "..." : "");
+            } else {
+                ret = ESP_ERR_INVALID_ARG;
+                snprintf(result->output, sizeof(result->output), "No QR text specified");
+            }
+            break;
+            
+        case TS_LED_CTRL_FILTER:
+            /* 应用后处理滤镜（仅 Matrix）- 通过 CLI 执行 */
+            if (strcmp(device_name, "led_matrix") != 0) {
+                ret = ESP_ERR_NOT_SUPPORTED;
+                snprintf(result->output, sizeof(result->output), "Filter only supported on matrix");
+                break;
+            }
+            if (led_final->filter[0]) {
+                char cmd[128];
+                if (strcmp(led_final->filter, "none") == 0 || strcmp(led_final->filter, "stop") == 0) {
+                    snprintf(cmd, sizeof(cmd), "led --stop-filter --device matrix");
+                } else {
+                    snprintf(cmd, sizeof(cmd), "led --filter --device matrix --filter-name %s", led_final->filter);
+                }
+                
+                ESP_LOGI(TAG, "Executing LED filter CLI: %s", cmd);
+                ret = ts_console_exec(cmd, NULL);
+                snprintf(result->output, sizeof(result->output), "LED filter: %s", led_final->filter);
+            } else {
+                ret = ESP_ERR_INVALID_ARG;
+                snprintf(result->output, sizeof(result->output), "No filter specified");
+            }
+            break;
+            
+        case TS_LED_CTRL_FILTER_STOP:
+            /* 停止滤镜（仅 Matrix）*/
+            if (strcmp(device_name, "led_matrix") != 0) {
+                ret = ESP_ERR_NOT_SUPPORTED;
+                snprintf(result->output, sizeof(result->output), "Filter stop only supported on matrix");
+                break;
+            }
+            {
+                const char *cmd = "led --stop-filter --device matrix";
+                ESP_LOGI(TAG, "Executing LED filter stop CLI: %s", cmd);
+                ret = ts_console_exec(cmd, NULL);
+                snprintf(result->output, sizeof(result->output), "LED filter stopped");
+            }
+            break;
+            
+        case TS_LED_CTRL_TEXT_STOP:
+            /* 停止文本覆盖层（仅 Matrix）*/
+            if (strcmp(device_name, "led_matrix") != 0) {
+                ret = ESP_ERR_NOT_SUPPORTED;
+                snprintf(result->output, sizeof(result->output), "Text stop only supported on matrix");
+                break;
+            }
+            {
+                const char *cmd = "led --stop-text --device matrix";
+                ESP_LOGI(TAG, "Executing LED text stop CLI: %s", cmd);
+                ret = ts_console_exec(cmd, NULL);
+                snprintf(result->output, sizeof(result->output), "LED text stopped");
+            }
+            break;
+    }
+
+done:
     result->duration_ms = (esp_timer_get_time() - start_time) / 1000;
     result->timestamp = esp_timer_get_time() / 1000;
     
     if (ret == ESP_OK) {
         result->status = TS_ACTION_STATUS_SUCCESS;
-        snprintf(result->output, sizeof(result->output), "LED %s updated", led->device);
     } else {
         result->status = TS_ACTION_STATUS_FAILED;
-        snprintf(result->output, sizeof(result->output), 
-                 "LED failed: %s", esp_err_to_name(ret));
+        if (result->output[0] == '\0') {
+            snprintf(result->output, sizeof(result->output), 
+                     "LED failed: %s", esp_err_to_name(ret));
+        }
     }
     
     /* Update statistics */
@@ -1158,7 +1412,7 @@ static esp_err_t execute_action_internal(const ts_auto_action_t *action,
 
 static void action_executor_task(void *arg)
 {
-    ESP_LOGI(TAG, "Action executor task started");
+    ESP_LOGI(TAG, "Action executor task started (DRAM stack)");
     
     ts_action_queue_entry_t entry;
     
@@ -1166,27 +1420,33 @@ static void action_executor_task(void *arg)
         if (xQueueReceive(s_ctx->action_queue, &entry, pdMS_TO_TICKS(1000)) == pdTRUE) {
             if (!s_ctx->running) break;
             
-            ts_action_result_t result = {0};
+            ts_action_result_t local_result = {0};
+            ts_action_result_t *result = entry.result_ptr ? entry.result_ptr : &local_result;
             
             /* Handle delay */
             if (entry.action.delay_ms > 0) {
                 vTaskDelay(pdMS_TO_TICKS(entry.action.delay_ms));
             }
             
-            /* Execute */
-            execute_action_internal(&entry.action, &result);
+            /* Execute action (safe: this task has DRAM stack) */
+            execute_action_internal(&entry.action, result);
             
-            /* Callback */
+            /* Callback (async mode) */
             if (entry.callback) {
-                entry.callback(&entry.action, &result, entry.user_data);
+                entry.callback(&entry.action, result, entry.user_data);
+            }
+            
+            /* Signal completion (sync mode) */
+            if (entry.done_sem) {
+                xSemaphoreGive(entry.done_sem);
             }
             
             /* Update stats */
             xSemaphoreTake(s_ctx->stats_mutex, portMAX_DELAY);
             s_ctx->stats.total_executed++;
-            if (result.status == TS_ACTION_STATUS_SUCCESS) {
+            if (result->status == TS_ACTION_STATUS_SUCCESS) {
                 s_ctx->stats.total_success++;
-            } else if (result.status == TS_ACTION_STATUS_TIMEOUT) {
+            } else if (result->status == TS_ACTION_STATUS_TIMEOUT) {
                 s_ctx->stats.total_timeout++;
             } else {
                 s_ctx->stats.total_failed++;
@@ -1408,6 +1668,7 @@ const char *ts_action_status_name(ts_action_status_t status)
         case TS_ACTION_STATUS_FAILED:    return "Failed";
         case TS_ACTION_STATUS_TIMEOUT:   return "Timeout";
         case TS_ACTION_STATUS_CANCELLED: return "Cancelled";
+        case TS_ACTION_STATUS_QUEUED:    return "Queued";
         default:                         return "Unknown";
     }
 }
@@ -1561,8 +1822,25 @@ esp_err_t ts_action_template_execute(const char *id, ts_action_result_t *result)
         return ESP_ERR_INVALID_STATE;
     }
     
-    /* Execute the action */
-    ret = ts_action_manager_execute(&tpl.action, result);
+    /* Check async mode from template or action */
+    bool is_async = tpl.async || tpl.action.async;
+    
+    if (is_async) {
+        /* Async execution: queue and return immediately */
+        ret = ts_action_queue(&tpl.action, NULL, NULL, 0);
+        if (result) {
+            if (ret == ESP_OK) {
+                result->status = TS_ACTION_STATUS_QUEUED;
+                snprintf(result->output, sizeof(result->output), "Action queued for async execution");
+            } else {
+                result->status = TS_ACTION_STATUS_FAILED;
+                snprintf(result->output, sizeof(result->output), "Failed to queue action: %s", esp_err_to_name(ret));
+            }
+        }
+    } else {
+        /* Sync execution: wait for completion */
+        ret = ts_action_manager_execute(&tpl.action, result);
+    }
     
     /* Update usage stats */
     xSemaphoreTake(s_ctx->templates_mutex, portMAX_DELAY);
@@ -1690,12 +1968,63 @@ static char *template_to_json(const ts_action_template_t *tpl)
         case TS_AUTO_ACT_LED: {
             cJSON *led = cJSON_AddObjectToObject(root, "led");
             cJSON_AddStringToObject(led, "device", tpl->action.led.device);
+            /* 控制类型 */
+            const char *ctrl_type_str = "fill";
+            switch (tpl->action.led.ctrl_type) {
+                case TS_LED_CTRL_EFFECT: ctrl_type_str = "effect"; break;
+                case TS_LED_CTRL_BRIGHTNESS: ctrl_type_str = "brightness"; break;
+                case TS_LED_CTRL_OFF: ctrl_type_str = "off"; break;
+                case TS_LED_CTRL_TEXT: ctrl_type_str = "text"; break;
+                case TS_LED_CTRL_IMAGE: ctrl_type_str = "image"; break;
+                case TS_LED_CTRL_QRCODE: ctrl_type_str = "qrcode"; break;
+                case TS_LED_CTRL_FILTER: ctrl_type_str = "filter"; break;
+                case TS_LED_CTRL_FILTER_STOP: ctrl_type_str = "filter_stop"; break;
+                case TS_LED_CTRL_TEXT_STOP: ctrl_type_str = "text_stop"; break;
+                default: ctrl_type_str = "fill"; break;
+            }
+            cJSON_AddStringToObject(led, "ctrl_type", ctrl_type_str);
             cJSON_AddNumberToObject(led, "index", tpl->action.led.index);
-            cJSON_AddNumberToObject(led, "r", tpl->action.led.r);
-            cJSON_AddNumberToObject(led, "g", tpl->action.led.g);
-            cJSON_AddNumberToObject(led, "b", tpl->action.led.b);
-            cJSON_AddStringToObject(led, "effect", tpl->action.led.effect);
+            /* 颜色输出为 hex */
+            char color_hex[8];
+            snprintf(color_hex, sizeof(color_hex), "#%02X%02X%02X", 
+                     tpl->action.led.r, tpl->action.led.g, tpl->action.led.b);
+            cJSON_AddStringToObject(led, "color", color_hex);
+            cJSON_AddNumberToObject(led, "brightness", tpl->action.led.brightness);
+            if (tpl->action.led.effect[0]) {
+                cJSON_AddStringToObject(led, "effect", tpl->action.led.effect);
+            }
+            cJSON_AddNumberToObject(led, "speed", tpl->action.led.speed);
             cJSON_AddNumberToObject(led, "duration_ms", tpl->action.led.duration_ms);
+            /* Matrix 高级功能 */
+            if (tpl->action.led.text[0]) {
+                cJSON_AddStringToObject(led, "text", tpl->action.led.text);
+            }
+            if (tpl->action.led.font[0]) {
+                cJSON_AddStringToObject(led, "font", tpl->action.led.font);
+            }
+            if (tpl->action.led.image_path[0]) {
+                cJSON_AddStringToObject(led, "image_path", tpl->action.led.image_path);
+            }
+            if (tpl->action.led.qr_text[0]) {
+                cJSON_AddStringToObject(led, "qr_text", tpl->action.led.qr_text);
+            }
+            if (tpl->action.led.qr_ecc) {
+                char ecc_str[2] = { tpl->action.led.qr_ecc, '\0' };
+                cJSON_AddStringToObject(led, "qr_ecc", ecc_str);
+            }
+            if (tpl->action.led.filter[0]) {
+                cJSON_AddStringToObject(led, "filter", tpl->action.led.filter);
+            }
+            cJSON_AddBoolToObject(led, "center", tpl->action.led.center);
+            cJSON_AddBoolToObject(led, "loop", tpl->action.led.loop);
+            if (tpl->action.led.scroll[0]) {
+                cJSON_AddStringToObject(led, "scroll", tpl->action.led.scroll);
+            }
+            if (tpl->action.led.align[0]) {
+                cJSON_AddStringToObject(led, "align", tpl->action.led.align);
+            }
+            cJSON_AddNumberToObject(led, "x", tpl->action.led.x);
+            cJSON_AddNumberToObject(led, "y", tpl->action.led.y);
             break;
         }
         case TS_AUTO_ACT_LOG: {
@@ -1803,24 +2132,101 @@ static esp_err_t json_to_template(const char *json, ts_action_template_t *tpl)
                     strncpy(tpl->action.led.device, item->valuestring, 
                             sizeof(tpl->action.led.device) - 1);
                 }
+                /* 解析控制类型 */
+                if ((item = cJSON_GetObjectItem(led, "ctrl_type")) && cJSON_IsString(item)) {
+                    const char *ct = item->valuestring;
+                    if (strcmp(ct, "fill") == 0) tpl->action.led.ctrl_type = TS_LED_CTRL_FILL;
+                    else if (strcmp(ct, "effect") == 0) tpl->action.led.ctrl_type = TS_LED_CTRL_EFFECT;
+                    else if (strcmp(ct, "brightness") == 0) tpl->action.led.ctrl_type = TS_LED_CTRL_BRIGHTNESS;
+                    else if (strcmp(ct, "off") == 0) tpl->action.led.ctrl_type = TS_LED_CTRL_OFF;
+                    else if (strcmp(ct, "text") == 0) tpl->action.led.ctrl_type = TS_LED_CTRL_TEXT;
+                    else if (strcmp(ct, "image") == 0) tpl->action.led.ctrl_type = TS_LED_CTRL_IMAGE;
+                    else if (strcmp(ct, "qrcode") == 0) tpl->action.led.ctrl_type = TS_LED_CTRL_QRCODE;
+                    else if (strcmp(ct, "filter") == 0) tpl->action.led.ctrl_type = TS_LED_CTRL_FILTER;
+                    else if (strcmp(ct, "filter_stop") == 0) tpl->action.led.ctrl_type = TS_LED_CTRL_FILTER_STOP;
+                    else if (strcmp(ct, "text_stop") == 0) tpl->action.led.ctrl_type = TS_LED_CTRL_TEXT_STOP;
+                }
                 if ((item = cJSON_GetObjectItem(led, "index")) && cJSON_IsNumber(item)) {
                     tpl->action.led.index = (uint8_t)item->valueint;
+                } else {
+                    tpl->action.led.index = 0xFF;  /* Default: fill all */
                 }
-                if ((item = cJSON_GetObjectItem(led, "r")) && cJSON_IsNumber(item)) {
-                    tpl->action.led.r = (uint8_t)item->valueint;
+                /* 解析颜色（支持 color 字符串或 r/g/b 数值） */
+                if ((item = cJSON_GetObjectItem(led, "color")) && cJSON_IsString(item)) {
+                    /* Parse hex color like "#FF0000" */
+                    const char *hex = item->valuestring;
+                    if (hex[0] == '#') hex++;
+                    uint32_t color_val = strtoul(hex, NULL, 16);
+                    tpl->action.led.r = (color_val >> 16) & 0xFF;
+                    tpl->action.led.g = (color_val >> 8) & 0xFF;
+                    tpl->action.led.b = color_val & 0xFF;
+                } else {
+                    if ((item = cJSON_GetObjectItem(led, "r")) && cJSON_IsNumber(item)) {
+                        tpl->action.led.r = (uint8_t)item->valueint;
+                    }
+                    if ((item = cJSON_GetObjectItem(led, "g")) && cJSON_IsNumber(item)) {
+                        tpl->action.led.g = (uint8_t)item->valueint;
+                    }
+                    if ((item = cJSON_GetObjectItem(led, "b")) && cJSON_IsNumber(item)) {
+                        tpl->action.led.b = (uint8_t)item->valueint;
+                    }
                 }
-                if ((item = cJSON_GetObjectItem(led, "g")) && cJSON_IsNumber(item)) {
-                    tpl->action.led.g = (uint8_t)item->valueint;
-                }
-                if ((item = cJSON_GetObjectItem(led, "b")) && cJSON_IsNumber(item)) {
-                    tpl->action.led.b = (uint8_t)item->valueint;
+                if ((item = cJSON_GetObjectItem(led, "brightness")) && cJSON_IsNumber(item)) {
+                    tpl->action.led.brightness = (uint8_t)item->valueint;
                 }
                 if ((item = cJSON_GetObjectItem(led, "effect")) && cJSON_IsString(item)) {
                     strncpy(tpl->action.led.effect, item->valuestring, 
                             sizeof(tpl->action.led.effect) - 1);
                 }
+                if ((item = cJSON_GetObjectItem(led, "speed")) && cJSON_IsNumber(item)) {
+                    tpl->action.led.speed = (uint8_t)item->valueint;
+                }
                 if ((item = cJSON_GetObjectItem(led, "duration_ms")) && cJSON_IsNumber(item)) {
                     tpl->action.led.duration_ms = (uint16_t)item->valueint;
+                }
+                /* Matrix 高级功能参数 */
+                if ((item = cJSON_GetObjectItem(led, "text")) && cJSON_IsString(item)) {
+                    strncpy(tpl->action.led.text, item->valuestring, 
+                            sizeof(tpl->action.led.text) - 1);
+                }
+                if ((item = cJSON_GetObjectItem(led, "font")) && cJSON_IsString(item)) {
+                    strncpy(tpl->action.led.font, item->valuestring, 
+                            sizeof(tpl->action.led.font) - 1);
+                }
+                if ((item = cJSON_GetObjectItem(led, "image_path")) && cJSON_IsString(item)) {
+                    strncpy(tpl->action.led.image_path, item->valuestring, 
+                            sizeof(tpl->action.led.image_path) - 1);
+                }
+                if ((item = cJSON_GetObjectItem(led, "qr_text")) && cJSON_IsString(item)) {
+                    strncpy(tpl->action.led.qr_text, item->valuestring, 
+                            sizeof(tpl->action.led.qr_text) - 1);
+                }
+                if ((item = cJSON_GetObjectItem(led, "qr_ecc")) && cJSON_IsString(item)) {
+                    tpl->action.led.qr_ecc = item->valuestring[0];  /* L/M/Q/H */
+                }
+                if ((item = cJSON_GetObjectItem(led, "filter")) && cJSON_IsString(item)) {
+                    strncpy(tpl->action.led.filter, item->valuestring, 
+                            sizeof(tpl->action.led.filter) - 1);
+                }
+                if ((item = cJSON_GetObjectItem(led, "center")) && cJSON_IsBool(item)) {
+                    tpl->action.led.center = cJSON_IsTrue(item);
+                }
+                if ((item = cJSON_GetObjectItem(led, "loop")) && cJSON_IsBool(item)) {
+                    tpl->action.led.loop = cJSON_IsTrue(item);
+                }
+                if ((item = cJSON_GetObjectItem(led, "scroll")) && cJSON_IsString(item)) {
+                    strncpy(tpl->action.led.scroll, item->valuestring, 
+                            sizeof(tpl->action.led.scroll) - 1);
+                }
+                if ((item = cJSON_GetObjectItem(led, "align")) && cJSON_IsString(item)) {
+                    strncpy(tpl->action.led.align, item->valuestring, 
+                            sizeof(tpl->action.led.align) - 1);
+                }
+                if ((item = cJSON_GetObjectItem(led, "x")) && cJSON_IsNumber(item)) {
+                    tpl->action.led.x = (int16_t)item->valueint;
+                }
+                if ((item = cJSON_GetObjectItem(led, "y")) && cJSON_IsNumber(item)) {
+                    tpl->action.led.y = (int16_t)item->valueint;
                 }
             }
             break;

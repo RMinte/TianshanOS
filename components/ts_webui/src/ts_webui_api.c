@@ -188,7 +188,8 @@ static esp_err_t api_handler(ts_http_request_t *req, void *user_data)
         ts_api_result_free(&result);
         return ts_http_send_error(req, 404, "API not found");
     } else {
-        // Return the actual error from the API handler
+        // Return the actual error from the API handler with HTTP 200
+        // API errors (like "no data") are business logic errors, not HTTP errors
         cJSON *response = cJSON_CreateObject();
         cJSON_AddNumberToObject(response, "code", result.code);
         cJSON_AddStringToObject(response, "error", result.message ? result.message : "Internal error");
@@ -198,9 +199,9 @@ static esp_err_t api_handler(ts_http_request_t *req, void *user_data)
         ts_api_result_free(&result);
         
         if (json) {
-            int http_status = (ret == ESP_ERR_NOT_FOUND) ? 404 : 
-                              (ret == ESP_ERR_INVALID_ARG) ? 400 : 500;
-            esp_err_t send_ret = ts_http_send_json(req, http_status, json);
+            // Always return HTTP 200 for API business errors
+            // The error is indicated by the "code" field in the JSON response
+            esp_err_t send_ret = ts_http_send_json(req, 200, json);
             free(json);
             return send_ret;
         }
