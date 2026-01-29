@@ -17,14 +17,17 @@
 #include "ts_rule_engine.h"
 #include "ts_source_manager.h"
 #include "ts_action_manager.h"
+#include "ts_storage.h"
 
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/semphr.h"
+#include "cJSON.h"
 
 #include <string.h>
+#include <stdio.h>
 
 static const char *TAG = "ts_automation";
 
@@ -136,14 +139,18 @@ esp_err_t ts_automation_init(const ts_automation_config_t *config)
         goto cleanup;
     }
 
-    // 加载配置
+    // 加载引擎配置（sources/rules/actions 已由各自模块从 SD 卡加载）
     ret = load_config(s_ctx.config_path);
     if (ret == ESP_ERR_NOT_FOUND) {
-        ESP_LOGW(TAG, "Config file not found, using defaults");
+        /* automation.json 不存在是正常情况，使用默认引擎设置 */
+        ESP_LOGD(TAG, "No automation.json found, using default engine settings");
+        ret = apply_default_config();
+    } else if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to load automation.json: %s, using defaults", esp_err_to_name(ret));
         ret = apply_default_config();
     }
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to load config: %s", esp_err_to_name(ret));
+        ESP_LOGE(TAG, "Failed to apply config: %s", esp_err_to_name(ret));
         // 继续运行，使用空配置
     }
 
@@ -414,29 +421,86 @@ static void automation_task(void *arg)
 
 /**
  * 加载配置文件
+ * 
+ * automation.json 是引擎级元配置，包含：
+ * - version: 配置版本
+ * - enabled: 引擎是否启用
+ * - eval_interval_ms: 规则评估间隔
+ * 
+ * 注意：sources、rules、actions 由各自模块加载，这里只处理引擎级设置
  */
 static esp_err_t load_config(const char *path)
 {
     ESP_LOGI(TAG, "Loading config from: %s", path);
-
-    // TODO: 实现配置文件加载
-    // 1. 检查文件是否存在
-    // 2. 读取 JSON 内容
-    // 3. 解析并注册数据源、规则、变量
-    // 4. 返回 ESP_ERR_NOT_FOUND 如果文件不存在
-
-    // 暂时返回文件不存在，使用默认配置
-    return ESP_ERR_NOT_FOUND;
+    
+    FILE *f = fopen(path, "r");
+    if (!f) {
+        ESP_LOGD(TAG, "Config file not found: %s", path);
+        return ESP_ERR_NOT_FOUND;
+    }
+    
+    fseek(f, 0, SEEK_END);
+    long size = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    
+    if (size <= 0 || size > 4096) {
+        fclose(f);
+        ESP_LOGW(TAG, "Config file invalid size: %ld", size);
+        return ESP_ERR_INVALID_SIZE;
+    }
+    
+    char *content = malloc(size + 1);
+    if (!content) {
+        fclose(f);
+        return ESP_ERR_NO_MEM;
+    }
+    
+    size_t read = fread(content, 1, size, f);
+    fclose(f);
+    content[read] = '\0';
+    
+    cJSON *root = cJSON_Parse(content);
+    free(content);
+    
+    if (!root) {
+        ESP_LOGW(TAG, "Failed to parse config JSON");
+        return ESP_ERR_INVALID_ARG;
+    }
+    
+    /* 解析配置项 */
+    cJSON *version = cJSON_GetObjectItem(root, "version");
+    if (version && cJSON_IsString(version)) {
+        ESP_LOGI(TAG, "Config version: %s", version->valuestring);
+    }
+    
+    cJSON *enabled = cJSON_GetObjectItem(root, "enabled");
+    if (enabled && !cJSON_IsTrue(enabled)) {
+        ESP_LOGW(TAG, "Automation engine disabled by config");
+        /* 可以在这里设置标志，但目前不阻止启动 */
+    }
+    
+    cJSON *eval_interval = cJSON_GetObjectItem(root, "eval_interval_ms");
+    if (eval_interval && cJSON_IsNumber(eval_interval)) {
+        ESP_LOGI(TAG, "Rule eval interval: %d ms", eval_interval->valueint);
+        /* TODO: 应用到规则引擎 */
+    }
+    
+    cJSON_Delete(root);
+    
+    ESP_LOGI(TAG, "Config loaded from SD card");
+    return ESP_OK;
 }
 
 /**
- * @brief 应用默认配置
+ * @brief 应用默认引擎配置
  * 
- * 数据源已从 NVS 加载，无需注册默认内置源
+ * 注意：数据源、规则、动作模板已由各自模块按 SD卡>NVS 优先级加载
+ * 此函数仅设置引擎级默认参数
  */
 static esp_err_t apply_default_config(void)
 {
-    ESP_LOGI(TAG, "No default sources - data sources are loaded from NVS");
+    /* 引擎级默认设置已在结构体初始化时设定 */
+    /* sources.json/rules.json/actions.json 已由子模块独立加载 */
     return ESP_OK;
 }
 

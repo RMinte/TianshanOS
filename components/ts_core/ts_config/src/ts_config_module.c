@@ -39,25 +39,34 @@ static const char *TAG = "ts_config_module";
 
 /** 模块名称到文件名映射 */
 static const char *const MODULE_FILENAMES[] = {
-    [TS_CONFIG_MODULE_NET]    = "net.json",
-    [TS_CONFIG_MODULE_DHCP]   = "dhcp.json",
-    [TS_CONFIG_MODULE_WIFI]   = "wifi.json",
-    [TS_CONFIG_MODULE_LED]    = "led.json",
-    [TS_CONFIG_MODULE_FAN]    = "fan.json",
-    [TS_CONFIG_MODULE_DEVICE] = "device.json",
-    [TS_CONFIG_MODULE_SYSTEM] = "system.json",
+    [TS_CONFIG_MODULE_NET]     = "net.json",
+    [TS_CONFIG_MODULE_DHCP]    = "dhcp.json",
+    [TS_CONFIG_MODULE_WIFI]    = "wifi.json",
+    [TS_CONFIG_MODULE_NAT]     = "nat.json",
+    [TS_CONFIG_MODULE_LED]     = "led.json",
+    [TS_CONFIG_MODULE_FAN]     = "fan.json",
+    [TS_CONFIG_MODULE_DEVICE]  = "device.json",
+    [TS_CONFIG_MODULE_SYSTEM]  = "system.json",
+    [TS_CONFIG_MODULE_TEMP]    = "temp.json",
+    [TS_CONFIG_MODULE_RULES]   = "rules.json",
+    [TS_CONFIG_MODULE_ACTIONS] = "actions.json",
+    [TS_CONFIG_MODULE_SOURCES] = "sources.json",
 };
 
 /** 模块名称 */
 static const char *const MODULE_NAMES[] = {
-    [TS_CONFIG_MODULE_NET]    = "NET",
-    [TS_CONFIG_MODULE_DHCP]   = "DHCP",
-    [TS_CONFIG_MODULE_WIFI]   = "WIFI",
-    [TS_CONFIG_MODULE_NAT]    = "NAT",
-    [TS_CONFIG_MODULE_LED]    = "LED",
-    [TS_CONFIG_MODULE_FAN]    = "FAN",
-    [TS_CONFIG_MODULE_DEVICE] = "DEVICE",
-    [TS_CONFIG_MODULE_SYSTEM] = "SYSTEM",
+    [TS_CONFIG_MODULE_NET]     = "NET",
+    [TS_CONFIG_MODULE_DHCP]    = "DHCP",
+    [TS_CONFIG_MODULE_WIFI]    = "WIFI",
+    [TS_CONFIG_MODULE_NAT]     = "NAT",
+    [TS_CONFIG_MODULE_LED]     = "LED",
+    [TS_CONFIG_MODULE_FAN]     = "FAN",
+    [TS_CONFIG_MODULE_DEVICE]  = "DEVICE",
+    [TS_CONFIG_MODULE_SYSTEM]  = "SYSTEM",
+    [TS_CONFIG_MODULE_TEMP]    = "TEMP",
+    [TS_CONFIG_MODULE_RULES]   = "RULES",
+    [TS_CONFIG_MODULE_ACTIONS] = "ACTIONS",
+    [TS_CONFIG_MODULE_SOURCES] = "SOURCES",
 };
 
 /** JSON 元数据键名 */
@@ -276,6 +285,12 @@ esp_err_t ts_config_module_load(ts_config_module_t module)
     if (!loaded_from_sdcard && !loaded_from_nvs) {
         ESP_LOGI(TAG, "Using schema defaults for module %s", MODULE_NAMES[module]);
         ret = ts_config_module_reset(module, false);
+        
+        /* 使用默认值后也导出到 SD 卡（仅对有 Schema 的模块） */
+        if (sdcard_mounted && s_mgr.modules[module].schema != NULL) {
+            ESP_LOGI(TAG, "Auto-exporting module %s defaults to SD card", MODULE_NAMES[module]);
+            ts_config_module_export_to_sdcard(module);
+        }
     }
     
     /* Schema版本迁移 */
@@ -783,6 +798,54 @@ esp_err_t ts_config_module_export_to_sdcard(ts_config_module_t module)
     
     if (ret == ESP_OK) {
         ESP_LOGD(TAG, "Module %s exported to %s", MODULE_NAMES[module], path);
+    }
+    
+    return ret;
+}
+
+esp_err_t ts_config_module_export_custom_json(ts_config_module_t module, const cJSON *json)
+{
+    if (module >= TS_CONFIG_MODULE_MAX || !s_mgr.modules[module].registered) {
+        return TS_CONFIG_ERR_MODULE_NOT_FOUND;
+    }
+    
+    if (json == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    
+    if (!is_sdcard_mounted()) {
+        /* SD卡未挂载，标记待同步 */
+        ts_config_meta_set_pending_sync(module);
+        ESP_LOGD(TAG, "SD card not mounted, %s marked pending sync", MODULE_NAMES[module]);
+        return TS_CONFIG_ERR_SD_NOT_MOUNTED;
+    }
+    
+    /* 确保目录存在 */
+    esp_err_t ret = ensure_config_dir();
+    if (ret != ESP_OK) {
+        return ret;
+    }
+    
+    /* 构建文件路径 */
+    char path[64];
+    snprintf(path, sizeof(path), "%s/%s", TS_CONFIG_SDCARD_PATH, MODULE_FILENAMES[module]);
+    
+    /* 写入文件（传入的是 const cJSON*，write_json_file 需要非 const，需要复制） */
+    cJSON *json_copy = cJSON_Duplicate(json, true);
+    if (json_copy == NULL) {
+        ESP_LOGE(TAG, "Failed to duplicate JSON for %s", MODULE_NAMES[module]);
+        return ESP_ERR_NO_MEM;
+    }
+    
+    ret = write_json_file(path, json_copy);
+    cJSON_Delete(json_copy);
+    
+    if (ret == ESP_OK) {
+        ts_config_meta_clear_pending_sync(module);
+        ESP_LOGI(TAG, "Module %s custom JSON exported to %s", MODULE_NAMES[module], path);
+    } else {
+        ts_config_meta_set_pending_sync(module);
+        ESP_LOGW(TAG, "Failed to export %s to SD card: %s", MODULE_NAMES[module], esp_err_to_name(ret));
     }
     
     return ret;

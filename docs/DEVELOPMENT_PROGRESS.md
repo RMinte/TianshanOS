@@ -1,7 +1,7 @@
 # TianShanOS 开发进度跟踪
 
 > **项目**：TianShanOS（天山操作系统）  
-> **版本**：0.3.3  
+> **版本**：0.3.4  
 > **最后更新**：2026年1月30日  
 > **代码统计**：110+ 个 C 源文件，80+ 个头文件
 
@@ -36,6 +36,145 @@
 | Phase 22: 规则引擎增强 | ✅ 完成 | 100% | 2026-01-28 |
 | Phase 23: 自动化 UI 增强 & 代码清理 | ✅ 完成 | 100% | 2026-01-29 |
 | Phase 24: 风扇曲线控制增强 | ✅ 完成 | 100% | 2026-01-30 |
+| Phase 25: 配置系统修复 & 内存优化 | ✅ 完成 | 100% | 2026-01-30 |
+
+---
+
+## 📋 Phase 25: 配置系统修复 & 内存优化 ✅
+
+**时间**：2026年1月30日  
+**目标**：修复配置系统优先级问题、解决大型结构体栈溢出、消除启动警告
+
+### 问题背景
+
+在 NVS 配置同步到 SD 卡的过程中，发现多个严重问题：
+1. **`ESP_ERR_NVS_VALUE_TOO_LONG`**：模板数组序列化为巨大字符串导致 NVS 写入失败
+2. **配置优先级错误**：schema-less 模块（TEMP/RULES/ACTIONS/SOURCES）的加载顺序错误
+3. **栈溢出崩溃**：大型结构体（>1KB）在循环中栈分配导致 main 任务栈溢出
+4. **WebSocket 超时警告**：未配置超时参数导致启动时警告
+
+### 配置优先级修正
+
+**正确的配置优先级**（从高到低）：
+
+```
+SD 卡文件 > NVS 持久化 > 代码默认值
+```
+
+**Schema-based 模块**（8个）：NET, DHCP, WIFI, NAT, LED, FAN, DEVICE, SYSTEM
+- 使用 `ts_config_module_persist()` 统一管理
+- 文件后端自动处理优先级
+
+**Schema-less 模块**（4个）：TEMP, RULES, ACTIONS, SOURCES
+- 使用自定义 NVS 格式，需专门处理
+- 修复前：先加载 NVS，SD 卡文件被忽略
+- 修复后：优先检查 SD 卡，无则回退 NVS
+
+### 核心修复
+
+#### 1. SD 卡优先级修复
+
+**修复的模块**：
+- `ts_action_manager.c` - Action 模板加载
+- `ts_rule_engine.c` - 规则加载
+- `ts_source_manager.c` - 数据源加载
+- `ts_temp_source.c` - 温度源配置
+
+**修复模式**：
+```c
+// 修复前（错误）
+load_from_nvs();  // 先加载 NVS
+if (!loaded) {
+    load_from_sd_card();  // SD 卡作为 fallback
+}
+
+// 修复后（正确）
+if (load_from_sd_card()) {  // 优先 SD 卡
+    save_to_nvs();  // 同步到 NVS
+} else {
+    load_from_nvs();  // SD 卡无文件时用 NVS
+}
+```
+
+#### 2. 栈溢出修复（PSRAM 堆分配）
+
+**问题**：`ts_action_template_t` (~1KB) 和 `ts_auto_rule_t` 在循环中栈分配
+
+```c
+// 错误：栈分配大型结构体
+for (int i = 0; i < count; i++) {
+    ts_action_template_t temp;  // ~1KB 在栈上！
+    // 多次循环导致栈溢出
+}
+
+// 正确：PSRAM 堆分配
+ts_action_template_t *temp = heap_caps_malloc(
+    sizeof(ts_action_template_t), 
+    MALLOC_CAP_SPIRAM
+);
+if (!temp) {
+    temp = malloc(sizeof(ts_action_template_t));  // Fallback
+}
+// 使用后释放
+free(temp);
+```
+
+#### 3. WebSocket 超时配置
+
+**修复位置**：`ts_source_manager.c`
+
+```c
+esp_websocket_client_config_t ws_cfg = {
+    .uri = ws_url,
+    .buffer_size = 2048,
+    .reconnect_timeout_ms = 10000,  // 新增
+    .network_timeout_ms = 10000,    // 新增
+    .ping_interval_sec = 0,         // 新增：禁用心跳
+};
+```
+
+#### 4. automation.json 加载
+
+**新增**：`ts_automation.c` 中实现 `load_config()` 函数
+- 解析 `/sdcard/config/automation.json`
+- 文件不存在时使用 DEBUG 级别日志（不再是 WARNING）
+
+### 代码变更
+
+| 文件 | 变更内容 |
+|------|---------|
+| `ts_action_manager.c` | SD卡优先级修复 + PSRAM堆分配 |
+| `ts_rule_engine.c` | SD卡优先级修复 + PSRAM堆分配 |
+| `ts_source_manager.c` | SD卡优先级修复 + WebSocket超时配置 |
+| `ts_temp_source.c` | SD卡优先级修复 |
+| `ts_automation.c` | 实现 load_config() 函数 |
+| `ts_config_file.c` | 跳过 schema-less 文件的通用加载 |
+
+### 验证结果
+
+启动日志确认修复成功：
+```log
+I (3222) ts_source_mgr: Loaded 1 sources from SD card: /sdcard/config/sources.json
+I (3289) ts_rule_engine: Loaded 5 rules from SD card: /sdcard/config/rules.json
+I (3430) ts_action_mgr: Loaded 16 action templates from SD card: /sdcard/config/actions.json
+I (5155) websocket_client: Started  ← 无超时警告
+```
+
+**系统状态**：
+- 12 个服务全部正常运行
+- 启动时间：4061 ms
+- 无 `ESP_ERR_NVS_VALUE_TOO_LONG` 错误
+- 无栈溢出崩溃
+- 无 WebSocket 超时警告
+
+### 内存分配规范总结
+
+| 大小 | 分配方式 | 说明 |
+|------|---------|------|
+| < 128 字节 | `malloc()` | 小分配用 DRAM |
+| ≥ 128 字节 | `heap_caps_malloc(MALLOC_CAP_SPIRAM)` | 中大分配用 PSRAM |
+| 循环中的大型结构体 | 必须用堆分配 | 避免栈溢出 |
+| DMA 缓冲区 | `heap_caps_malloc(MALLOC_CAP_DMA)` | 必须用 DRAM |
 
 ---
 

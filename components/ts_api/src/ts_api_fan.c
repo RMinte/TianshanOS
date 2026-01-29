@@ -10,6 +10,7 @@
 #include "ts_api.h"
 #include "ts_fan.h"
 #include "ts_temp_source.h"
+#include "ts_config_module.h"
 #include "ts_log.h"
 #include <string.h>
 
@@ -293,8 +294,9 @@ static esp_err_t api_fan_limits(const cJSON *params, ts_api_result_t *result)
         return ret;
     }
     
-    // 自动保存到 NVS
+    // 自动保存到 NVS + SD 卡
     ts_fan_save_full_config(fan_id);
+    ts_config_module_persist(TS_CONFIG_MODULE_FAN);
     
     cJSON *data = cJSON_CreateObject();
     cJSON_AddNumberToObject(data, "id", fan_id);
@@ -383,8 +385,9 @@ static esp_err_t api_fan_curve(const cJSON *params, ts_api_result_t *result)
         }
     }
     
-    // 自动保存到 NVS
+    // 自动保存到 NVS + SD 卡
     ts_fan_save_full_config(fan_id);
+    ts_config_module_persist(TS_CONFIG_MODULE_FAN);
     
     cJSON *data = cJSON_CreateObject();
     cJSON_AddNumberToObject(data, "id", fan_id);
@@ -414,6 +417,9 @@ static esp_err_t api_fan_save(const cJSON *params, ts_api_result_t *result)
     } else {
         ret = ts_fan_save_config();
     }
+    
+    // 同步到 SD 卡
+    ts_config_module_persist(TS_CONFIG_MODULE_FAN);
     
     if (ret != ESP_OK) {
         ts_api_result_error(result, TS_API_ERR_HARDWARE, "Failed to save fan config");

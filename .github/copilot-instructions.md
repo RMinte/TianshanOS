@@ -130,6 +130,19 @@ if (!buf) {
     buf = malloc(size);  // Fallback to DRAM
     ESP_LOGW(TAG, "PSRAM unavailable, using DRAM");
 }
+
+// ❌ 禁止：循环中栈分配大型结构体（会导致栈溢出）
+for (int i = 0; i < count; i++) {
+    ts_action_template_t temp;  // ~1KB 结构体在栈上！
+}
+
+// ✅ 正确：循环外堆分配，循环内复用
+ts_action_template_t *temp = heap_caps_malloc(sizeof(*temp), MALLOC_CAP_SPIRAM);
+for (int i = 0; i < count; i++) {
+    memset(temp, 0, sizeof(*temp));
+    // 使用 temp...
+}
+free(temp);
 ```
 
 ### 分配策略
@@ -138,6 +151,7 @@ if (!buf) {
 |------|---------|------|
 | < 128 字节 | `malloc()` | 小分配用 DRAM（速度快） |
 | ≥ 128 字节 | `heap_caps_malloc(MALLOC_CAP_SPIRAM)` | 中大分配用 PSRAM |
+| 循环中的大型结构体 | **必须堆分配** | 避免栈溢出 |
 | DMA 缓冲区 | `heap_caps_malloc(MALLOC_CAP_DMA)` | DMA 必须用 DRAM |
 | 任务栈 | 默认 DRAM，大栈可用 PSRAM | 使用 `xTaskCreateWithCaps()` |
 

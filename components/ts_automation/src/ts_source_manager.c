@@ -16,6 +16,7 @@
 #include "ts_source_manager.h"
 #include "ts_variable.h"
 #include "ts_jsonpath.h"
+#include "ts_config_module.h"
 // ts_var.h 已废弃，统一使用 ts_variable.h（ts_automation 变量系统）
 
 #include "esp_log.h"
@@ -44,6 +45,9 @@
 // NVS 持久化
 #include "nvs_flash.h"
 #include "nvs.h"
+
+// SD 卡状态检查
+#include "ts_storage.h"
 
 #include <string.h>
 #include <stdlib.h>
@@ -391,6 +395,10 @@ static esp_err_t save_sources_to_nvs(void)
         return ret;
     }
 
+    // 为 SD 卡导出准备 JSON 数组
+    cJSON *export_json = cJSON_CreateObject();
+    cJSON *sources_array = cJSON_CreateArray();
+
     // 保存每个数据源
     for (int i = 0; i < s_src_ctx.count; i++) {
         char key[16];
@@ -402,7 +410,15 @@ static esp_err_t save_sources_to_nvs(void)
             continue;
         }
 
+        // 保存到 NVS
         ret = nvs_set_str(handle, key, json);
+        
+        // 同时添加到 SD 卡 JSON 数组
+        cJSON *src_obj = cJSON_Parse(json);
+        if (src_obj) {
+            cJSON_AddItemToArray(sources_array, src_obj);
+        }
+
         free(json);
 
         if (ret != ESP_OK) {
@@ -413,31 +429,57 @@ static esp_err_t save_sources_to_nvs(void)
     ret = nvs_commit(handle);
     nvs_close(handle);
 
+    // 构建完整 JSON 并导出到 SD 卡
+    cJSON_AddItemToObject(export_json, "sources", sources_array);
+    cJSON_AddNumberToObject(export_json, "count", s_src_ctx.count);
+
+    // 使用新的 API 导出到 SD 卡
+    esp_err_t sd_ret = ts_config_module_export_custom_json(TS_CONFIG_MODULE_SOURCES, export_json);
+    cJSON_Delete(export_json);
+
+    if (sd_ret != ESP_OK && sd_ret != TS_CONFIG_ERR_SD_NOT_MOUNTED) {
+        ESP_LOGW(TAG, "Failed to export sources to SD card: %s", esp_err_to_name(sd_ret));
+    }
+
     ESP_LOGI(TAG, "Saved %d sources to NVS", s_src_ctx.count);
     return ret;
 }
 
+/* Forward declaration for SD card loading */
+static esp_err_t load_sources_from_file(const char *filepath);
+
 /**
- * 从 NVS 加载数据源
+ * 从存储加载数据源
+ * 
+ * Priority: SD card file > NVS > empty (遵循系统配置优先级原则)
  */
 static esp_err_t load_sources_from_nvs(void)
 {
+    esp_err_t ret;
+    
+    /* 1. 优先从 SD 卡加载 */
+    if (ts_storage_sd_mounted()) {
+        ret = load_sources_from_file("/sdcard/config/sources.json");
+        if (ret == ESP_OK && s_src_ctx.count > 0) {
+            ESP_LOGI(TAG, "Loaded %d sources from SD card", s_src_ctx.count);
+            return ESP_OK;  /* SD 卡配置已自动保存到 NVS */
+        }
+    }
+    
+    /* 2. SD 卡无配置，从 NVS 加载 */
+    uint8_t count = 0;
     nvs_handle_t handle;
-    esp_err_t ret = nvs_open(NVS_NAMESPACE, NVS_READONLY, &handle);
-    if (ret == ESP_ERR_NVS_NOT_FOUND) {
+    ret = nvs_open(NVS_NAMESPACE, NVS_READONLY, &handle);
+    
+    if (ret != ESP_OK) {
         ESP_LOGI(TAG, "No saved sources found");
         return ESP_OK;
     }
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to open NVS: %s", esp_err_to_name(ret));
-        return ret;
-    }
-
-    // 读取数量
-    uint8_t count = 0;
+    
     ret = nvs_get_u8(handle, NVS_KEY_COUNT, &count);
     if (ret != ESP_OK || count == 0) {
         nvs_close(handle);
+        ESP_LOGI(TAG, "No saved sources found");
         return ESP_OK;
     }
 
@@ -486,6 +528,87 @@ static esp_err_t load_sources_from_nvs(void)
     nvs_close(handle);
     ESP_LOGI(TAG, "Loaded %d sources from NVS", s_src_ctx.count);
 
+    return ESP_OK;
+}
+
+/**
+ * Load sources from SD card JSON file
+ */
+static esp_err_t load_sources_from_file(const char *filepath)
+{
+    if (!filepath) return ESP_ERR_INVALID_ARG;
+    
+    FILE *f = fopen(filepath, "r");
+    if (!f) {
+        ESP_LOGD(TAG, "Cannot open file: %s", filepath);
+        return ESP_ERR_NOT_FOUND;
+    }
+    
+    fseek(f, 0, SEEK_END);
+    long size = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    
+    if (size <= 0 || size > 16384) {
+        fclose(f);
+        ESP_LOGW(TAG, "File too large or empty: %s (%ld bytes)", filepath, size);
+        return ESP_ERR_INVALID_SIZE;
+    }
+    
+    char *content = heap_caps_malloc(size + 1, MALLOC_CAP_SPIRAM);
+    if (!content) content = malloc(size + 1);
+    if (!content) {
+        fclose(f);
+        return ESP_ERR_NO_MEM;
+    }
+    
+    size_t read_size = fread(content, 1, size, f);
+    fclose(f);
+    content[read_size] = '\0';
+    
+    cJSON *root = cJSON_Parse(content);
+    free(content);
+    
+    if (!root) {
+        ESP_LOGW(TAG, "Failed to parse JSON: %s", filepath);
+        return ESP_ERR_INVALID_ARG;
+    }
+    
+    cJSON *sources = cJSON_GetObjectItem(root, "sources");
+    if (!sources || !cJSON_IsArray(sources)) {
+        cJSON_Delete(root);
+        ESP_LOGW(TAG, "No 'sources' array in file");
+        return ESP_ERR_INVALID_ARG;
+    }
+    
+    int loaded = 0;
+    cJSON *item;
+    cJSON_ArrayForEach(item, sources) {
+        if (s_src_ctx.count >= s_src_ctx.capacity) break;
+        
+        char *json_str = cJSON_PrintUnformatted(item);
+        if (!json_str) continue;
+        
+        ts_auto_source_t *src = heap_caps_malloc(sizeof(ts_auto_source_t), MALLOC_CAP_SPIRAM);
+        if (!src) src = malloc(sizeof(ts_auto_source_t));
+        if (src) {
+            memset(src, 0, sizeof(ts_auto_source_t));
+            if (json_to_source(json_str, src) == ESP_OK && src->id[0]) {
+                memcpy(&s_src_ctx.sources[s_src_ctx.count], src, sizeof(ts_auto_source_t));
+                s_src_ctx.count++;
+                loaded++;
+            }
+            free(src);
+        }
+        cJSON_free(json_str);
+    }
+    
+    cJSON_Delete(root);
+    
+    if (loaded > 0) {
+        ESP_LOGI(TAG, "Loaded %d sources from SD card: %s", loaded, filepath);
+        save_sources_to_nvs();  /* Save to NVS for next boot */
+    }
+    
     return ESP_OK;
 }
 
@@ -2214,6 +2337,9 @@ connection_retry:
     esp_websocket_client_config_t ws_cfg = {
         .uri = ws_url,
         .buffer_size = 2048,
+        .reconnect_timeout_ms = 10000,   /* 重连超时 10s */
+        .network_timeout_ms = 10000,     /* 网络超时 10s */
+        .ping_interval_sec = 0,          /* 禁用 WebSocket ping，使用 Socket.IO ping */
     };
 
     conn->client = esp_websocket_client_init(&ws_cfg);

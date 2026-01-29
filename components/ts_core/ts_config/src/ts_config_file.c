@@ -21,6 +21,7 @@
 #include <dirent.h>
 #include "ts_config.h"
 #include "ts_config_file.h"
+#include "ts_config_module.h"
 #include "ts_event.h"
 #include "esp_log.h"
 #include "esp_vfs.h"
@@ -46,6 +47,34 @@ static ts_event_handler_handle_t s_storage_event_handler = NULL;
 static bool path_exists(const char *path);
 static bool ensure_directory(const char *path);
 static void storage_event_handler(const ts_event_t *event, void *user_data);
+
+/**
+ * @brief 检查文件是否属于 schema-less 模块（这些模块有自己的加载逻辑）
+ * 
+ * Schema-less 模块（如 rules, actions, sources, temp）使用自定义的 NVS 存储
+ * 格式，不应该通过通用配置系统加载其 JSON 文件。
+ * 
+ * @param filename 文件名（如 "rules.json"）
+ * @return true 如果是 schema-less 模块的文件，应该跳过
+ */
+static bool is_schemaless_module_file(const char *filename)
+{
+    /* Schema-less 模块的配置文件列表 */
+    static const char *schemaless_files[] = {
+        "rules.json",
+        "actions.json", 
+        "sources.json",
+        "temp.json",
+        NULL
+    };
+    
+    for (int i = 0; schemaless_files[i] != NULL; i++) {
+        if (strcmp(filename, schemaless_files[i]) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
 
 /* ============================================================================
  * 后端操作函数
@@ -217,12 +246,21 @@ esp_err_t ts_config_file_load_all(void)
     }
 
     int loaded_count = 0;
+    int skipped_count = 0;
     struct dirent *entry;
 
     while ((entry = readdir(dir)) != NULL) {
         // 检查是否是 .json 文件
         const char *ext = strrchr(entry->d_name, '.');
         if (ext != NULL && strcmp(ext, ".json") == 0) {
+            /* 跳过 schema-less 模块的配置文件 
+             * 这些模块有自己的 NVS 存储格式和加载逻辑 */
+            if (is_schemaless_module_file(entry->d_name)) {
+                ESP_LOGD(TAG, "Skipping schema-less module file: %s", entry->d_name);
+                skipped_count++;
+                continue;
+            }
+            
             char filepath[512];
             snprintf(filepath, sizeof(filepath), "%.255s/%.255s", s_config_path, entry->d_name);
 
@@ -238,7 +276,7 @@ esp_err_t ts_config_file_load_all(void)
 
     closedir(dir);
 
-    ESP_LOGI(TAG, "Loaded %d configuration files", loaded_count);
+    ESP_LOGI(TAG, "Loaded %d configuration files (skipped %d schema-less)", loaded_count, skipped_count);
     return ESP_OK;
 }
 

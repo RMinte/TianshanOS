@@ -240,10 +240,22 @@ esp_err_t ts_rules_save(void);
 
 /**
  * @brief Load all rules from NVS
+ * 
+ * If NVS is empty and SD card is mounted, will try to load from SD card file.
  *
  * @return ESP_OK on success
  */
 esp_err_t ts_rules_load(void);
+
+/**
+ * @brief Load rules from SD card file
+ * 
+ * Used for config recovery when NVS is empty.
+ *
+ * @param filepath Path to JSON file (e.g., "/sdcard/config/rules.json")
+ * @return ESP_OK on success
+ */
+esp_err_t ts_rules_load_from_file(const char *filepath);
 
 #ifdef __cplusplus
 }

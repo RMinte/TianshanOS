@@ -25,6 +25,8 @@
 #include "ts_hal.h"
 #include "ts_core.h"
 #include "ts_console.h"
+#include "ts_config_module.h"
+#include "ts_storage.h"
 
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -2338,6 +2340,10 @@ esp_err_t ts_action_templates_save(void)
         return ret;
     }
     
+    /* 为 SD 卡导出准备 JSON 数组 */
+    cJSON *export_json = cJSON_CreateObject();
+    cJSON *templates_array = cJSON_CreateArray();
+    
     /* Save each template */
     for (int i = 0; i < s_ctx->template_count; i++) {
         char key[16];
@@ -2349,7 +2355,15 @@ esp_err_t ts_action_templates_save(void)
             continue;
         }
         
+        /* 保存到 NVS */
         ret = nvs_set_str(handle, key, json);
+        
+        /* 同时添加到 SD 卡 JSON 数组 */
+        cJSON *tpl_obj = cJSON_Parse(json);
+        if (tpl_obj) {
+            cJSON_AddItemToArray(templates_array, tpl_obj);
+        }
+        
         free(json);
         
         if (ret != ESP_OK) {
@@ -2362,51 +2376,82 @@ esp_err_t ts_action_templates_save(void)
     ret = nvs_commit(handle);
     nvs_close(handle);
     
+    /* 构建完整 JSON 并导出到 SD 卡 */
+    cJSON_AddItemToObject(export_json, "templates", templates_array);
+    cJSON_AddNumberToObject(export_json, "count", s_ctx->template_count);
+    
+    /* 使用新的 API 导出到 SD 卡 */
+    esp_err_t sd_ret = ts_config_module_export_custom_json(TS_CONFIG_MODULE_ACTIONS, export_json);
+    cJSON_Delete(export_json);
+    
+    if (sd_ret != ESP_OK && sd_ret != TS_CONFIG_ERR_SD_NOT_MOUNTED) {
+        ESP_LOGW(TAG, "Failed to export action templates to SD card: %s", esp_err_to_name(sd_ret));
+    }
+    
     ESP_LOGI(TAG, "Saved %d action templates to NVS", s_ctx->template_count);
     return ret;
 }
 
 /**
- * @brief Load all action templates from NVS
+ * @brief Load all action templates
+ * 
+ * Priority: SD card file > NVS > empty (遵循系统配置优先级原则)
  */
 esp_err_t ts_action_templates_load(void)
 {
     if (!s_ctx) return ESP_ERR_INVALID_STATE;
     
+    esp_err_t ret;
+    
+    /* 1. 优先从 SD 卡加载 */
+    if (ts_storage_sd_mounted()) {
+        ret = ts_action_templates_load_from_file("/sdcard/config/actions.json");
+        if (ret == ESP_OK && s_ctx->template_count > 0) {
+            ESP_LOGI(TAG, "Loaded %d action templates from SD card", s_ctx->template_count);
+            return ESP_OK;  /* SD 卡配置已自动保存到 NVS */
+        }
+    }
+    
+    /* 2. SD 卡无配置，从 NVS 加载 */
+    uint8_t count = 0;
     nvs_handle_t handle;
-    esp_err_t ret = nvs_open(NVS_NAMESPACE, NVS_READONLY, &handle);
-    if (ret == ESP_ERR_NVS_NOT_FOUND) {
+    ret = nvs_open(NVS_NAMESPACE, NVS_READONLY, &handle);
+    
+    if (ret != ESP_OK) {
         ESP_LOGI(TAG, "No saved action templates found");
         return ESP_OK;
     }
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to open NVS: %s", esp_err_to_name(ret));
-        return ret;
-    }
     
-    /* Read count */
-    uint8_t count = 0;
     ret = nvs_get_u8(handle, NVS_KEY_COUNT, &count);
     if (ret != ESP_OK || count == 0) {
         nvs_close(handle);
+        ESP_LOGI(TAG, "No saved action templates found");
         return ESP_OK;
     }
     
+    /* Load from NVS */
     ESP_LOGI(TAG, "Loading %d action templates from NVS", count);
+    
+    /* 使用堆分配避免栈溢出 - ts_action_template_t 结构体很大（>1KB）*/
+    ts_action_template_t *tpl = heap_caps_malloc(sizeof(ts_action_template_t), MALLOC_CAP_SPIRAM);
+    if (!tpl) {
+        tpl = malloc(sizeof(ts_action_template_t));
+    }
+    if (!tpl) {
+        nvs_close(handle);
+        ESP_LOGE(TAG, "Failed to allocate template buffer");
+        return ESP_ERR_NO_MEM;
+    }
     
     xSemaphoreTake(s_ctx->templates_mutex, portMAX_DELAY);
     
-    /* Load each template */
     for (int i = 0; i < count && s_ctx->template_count < TS_ACTION_TEMPLATE_MAX; i++) {
         char key[16];
         snprintf(key, sizeof(key), "%s%d", NVS_KEY_PREFIX, i);
         
-        /* Get string length first */
         size_t len = 0;
         ret = nvs_get_str(handle, key, NULL, &len);
-        if (ret != ESP_OK || len == 0) {
-            continue;
-        }
+        if (ret != ESP_OK || len == 0) continue;
         
         char *json = malloc(len);
         if (!json) {
@@ -2416,21 +2461,116 @@ esp_err_t ts_action_templates_load(void)
         
         ret = nvs_get_str(handle, key, json, &len);
         if (ret == ESP_OK) {
-            ts_action_template_t tpl;
-            if (json_to_template(json, &tpl) == ESP_OK) {
-                memcpy(&s_ctx->templates[s_ctx->template_count], &tpl, 
-                       sizeof(ts_action_template_t));
+            if (json_to_template(json, tpl) == ESP_OK) {
+                memcpy(&s_ctx->templates[s_ctx->template_count], tpl, sizeof(ts_action_template_t));
                 s_ctx->template_count++;
-                ESP_LOGD(TAG, "Loaded template: %s", tpl.id);
+                ESP_LOGD(TAG, "Loaded template: %s", tpl->id);
             }
         }
-        
         free(json);
     }
     
     xSemaphoreGive(s_ctx->templates_mutex);
+    free(tpl);
     nvs_close(handle);
     
     ESP_LOGI(TAG, "Loaded %d action templates from NVS", s_ctx->template_count);
+    return ESP_OK;
+}
+
+/**
+ * @brief Load action templates from SD card JSON file
+ */
+esp_err_t ts_action_templates_load_from_file(const char *filepath)
+{
+    if (!s_ctx || !filepath) return ESP_ERR_INVALID_ARG;
+    
+    FILE *f = fopen(filepath, "r");
+    if (!f) {
+        ESP_LOGD(TAG, "Cannot open file: %s", filepath);
+        return ESP_ERR_NOT_FOUND;
+    }
+    
+    /* Get file size */
+    fseek(f, 0, SEEK_END);
+    long size = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    
+    if (size <= 0 || size > 32768) {  /* Max 32KB */
+        fclose(f);
+        ESP_LOGW(TAG, "File too large or empty: %s (%ld bytes)", filepath, size);
+        return ESP_ERR_INVALID_SIZE;
+    }
+    
+    char *content = heap_caps_malloc(size + 1, MALLOC_CAP_SPIRAM);
+    if (!content) {
+        content = malloc(size + 1);
+    }
+    if (!content) {
+        fclose(f);
+        return ESP_ERR_NO_MEM;
+    }
+    
+    size_t read = fread(content, 1, size, f);
+    fclose(f);
+    content[read] = '\0';
+    
+    /* Parse JSON */
+    cJSON *root = cJSON_Parse(content);
+    free(content);
+    
+    if (!root) {
+        ESP_LOGW(TAG, "Failed to parse JSON: %s", filepath);
+        return ESP_ERR_INVALID_ARG;
+    }
+    
+    /* Get templates array */
+    cJSON *templates = cJSON_GetObjectItem(root, "templates");
+    if (!templates || !cJSON_IsArray(templates)) {
+        cJSON_Delete(root);
+        ESP_LOGW(TAG, "No 'templates' array in file");
+        return ESP_ERR_INVALID_ARG;
+    }
+    
+    int loaded = 0;
+    
+    /* 使用堆分配避免栈溢出 - ts_action_template_t 结构体很大（>1KB）*/
+    ts_action_template_t *tpl = heap_caps_malloc(sizeof(ts_action_template_t), MALLOC_CAP_SPIRAM);
+    if (!tpl) {
+        tpl = malloc(sizeof(ts_action_template_t));
+    }
+    if (!tpl) {
+        cJSON_Delete(root);
+        ESP_LOGE(TAG, "Failed to allocate template buffer");
+        return ESP_ERR_NO_MEM;
+    }
+    
+    xSemaphoreTake(s_ctx->templates_mutex, portMAX_DELAY);
+    
+    cJSON *item;
+    cJSON_ArrayForEach(item, templates) {
+        if (s_ctx->template_count >= TS_ACTION_TEMPLATE_MAX) break;
+        
+        char *json_str = cJSON_PrintUnformatted(item);
+        if (!json_str) continue;
+        
+        if (json_to_template(json_str, tpl) == ESP_OK) {
+            memcpy(&s_ctx->templates[s_ctx->template_count], tpl, sizeof(ts_action_template_t));
+            s_ctx->template_count++;
+            loaded++;
+        }
+        cJSON_free(json_str);
+    }
+    
+    xSemaphoreGive(s_ctx->templates_mutex);
+    free(tpl);
+    cJSON_Delete(root);
+    
+    if (loaded > 0) {
+        ESP_LOGI(TAG, "Loaded %d action templates from SD card: %s", loaded, filepath);
+        /* Save to NVS for next boot */
+        ts_action_templates_save();
+    }
+    
     return ESP_OK;
 }

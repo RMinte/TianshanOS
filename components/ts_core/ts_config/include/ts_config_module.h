@@ -27,6 +27,7 @@
 #include <stddef.h>
 #include "esp_err.h"
 #include "ts_config.h"
+#include "cJSON.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -82,6 +83,10 @@ typedef enum {
     TS_CONFIG_MODULE_FAN,       /**< 风扇配置 (fan.json / ts_fan) */
     TS_CONFIG_MODULE_DEVICE,    /**< 设备控制配置 (device.json / ts_device) */
     TS_CONFIG_MODULE_SYSTEM,    /**< 系统配置 (system.json / ts_system) */
+    TS_CONFIG_MODULE_TEMP,      /**< 温度源配置 (temp.json / ts_temp) */
+    TS_CONFIG_MODULE_RULES,     /**< 自动化规则配置 (rules.json / ts_rules) */
+    TS_CONFIG_MODULE_ACTIONS,   /**< 动作模板配置 (actions.json / ts_actions) */
+    TS_CONFIG_MODULE_SOURCES,   /**< 数据源配置 (sources.json / ts_sources) */
     TS_CONFIG_MODULE_MAX        /**< 模块数量（用于边界检查）*/
 } ts_config_module_t;
 
@@ -319,6 +324,22 @@ esp_err_t ts_config_module_persist(ts_config_module_t module);
  * @return ESP_OK 成功
  */
 esp_err_t ts_config_module_export_to_sdcard(ts_config_module_t module);
+
+/**
+ * @brief 导出自定义 JSON 到 SD卡配置文件
+ * 
+ * 用于 Schema-less 模块（如 RULES、ACTIONS、SOURCES）直接导出自己的 JSON 数据。
+ * 这些模块有独立的 NVS 存储逻辑，无法通过 ts_config_module_persist() 自动生成 JSON。
+ * 
+ * @param module 模块ID，必须是已注册的模块
+ * @param json 自定义 JSON 对象（调用者负责创建和释放）
+ * @return 
+ *      - ESP_OK: 成功
+ *      - TS_CONFIG_ERR_MODULE_NOT_FOUND: 模块未注册
+ *      - TS_CONFIG_ERR_SD_NOT_MOUNTED: SD卡未挂载
+ *      - ESP_ERR_INVALID_ARG: json 为 NULL
+ */
+esp_err_t ts_config_module_export_custom_json(ts_config_module_t module, const cJSON *json);
 
 /**
  * @brief 从 SD卡导入模块配置到 NVS

@@ -4,6 +4,40 @@
 
 TianShanOS 使用 JSON 配置文件定义板级硬件配置，实现"配置驱动"的设计理念。
 
+## 配置优先级
+
+配置系统采用分层优先级设计：
+
+```
+SD 卡文件 > NVS 持久化 > 代码默认值
+```
+
+| 优先级 | 来源 | 说明 |
+|--------|------|------|
+| 1 (最高) | `/sdcard/config/*.json` | SD 卡上的 JSON 配置文件 |
+| 2 | NVS 存储 | 非易失性存储中的持久化配置 |
+| 3 (最低) | 代码默认值 | 编译时的硬编码默认值 |
+
+### 配置模块分类
+
+**Schema-based 模块**（8个）：
+- `net.json`, `dhcp.json`, `wifi.json`, `nat.json`
+- `led.json`, `fan.json`, `device.json`, `system.json`
+- 使用 `ts_config_module_persist()` 统一管理
+
+**Schema-less 模块**（4个）：
+- `sources.json` - 数据源配置
+- `rules.json` - 自动化规则
+- `actions.json` - 动作模板
+- `temp.json` - 温度源配置（含变量绑定）
+- 使用自定义 NVS 格式，独立管理
+
+### 同步行为
+
+- SD 卡文件修改后，自动同步到 NVS
+- NVS 更新后，自动导出到 SD 卡
+- 启动时优先加载 SD 卡文件
+
 ## 配置文件结构
 
 每个板级配置目录包含三个文件：

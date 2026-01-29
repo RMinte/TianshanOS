@@ -12,6 +12,7 @@
 #include <string.h>
 #include <dirent.h>
 #include <sys/stat.h>
+#include "esp_heap_caps.h"
 
 #define TAG "api_storage"
 
@@ -326,6 +327,95 @@ static esp_err_t api_storage_info(const cJSON *params, ts_api_result_t *result)
     return ESP_OK;
 }
 
+/**
+ * @brief storage.read - Read file content (text files only, max 8KB)
+ * @param params { "path": "/sdcard/config/net.json" }
+ */
+static esp_err_t api_storage_read(const cJSON *params, ts_api_result_t *result)
+{
+    if (!params) {
+        ts_api_result_error(result, TS_API_ERR_INVALID_ARG, "Missing parameters");
+        return ESP_ERR_INVALID_ARG;
+    }
+    
+    const cJSON *path_param = cJSON_GetObjectItem(params, "path");
+    if (!path_param || !cJSON_IsString(path_param)) {
+        ts_api_result_error(result, TS_API_ERR_INVALID_ARG, "Missing 'path' parameter");
+        return ESP_ERR_INVALID_ARG;
+    }
+    
+    const char *path = path_param->valuestring;
+    
+    // 检查文件是否存在
+    if (!ts_storage_exists(path)) {
+        ts_api_result_error(result, TS_API_ERR_NOT_FOUND, "File not found");
+        return ESP_ERR_NOT_FOUND;
+    }
+    
+    // 检查是否是目录
+    if (ts_storage_is_dir(path)) {
+        ts_api_result_error(result, TS_API_ERR_INVALID_ARG, "Cannot read directory");
+        return ESP_ERR_INVALID_ARG;
+    }
+    
+    // 获取文件大小
+    ts_file_info_t info;
+    esp_err_t ret = ts_storage_stat(path, &info);
+    if (ret != ESP_OK) {
+        ts_api_result_error(result, TS_API_ERR_INTERNAL, "Failed to stat file");
+        return ret;
+    }
+    
+    // 限制文件大小（最大 8KB）
+    const size_t max_size = 8192;
+    if (info.size > max_size) {
+        ts_api_result_error(result, TS_API_ERR_INVALID_ARG, "File too large (max 8KB)");
+        return ESP_ERR_INVALID_ARG;
+    }
+    
+    // 分配缓冲区
+    char *content = heap_caps_malloc(info.size + 1, MALLOC_CAP_SPIRAM);
+    if (!content) {
+        content = malloc(info.size + 1);
+    }
+    if (!content) {
+        ts_api_result_error(result, TS_API_ERR_NO_MEM, "Memory allocation failed");
+        return ESP_ERR_NO_MEM;
+    }
+    
+    // 读取文件
+    FILE *f = fopen(path, "r");
+    if (!f) {
+        free(content);
+        ts_api_result_error(result, TS_API_ERR_INTERNAL, "Failed to open file");
+        return ESP_FAIL;
+    }
+    
+    size_t read_size = fread(content, 1, info.size, f);
+    fclose(f);
+    content[read_size] = '\0';
+    
+    // 构建结果
+    cJSON *data = cJSON_CreateObject();
+    cJSON_AddStringToObject(data, "path", path);
+    cJSON_AddNumberToObject(data, "size", read_size);
+    
+    // 尝试解析为 JSON
+    cJSON *json_content = cJSON_Parse(content);
+    if (json_content) {
+        cJSON_AddItemToObject(data, "content", json_content);
+        cJSON_AddStringToObject(data, "type", "json");
+    } else {
+        cJSON_AddStringToObject(data, "content", content);
+        cJSON_AddStringToObject(data, "type", "text");
+    }
+    
+    free(content);
+    
+    ts_api_result_ok(result, data);
+    return ESP_OK;
+}
+
 /*===========================================================================*/
 /*                          Registration                                      */
 /*===========================================================================*/
@@ -385,6 +475,13 @@ static const ts_api_endpoint_t s_storage_endpoints[] = {
         .description = "Get file info",
         .category = TS_API_CAT_STORAGE,
         .handler = api_storage_info,
+        .requires_auth = false
+    },
+    {
+        .name = "storage.read",
+        .description = "Read file content",
+        .category = TS_API_CAT_STORAGE,
+        .handler = api_storage_read,
         .requires_auth = false
     }
 };
