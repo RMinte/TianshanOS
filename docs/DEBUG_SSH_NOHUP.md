@@ -19,7 +19,9 @@
 
 ```javascript
 // 最终工作代码 - 就这么简单！
-const nohupLogFile = `/tmp/ts_nohup_${Date.now()}.log`;
+// 基于命令名生成固定日志文件名（每次执行覆盖，不累积）
+const safeName = cmd.name.replace(/[^a-zA-Z0-9]/g, '').slice(0, 20) || 'cmd';
+const nohupLogFile = `/tmp/ts_nohup_${safeName}.log`;
 actualCommand = `nohup ${cmd.command} > ${nohupLogFile} 2>&1 & sleep 0.3; pgrep -f '${cmd.command.split(' ')[0]}'`;
 ```
 
@@ -27,6 +29,7 @@ actualCommand = `nohup ${cmd.command} > ${nohupLogFile} 2>&1 & sleep 0.3; pgrep 
 - 使用最基本的 `nohup cmd > log 2>&1 &` 形式
 - 无需任何特殊转义、脚本包装、tmux/screen 等复杂方案
 - `sleep 0.3` 确保进程启动，`pgrep` 返回 PID 确认执行
+- 日志文件基于命令名固定命名，每次执行覆盖（不累积）
 
 ---
 
@@ -193,11 +196,35 @@ sshpass -p rm01 ssh rm01@10.10.99.99 "nohup ping 10.10.99.97 > /tmp/test.log 2>&
 **命令生成** ([app.js](../components/ts_webui/web/js/app.js)):
 ```javascript
 if (cmd.nohup) {
-    const nohupLogFile = `/tmp/ts_nohup_${Date.now()}.log`;
-    currentNohupLogFile = nohupLogFile;
+    // 基于命令名生成固定日志文件（每次执行覆盖）
+    const safeName = cmd.name.replace(/[^a-zA-Z0-9]/g, '').slice(0, 20) || 'cmd';
+    const nohupLogFile = `/tmp/ts_nohup_${safeName}.log`;
+    currentNohupInfo = { logFile: nohupLogFile, processKeyword: cmd.command.split(' ')[0], hostId };
     actualCommand = `nohup ${cmd.command} > ${nohupLogFile} 2>&1 & sleep 0.3; pgrep -f '${cmd.command.split(' ')[0]}'`;
 }
 ```
+
+### 6.2 系统页面快捷操作集成
+
+**自动化规则手动触发时，如果动作包含 nohup SSH 命令，快捷操作卡片会显示额外按钮**：
+
+```html
+<div class="quick-action-card has-nohup">
+    <div class="quick-action-icon">⚡</div>
+    <div class="quick-action-name">规则名称</div>
+    <div class="quick-action-count">0次</div>
+    <div class="quick-action-nohup-btns">
+        <button onclick="quickActionViewLog(...)">📄</button>  <!-- 查看日志 -->
+        <button onclick="quickActionStopProcess(...)">🛑</button>  <!-- 终止进程 -->
+    </div>
+</div>
+```
+
+**日志查看模态框功能**：
+- 📄 查看完整日志
+- 👁️ 实时跟踪（每2秒自动刷新）
+- ⏹️ 停止跟踪
+- 🔄 手动刷新
 
 ### 6.2 辅助功能
 

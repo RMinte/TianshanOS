@@ -995,20 +995,37 @@ async function refreshQuickActions() {
             console.log('refreshQuickActions: Manual rules count:', manualRules.length);
             
             if (manualRules.length > 0) {
-                container.innerHTML = manualRules.map(rule => {
+                // 检查每个规则是否包含 nohup SSH 命令
+                const cardsHtml = await Promise.all(manualRules.map(async rule => {
                     const iconValue = rule.icon || '⚡';
                     const iconHtml = iconValue.startsWith('/sdcard/') 
                         ? `<img src="/api/v1/file/download?path=${encodeURIComponent(iconValue)}" alt="icon" onerror="this.textContent='⚡'">`
                         : iconValue;
                     
+                    // 检查是否有 nohup SSH 命令动作
+                    const nohupInfo = await checkRuleHasNohupSsh(rule);
+                    
+                    // 基础卡片 + nohup 控制按钮
+                    let nohupBtns = '';
+                    if (nohupInfo) {
+                        nohupBtns = `
+                            <div class="quick-action-nohup-btns" onclick="event.stopPropagation()">
+                                <button class="btn btn-xs" onclick="quickActionViewLog('${escapeHtml(nohupInfo.logFile)}', '${escapeHtml(nohupInfo.hostId)}')" title="查看日志">📄</button>
+                                <button class="btn btn-xs" onclick="quickActionStopProcess('${escapeHtml(nohupInfo.keyword)}', '${escapeHtml(nohupInfo.hostId)}')" title="终止进程">🛑</button>
+                            </div>
+                        `;
+                    }
+                    
                     return `
-                        <div class="quick-action-card" onclick="triggerQuickAction('${escapeHtml(rule.id)}')" title="${escapeHtml(rule.name)}">
+                        <div class="quick-action-card${nohupInfo ? ' has-nohup' : ''}" onclick="triggerQuickAction('${escapeHtml(rule.id)}')" title="${escapeHtml(rule.name)}">
                             <div class="quick-action-icon">${iconHtml}</div>
                             <div class="quick-action-name">${escapeHtml(rule.name)}</div>
                             <div class="quick-action-count">${rule.trigger_count || 0}次</div>
+                            ${nohupBtns}
                         </div>
                     `;
-                }).join('');
+                }));
+                container.innerHTML = cardsHtml.join('');
             } else {
                 container.innerHTML = `
                     <div class="quick-actions-empty">
@@ -1050,6 +1067,171 @@ async function triggerQuickAction(ruleId) {
     } catch (e) {
         showToast('❌ 执行失败: ' + e.message, 'error');
         event.currentTarget?.classList.remove('triggering');
+    }
+}
+
+/**
+ * 检查规则是否包含 nohup SSH 命令
+ * @param {object} rule - 规则对象
+ * @returns {object|null} - 返回 {logFile, keyword, hostId} 或 null
+ */
+async function checkRuleHasNohupSsh(rule) {
+    if (!rule.actions || rule.actions.length === 0) return null;
+    
+    // 确保 SSH 命令已加载
+    if (Object.keys(sshCommands).length === 0) {
+        await loadSshCommands();
+    }
+    
+    // 遍历所有动作，查找 ssh_cmd_ref 类型且对应命令有 nohup 标记的
+    for (const action of rule.actions) {
+        if (action.type === 'ssh_cmd_ref' && action.ssh_ref?.cmd_id) {
+            const cmdId = action.ssh_ref.cmd_id;
+            // 在所有主机的命令中查找
+            for (const [hostId, cmds] of Object.entries(sshCommands)) {
+                const cmd = cmds.find(c => c.id === cmdId);
+                if (cmd && cmd.nohup) {
+                    // 找到了 nohup 命令
+                    const safeName = cmd.name.replace(/[^a-zA-Z0-9]/g, '').slice(0, 20) || 'cmd';
+                    return {
+                        logFile: `/tmp/ts_nohup_${safeName}.log`,
+                        keyword: cmd.command.split(' ')[0],
+                        hostId: hostId,
+                        cmdName: cmd.name
+                    };
+                }
+            }
+        }
+    }
+    return null;
+}
+
+/**
+ * 快捷操作 - 查看日志
+ */
+let quickActionTailInterval = null;
+let quickActionLastContent = '';
+
+async function quickActionViewLog(logFile, hostId) {
+    // 获取主机信息
+    const host = sshHosts.find(h => h.id === hostId);
+    if (!host) {
+        showToast('❌ 主机不存在', 'error');
+        return;
+    }
+    
+    // 显示日志模态框
+    const modalHtml = `
+        <div id="quick-log-modal" class="modal">
+            <div class="modal-content" style="max-width:700px">
+                <div class="modal-header">
+                    <h2>📄 日志查看 - ${escapeHtml(logFile)}</h2>
+                    <button class="modal-close" onclick="closeQuickLogModal()">&times;</button>
+                </div>
+                <div class="modal-body" style="padding:0">
+                    <pre id="quick-log-content" style="max-height:400px;overflow:auto;padding:15px;margin:0;background:#1a1a2e;color:#eee;font-size:12px;white-space:pre-wrap">加载中...</pre>
+                </div>
+                <div class="modal-footer" style="display:flex;gap:10px;padding:10px 15px">
+                    <button class="btn" id="quick-log-tail-btn" onclick="toggleQuickLogTail('${escapeHtml(logFile)}', '${escapeHtml(hostId)}')">👁️ 实时跟踪</button>
+                    <button class="btn" onclick="quickActionRefreshLog('${escapeHtml(logFile)}', '${escapeHtml(hostId)}')">🔄 刷新</button>
+                    <button class="btn btn-secondary" onclick="closeQuickLogModal()">关闭</button>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    // 添加模态框
+    const existing = document.getElementById('quick-log-modal');
+    if (existing) existing.remove();
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+    
+    // 加载日志
+    await quickActionRefreshLog(logFile, hostId);
+}
+
+async function quickActionRefreshLog(logFile, hostId) {
+    const host = sshHosts.find(h => h.id === hostId);
+    if (!host) return;
+    
+    const contentEl = document.getElementById('quick-log-content');
+    if (!contentEl) return;
+    
+    try {
+        const result = await api.call('ssh.execute', {
+            host_id: hostId,
+            command: `cat ${logFile} 2>/dev/null || echo '[日志文件不存在]'`,
+            timeout: 10
+        });
+        
+        if (result.code === 0 && result.data) {
+            contentEl.textContent = result.data.output || '[空]';
+            contentEl.scrollTop = contentEl.scrollHeight;
+            quickActionLastContent = result.data.output || '';
+        } else {
+            contentEl.textContent = '[获取失败] ' + (result.message || '');
+        }
+    } catch (e) {
+        contentEl.textContent = '[错误] ' + e.message;
+    }
+}
+
+function toggleQuickLogTail(logFile, hostId) {
+    const btn = document.getElementById('quick-log-tail-btn');
+    if (quickActionTailInterval) {
+        // 停止跟踪
+        clearInterval(quickActionTailInterval);
+        quickActionTailInterval = null;
+        if (btn) btn.textContent = '👁️ 实时跟踪';
+        showToast('已停止跟踪', 'info');
+    } else {
+        // 开始跟踪
+        if (btn) btn.textContent = '⏹️ 停止跟踪';
+        quickActionLastContent = '';
+        quickActionTailInterval = setInterval(async () => {
+            await quickActionRefreshLog(logFile, hostId);
+        }, 2000);
+        showToast('开始实时跟踪 (每2秒刷新)', 'info');
+    }
+}
+
+function closeQuickLogModal() {
+    if (quickActionTailInterval) {
+        clearInterval(quickActionTailInterval);
+        quickActionTailInterval = null;
+    }
+    const modal = document.getElementById('quick-log-modal');
+    if (modal) modal.remove();
+}
+
+/**
+ * 快捷操作 - 终止进程
+ */
+async function quickActionStopProcess(keyword, hostId) {
+    const host = sshHosts.find(h => h.id === hostId);
+    if (!host) {
+        showToast('❌ 主机不存在', 'error');
+        return;
+    }
+    
+    if (!confirm(`确定要终止包含 "${keyword}" 的进程吗？`)) {
+        return;
+    }
+    
+    try {
+        showToast('正在终止进程...', 'info');
+        const result = await api.call('ssh.execute', {
+            host_id: hostId,
+            command: `pkill -f '${keyword}' && echo '进程已终止' || echo '未找到匹配进程'`,
+            timeout: 10
+        });
+        
+        if (result.code === 0 && result.data) {
+            showToast(result.data.output || '操作完成', 'success');
+        } else {
+            showToast('❌ ' + (result.message || '操作失败'), 'error');
+        }
+    } catch (e) {
+        showToast('❌ 错误: ' + e.message, 'error');
     }
 }
 
@@ -5687,10 +5869,9 @@ async function executeCommand(idx) {
     let actualCommand = cmd.command;
     let nohupLogFile = null;
     if (cmd.nohup) {
-        // 生成唯一日志文件名
-        const timestamp = Date.now();
-        const safeName = cmd.name.replace(/[^a-zA-Z0-9]/g, '').slice(0, 12) || 'cmd';
-        nohupLogFile = `/tmp/ts_${safeName}_${timestamp}.log`;
+        // 基于命令名生成固定日志文件名（每次执行会覆盖）
+        const safeName = cmd.name.replace(/[^a-zA-Z0-9]/g, '').slice(0, 20) || 'cmd';
+        nohupLogFile = `/tmp/ts_nohup_${safeName}.log`;
         
         // 最简单的 nohup 方案 - 已验证可行
         actualCommand = `nohup ${cmd.command} > ${nohupLogFile} 2>&1 & sleep 0.3; pgrep -f '${cmd.command.split(' ')[0]}'`;

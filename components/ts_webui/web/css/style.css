@@ -5558,6 +5558,25 @@ body {
     color: var(--text-light);
 }
 
+/* nohup 控制按钮（快捷操作卡片内） */
+.quick-action-nohup-btns {
+    display: flex;
+    gap: 4px;
+    margin-top: 6px;
+    justify-content: center;
+}
+
+.quick-action-nohup-btns .btn-xs {
+    padding: 2px 6px;
+    font-size: 0.7em;
+    min-width: unset;
+    border-radius: 4px;
+}
+
+.quick-action-card.has-nohup {
+    border: 1px solid var(--primary-color);
+}
+
 .quick-actions-empty {
     grid-column: 1 / -1;
     text-align: center;
