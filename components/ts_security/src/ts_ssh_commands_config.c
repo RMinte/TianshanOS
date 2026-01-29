@@ -46,6 +46,7 @@ typedef struct __attribute__((packed)) {
     char var_name[TS_SSH_CMD_VARNAME_MAX];
     uint16_t timeout_sec;
     uint8_t stop_on_match;
+    uint8_t nohup;
     uint8_t enabled;
     uint32_t created_time;
     uint32_t last_exec_time;
@@ -280,6 +281,7 @@ esp_err_t ts_ssh_commands_config_add(const ts_ssh_command_config_t *config,
     strncpy(entry.var_name, config->var_name, sizeof(entry.var_name) - 1);
     entry.timeout_sec = config->timeout_sec > 0 ? config->timeout_sec : 30;
     entry.stop_on_match = config->stop_on_match ? 1 : 0;
+    entry.nohup = config->nohup ? 1 : 0;
     entry.enabled = config->enabled ? 1 : 0;
     entry.created_time = (existing_index >= 0) ? entry.created_time : get_current_time();
     entry.last_exec_time = config->last_exec_time;
@@ -376,6 +378,7 @@ esp_err_t ts_ssh_commands_config_get(const char *id, ts_ssh_command_config_t *co
                 strncpy(config->var_name, entry.var_name, sizeof(config->var_name) - 1);
                 config->timeout_sec = entry.timeout_sec;
                 config->stop_on_match = entry.stop_on_match != 0;
+                config->nohup = entry.nohup != 0;
                 config->enabled = entry.enabled != 0;
                 config->created_time = entry.created_time;
                 config->last_exec_time = entry.last_exec_time;
@@ -421,6 +424,7 @@ esp_err_t ts_ssh_commands_config_list(ts_ssh_command_config_t *configs,
             strncpy(cfg->var_name, entry.var_name, sizeof(cfg->var_name) - 1);
             cfg->timeout_sec = entry.timeout_sec;
             cfg->stop_on_match = entry.stop_on_match != 0;
+            cfg->nohup = entry.nohup != 0;
             cfg->enabled = entry.enabled != 0;
             cfg->created_time = entry.created_time;
             cfg->last_exec_time = entry.last_exec_time;
@@ -467,6 +471,7 @@ esp_err_t ts_ssh_commands_config_list_by_host(const char *host_id,
                 strncpy(cfg->var_name, entry.var_name, sizeof(cfg->var_name) - 1);
                 cfg->timeout_sec = entry.timeout_sec;
                 cfg->stop_on_match = entry.stop_on_match != 0;
+                cfg->nohup = entry.nohup != 0;
                 cfg->enabled = entry.enabled != 0;
                 cfg->created_time = entry.created_time;
                 cfg->last_exec_time = entry.last_exec_time;

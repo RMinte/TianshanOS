@@ -1750,10 +1750,18 @@ static void ssh_exec_task(void *arg)
     }
     
     /* 判断是否需要启动超时定时器 */
-    /* 超时在以下情况有效：设定了成功/失败条件，或勾选了匹配后停止 */
-    bool need_timeout = params->stop_on_match || 
+    /* 超时在以下情况有效：
+     * 1. 设定了超时时间（前端可能为 nohup 命令设置短超时）
+     * 2. 设定了成功/失败条件
+     * 3. 勾选了匹配后停止 
+     */
+    bool need_timeout = (params->timeout_ms > 0) ||
+                        params->stop_on_match || 
                         (params->expect_pattern && params->expect_pattern[0]) ||
                         (params->fail_pattern && params->fail_pattern[0]);
+    
+    TS_LOGI(TAG, "Timeout check: timeout_ms=%lu, need_timeout=%d, stop_on_match=%d",
+            (unsigned long)params->timeout_ms, need_timeout, params->stop_on_match);
     
     if (need_timeout && params->timeout_ms > 0) {
         /* 创建或重置超时定时器 */
@@ -2192,7 +2200,8 @@ esp_err_t ts_webui_ssh_exec_start_ex(const char *host, uint16_t port,
         params->max_output_size = options->max_output_size > 0 ? options->max_output_size : 64 * 1024;
         params->stop_on_match = options->stop_on_match;
         
-        TS_LOGI(TAG, "SSH exec options: expect=%s, fail=%s, extract=%s, stop_on_match=%d, var=%s",
+        TS_LOGI(TAG, "SSH exec options: timeout_ms=%lu, expect=%s, fail=%s, extract=%s, stop_on_match=%d, var=%s",
+                (unsigned long)params->timeout_ms,
                 params->expect_pattern ? params->expect_pattern : "(null)",
                 params->fail_pattern ? params->fail_pattern : "(null)",
                 params->extract_pattern ? params->extract_pattern : "(null)",

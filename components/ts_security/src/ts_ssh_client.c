@@ -784,8 +784,16 @@ esp_err_t ts_ssh_exec_stream(ts_ssh_session_t session, const char *command,
 
         if (aborted) break;
 
+        /* 检查 channel 是否已经结束（远程命令退出）*/
+        if (libssh2_channel_eof(channel)) {
+            break;  /* 命令已完成，退出循环 */
+        }
+
         if (rc == LIBSSH2_ERROR_EAGAIN) {
             wait_socket(session->sock, session->session, 100);  /* 减少等待时间以便更快响应中断 */
+        } else if (rc == 0) {
+            /* 没有数据但 channel 未结束，短暂等待后继续 */
+            wait_socket(session->sock, session->session, 50);
         } else {
             break;
         }

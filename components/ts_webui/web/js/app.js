@@ -807,11 +807,12 @@ function updatePowerInfo(data) {
     document.getElementById('voltage').textContent = 
         (typeof inputVoltage === 'number' ? inputVoltage.toFixed(1) + ' V' : '-');
     
-    // 显示内部电压（如果可用）
+    // 显示内部电压（如果可用）- ADC 需要 -1V 校准
     const internalVoltageElem = document.getElementById('internal-voltage');
     if (internalVoltageElem) {
+        const calibratedVoltage = typeof internalVoltage === 'number' ? internalVoltage - 1.0 : null;
         internalVoltageElem.textContent = 
-            (typeof internalVoltage === 'number' ? internalVoltage.toFixed(2) + ' V' : '-');
+            (calibratedVoltage !== null ? calibratedVoltage.toFixed(2) + ' V' : '-');
     }
     
     document.getElementById('current').textContent = 
@@ -4368,6 +4369,7 @@ async function loadSshCommands() {
                     command: cmd.command,
                     desc: cmd.desc || '',
                     icon: cmd.icon || '🚀',
+                    nohup: cmd.nohup || false,
                     expectPattern: cmd.expectPattern || '',
                     failPattern: cmd.failPattern || '',
                     extractPattern: cmd.extractPattern || '',
@@ -4397,6 +4399,7 @@ async function saveSshCommandToBackend(hostId, cmdData, existingId = null) {
         command: cmdData.command,
         ...(cmdData.desc && { desc: cmdData.desc }),
         ...(cmdData.icon && { icon: cmdData.icon }),
+        nohup: !!cmdData.nohup,  // 始终发送，确保能取消勾选
         ...(cmdData.expectPattern && { expectPattern: cmdData.expectPattern }),
         ...(cmdData.failPattern && { failPattern: cmdData.failPattern }),
         ...(cmdData.extractPattern && { extractPattern: cmdData.extractPattern }),
@@ -4495,6 +4498,14 @@ async function loadCommandsPage() {
                         <button class="btn btn-sm" onclick="clearExecResult()">🗑️ 清除</button>
                     </div>
                 </div>
+                <!-- nohup 快捷操作按钮 -->
+                <div id="nohup-actions" class="nohup-actions" style="display:none">
+                    <button class="btn btn-sm" id="nohup-view-log" onclick="nohupViewLog()">📄 查看日志</button>
+                    <button class="btn btn-sm" id="nohup-tail-log" onclick="nohupTailLog()">👁️ 实时跟踪</button>
+                    <button class="btn btn-sm" id="nohup-stop-tail" onclick="nohupStopTail()" style="display:none;background:#ffc107;color:#333">⏹️ 停止跟踪</button>
+                    <button class="btn btn-sm" id="nohup-check-process" onclick="nohupCheckProcess()">🔍 检查进程</button>
+                    <button class="btn btn-sm" id="nohup-stop-process" onclick="nohupStopProcess()" style="background:#dc3545;color:white">🛑 停止进程</button>
+                </div>
                 <pre id="exec-result" class="exec-result"></pre>
                 
                 <!-- 模式匹配结果面板 -->
@@ -4587,36 +4598,45 @@ async function loadCommandsPage() {
                             <summary>⚙️ 高级选项（模式匹配）</summary>
                             <div class="advanced-content">
                                 <div class="form-group">
-                                    <label>✅ 成功匹配模式</label>
-                                    <input type="text" id="cmd-expect-pattern" placeholder="例如：active (running)" oninput="updateTimeoutState()">
-                                    <small>输出中包含此文本时标记为成功</small>
-                                </div>
-                                <div class="form-group">
-                                    <label>❌ 失败匹配模式</label>
-                                    <input type="text" id="cmd-fail-pattern" placeholder="例如：failed|error" oninput="updateTimeoutState()">
-                                    <small>输出中包含此文本时标记为失败</small>
-                                </div>
-                                <div class="form-group">
-                                    <label>📋 提取模式</label>
-                                    <input type="text" id="cmd-extract-pattern" placeholder="例如：version: (.*)">
-                                    <small>从输出中提取匹配内容，使用 (.*) 捕获组</small>
-                                </div>
-                                <div class="form-group">
-                                    <label>📝 存储变量名</label>
-                                    <input type="text" id="cmd-var-name" placeholder="例如：ping_test">
-                                    <small>执行结果将存储为 \${变量名.status}、\${变量名.extracted} 等，可在后续命令中引用</small>
-                                </div>
-                                <div class="form-group">
                                     <label class="checkbox-label">
-                                        <input type="checkbox" id="cmd-stop-on-match" onchange="updateTimeoutState()">
-                                        <span>⏹️ 匹配后自动停止</span>
+                                        <input type="checkbox" id="cmd-nohup" onchange="updateNohupState()">
+                                        <span>🚀 后台执行（nohup）</span>
                                     </label>
-                                    <small>适用于 ping 等持续运行的命令，匹配成功后自动终止</small>
+                                    <small>命令将在服务器后台运行，SSH 断开后不受影响。适合重启、长时间任务等场景</small>
                                 </div>
-                                <div class="form-group" id="cmd-timeout-group">
-                                    <label>⏱️ 超时（秒）</label>
-                                    <input type="number" id="cmd-timeout" value="30" min="5" max="300" step="5">
-                                    <small id="cmd-timeout-hint">超时仅在设置了成功/失败模式或勾选了"匹配后停止"时有效</small>
+                                <div id="cmd-pattern-options">
+                                    <div class="form-group">
+                                        <label>✅ 成功匹配模式</label>
+                                        <input type="text" id="cmd-expect-pattern" placeholder="例如：active (running)" oninput="updateTimeoutState()">
+                                        <small>输出中包含此文本时标记为成功</small>
+                                    </div>
+                                    <div class="form-group">
+                                        <label>❌ 失败匹配模式</label>
+                                        <input type="text" id="cmd-fail-pattern" placeholder="例如：failed|error" oninput="updateTimeoutState()">
+                                        <small>输出中包含此文本时标记为失败</small>
+                                    </div>
+                                    <div class="form-group">
+                                        <label>📋 提取模式</label>
+                                        <input type="text" id="cmd-extract-pattern" placeholder="例如：version: (.*)">
+                                        <small>从输出中提取匹配内容，使用 (.*) 捕获组</small>
+                                    </div>
+                                    <div class="form-group">
+                                        <label>📝 存储变量名</label>
+                                        <input type="text" id="cmd-var-name" placeholder="例如：ping_test">
+                                        <small>执行结果将存储为 \${变量名.status}、\${变量名.extracted} 等，可在后续命令中引用</small>
+                                    </div>
+                                    <div class="form-group">
+                                        <label class="checkbox-label">
+                                            <input type="checkbox" id="cmd-stop-on-match" onchange="updateTimeoutState()">
+                                            <span>⏹️ 匹配后自动停止</span>
+                                        </label>
+                                        <small>适用于 ping 等持续运行的命令，匹配成功后自动终止</small>
+                                    </div>
+                                    <div class="form-group" id="cmd-timeout-group">
+                                        <label>⏱️ 超时（秒）</label>
+                                        <input type="number" id="cmd-timeout" value="30" min="5" max="300" step="5">
+                                        <small id="cmd-timeout-hint">超时仅在设置了成功/失败模式或勾选了"匹配后停止"时有效</small>
+                                    </div>
                                 </div>
                             </div>
                         </details>
@@ -4813,6 +4833,21 @@ function addCommandsPageStyles() {
             overflow: auto;
             white-space: pre-wrap;
             word-break: break-all;
+        }
+        
+        /* nohup 快捷操作按钮 */
+        .nohup-actions {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 10px;
+            flex-wrap: wrap;
+        }
+        .nohup-actions .btn {
+            background: var(--primary-color);
+            color: white;
+        }
+        .nohup-actions .btn:hover {
+            filter: brightness(1.1);
         }
         
         /* 匹配结果面板 */
@@ -5028,6 +5063,9 @@ function refreshCommandsList() {
             </div>
         ` : '';
         
+        // nohup 标签
+        const nohupHtml = cmd.nohup ? '<span class="pattern-tag nohup" title="后台执行（nohup）">🚀</span>' : '';
+        
         // 变量按钮（仅当设置了 varName 时显示）
         const varBtnHtml = cmd.varName ? `<button class="btn btn-sm" onclick="showCommandVariables('${escapeHtml(cmd.varName)}')" title="查看变量: ${escapeHtml(cmd.varName)}.*">📊</button>` : '';
         
@@ -5042,6 +5080,7 @@ function refreshCommandsList() {
             <div class="cmd-header">
                 ${iconHtml}
                 <span class="cmd-name" title="${escapeHtml(cmd.name)}">${escapeHtml(cmd.name)}</span>
+                ${nohupHtml}
                 ${patternsHtml}
             </div>
             ${cmd.desc ? `<div class="cmd-desc" title="${escapeHtml(cmd.desc)}">${escapeHtml(cmd.desc)}</div>` : ''}
@@ -5075,6 +5114,10 @@ function showAddCommandModal() {
     switchCmdIconType('emoji');
     updateCmdIconPreview(null);
     
+    // 重置 nohup 选项
+    const nohupCheckbox = document.getElementById('cmd-nohup');
+    if (nohupCheckbox) nohupCheckbox.checked = false;
+    
     // 重置高级选项
     document.getElementById('cmd-expect-pattern').value = '';
     document.getElementById('cmd-fail-pattern').value = '';
@@ -5095,6 +5138,8 @@ function showAddCommandModal() {
     
     // 更新超时输入框状态
     updateTimeoutState();
+    // 更新 nohup 状态
+    updateNohupState();
 }
 
 function closeCommandModal() {
@@ -5188,6 +5233,28 @@ function updateTimeoutState() {
     }
 }
 
+/* 更新 nohup 选项的状态（禁用模式匹配选项） */
+function updateNohupState() {
+    const nohup = document.getElementById('cmd-nohup')?.checked;
+    const patternOptions = document.getElementById('cmd-pattern-options');
+    
+    if (patternOptions) {
+        patternOptions.style.opacity = nohup ? '0.4' : '1';
+        patternOptions.style.pointerEvents = nohup ? 'none' : '';
+    }
+    
+    // 如果启用 nohup，清空模式匹配选项并禁用
+    if (nohup) {
+        const fields = ['cmd-expect-pattern', 'cmd-fail-pattern', 'cmd-extract-pattern', 'cmd-var-name'];
+        fields.forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.value = '';
+        });
+        const stopMatch = document.getElementById('cmd-stop-on-match');
+        if (stopMatch) stopMatch.checked = false;
+    }
+}
+
 /**
  * 切换图标类型（Emoji / 图片）
  */
@@ -5265,6 +5332,7 @@ async function saveCommand() {
     const command = document.getElementById('cmd-command').value.trim();
     const desc = document.getElementById('cmd-desc').value.trim();
     const icon = document.getElementById('cmd-icon').value;
+    const nohup = document.getElementById('cmd-nohup')?.checked || false;
     const expectPattern = document.getElementById('cmd-expect-pattern').value.trim();
     const failPattern = document.getElementById('cmd-fail-pattern').value.trim();
     const extractPattern = document.getElementById('cmd-extract-pattern').value.trim();
@@ -5284,13 +5352,15 @@ async function saveCommand() {
     
     const cmdData = { 
         name, command, desc, icon,
-        // 高级选项（仅在有值时保存）
-        ...(expectPattern && { expectPattern }),
-        ...(failPattern && { failPattern }),
-        ...(extractPattern && { extractPattern }),
-        ...(varName && { varName }),
-        ...(timeout !== 30 && { timeout }),
-        ...(stopOnMatch && { stopOnMatch })
+        // nohup 后台执行（优先于模式匹配）
+        ...(nohup && { nohup: true }),
+        // 高级选项（仅在有值时保存，nohup 时忽略）
+        ...(!nohup && expectPattern && { expectPattern }),
+        ...(!nohup && failPattern && { failPattern }),
+        ...(!nohup && extractPattern && { extractPattern }),
+        ...(!nohup && varName && { varName }),
+        ...(!nohup && timeout !== 30 && { timeout }),
+        ...(!nohup && stopOnMatch && { stopOnMatch })
     };
     
     try {
@@ -5352,6 +5422,12 @@ function editCommand(idx) {
         updateCmdIconPreview(null);
     }
     
+    // nohup 选项
+    const nohupCheckbox = document.getElementById('cmd-nohup');
+    if (nohupCheckbox) {
+        nohupCheckbox.checked = cmd.nohup || false;
+    }
+    
     // 高级选项
     document.getElementById('cmd-expect-pattern').value = cmd.expectPattern || '';
     document.getElementById('cmd-fail-pattern').value = cmd.failPattern || '';
@@ -5362,7 +5438,7 @@ function editCommand(idx) {
     
     // 如果有高级选项，展开面板
     const advDetails = document.querySelector('.advanced-options');
-    if (advDetails && (cmd.expectPattern || cmd.failPattern || cmd.extractPattern || cmd.varName || cmd.timeout !== 30 || cmd.stopOnMatch)) {
+    if (advDetails && (cmd.nohup || cmd.expectPattern || cmd.failPattern || cmd.extractPattern || cmd.varName || cmd.timeout !== 30 || cmd.stopOnMatch)) {
         advDetails.open = true;
     }
     
@@ -5375,6 +5451,8 @@ function editCommand(idx) {
     
     // 更新超时输入框状态
     updateTimeoutState();
+    // 更新 nohup 状态（禁用模式匹配选项）
+    updateNohupState();
 }
 
 async function deleteCommand(idx) {
@@ -5402,6 +5480,176 @@ async function deleteCommand(idx) {
 /* 当前执行中的会话 ID */
 let currentExecSessionId = null;
 
+/* nohup 相关状态（用于快捷按钮） */
+let currentNohupInfo = {
+    logFile: null,
+    processKeyword: null,
+    hostId: null
+};
+
+/* nohup 快捷操作：查看日志 */
+async function nohupViewLog() {
+    if (!currentNohupInfo.logFile || !currentNohupInfo.hostId) {
+        showToast('没有可用的日志信息', 'warning');
+        return;
+    }
+    await executeNohupHelperCommand(`cat "${currentNohupInfo.logFile}"`);
+}
+
+/* nohup 实时跟踪状态 */
+let tailIntervalId = null;
+let lastTailContent = '';
+
+/* nohup 快捷操作：实时跟踪 */
+async function nohupTailLog() {
+    if (!currentNohupInfo.logFile || !currentNohupInfo.hostId) {
+        showToast('没有可用的日志信息', 'warning');
+        return;
+    }
+    
+    // 如果已在跟踪，则停止
+    if (tailIntervalId) {
+        nohupStopTail();
+        return;
+    }
+    
+    const tailBtn = document.getElementById('nohup-tail-log');
+    const stopBtn = document.getElementById('nohup-stop-tail');
+    const resultPre = document.getElementById('exec-result');
+    
+    // 切换按钮状态
+    tailBtn.style.display = 'none';
+    stopBtn.style.display = 'inline-block';
+    
+    resultPre.textContent += `\n\n━━━━━━━━━━━━━━━━━━━━━━\n📡 开始实时跟踪: ${currentNohupInfo.logFile}\n（点击"停止跟踪"按钮退出）\n━━━━━━━━━━━━━━━━━━━━━━\n`;
+    lastTailContent = '';
+    
+    // 定时获取日志
+    const fetchLog = async () => {
+        try {
+            const host = window._cmdHostsList?.find(h => h.id === currentNohupInfo.hostId);
+            if (!host) return;
+            
+            const result = await api.call('ssh.exec', {
+                host: host.host,
+                port: host.port,
+                user: host.username,
+                keyid: host.keyid,
+                command: `tail -100 "${currentNohupInfo.logFile}" 2>/dev/null`,
+                timeout_ms: 5000
+            });
+            
+            const content = result.data?.stdout || '';
+            // 只显示新增内容
+            if (content && content !== lastTailContent) {
+                if (lastTailContent === '') {
+                    resultPre.textContent += content;
+                } else if (content.length > lastTailContent.length && content.startsWith(lastTailContent)) {
+                    resultPre.textContent += content.substring(lastTailContent.length);
+                } else {
+                    // 内容完全变化，显示全部
+                    resultPre.textContent += '\n' + content;
+                }
+                lastTailContent = content;
+                resultPre.scrollTop = resultPre.scrollHeight;
+            }
+        } catch (e) {
+            console.error('Tail log error:', e);
+        }
+    };
+    
+    // 立即获取一次
+    await fetchLog();
+    // 每2秒获取一次
+    tailIntervalId = setInterval(fetchLog, 2000);
+}
+
+/* nohup 快捷操作：停止实时跟踪 */
+function nohupStopTail() {
+    if (tailIntervalId) {
+        clearInterval(tailIntervalId);
+        tailIntervalId = null;
+    }
+    
+    const tailBtn = document.getElementById('nohup-tail-log');
+    const stopBtn = document.getElementById('nohup-stop-tail');
+    const resultPre = document.getElementById('exec-result');
+    
+    if (tailBtn) tailBtn.style.display = 'inline-block';
+    if (stopBtn) stopBtn.style.display = 'none';
+    
+    resultPre.textContent += `\n━━━━━━━━━━━━━━━━━━━━━━\n⏹️ 已停止实时跟踪\n`;
+    resultPre.scrollTop = resultPre.scrollHeight;
+}
+
+/* nohup 快捷操作：检查进程 */
+async function nohupCheckProcess() {
+    if (!currentNohupInfo.processKeyword || !currentNohupInfo.hostId) {
+        showToast('没有可用的进程信息', 'warning');
+        return;
+    }
+    await executeNohupHelperCommand(`ps aux | grep -v grep | grep "${currentNohupInfo.processKeyword}" || echo "进程未找到（可能已完成）"`);
+}
+
+/* nohup 快捷操作：停止进程 */
+async function nohupStopProcess() {
+    if (!currentNohupInfo.processKeyword || !currentNohupInfo.hostId) {
+        showToast('没有可用的进程信息', 'warning');
+        return;
+    }
+    
+    // 确认对话框
+    if (!confirm(`确定要停止所有 "${currentNohupInfo.processKeyword}" 进程吗？`)) {
+        return;
+    }
+    
+    // 停止实时跟踪（如果正在进行）
+    nohupStopTail();
+    
+    await executeNohupHelperCommand(`pkill -f "${currentNohupInfo.processKeyword}" && echo "✅ 进程已停止" || echo "⚠️ 没有找到匹配的进程"`);
+    
+    // 再次检查进程状态
+    await executeNohupHelperCommand(`ps aux | grep -v grep | grep "${currentNohupInfo.processKeyword}" || echo "✅ 确认：进程已全部停止"`);
+}
+
+/* 执行 nohup 辅助命令 */
+async function executeNohupHelperCommand(command) {
+    const host = window._cmdHostsList?.find(h => h.id === currentNohupInfo.hostId);
+    if (!host) {
+        showToast('主机信息不存在', 'error');
+        return;
+    }
+    
+    const resultPre = document.getElementById('exec-result');
+    resultPre.textContent += `\n\n━━━━━━━━━━━━━━━━━━━━━━\n$ ${command}\n`;
+    
+    try {
+        const result = await api.call('ssh.exec', {
+            host: host.host,
+            port: host.port,
+            user: host.username,
+            keyid: host.keyid,
+            command: command,
+            timeout_ms: 10000
+        });
+        
+        // ssh.exec 返回 stdout 和 stderr，不是 output
+        const stdout = result.data?.stdout || '';
+        const stderr = result.data?.stderr || '';
+        if (stdout || stderr) {
+            if (stdout) resultPre.textContent += stdout;
+            if (stderr) resultPre.textContent += `[stderr] ${stderr}`;
+        } else {
+            resultPre.textContent += '（无输出）\n';
+        }
+    } catch (e) {
+        resultPre.textContent += `执行失败: ${e.message}\n`;
+    }
+    
+    // 滚动到底部
+    resultPre.scrollTop = resultPre.scrollHeight;
+}
+
 async function executeCommand(idx) {
     const cmd = sshCommands[selectedHostId]?.[idx];
     if (!cmd) return;
@@ -5412,8 +5660,8 @@ async function executeCommand(idx) {
         return;
     }
     
-    // 检查是否有正在运行的命令
-    if (currentExecSessionId) {
+    // 检查是否有正在运行的命令（nohup 模式不需要检查）
+    if (currentExecSessionId && !cmd.nohup) {
         showToast('有命令正在执行中，请先取消或等待完成', 'warning');
         return;
     }
@@ -5422,13 +5670,45 @@ async function executeCommand(idx) {
     const resultSection = document.getElementById('exec-result-section');
     const resultPre = document.getElementById('exec-result');
     const cancelBtn = document.getElementById('cancel-exec-btn');
+    const nohupActions = document.getElementById('nohup-actions');
     resultSection.style.display = 'block';
-    cancelBtn.style.display = 'inline-block';
-    cancelBtn.disabled = false;
+    
+    // nohup 模式下隐藏取消按钮，显示快捷按钮
+    if (cmd.nohup) {
+        cancelBtn.style.display = 'none';
+        nohupActions.style.display = 'flex';
+    } else {
+        cancelBtn.style.display = 'inline-block';
+        cancelBtn.disabled = false;
+        nohupActions.style.display = 'none';
+    }
+    
+    // 对于 nohup 命令，包装命令以实现后台执行，并记录日志
+    let actualCommand = cmd.command;
+    let nohupLogFile = null;
+    if (cmd.nohup) {
+        // 生成唯一日志文件名
+        const timestamp = Date.now();
+        const safeName = cmd.name.replace(/[^a-zA-Z0-9]/g, '').slice(0, 12) || 'cmd';
+        nohupLogFile = `/tmp/ts_${safeName}_${timestamp}.log`;
+        
+        // 最简单的 nohup 方案 - 已验证可行
+        actualCommand = `nohup ${cmd.command} > ${nohupLogFile} 2>&1 & sleep 0.3; pgrep -f '${cmd.command.split(' ')[0]}'`;
+        
+        // 保存 nohup 信息供快捷按钮使用
+        currentNohupInfo = {
+            logFile: nohupLogFile,
+            processKeyword: cmd.command.split(' ')[0],
+            hostId: selectedHostId
+        };
+    }
     
     // 构建状态信息
-    let statusInfo = `⏳ 正在连接: ${cmd.name}\n主机: ${host.username}@${host.host}:${host.port}\n命令: ${cmd.command}\n`;
-    if (cmd.expectPattern || cmd.failPattern || cmd.extractPattern) {
+    let statusInfo = `⏳ 正在连接: ${cmd.name}\n主机: ${host.username}@${host.host}:${host.port}\n命令: ${actualCommand}\n`;
+    if (cmd.nohup) {
+        statusInfo += `\n🚀 后台执行模式: 命令将在服务器后台运行，断开后不受影响\n`;
+        statusInfo += `📄 日志文件: ${nohupLogFile}\n`;
+    } else if (cmd.expectPattern || cmd.failPattern || cmd.extractPattern) {
         statusInfo += `\n📋 模式匹配配置:\n`;
         if (cmd.expectPattern) statusInfo += `  ✅ 成功模式: ${cmd.expectPattern}\n`;
         if (cmd.failPattern) statusInfo += `  ❌ 失败模式: ${cmd.failPattern}\n`;
@@ -5449,26 +5729,50 @@ async function executeCommand(idx) {
             port: host.port,
             user: host.username,
             keyid: host.keyid,
-            command: cmd.command
+            command: actualCommand
         };
         
-        // 添加高级选项
-        if (cmd.expectPattern) params.expect_pattern = cmd.expectPattern;
-        if (cmd.failPattern) params.fail_pattern = cmd.failPattern;
-        if (cmd.extractPattern) params.extract_pattern = cmd.extractPattern;
-        if (cmd.varName) params.var_name = cmd.varName;
-        if (cmd.timeout) params.timeout = cmd.timeout * 1000; // 转为毫秒
-        if (cmd.stopOnMatch) params.stop_on_match = true;
+        // 添加高级选项（仅非 nohup 模式）
+        if (!cmd.nohup) {
+            if (cmd.expectPattern) params.expect_pattern = cmd.expectPattern;
+            if (cmd.failPattern) params.fail_pattern = cmd.failPattern;
+            if (cmd.extractPattern) params.extract_pattern = cmd.extractPattern;
+            if (cmd.varName) params.var_name = cmd.varName;
+            if (cmd.timeout) params.timeout = cmd.timeout * 1000; // 转为毫秒
+            if (cmd.stopOnMatch) params.stop_on_match = true;
+        } else {
+            // nohup 模式设置短超时，命令发送后立即返回
+            params.timeout = 5000;
+        }
         
         // 使用流式执行 API
         const result = await api.call('ssh.exec_stream', params);
         
         currentExecSessionId = result.data?.session_id;
-        resultPre.textContent += `会话 ID: ${currentExecSessionId}\n等待输出...\n\n`;
+        
+        if (cmd.nohup) {
+            resultPre.textContent += `✅ 命令已提交到服务器后台\n\n`;
+            resultPre.textContent += `💡 使用上方按钮查看日志、跟踪输出或检查进程状态\n`;
+            resultPre.textContent += `\n📄 日志文件: ${nohupLogFile}\n`;
+            resultPre.textContent += `🔍 进程关键词: ${cmd.command.split(' ')[0]}\n`;
+            // nohup 命令不跟踪会话
+            currentExecSessionId = null;
+        } else {
+            resultPre.textContent += `会话 ID: ${currentExecSessionId}\n等待输出...\n\n`;
+        }
         
         // 输出将通过 WebSocket 实时推送
         
     } catch (e) {
+        // nohup 模式下超时是正常的（命令在后台运行）
+        if (cmd.nohup && (e.message.includes('timeout') || e.message.includes('超时'))) {
+            resultPre.textContent += `✅ 命令已提交到服务器后台\n\n`;
+            resultPre.textContent += `💡 使用上方按钮查看日志、跟踪输出或检查进程状态\n`;
+            resultPre.textContent += `\n📄 日志文件: ${nohupLogFile}\n`;
+            resultPre.textContent += `🔍 进程关键词: ${cmd.command.split(' ')[0]}\n`;
+            currentExecSessionId = null;
+            return;
+        }
         resultPre.textContent = `❌ 启动执行失败\n\n${e.message}`;
         showToast('启动执行失败: ' + e.message, 'error');
         cancelBtn.style.display = 'none';
@@ -5739,10 +6043,15 @@ function clearExecResult() {
     document.getElementById('exec-result-section').style.display = 'none';
     document.getElementById('exec-result').textContent = '';
     document.getElementById('cancel-exec-btn').style.display = 'none';
+    // 隐藏 nohup 快捷按钮
+    const nohupActions = document.getElementById('nohup-actions');
+    if (nohupActions) nohupActions.style.display = 'none';
     // 隐藏匹配结果面板
     const matchPanel = document.getElementById('match-result-panel');
     if (matchPanel) matchPanel.style.display = 'none';
     currentExecSessionId = null;
+    // 清除 nohup 信息
+    currentNohupInfo = { logFile: null, processKeyword: null, hostId: null };
 }
 
 // =========================================================================
@@ -7933,8 +8242,6 @@ window.updateBrightnessLabel = updateBrightnessLabel;
 window.showWifiScan = showWifiScan;
 window.connectWifi = connectWifi;
 window.toggleNat = toggleNat;
-window.devicePower = devicePower;
-window.deviceReset = deviceReset;
 window.setFanSpeed = setFanSpeed;
 // Commands page functions
 window.loadCommandsPage = loadCommandsPage;
@@ -10019,7 +10326,7 @@ async function refreshAutomationStatus() {
                     <div class="status-label">触发次数</div>
                 </div>
                 <div class="status-card">
-                    <div class="status-value">${formatUptime(uptimeSec)}</div>
+                    <div class="status-value">${formatUptimeSec(uptimeSec)}</div>
                     <div class="status-label">运行时长</div>
                 </div>
             `;
@@ -10033,9 +10340,9 @@ async function refreshAutomationStatus() {
 }
 
 /**
- * 格式化运行时长
+ * 格式化运行时长（秒）
  */
-function formatUptime(seconds) {
+function formatUptimeSec(seconds) {
     if (seconds < 60) return `${seconds}秒`;
     if (seconds < 3600) return `${Math.floor(seconds/60)}分${seconds%60}秒`;
     const h = Math.floor(seconds/3600);

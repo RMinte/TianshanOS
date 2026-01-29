@@ -1430,6 +1430,7 @@ static esp_err_t api_ssh_commands_list(const cJSON *params, ts_api_result_t *res
             }
             cJSON_AddNumberToObject(item, "timeout", configs[i].timeout_sec);
             cJSON_AddBoolToObject(item, "stopOnMatch", configs[i].stop_on_match);
+            cJSON_AddBoolToObject(item, "nohup", configs[i].nohup);
             cJSON_AddBoolToObject(item, "enabled", configs[i].enabled);
             cJSON_AddNumberToObject(item, "created", configs[i].created_time);
             cJSON_AddNumberToObject(item, "lastExec", configs[i].last_exec_time);
@@ -1498,6 +1499,7 @@ static esp_err_t api_ssh_commands_add(const cJSON *params, ts_api_result_t *resu
     const cJSON *var_name = cJSON_GetObjectItem(params, "varName");
     const cJSON *timeout = cJSON_GetObjectItem(params, "timeout");
     const cJSON *stop_on_match = cJSON_GetObjectItem(params, "stopOnMatch");
+    const cJSON *nohup = cJSON_GetObjectItem(params, "nohup");
     
     if (desc && cJSON_IsString(desc)) {
         strncpy(config.desc, desc->valuestring, sizeof(config.desc) - 1);
@@ -1524,6 +1526,9 @@ static esp_err_t api_ssh_commands_add(const cJSON *params, ts_api_result_t *resu
     }
     if (stop_on_match && cJSON_IsBool(stop_on_match)) {
         config.stop_on_match = cJSON_IsTrue(stop_on_match);
+    }
+    if (nohup && cJSON_IsBool(nohup)) {
+        config.nohup = cJSON_IsTrue(nohup);
     }
     
     char out_id[TS_SSH_CMD_ID_MAX] = {0};
@@ -1613,6 +1618,7 @@ static esp_err_t api_ssh_commands_get(const cJSON *params, ts_api_result_t *resu
         }
         cJSON_AddNumberToObject(data, "timeout", config.timeout_sec);
         cJSON_AddBoolToObject(data, "stopOnMatch", config.stop_on_match);
+        cJSON_AddBoolToObject(data, "nohup", config.nohup);
         cJSON_AddBoolToObject(data, "enabled", config.enabled);
         cJSON_AddNumberToObject(data, "created", config.created_time);
         cJSON_AddNumberToObject(data, "lastExec", config.last_exec_time);

@@ -67,6 +67,7 @@ typedef struct {
     
     uint16_t timeout_sec;                    /**< 超时（秒） */
     bool stop_on_match;                      /**< 匹配后自动停止 */
+    bool nohup;                              /**< 后台执行模式 */
     bool enabled;                            /**< 是否启用 */
     
     uint32_t created_time;                   /**< 创建时间戳 */

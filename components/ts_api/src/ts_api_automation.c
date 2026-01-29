@@ -687,28 +687,30 @@ static esp_err_t api_automation_rules_get(const cJSON *params, ts_api_result_t *
                 break;
         }
         
-        // 尝试通过动作配置查找匹配的模板 ID
-        for (int j = 0; j < tpl_count && templates; j++) {
-            ts_action_template_t *tpl = &templates[j];
-            if (tpl->action.type == a->type) {
-                bool match = false;
-                switch (a->type) {
-                    case TS_AUTO_ACT_CLI:
-                        match = (strcmp(tpl->action.cli.command, a->cli.command) == 0);
+        // 尝试通过动作配置查找匹配的模板 ID（仅当没有保存 template_id 时）
+        if (!a->template_id[0]) {
+            for (int j = 0; j < tpl_count && templates; j++) {
+                ts_action_template_t *tpl = &templates[j];
+                if (tpl->action.type == a->type) {
+                    bool match = false;
+                    switch (a->type) {
+                        case TS_AUTO_ACT_CLI:
+                            match = (strcmp(tpl->action.cli.command, a->cli.command) == 0);
+                            break;
+                        case TS_AUTO_ACT_LED:
+                            match = (strcmp(tpl->action.led.device, a->led.device) == 0);
+                            break;
+                        case TS_AUTO_ACT_LOG:
+                            match = (strcmp(tpl->action.log.message, a->log.message) == 0);
+                            break;
+                        default:
+                            match = true;
+                            break;
+                    }
+                    if (match) {
+                        cJSON_AddStringToObject(act, "template_id", tpl->id);
                         break;
-                    case TS_AUTO_ACT_LED:
-                        match = (strcmp(tpl->action.led.device, a->led.device) == 0);
-                        break;
-                    case TS_AUTO_ACT_LOG:
-                        match = (strcmp(tpl->action.log.message, a->log.message) == 0);
-                        break;
-                    default:
-                        match = true;
-                        break;
-                }
-                if (match) {
-                    cJSON_AddStringToObject(act, "template_id", tpl->id);
-                    break;
+                    }
                 }
             }
         }

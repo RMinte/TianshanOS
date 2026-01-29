@@ -1645,6 +1645,36 @@ ESP_LOGI(TAG, "Free heap: %d bytes", esp_get_free_heap_size());
 
 ---
 
+---
+
+## 12. SSH nohup 后台执行问题
+
+> ⚠️ **重大教训**：详见 [DEBUG_SSH_NOHUP.md](./DEBUG_SSH_NOHUP.md)
+
+### 问题概述
+
+实现 SSH 命令后台执行 (nohup) 功能时，花费 **5+ 小时、83+ 次请求** 调试，最终发现问题极其简单。
+
+### 根本原因
+
+**测试目标不可达**：使用 `ping 8.8.8.8` 测试，但目标服务器无法访问该 IP，导致 ping 无输出，日志文件始终为空。
+
+### 解决方案
+
+最简单的方案从一开始就是正确的：
+
+```javascript
+actualCommand = `nohup ${cmd.command} > ${nohupLogFile} 2>&1 & sleep 0.3; pgrep -f '${keyword}'`;
+```
+
+### 教训
+
+1. **先验证基础假设**：在目标服务器直接测试命令
+2. **使用可控测试数据**：确保测试目标可达
+3. **从简单方案开始**：不要过早跳入复杂方案
+
+---
+
 ## 更新日志
 
 - 2026-01-22: 添加 SD 卡重挂载失败 (VFS_MAX_COUNT 限制) 和配置 double-free 问题修复记录
@@ -1652,3 +1682,4 @@ ESP_LOGI(TAG, "Free heap: %d bytes", esp_get_free_heap_size());
 - 2026-01-23: 添加 SNTP 双服务器配置问题和解决方案
 - 2026-01-23: 添加 WiFi 开放网络（无密码）连接问题和认证调试技巧
 - 2026-01-23: 添加 WebSocket 连接管理和终端会话问题完整调试过程
+- 2026-01-29: 添加 SSH nohup 后台执行问题（5小时调试教训）→ [DEBUG_SSH_NOHUP.md](./DEBUG_SSH_NOHUP.md)

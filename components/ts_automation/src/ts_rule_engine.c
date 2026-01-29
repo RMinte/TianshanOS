@@ -1543,6 +1543,11 @@ static char *rule_to_json(const ts_auto_rule_t *rule)
                 break;
         }
         
+        // 保存 template_id（如果有）
+        if (a->template_id[0]) {
+            cJSON_AddStringToObject(action, "template_id", a->template_id);
+        }
+        
         cJSON_AddItemToArray(actions, action);
     }
     cJSON_AddItemToObject(root, "actions", actions);
@@ -1743,6 +1748,12 @@ static esp_err_t json_to_rule(const char *json_str, ts_auto_rule_t *rule)
                         default:
                             break;
                     }
+                    
+                    // 加载 template_id（如果有）
+                    if ((item = cJSON_GetObjectItem(act_item, "template_id")) && cJSON_IsString(item)) {
+                        strncpy(a->template_id, item->valuestring, sizeof(a->template_id) - 1);
+                    }
+                    
                     idx++;
                 }
             }
