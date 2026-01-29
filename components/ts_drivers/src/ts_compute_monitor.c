@@ -26,6 +26,8 @@
 #include "esp_timer.h"
 #include "esp_websocket_client.h"
 #include "esp_http_client.h"
+#include "nvs_flash.h"
+#include "nvs.h"
 #include "cJSON.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -38,6 +40,11 @@ static const char *TAG = "ts_compute_monitor";
 /*===========================================================================*/
 /*                              Configuration                                 */
 /*===========================================================================*/
+
+/** NVS 存储键 */
+#define NVS_NAMESPACE           "ts_compute"
+#define NVS_KEY_SERVER_IP       "server_ip"
+#define NVS_KEY_SERVER_PORT     "server_port"
 
 #define SOCKETIO_PROBE_MESSAGE      "2probe"
 #define SOCKETIO_UPGRADE_MESSAGE    "5"
@@ -134,6 +141,158 @@ esp_err_t ts_compute_monitor_get_default_config(ts_compute_config_t *config)
     return ESP_OK;
 }
 
+esp_err_t ts_compute_monitor_get_config(ts_compute_config_t *config)
+{
+    if (config == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    
+    if (s_ctx != NULL && s_ctx->initialized) {
+        /* 返回当前运行配置 */
+        memcpy(config, &s_ctx->config, sizeof(ts_compute_config_t));
+    } else {
+        /* 尝试从 NVS 加载，否则返回默认配置 */
+        if (ts_compute_monitor_load_config(config) != ESP_OK) {
+            ts_compute_monitor_get_default_config(config);
+        }
+    }
+    
+    return ESP_OK;
+}
+
+esp_err_t ts_compute_monitor_load_config(ts_compute_config_t *config)
+{
+    if (config == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    
+    /* 先加载默认值 */
+    ts_compute_monitor_get_default_config(config);
+    
+    nvs_handle_t handle;
+    esp_err_t ret = nvs_open(NVS_NAMESPACE, NVS_READONLY, &handle);
+    
+    if (ret == ESP_ERR_NVS_NOT_FOUND) {
+        ESP_LOGD(TAG, "No NVS config found, using defaults");
+        return ESP_ERR_NOT_FOUND;
+    }
+    
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to open NVS: %s", esp_err_to_name(ret));
+        return ret;
+    }
+    
+    /* 读取 server_ip */
+    size_t len = sizeof(config->server_ip);
+    ret = nvs_get_str(handle, NVS_KEY_SERVER_IP, config->server_ip, &len);
+    if (ret == ESP_OK) {
+        ESP_LOGI(TAG, "Loaded server IP from NVS: %s", config->server_ip);
+    }
+    
+    /* 读取 server_port */
+    uint16_t port = 0;
+    ret = nvs_get_u16(handle, NVS_KEY_SERVER_PORT, &port);
+    if (ret == ESP_OK && port > 0) {
+        config->server_port = port;
+        ESP_LOGI(TAG, "Loaded server port from NVS: %d", port);
+    }
+    
+    nvs_close(handle);
+    return ESP_OK;
+}
+
+esp_err_t ts_compute_monitor_save_config(const ts_compute_config_t *config)
+{
+    if (config == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    
+    nvs_handle_t handle;
+    esp_err_t ret = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &handle);
+    
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to open NVS for write: %s", esp_err_to_name(ret));
+        return ret;
+    }
+    
+    /* 保存 server_ip */
+    ret = nvs_set_str(handle, NVS_KEY_SERVER_IP, config->server_ip);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to save server IP: %s", esp_err_to_name(ret));
+        nvs_close(handle);
+        return ret;
+    }
+    
+    /* 保存 server_port */
+    ret = nvs_set_u16(handle, NVS_KEY_SERVER_PORT, config->server_port);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to save server port: %s", esp_err_to_name(ret));
+        nvs_close(handle);
+        return ret;
+    }
+    
+    ret = nvs_commit(handle);
+    nvs_close(handle);
+    
+    if (ret == ESP_OK) {
+        ESP_LOGI(TAG, "Saved config to NVS: %s:%d", config->server_ip, config->server_port);
+    }
+    
+    return ret;
+}
+
+esp_err_t ts_compute_monitor_set_server(const char *server_ip, uint16_t server_port)
+{
+    if (server_ip == NULL || strlen(server_ip) == 0) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    
+    ts_compute_config_t config;
+    ts_compute_monitor_get_config(&config);
+    
+    /* 更新配置 */
+    strncpy(config.server_ip, server_ip, sizeof(config.server_ip) - 1);
+    config.server_ip[sizeof(config.server_ip) - 1] = '\0';
+    
+    if (server_port > 0) {
+        config.server_port = server_port;
+    }
+    
+    /* 保存到 NVS */
+    esp_err_t ret = ts_compute_monitor_save_config(&config);
+    if (ret != ESP_OK) {
+        return ret;
+    }
+    
+    /* 如果已初始化，更新运行时配置 */
+    if (s_ctx != NULL && s_ctx->initialized) {
+        bool was_running = s_ctx->running;
+        
+        /* 如果正在运行，先停止 */
+        if (was_running) {
+            ESP_LOGI(TAG, "Stopping monitor to apply new config...");
+            ts_compute_monitor_stop();
+        }
+        
+        /* 更新配置 */
+        strncpy(s_ctx->config.server_ip, server_ip, sizeof(s_ctx->config.server_ip) - 1);
+        if (server_port > 0) {
+            s_ctx->config.server_port = server_port;
+        }
+        
+        ESP_LOGI(TAG, "Updated server config: %s:%d", 
+                 s_ctx->config.server_ip, s_ctx->config.server_port);
+        
+        /* 如果之前在运行，重新启动 */
+        if (was_running) {
+            ESP_LOGI(TAG, "Restarting monitor with new config...");
+            ret = ts_compute_monitor_start();
+        }
+    }
+    
+    return ret;
+}
+
 esp_err_t ts_compute_monitor_init(const ts_compute_config_t *config)
 {
     if (s_ctx != NULL) {
@@ -150,11 +309,14 @@ esp_err_t ts_compute_monitor_init(const ts_compute_config_t *config)
         return ESP_ERR_NO_MEM;
     }
     
-    /* 加载配置 */
+    /* 加载配置：优先使用传入配置，否则尝试从 NVS 加载，最后使用默认值 */
     if (config != NULL) {
         memcpy(&s_ctx->config, config, sizeof(ts_compute_config_t));
     } else {
-        ts_compute_monitor_get_default_config(&s_ctx->config);
+        /* 先尝试从 NVS 加载 */
+        if (ts_compute_monitor_load_config(&s_ctx->config) != ESP_OK) {
+            ts_compute_monitor_get_default_config(&s_ctx->config);
+        }
     }
     
     /* 创建互斥锁 */

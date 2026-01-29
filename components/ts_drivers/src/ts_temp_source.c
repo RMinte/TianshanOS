@@ -11,12 +11,20 @@
 #include "ts_temp_source.h"
 #include "ts_event.h"
 #include "ts_log.h"
+#include "ts_variable.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
+#include "nvs_flash.h"
+#include "nvs.h"
 #include <string.h>
 
 #define TAG "ts_temp_source"
+
+/** NVS 存储键 */
+#define NVS_NAMESPACE       "ts_temp"
+#define NVS_KEY_PREFERRED   "preferred"
+#define NVS_KEY_BOUND_VAR   "bound_var"
 
 /*===========================================================================*/
 /*                          Internal Types                                    */
@@ -38,6 +46,8 @@ typedef struct {
     int16_t manual_temp;
     int16_t current_temp;
     ts_temp_source_type_t active_source;
+    ts_temp_source_type_t preferred_source;  /**< 用户首选源（0=自动）*/
+    char bound_variable[TS_TEMP_MAX_VARNAME_LEN];  /**< 绑定的变量名 */
     provider_t providers[TS_TEMP_SOURCE_MAX];
     SemaphoreHandle_t mutex;
 } temp_source_state_t;
@@ -56,6 +66,8 @@ static uint32_t get_current_ms(void);
 static void evaluate_active_source(void);
 static void publish_temp_event(int16_t new_temp, ts_temp_source_type_t new_source,
                                int16_t prev_temp, ts_temp_source_type_t prev_source);
+static esp_err_t load_preferred_source_from_nvs(void);
+static esp_err_t save_preferred_source_to_nvs(ts_temp_source_type_t type);
 
 /*===========================================================================*/
 /*                          Utility Functions                                 */
@@ -72,6 +84,7 @@ const char *ts_temp_source_type_to_str(ts_temp_source_type_t type)
         case TS_TEMP_SOURCE_DEFAULT:      return "default";
         case TS_TEMP_SOURCE_SENSOR_LOCAL: return "sensor";
         case TS_TEMP_SOURCE_AGX_AUTO:     return "agx";
+        case TS_TEMP_SOURCE_VARIABLE:     return "variable";
         case TS_TEMP_SOURCE_MANUAL:       return "manual";
         default:                          return "unknown";
     }
@@ -82,16 +95,73 @@ const char *ts_temp_source_type_to_str(ts_temp_source_type_t type)
 /*===========================================================================*/
 
 /**
+ * @brief 检查 provider 是否可用（已注册、激活且数据未过期）
+ */
+static bool is_provider_valid(ts_temp_source_type_t type, uint32_t now)
+{
+    if (type >= TS_TEMP_SOURCE_MAX) return false;
+    
+    // VARIABLE 类型特殊处理 - 检查绑定变量是否可读
+    if (type == TS_TEMP_SOURCE_VARIABLE) {
+        if (s_state.bound_variable[0] == '\0') return false;
+        double value = 0;
+        return (ts_variable_get_float(s_state.bound_variable, &value) == ESP_OK);
+    }
+    
+    provider_t *p = &s_state.providers[type];
+    if (!p->registered || !p->active) return false;
+    
+    // DEFAULT 源始终有效
+    if (type == TS_TEMP_SOURCE_DEFAULT) return true;
+    
+    // 检查数据是否过期
+    uint32_t age = now - p->last_update_ms;
+    return (age < TS_TEMP_DATA_TIMEOUT_MS);
+}
+
+/**
+ * @brief 从绑定的变量读取温度值
+ */
+static int16_t read_temp_from_variable(void)
+{
+    if (s_state.bound_variable[0] == '\0') {
+        return TS_TEMP_DEFAULT_VALUE;
+    }
+    
+    double value = 0;
+    esp_err_t ret = ts_variable_get_float(s_state.bound_variable, &value);
+    if (ret != ESP_OK) {
+        TS_LOGD(TAG, "Failed to read variable '%s': %s", 
+                s_state.bound_variable, esp_err_to_name(ret));
+        return TS_TEMP_DEFAULT_VALUE;
+    }
+    
+    // 转换为 0.1°C 单位
+    int16_t temp_01c = (int16_t)(value * 10.0);
+    
+    // 范围检查
+    if (temp_01c < TS_TEMP_MIN_VALID || temp_01c > TS_TEMP_MAX_VALID) {
+        TS_LOGW(TAG, "Variable '%s' value out of range: %.1f°C", 
+                s_state.bound_variable, value);
+        return TS_TEMP_DEFAULT_VALUE;
+    }
+    
+    return temp_01c;
+}
+
+/**
  * @brief 根据优先级和数据有效性选择活动温度源
+ * 
+ * 选择逻辑：
+ * 1. 手动模式最高优先级（无视 preferred_source）
+ * 2. 如果设置了 preferred_source 且该源可用，使用它
+ * 3. 否则按默认优先级（VARIABLE > AGX > SENSOR > DEFAULT）
  */
 static void evaluate_active_source(void)
 {
     uint32_t now = get_current_ms();
     ts_temp_source_type_t best_source = TS_TEMP_SOURCE_DEFAULT;
     int16_t best_temp = TS_TEMP_DEFAULT_VALUE;
-    
-    // 优先级：MANUAL > AGX_AUTO > SENSOR_LOCAL > DEFAULT
-    // 从高优先级到低优先级检查
     
     // 1. 手动模式最高优先级
     if (s_state.manual_mode) {
@@ -103,30 +173,44 @@ static void evaluate_active_source(void)
         }
     }
     
-    // 2. AGX 自动
-    {
-        provider_t *p = &s_state.providers[TS_TEMP_SOURCE_AGX_AUTO];
-        if (p->registered && p->active) {
-            uint32_t age = now - p->last_update_ms;
-            if (age < TS_TEMP_DATA_TIMEOUT_MS) {
-                best_source = TS_TEMP_SOURCE_AGX_AUTO;
-                best_temp = p->value;
+    // 2. 检查用户首选源
+    if (s_state.preferred_source != TS_TEMP_SOURCE_DEFAULT && 
+        s_state.preferred_source != TS_TEMP_SOURCE_MANUAL) {
+        
+        // 变量绑定特殊处理
+        if (s_state.preferred_source == TS_TEMP_SOURCE_VARIABLE) {
+            if (is_provider_valid(TS_TEMP_SOURCE_VARIABLE, now)) {
+                best_source = TS_TEMP_SOURCE_VARIABLE;
+                best_temp = read_temp_from_variable();
                 goto done;
             }
+        } else if (is_provider_valid(s_state.preferred_source, now)) {
+            best_source = s_state.preferred_source;
+            best_temp = s_state.providers[s_state.preferred_source].value;
+            goto done;
         }
+        // 首选源不可用，降级到自动选择
+        TS_LOGD(TAG, "Preferred source %s unavailable, falling back",
+                ts_temp_source_type_to_str(s_state.preferred_source));
     }
     
-    // 3. 本地传感器
-    {
-        provider_t *p = &s_state.providers[TS_TEMP_SOURCE_SENSOR_LOCAL];
-        if (p->registered && p->active) {
-            uint32_t age = now - p->last_update_ms;
-            if (age < TS_TEMP_DATA_TIMEOUT_MS) {
-                best_source = TS_TEMP_SOURCE_SENSOR_LOCAL;
-                best_temp = p->value;
-                goto done;
-            }
-        }
+    // 3. 默认优先级：VARIABLE > AGX > SENSOR > DEFAULT
+    if (is_provider_valid(TS_TEMP_SOURCE_VARIABLE, now)) {
+        best_source = TS_TEMP_SOURCE_VARIABLE;
+        best_temp = read_temp_from_variable();
+        goto done;
+    }
+    
+    if (is_provider_valid(TS_TEMP_SOURCE_AGX_AUTO, now)) {
+        best_source = TS_TEMP_SOURCE_AGX_AUTO;
+        best_temp = s_state.providers[TS_TEMP_SOURCE_AGX_AUTO].value;
+        goto done;
+    }
+    
+    if (is_provider_valid(TS_TEMP_SOURCE_SENSOR_LOCAL, now)) {
+        best_source = TS_TEMP_SOURCE_SENSOR_LOCAL;
+        best_temp = s_state.providers[TS_TEMP_SOURCE_SENSOR_LOCAL].value;
+        goto done;
     }
     
     // 4. 默认值
@@ -195,10 +279,17 @@ esp_err_t ts_temp_source_init(void)
     s_state.current_temp = TS_TEMP_DEFAULT_VALUE;
     s_state.active_source = TS_TEMP_SOURCE_DEFAULT;
     s_state.manual_temp = TS_TEMP_DEFAULT_VALUE;
+    s_state.preferred_source = TS_TEMP_SOURCE_DEFAULT;  // 默认自动选择
+    
+    // 从 NVS 加载首选温度源
+    load_preferred_source_from_nvs();
     
     s_state.initialized = true;
     
-    TS_LOGI(TAG, "Temperature source manager initialized (v%s)", TS_TEMP_SOURCE_VERSION);
+    TS_LOGI(TAG, "Temperature source manager initialized (v%s), preferred: %s", 
+            TS_TEMP_SOURCE_VERSION, 
+            s_state.preferred_source == TS_TEMP_SOURCE_DEFAULT ? "auto" : 
+            ts_temp_source_type_to_str(s_state.preferred_source));
     return ESP_OK;
 }
 
@@ -316,6 +407,9 @@ int16_t ts_temp_get_effective(ts_temp_data_t *data)
     
     xSemaphoreTake(s_state.mutex, portMAX_DELAY);
     
+    /* 重新评估活动源并更新温度（确保获取最新值） */
+    evaluate_active_source();
+    
     int16_t temp = s_state.current_temp;
     ts_temp_source_type_t source = s_state.active_source;
     
@@ -423,10 +517,20 @@ esp_err_t ts_temp_get_status(ts_temp_status_t *status)
     
     xSemaphoreTake(s_state.mutex, portMAX_DELAY);
     
+    /* 重新评估活动源并更新温度（确保获取最新值） */
+    evaluate_active_source();
+    
     status->initialized = s_state.initialized;
     status->active_source = s_state.active_source;
+    status->preferred_source = s_state.preferred_source;
     status->current_temp = s_state.current_temp;
     status->manual_mode = s_state.manual_mode;
+    
+    /* 复制绑定的变量名 */
+    if (s_state.bound_variable[0] != '\0') {
+        strncpy(status->bound_variable, s_state.bound_variable, sizeof(status->bound_variable) - 1);
+        status->bound_variable[sizeof(status->bound_variable) - 1] = '\0';
+    }
     
     uint32_t count = 0;
     for (int i = 0; i < TS_TEMP_SOURCE_MAX; i++) {
@@ -452,4 +556,237 @@ esp_err_t ts_temp_get_status(ts_temp_status_t *status)
 ts_temp_source_type_t ts_temp_get_active_source(void)
 {
     return s_state.active_source;
+}
+
+/*===========================================================================*/
+/*                          Public API - Preferred Source                     */
+/*===========================================================================*/
+
+esp_err_t ts_temp_set_preferred_source(ts_temp_source_type_t type)
+{
+    if (!s_state.initialized) return ESP_ERR_INVALID_STATE;
+    
+    // 不能选择 MANUAL（手动模式通过专用 API）或无效值
+    if (type == TS_TEMP_SOURCE_MANUAL || type >= TS_TEMP_SOURCE_MAX) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    
+    xSemaphoreTake(s_state.mutex, portMAX_DELAY);
+    
+    ts_temp_source_type_t old_preferred = s_state.preferred_source;
+    s_state.preferred_source = type;
+    
+    // 切换到非手动源时，自动禁用手动模式
+    if (s_state.manual_mode) {
+        s_state.manual_mode = false;
+        TS_LOGI(TAG, "Manual mode disabled (switching to %s)", ts_temp_source_type_to_str(type));
+    }
+    
+    // 重新评估活动源
+    evaluate_active_source();
+    
+    xSemaphoreGive(s_state.mutex);
+    
+    // 保存到 NVS
+    save_preferred_source_to_nvs(type);
+    
+    TS_LOGI(TAG, "Preferred source: %s -> %s",
+            old_preferred == TS_TEMP_SOURCE_DEFAULT ? "auto" : ts_temp_source_type_to_str(old_preferred),
+            type == TS_TEMP_SOURCE_DEFAULT ? "auto" : ts_temp_source_type_to_str(type));
+    
+    return ESP_OK;
+}
+
+ts_temp_source_type_t ts_temp_get_preferred_source(void)
+{
+    return s_state.preferred_source;
+}
+
+esp_err_t ts_temp_clear_preferred_source(void)
+{
+    return ts_temp_set_preferred_source(TS_TEMP_SOURCE_DEFAULT);
+}
+
+/*===========================================================================*/
+/*                          NVS Functions                                     */
+/*===========================================================================*/
+
+static esp_err_t load_preferred_source_from_nvs(void)
+{
+    nvs_handle_t handle;
+    esp_err_t ret = nvs_open(NVS_NAMESPACE, NVS_READONLY, &handle);
+    
+    if (ret == ESP_ERR_NVS_NOT_FOUND) {
+        TS_LOGD(TAG, "No NVS config found, using defaults");
+        return ESP_OK;
+    }
+    
+    if (ret != ESP_OK) {
+        TS_LOGW(TAG, "Failed to open NVS: %s", esp_err_to_name(ret));
+        return ret;
+    }
+    
+    /* 加载首选温度源 */
+    uint8_t preferred = 0;
+    ret = nvs_get_u8(handle, NVS_KEY_PREFERRED, &preferred);
+    if (ret == ESP_OK && preferred < TS_TEMP_SOURCE_MAX) {
+        s_state.preferred_source = (ts_temp_source_type_t)preferred;
+        TS_LOGI(TAG, "Loaded preferred source from NVS: %s",
+                preferred == 0 ? "auto" : ts_temp_source_type_to_str(s_state.preferred_source));
+    }
+    
+    /* 加载绑定的变量名 */
+    size_t len = sizeof(s_state.bound_variable);
+    ret = nvs_get_str(handle, NVS_KEY_BOUND_VAR, s_state.bound_variable, &len);
+    if (ret == ESP_OK && s_state.bound_variable[0] != '\0') {
+        TS_LOGI(TAG, "Loaded bound variable from NVS: %s", s_state.bound_variable);
+    } else {
+        s_state.bound_variable[0] = '\0';
+    }
+    
+    nvs_close(handle);
+    return ESP_OK;
+}
+
+static esp_err_t save_preferred_source_to_nvs(ts_temp_source_type_t type)
+{
+    nvs_handle_t handle;
+    esp_err_t ret = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &handle);
+    
+    if (ret != ESP_OK) {
+        TS_LOGE(TAG, "Failed to open NVS for write: %s", esp_err_to_name(ret));
+        return ret;
+    }
+    
+    ret = nvs_set_u8(handle, NVS_KEY_PREFERRED, (uint8_t)type);
+    if (ret != ESP_OK) {
+        TS_LOGE(TAG, "Failed to write preferred source: %s", esp_err_to_name(ret));
+        nvs_close(handle);
+        return ret;
+    }
+    
+    ret = nvs_commit(handle);
+    nvs_close(handle);
+    
+    if (ret == ESP_OK) {
+        TS_LOGD(TAG, "Saved preferred source to NVS: %s",
+                type == 0 ? "auto" : ts_temp_source_type_to_str(type));
+    }
+    
+    return ret;
+}
+
+static esp_err_t save_bound_variable_to_nvs(const char *var_name)
+{
+    nvs_handle_t handle;
+    esp_err_t ret = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &handle);
+    
+    if (ret != ESP_OK) {
+        TS_LOGE(TAG, "Failed to open NVS for write: %s", esp_err_to_name(ret));
+        return ret;
+    }
+    
+    if (var_name && var_name[0] != '\0') {
+        ret = nvs_set_str(handle, NVS_KEY_BOUND_VAR, var_name);
+    } else {
+        ret = nvs_erase_key(handle, NVS_KEY_BOUND_VAR);
+        if (ret == ESP_ERR_NVS_NOT_FOUND) ret = ESP_OK;  // 键不存在也是成功
+    }
+    
+    if (ret != ESP_OK) {
+        TS_LOGE(TAG, "Failed to write bound variable: %s", esp_err_to_name(ret));
+        nvs_close(handle);
+        return ret;
+    }
+    
+    ret = nvs_commit(handle);
+    nvs_close(handle);
+    
+    if (ret == ESP_OK) {
+        TS_LOGD(TAG, "Saved bound variable to NVS: %s", var_name ? var_name : "(none)");
+    }
+    
+    return ret;
+}
+
+/*===========================================================================*/
+/*                      Public API - Variable Binding                         */
+/*===========================================================================*/
+
+esp_err_t ts_temp_bind_variable(const char *var_name)
+{
+    if (!s_state.initialized) return ESP_ERR_INVALID_STATE;
+    if (!var_name || var_name[0] == '\0') return ESP_ERR_INVALID_ARG;
+    
+    /* 检查变量名长度 */
+    if (strlen(var_name) >= TS_TEMP_MAX_VARNAME_LEN) {
+        TS_LOGE(TAG, "Variable name too long: %s", var_name);
+        return ESP_ERR_INVALID_SIZE;
+    }
+    
+    /* 验证变量是否存在 */
+    if (!ts_variable_exists(var_name)) {
+        TS_LOGW(TAG, "Variable does not exist: %s (will bind anyway)", var_name);
+    }
+    
+    xSemaphoreTake(s_state.mutex, portMAX_DELAY);
+    
+    strncpy(s_state.bound_variable, var_name, sizeof(s_state.bound_variable) - 1);
+    s_state.bound_variable[sizeof(s_state.bound_variable) - 1] = '\0';
+    
+    /* 重新评估活动源 */
+    evaluate_active_source();
+    
+    xSemaphoreGive(s_state.mutex);
+    
+    /* 保存到 NVS */
+    save_bound_variable_to_nvs(var_name);
+    
+    TS_LOGI(TAG, "Temperature bound to variable: %s", var_name);
+    
+    return ESP_OK;
+}
+
+esp_err_t ts_temp_get_bound_variable(char *var_name, size_t len)
+{
+    if (!var_name || len == 0) return ESP_ERR_INVALID_ARG;
+    if (!s_state.initialized) return ESP_ERR_INVALID_STATE;
+    
+    xSemaphoreTake(s_state.mutex, portMAX_DELAY);
+    
+    if (s_state.bound_variable[0] == '\0') {
+        xSemaphoreGive(s_state.mutex);
+        var_name[0] = '\0';
+        return ESP_ERR_NOT_FOUND;
+    }
+    
+    strncpy(var_name, s_state.bound_variable, len - 1);
+    var_name[len - 1] = '\0';
+    
+    xSemaphoreGive(s_state.mutex);
+    
+    return ESP_OK;
+}
+
+esp_err_t ts_temp_unbind_variable(void)
+{
+    if (!s_state.initialized) return ESP_ERR_INVALID_STATE;
+    
+    xSemaphoreTake(s_state.mutex, portMAX_DELAY);
+    
+    bool was_bound = (s_state.bound_variable[0] != '\0');
+    s_state.bound_variable[0] = '\0';
+    
+    /* 重新评估活动源 */
+    evaluate_active_source();
+    
+    xSemaphoreGive(s_state.mutex);
+    
+    if (was_bound) {
+        /* 从 NVS 清除 */
+        save_bound_variable_to_nvs(NULL);
+        TS_LOGI(TAG, "Temperature variable binding removed");
+    }
+    
+    return ESP_OK;
 }

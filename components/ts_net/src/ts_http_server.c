@@ -305,6 +305,44 @@ esp_err_t ts_http_send_error(ts_http_request_t *req, int status, const char *mes
     return ts_http_send_json(req, status, json);
 }
 
+/**
+ * @brief URL decode helper - decode %XX sequences in place
+ */
+static void url_decode_inplace(char *str)
+{
+    char *src = str;
+    char *dst = str;
+    
+    while (*src) {
+        if (*src == '%' && src[1] && src[2]) {
+            // Decode %XX
+            int high = src[1];
+            int low = src[2];
+            
+            // Convert hex to int
+            if (high >= '0' && high <= '9') high -= '0';
+            else if (high >= 'A' && high <= 'F') high = high - 'A' + 10;
+            else if (high >= 'a' && high <= 'f') high = high - 'a' + 10;
+            else { *dst++ = *src++; continue; }
+            
+            if (low >= '0' && low <= '9') low -= '0';
+            else if (low >= 'A' && low <= 'F') low = low - 'A' + 10;
+            else if (low >= 'a' && low <= 'f') low = low - 'a' + 10;
+            else { *dst++ = *src++; continue; }
+            
+            *dst++ = (char)((high << 4) | low);
+            src += 3;
+        } else if (*src == '+') {
+            // '+' decodes to space
+            *dst++ = ' ';
+            src++;
+        } else {
+            *dst++ = *src++;
+        }
+    }
+    *dst = '\0';
+}
+
 esp_err_t ts_http_get_query_param(ts_http_request_t *req, const char *key,
                                    char *value, size_t max_len)
 {
@@ -319,6 +357,10 @@ esp_err_t ts_http_get_query_param(ts_http_request_t *req, const char *key,
     esp_err_t ret = httpd_req_get_url_query_str(req->req, buf, buf_len);
     if (ret == ESP_OK) {
         ret = httpd_query_key_value(buf, key, value, max_len);
+        if (ret == ESP_OK) {
+            // URL decode the value
+            url_decode_inplace(value);
+        }
     }
     
     free(buf);

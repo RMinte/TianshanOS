@@ -32,11 +32,13 @@ menu "TianShanOS Automation Engine"
 
     config TS_AUTOMATION_MAX_VARIABLES
         int "Maximum number of variables"
-        default 128
-        range 32 256
+        default 512
+        range 64 2048
         depends on TS_AUTOMATION_ENABLED
         help
             Maximum number of variables in the variable store.
+            Each variable uses approximately 350 bytes of PSRAM.
+            512 variables = ~175KB, 1024 = ~350KB, 2048 = ~700KB.
 
     config TS_AUTOMATION_TASK_STACK_SIZE
         int "Automation task stack size"

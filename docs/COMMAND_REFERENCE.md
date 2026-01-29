@@ -158,6 +158,7 @@ pin --test --gpio 2 --mode input
 # 显示风扇状态
 fan --status
 fan --status --id 0                # 指定风扇
+fan --status --json                # JSON 输出
 
 # 设置风扇速度
 fan --set --id 0 --speed 75
@@ -175,6 +176,13 @@ fan --disable --id 0
 # 配置温度曲线
 fan --curve --id 0 --points "30:20,50:40,70:60,80:100"
 
+# 设置占空比限制
+fan --limits --id 0 --min 10 --max 100
+fan --limits --id 0 --min 0         # 只设置最小值
+
+# 设置迟滞参数
+fan --hysteresis --id 0 --hyst 30 --interval 2000
+
 # 保存/加载配置
 fan --save
 fan --save --id 0
@@ -186,16 +194,22 @@ fan --load
 ```bash
 # 显示温度状态
 temp --status
+temp --status --json
 
 # 获取当前温度
 temp --get
 
 # 设置测试温度（调试用）
-temp --set --value 45
+temp --manual --enable --value 45
+temp --manual --disable            # 禁用测试温度
+
+# 绑定温度变量
+temp --bind --variable "agx.cpu_temp"
+temp --unbind                      # 解除绑定
 
 # 切换温度模式
-temp --mode --value auto
-temp --mode --value manual
+temp --select --source variable
+temp --select --source sensor
 ```
 
 ### LED 控制命令

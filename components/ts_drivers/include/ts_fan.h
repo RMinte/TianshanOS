@@ -111,6 +111,14 @@ bool ts_fan_is_initialized(void);
 esp_err_t ts_fan_configure(ts_fan_id_t fan, const ts_fan_config_t *config);
 
 /**
+ * @brief Get current fan configuration
+ * @param fan Fan ID
+ * @param config Output configuration structure
+ * @return ESP_OK on success
+ */
+esp_err_t ts_fan_get_config(ts_fan_id_t fan, ts_fan_config_t *config);
+
+/**
  * @brief Get default configuration
  */
 void ts_fan_get_default_config(ts_fan_config_t *config);
@@ -168,6 +176,15 @@ esp_err_t ts_fan_set_curve(ts_fan_id_t fan, const ts_fan_curve_point_t *curve, u
  * @param min_interval Minimum interval between speed changes in ms
  */
 esp_err_t ts_fan_set_hysteresis(ts_fan_id_t fan, int16_t hysteresis, uint32_t min_interval);
+
+/**
+ * @brief Set duty cycle limits for fan
+ * @param fan Fan ID
+ * @param min_duty Minimum duty cycle (0-100%)
+ * @param max_duty Maximum duty cycle (0-100%)
+ * @return ESP_OK on success
+ */
+esp_err_t ts_fan_set_limits(ts_fan_id_t fan, uint8_t min_duty, uint8_t max_duty);
 
 /*===========================================================================*/
 /*                          Status                                            */

@@ -114,13 +114,19 @@ static esp_err_t api_temp_read(const cJSON *params, ts_api_result_t *result)
 /**
  * @brief temp.manual - Set/get manual temperature mode
  * 
- * Params: { "enable": true, "temperature_c": 45.0 }
+ * Params: { "enable": true, "temperature": 45.0 } or { "temperature_c": 45.0 }
  */
 static esp_err_t api_temp_manual(const cJSON *params, ts_api_result_t *result)
 {
     const cJSON *enable_item = cJSON_GetObjectItem(params, "enable");
     const cJSON *temp_item = cJSON_GetObjectItem(params, "temperature_c");
+    const cJSON *temp_alias = cJSON_GetObjectItem(params, "temperature");  /* 别名 */
     const cJSON *temp_01c_item = cJSON_GetObjectItem(params, "temperature_01c");
+    
+    /* 使用 temperature 作为 temperature_c 的别名 */
+    if (!cJSON_IsNumber(temp_item) && cJSON_IsNumber(temp_alias)) {
+        temp_item = temp_alias;
+    }
     
     esp_err_t ret = ESP_OK;
     
@@ -172,10 +178,27 @@ static esp_err_t api_temp_status(const cJSON *params, ts_api_result_t *result)
     
     cJSON *data = cJSON_CreateObject();
     
+    /* Get full status for bound_variable */
+    ts_temp_status_t status;
+    ts_temp_get_status(&status);
+    
     /* Basic status */
     cJSON_AddBoolToObject(data, "initialized", ts_temp_source_is_initialized());
     cJSON_AddBoolToObject(data, "manual_mode", ts_temp_is_manual_mode());
     cJSON_AddStringToObject(data, "active_source", ts_temp_source_type_to_str(ts_temp_get_active_source()));
+    
+    /* Preferred source */
+    ts_temp_source_type_t preferred = ts_temp_get_preferred_source();
+    cJSON_AddStringToObject(data, "preferred_source", 
+                            preferred == TS_TEMP_SOURCE_DEFAULT ? "auto" : 
+                            ts_temp_source_type_to_str(preferred));
+    
+    /* Bound variable */
+    if (status.bound_variable[0] != '\0') {
+        cJSON_AddStringToObject(data, "bound_variable", status.bound_variable);
+    } else {
+        cJSON_AddNullToObject(data, "bound_variable");
+    }
     
     /* Current effective temperature */
     ts_temp_data_t temp_data;
@@ -184,6 +207,131 @@ static esp_err_t api_temp_status(const cJSON *params, ts_api_result_t *result)
     cJSON_AddNumberToObject(data, "temperature_c", temp / 10.0);
     cJSON_AddBoolToObject(data, "valid", temp_data.valid);
     cJSON_AddNumberToObject(data, "timestamp_ms", temp_data.timestamp_ms);
+    
+    ts_api_result_ok(result, data);
+    return ESP_OK;
+}
+
+/**
+ * @brief temp.select - Set/get preferred temperature source
+ * 
+ * Params: { "source": "agx" }  // or "sensor", "auto", "variable"
+ * 
+ * 当 source 为 "auto" 时，使用默认优先级自动选择
+ * 当 source 为 "variable" 时，使用绑定的变量（需先通过 temp.bind 绑定）
+ * 其他值设置为首选温度源（如果该源可用则优先使用）
+ */
+static esp_err_t api_temp_select(const cJSON *params, ts_api_result_t *result)
+{
+    const cJSON *source_item = cJSON_GetObjectItem(params, "source");
+    
+    if (cJSON_IsString(source_item) && source_item->valuestring) {
+        const char *src_str = source_item->valuestring;
+        ts_temp_source_type_t source_type = TS_TEMP_SOURCE_DEFAULT;
+        
+        // 解析源类型
+        if (strcmp(src_str, "auto") == 0 || strcmp(src_str, "default") == 0) {
+            source_type = TS_TEMP_SOURCE_DEFAULT;  // 自动选择
+        } else if (strcmp(src_str, "sensor_local") == 0 || strcmp(src_str, "sensor") == 0 || strcmp(src_str, "local") == 0) {
+            source_type = TS_TEMP_SOURCE_SENSOR_LOCAL;
+        } else if (strcmp(src_str, "agx_auto") == 0 || strcmp(src_str, "agx") == 0) {
+            source_type = TS_TEMP_SOURCE_AGX_AUTO;
+        } else if (strcmp(src_str, "variable") == 0) {
+            source_type = TS_TEMP_SOURCE_VARIABLE;
+        } else {
+            ts_api_result_error(result, TS_API_ERR_INVALID_ARG, 
+                               "Invalid source. Use: auto, agx, sensor, variable");
+            return ESP_ERR_INVALID_ARG;
+        }
+        
+        // 设置首选源
+        esp_err_t ret = ts_temp_set_preferred_source(source_type);
+        if (ret != ESP_OK) {
+            ts_api_result_error(result, TS_API_ERR_INTERNAL, "Failed to set preferred source");
+            return ret;
+        }
+    }
+    
+    // 返回当前状态
+    cJSON *data = cJSON_CreateObject();
+    
+    ts_temp_source_type_t preferred = ts_temp_get_preferred_source();
+    ts_temp_source_type_t active = ts_temp_get_active_source();
+    
+    cJSON_AddStringToObject(data, "preferred_source", 
+                            preferred == TS_TEMP_SOURCE_DEFAULT ? "auto" : 
+                            ts_temp_source_type_to_str(preferred));
+    cJSON_AddStringToObject(data, "active_source", ts_temp_source_type_to_str(active));
+    
+    // 获取当前温度
+    ts_temp_data_t temp_data;
+    ts_temp_get_effective(&temp_data);
+    cJSON_AddNumberToObject(data, "temperature_c", temp_data.value / 10.0);
+    cJSON_AddBoolToObject(data, "valid", temp_data.valid);
+    
+    ts_api_result_ok(result, data);
+    return ESP_OK;
+}
+
+/**
+ * @brief temp.bind - Bind/unbind temperature to a system variable
+ * 
+ * Params: { "variable": "agx.cpu_temp" }  // 绑定到变量
+ *         { "variable": null }            // 取消绑定
+ *         {}                              // 查询当前绑定
+ * 
+ * 绑定变量后，温度源会自动从该变量读取温度值。
+ * 变量必须为浮点类型，单位为摄氏度。
+ */
+static esp_err_t api_temp_bind(const cJSON *params, ts_api_result_t *result)
+{
+    const cJSON *var_item = cJSON_GetObjectItem(params, "variable");
+    
+    /* 处理绑定/解绑请求 */
+    if (var_item != NULL) {
+        if (cJSON_IsString(var_item) && var_item->valuestring && var_item->valuestring[0] != '\0') {
+            /* 绑定到变量 */
+            esp_err_t ret = ts_temp_bind_variable(var_item->valuestring);
+            if (ret != ESP_OK) {
+                if (ret == ESP_ERR_INVALID_SIZE) {
+                    ts_api_result_error(result, TS_API_ERR_INVALID_ARG, "Variable name too long");
+                } else {
+                    ts_api_result_error(result, TS_API_ERR_INTERNAL, "Failed to bind variable");
+                }
+                return ret;
+            }
+        } else if (cJSON_IsNull(var_item)) {
+            /* 取消绑定 */
+            esp_err_t ret = ts_temp_unbind_variable();
+            if (ret != ESP_OK) {
+                ts_api_result_error(result, TS_API_ERR_INTERNAL, "Failed to unbind variable");
+                return ret;
+            }
+        } else {
+            ts_api_result_error(result, TS_API_ERR_INVALID_ARG, "Variable must be a string or null");
+            return ESP_ERR_INVALID_ARG;
+        }
+    }
+    
+    /* 返回当前状态 */
+    cJSON *data = cJSON_CreateObject();
+    
+    char var_name[TS_TEMP_MAX_VARNAME_LEN];
+    esp_err_t ret = ts_temp_get_bound_variable(var_name, sizeof(var_name));
+    if (ret == ESP_OK && var_name[0] != '\0') {
+        cJSON_AddStringToObject(data, "bound_variable", var_name);
+    } else {
+        cJSON_AddNullToObject(data, "bound_variable");
+    }
+    
+    /* 添加活动源和当前温度信息 */
+    ts_temp_source_type_t active = ts_temp_get_active_source();
+    cJSON_AddStringToObject(data, "active_source", ts_temp_source_type_to_str(active));
+    
+    ts_temp_data_t temp_data;
+    ts_temp_get_effective(&temp_data);
+    cJSON_AddNumberToObject(data, "temperature_c", temp_data.value / 10.0);
+    cJSON_AddBoolToObject(data, "valid", temp_data.valid);
     
     ts_api_result_ok(result, data);
     return ESP_OK;
@@ -221,6 +369,20 @@ static const ts_api_endpoint_t s_temp_endpoints[] = {
         .category = TS_API_CAT_DEVICE,
         .handler = api_temp_status,
         .requires_auth = false,
+    },
+    {
+        .name = "temp.select",
+        .description = "Set/get preferred temperature source",
+        .category = TS_API_CAT_DEVICE,
+        .handler = api_temp_select,
+        .requires_auth = true,
+    },
+    {
+        .name = "temp.bind",
+        .description = "Bind/unbind temperature to a system variable",
+        .category = TS_API_CAT_DEVICE,
+        .handler = api_temp_bind,
+        .requires_auth = true,
     },
 };
 

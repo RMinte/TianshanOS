@@ -21,4 +21,5 @@ idf_component_register(
         esp_websocket_client
         esp_http_client
         json
+        ts_automation
 )

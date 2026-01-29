@@ -77,9 +77,9 @@ static esp_err_t api_handler(ts_http_request_t *req, void *user_data)
         if (*p == '/') *p = '.';
     }
     
-    // 日志相关 API 不输出调试日志，避免日志风暴
+    // API 请求日志使用 DEBUG 级别，避免干扰调试
     if (strncmp(api_name, "log.", 4) != 0) {
-        TS_LOGI(TAG, "API request: method=%d uri=%s -> api_name=%s", 
+        TS_LOGD(TAG, "API request: method=%d uri=%s -> api_name=%s", 
                 req->method, uri, api_name);
     }
     
@@ -115,8 +115,35 @@ static esp_err_t api_handler(ts_http_request_t *req, void *user_data)
                         char *key = pair;
                         char *value = eq + 1;
                         
-                        // URL decode the value (basic: + to space, %XX sequences)
-                        // For simplicity, just add as string or number
+                        // URL decode the value
+                        char *src = value;
+                        char *dst = value;
+                        while (*src) {
+                            if (*src == '%' && src[1] && src[2]) {
+                                int high = src[1];
+                                int low = src[2];
+                                // Convert hex
+                                if (high >= '0' && high <= '9') high -= '0';
+                                else if (high >= 'A' && high <= 'F') high = high - 'A' + 10;
+                                else if (high >= 'a' && high <= 'f') high = high - 'a' + 10;
+                                else { *dst++ = *src++; continue; }
+                                
+                                if (low >= '0' && low <= '9') low -= '0';
+                                else if (low >= 'A' && low <= 'F') low = low - 'A' + 10;
+                                else if (low >= 'a' && low <= 'f') low = low - 'a' + 10;
+                                else { *dst++ = *src++; continue; }
+                                
+                                *dst++ = (char)((high << 4) | low);
+                                src += 3;
+                            } else if (*src == '+') {
+                                *dst++ = ' ';
+                                src++;
+                            } else {
+                                *dst++ = *src++;
+                            }
+                        }
+                        *dst = '\0';
+                        
                         // Try to parse as number first
                         char *endptr;
                         long num = strtol(value, &endptr, 10);
@@ -151,9 +178,9 @@ static esp_err_t api_handler(ts_http_request_t *req, void *user_data)
     ts_api_result_t result = {0};
     esp_err_t ret = ts_api_call(api_name, request, &result);
     
-    // 日志相关 API 不输出调试日志
+    // API 结果日志使用 DEBUG 级别
     if (strncmp(api_name, "log.", 4) != 0) {
-        TS_LOGI(TAG, "API call result: api=%s ret=%d code=%d msg=%s", 
+        TS_LOGD(TAG, "API call result: api=%s ret=%d code=%d msg=%s", 
                 api_name, ret, result.code, result.message ? result.message : "null");
     }
     

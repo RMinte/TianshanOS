@@ -136,14 +136,14 @@ static esp_err_t api_monitor_data(const cJSON *params, ts_api_result_t *result)
 }
 
 /**
- * @brief agx.config - Get Compute monitor configuration
+ * @brief monitor.config - Get Compute monitor configuration
  */
 static esp_err_t api_monitor_config(const cJSON *params, ts_api_result_t *result)
 {
     (void)params;
     
     ts_compute_config_t config;
-    ts_compute_monitor_get_default_config(&config);
+    ts_compute_monitor_get_config(&config);
     
     cJSON *data = cJSON_CreateObject();
     if (!data) {
@@ -156,13 +156,52 @@ static esp_err_t api_monitor_config(const cJSON *params, ts_api_result_t *result
     cJSON_AddNumberToObject(data, "reconnect_ms", config.reconnect_interval_ms);
     cJSON_AddNumberToObject(data, "startup_delay_ms", config.startup_delay_ms);
     cJSON_AddNumberToObject(data, "heartbeat_timeout_ms", config.heartbeat_timeout_ms);
+    cJSON_AddBoolToObject(data, "auto_start", config.auto_start);
+    cJSON_AddBoolToObject(data, "update_temp_source", config.update_temp_source);
     
     ts_api_result_ok(result, data);
     return ESP_OK;
 }
 
 /**
- * @brief agx.start - Start Compute monitoring
+ * @brief monitor.set_server - Set AGX monitoring server IP and port
+ * 
+ * Params: { "server": "10.10.99.98", "port": 58090 }
+ */
+static esp_err_t api_monitor_set_server(const cJSON *params, ts_api_result_t *result)
+{
+    const cJSON *server_item = cJSON_GetObjectItem(params, "server");
+    const cJSON *port_item = cJSON_GetObjectItem(params, "port");
+    
+    if (!cJSON_IsString(server_item) || strlen(server_item->valuestring) == 0) {
+        ts_api_result_error(result, TS_API_ERR_INVALID_ARG, "Missing or invalid 'server' parameter");
+        return ESP_ERR_INVALID_ARG;
+    }
+    
+    const char *server_ip = server_item->valuestring;
+    uint16_t port = cJSON_IsNumber(port_item) ? (uint16_t)port_item->valueint : 0;
+    
+    esp_err_t ret = ts_compute_monitor_set_server(server_ip, port);
+    if (ret != ESP_OK) {
+        ts_api_result_error(result, TS_API_ERR_INTERNAL, "Failed to set server config");
+        return ret;
+    }
+    
+    /* 返回更新后的配置 */
+    ts_compute_config_t config;
+    ts_compute_monitor_get_config(&config);
+    
+    cJSON *data = cJSON_CreateObject();
+    cJSON_AddStringToObject(data, "server", config.server_ip);
+    cJSON_AddNumberToObject(data, "port", config.server_port);
+    cJSON_AddBoolToObject(data, "saved", true);
+    
+    ts_api_result_ok(result, data);
+    return ESP_OK;
+}
+
+/**
+ * @brief monitor.start - Start Compute monitoring
  */
 static esp_err_t api_monitor_start(const cJSON *params, ts_api_result_t *result)
 {
@@ -246,6 +285,13 @@ esp_err_t ts_api_monitor_register(void)
             .category = TS_API_CAT_DEVICE,
             .handler = api_monitor_config,
             .requires_auth = false,
+        },
+        {
+            .name = "monitor.set_server",
+            .description = "Set AGX monitoring server IP and port",
+            .category = TS_API_CAT_DEVICE,
+            .handler = api_monitor_set_server,
+            .requires_auth = true,
         },
         {
             .name = "monitor.start",

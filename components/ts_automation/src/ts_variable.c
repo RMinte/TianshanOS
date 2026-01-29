@@ -124,11 +124,11 @@ static void notify_change(const char *name,
 esp_err_t ts_variable_init(void)
 {
     if (s_var_ctx.initialized) {
-        ESP_LOGW(TAG, "Already initialized");
+        ESP_LOGD(TAG, "Already initialized");
         return ESP_OK;
     }
 
-    ESP_LOGI(TAG, "Initializing variable storage (max %d)", 
+    ESP_LOGD(TAG, "Initializing variable storage (max %d)", 
              CONFIG_TS_AUTOMATION_MAX_VARIABLES);
 
     // 分配变量数组（使用 PSRAM）
@@ -143,7 +143,7 @@ esp_err_t ts_variable_init(void)
             ESP_LOGE(TAG, "Failed to allocate variable storage");
             return ESP_ERR_NO_MEM;
         }
-        ESP_LOGW(TAG, "Using DRAM for variable storage");
+        ESP_LOGD(TAG, "Using DRAM for variable storage");
     }
 
     memset(s_var_ctx.variables, 0, alloc_size);
@@ -160,7 +160,7 @@ esp_err_t ts_variable_init(void)
     s_var_ctx.count = 0;
     s_var_ctx.initialized = true;
 
-    ESP_LOGI(TAG, "Variable storage initialized");
+    ESP_LOGD(TAG, "Variable storage initialized");
     return ESP_OK;
 }
 
@@ -170,7 +170,7 @@ esp_err_t ts_variable_deinit(void)
         return ESP_OK;
     }
 
-    ESP_LOGI(TAG, "Deinitializing variable storage");
+    ESP_LOGD(TAG, "Deinitializing variable storage");
 
     if (s_var_ctx.mutex) {
         vSemaphoreDelete(s_var_ctx.mutex);
@@ -220,7 +220,7 @@ esp_err_t ts_variable_register(const ts_auto_variable_t *var)
         memcpy(&s_var_ctx.variables[idx], var, sizeof(ts_auto_variable_t));
         s_var_ctx.variables[idx].last_change_ms = esp_timer_get_time() / 1000;
         xSemaphoreGive(s_var_ctx.mutex);
-        ESP_LOGI(TAG, "Updated variable: %s (type=%d)", var->name, var->value.type);
+        ESP_LOGD(TAG, "Updated variable: %s (type=%d)", var->name, var->value.type);
         return ESP_OK;
     }
 
@@ -239,7 +239,7 @@ esp_err_t ts_variable_register(const ts_auto_variable_t *var)
 
     xSemaphoreGive(s_var_ctx.mutex);
 
-    ESP_LOGI(TAG, "Registered variable: %s (type=%d, total: %d)", 
+    ESP_LOGD(TAG, "Registered variable: %s (type=%d, total: %d)", 
              var->name, var->value.type, s_var_ctx.count);
     return ESP_OK;
 }
@@ -302,7 +302,7 @@ int ts_variable_unregister_by_source(const char *source_id)
     xSemaphoreGive(s_var_ctx.mutex);
 
     if (removed > 0) {
-        ESP_LOGI(TAG, "Removed %d variables for source: %s", removed, source_id);
+        ESP_LOGD(TAG, "Removed %d variables for source: %s", removed, source_id);
     }
     return removed;
 }
@@ -481,7 +481,7 @@ esp_err_t ts_variable_set(const char *name, const ts_auto_value_t *value)
     // 检查只读标志
     if (var->flags & TS_AUTO_VAR_READONLY) {
         xSemaphoreGive(s_var_ctx.mutex);
-        ESP_LOGW(TAG, "Variable '%s' is read-only", name);
+        ESP_LOGD(TAG, "Variable '%s' is read-only", name);
         return ESP_ERR_NOT_ALLOWED;
     }
 
@@ -631,7 +631,7 @@ esp_err_t ts_variable_save_all(void)
         return ESP_ERR_INVALID_STATE;
     }
 
-    ESP_LOGI(TAG, "Saving persistent variables to NVS");
+    ESP_LOGD(TAG, "Saving persistent variables to NVS");
 
     // TODO: 实现 NVS 持久化
     // 遍历所有带 TS_AUTO_VAR_PERSISTENT 标志的变量
@@ -646,7 +646,7 @@ esp_err_t ts_variable_load_all(void)
         return ESP_ERR_INVALID_STATE;
     }
 
-    ESP_LOGI(TAG, "Loading persistent variables from NVS");
+    ESP_LOGD(TAG, "Loading persistent variables from NVS");
 
     // TODO: 实现 NVS 加载
 

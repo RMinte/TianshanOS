@@ -90,9 +90,10 @@ static void temp_event_handler(const ts_event_t *event, void *user_data)
     const ts_temp_event_data_t *temp_evt = (const ts_temp_event_data_t *)event->data;
     if (temp_evt == NULL) return;
     
-    /* 更新所有处于自动模式的风扇温度 */
+    /* 更新所有处于自动/曲线模式的风扇温度 */
     for (int i = 0; i < TS_FAN_MAX; i++) {
-        if (s_fans[i].initialized && s_fans[i].mode == TS_FAN_MODE_AUTO) {
+        if (s_fans[i].initialized && 
+            (s_fans[i].mode == TS_FAN_MODE_AUTO || s_fans[i].mode == TS_FAN_MODE_CURVE)) {
             s_fans[i].temperature = temp_evt->temp;
             TS_LOGD(TAG, "Fan %d temp updated: %d.%d°C (source=%d)", 
                     i, temp_evt->temp / 10, 
@@ -232,6 +233,20 @@ static esp_err_t update_pwm(fan_instance_t *fan, uint8_t duty)
 static void fan_update_callback(void *arg)
 {
     int64_t now = esp_timer_get_time();
+    
+    /* 主动获取最新温度（确保曲线模式能及时响应温度变化） */
+    if (s_auto_temp_enabled) {
+        ts_temp_data_t temp_data;
+        int16_t current_temp = ts_temp_get_effective(&temp_data);
+        if (current_temp > TS_TEMP_MIN_VALID) {
+            for (int i = 0; i < TS_FAN_MAX; i++) {
+                if (s_fans[i].initialized && 
+                    (s_fans[i].mode == TS_FAN_MODE_AUTO || s_fans[i].mode == TS_FAN_MODE_CURVE)) {
+                    s_fans[i].temperature = current_temp;
+                }
+            }
+        }
+    }
     
     for (int i = 0; i < TS_FAN_MAX; i++) {
         fan_instance_t *fan = &s_fans[i];
@@ -408,6 +423,15 @@ void ts_fan_get_default_config(ts_fan_config_t *config)
     };
     memcpy(config->curve, default_curve, sizeof(default_curve));
     config->curve_points = 4;
+}
+
+esp_err_t ts_fan_get_config(ts_fan_id_t fan, ts_fan_config_t *config)
+{
+    if (fan >= TS_FAN_MAX || !config) return ESP_ERR_INVALID_ARG;
+    if (!s_fans[fan].initialized) return ESP_ERR_INVALID_STATE;
+    
+    *config = s_fans[fan].config;
+    return ESP_OK;
 }
 
 esp_err_t ts_fan_configure(ts_fan_id_t fan, const ts_fan_config_t *config)
@@ -592,6 +616,25 @@ esp_err_t ts_fan_set_hysteresis(ts_fan_id_t fan, int16_t hysteresis, uint32_t mi
     return ESP_OK;
 }
 
+esp_err_t ts_fan_set_limits(ts_fan_id_t fan, uint8_t min_duty, uint8_t max_duty)
+{
+    if (fan >= TS_FAN_MAX) return ESP_ERR_INVALID_ARG;
+    
+    if (min_duty > 100 || max_duty > 100) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (min_duty > max_duty) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    
+    s_fans[fan].config.min_duty = min_duty;
+    s_fans[fan].config.max_duty = max_duty;
+    
+    TS_LOGI(TAG, "Fan %d limits: min=%d%%, max=%d%%", fan, min_duty, max_duty);
+    
+    return ESP_OK;
+}
+
 /*===========================================================================*/
 /*                          Public API - Status                               */
 /*===========================================================================*/
@@ -602,6 +645,25 @@ esp_err_t ts_fan_get_status(ts_fan_id_t fan, ts_fan_status_t *status)
     if (!s_fans[fan].initialized) return ESP_ERR_INVALID_STATE;
     
     fan_instance_t *f = &s_fans[fan];
+    
+    /* 同步获取最新温度（确保从绑定变量读取最新值） */
+    if (f->mode == TS_FAN_MODE_AUTO || f->mode == TS_FAN_MODE_CURVE) {
+        ts_temp_data_t temp_data;
+        int16_t temp = ts_temp_get_effective(&temp_data);
+        if (temp > TS_TEMP_MIN_VALID) {
+            f->temperature = temp;
+        }
+        
+        /* 计算基于当前温度的目标转速（用于显示） */
+        uint8_t computed_target = calc_duty_from_curve(f, f->temperature);
+        if (computed_target < f->config.min_duty && computed_target > 0) {
+            computed_target = f->config.min_duty;
+        }
+        if (computed_target > f->config.max_duty) {
+            computed_target = f->config.max_duty;
+        }
+        f->target_duty = computed_target;
+    }
     
     status->mode = f->mode;
     status->duty_percent = f->current_duty;

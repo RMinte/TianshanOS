@@ -1143,6 +1143,30 @@ esp_err_t ts_action_exec_ssh_ref(const ts_auto_action_ssh_ref_t *ssh_ref,
     char expanded_cmd[256];
     ts_action_expand_variables(cmd_config.command, expanded_cmd, sizeof(expanded_cmd));
     
+    /* Handle nohup mode: wrap command for background execution */
+    char nohup_cmd[512];
+    if (cmd_config.nohup) {
+        /* Generate safe name from command name for log file */
+        char safe_name[32] = {0};
+        const char *src = cmd_config.name;
+        int j = 0;
+        for (int i = 0; src[i] && j < 20; i++) {
+            if ((src[i] >= 'a' && src[i] <= 'z') || 
+                (src[i] >= 'A' && src[i] <= 'Z') || 
+                (src[i] >= '0' && src[i] <= '9')) {
+                safe_name[j++] = src[i];
+            }
+        }
+        if (j == 0) {
+            strcpy(safe_name, "cmd");
+        }
+        
+        snprintf(nohup_cmd, sizeof(nohup_cmd),
+                 "nohup %s > /tmp/ts_nohup_%s.log 2>&1 &",
+                 expanded_cmd, safe_name);
+        ESP_LOGI(TAG, "SSH nohup mode: %s", nohup_cmd);
+    }
+    
     /* Create SSH session */
     ts_ssh_config_t config = TS_SSH_DEFAULT_CONFIG();
     config.host = host.host;
@@ -1204,7 +1228,8 @@ esp_err_t ts_action_exec_ssh_ref(const ts_auto_action_ssh_ref_t *ssh_ref,
     
     /* Execute command */
     ts_ssh_exec_result_t exec_result = {0};
-    ret = ts_ssh_exec(session, expanded_cmd, &exec_result);
+    const char *cmd_to_exec = cmd_config.nohup ? nohup_cmd : expanded_cmd;
+    ret = ts_ssh_exec(session, cmd_to_exec, &exec_result);
     
     if (ret == ESP_OK) {
         result->exit_code = exec_result.exit_code;

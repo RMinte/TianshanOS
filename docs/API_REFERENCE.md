@@ -532,6 +532,225 @@ POST /api/v1/device/fan/speed
 }
 ```
 
+## 风扇控制 API
+
+### fan.status
+获取风扇状态。
+
+**请求**: `POST /api/v1/fan.status`
+
+**参数**:
+```json
+{}                    // 获取所有风扇
+{"id": 0}            // 获取指定风扇
+```
+
+**响应**:
+```json
+{
+  "code": 0,
+  "data": {
+    "fans": [
+      {
+        "id": 0,
+        "mode": "curve",
+        "duty": 30,
+        "target_duty": 25,
+        "rpm": 0,
+        "temperature": 35.5,
+        "enabled": true,
+        "running": true,
+        "fault": false
+      }
+    ],
+    "temperature": 35.5,
+    "temp_valid": true,
+    "temp_source": "agx.cpu_temp"
+  }
+}
+```
+
+### fan.mode
+设置风扇工作模式。
+
+**请求**:
+```json
+POST /api/v1/fan.mode
+{
+  "id": 0,
+  "mode": "curve"    // "off", "manual", "auto", "curve"
+}
+```
+
+### fan.set
+设置风扇速度（手动模式）。
+
+**请求**:
+```json
+POST /api/v1/fan.set
+{
+  "id": 0,
+  "duty": 75
+}
+```
+
+### fan.curve
+设置温度-转速曲线。
+
+**请求**:
+```json
+POST /api/v1/fan.curve
+{
+  "id": 0,
+  "curve": [
+    {"temp": 30, "duty": 10},
+    {"temp": 50, "duty": 40},
+    {"temp": 70, "duty": 80}
+  ],
+  "hysteresis": 3.0,
+  "min_interval": 2000
+}
+```
+
+**参数说明**:
+- `curve`: 温度-占空比曲线点（温度°C，占空比 0-100%）
+- `hysteresis`: 温度迟滞，防止频繁调速（°C）
+- `min_interval`: 最小调速间隔（毫秒）
+
+### fan.limits
+设置风扇占空比限制。
+
+**请求**:
+```json
+POST /api/v1/fan.limits
+{
+  "id": 0,
+  "min_duty": 10,
+  "max_duty": 100
+}
+```
+
+**响应**:
+```json
+{
+  "code": 0,
+  "data": {
+    "id": 0,
+    "min_duty": 10,
+    "max_duty": 100
+  }
+}
+```
+
+### fan.config
+获取风扇完整配置。
+
+**请求**:
+```json
+POST /api/v1/fan.config
+{
+  "id": 0
+}
+```
+
+**响应**:
+```json
+{
+  "code": 0,
+  "data": {
+    "id": 0,
+    "mode": "curve",
+    "min_duty": 10,
+    "max_duty": 100,
+    "hysteresis": 3.0,
+    "min_interval": 2000,
+    "invert_pwm": false,
+    "curve": [
+      {"temp": 30, "duty": 10},
+      {"temp": 50, "duty": 40},
+      {"temp": 70, "duty": 80}
+    ]
+  }
+}
+```
+
+### fan.save
+保存风扇配置到 NVS。
+
+**请求**:
+```json
+POST /api/v1/fan.save
+{"id": 0}   // 保存指定风扇
+{}          // 保存所有风扇
+```
+
+## 温度源 API
+
+### temp.status
+获取温度状态。
+
+**请求**: `POST /api/v1/temp.status`
+
+**响应**:
+```json
+{
+  "code": 0,
+  "data": {
+    "current_temp": 35.5,
+    "preferred_source": "variable",
+    "active_source": "variable",
+    "bound_variable": "agx.cpu_temp",
+    "manual_mode": false
+  }
+}
+```
+
+### temp.bind
+绑定温度变量。
+
+**请求**:
+```json
+POST /api/v1/temp.bind
+{
+  "variable": "agx.cpu_temp"   // 绑定变量
+}
+
+// 解除绑定
+POST /api/v1/temp.bind
+{
+  "variable": null
+}
+```
+
+### temp.select
+选择温度源。
+
+**请求**:
+```json
+POST /api/v1/temp.select
+{
+  "source": "variable"   // "default", "sensor", "agx", "variable"
+}
+```
+
+### temp.manual
+设置测试温度（手动模式）。
+
+**请求**:
+```json
+POST /api/v1/temp.manual
+{
+  "enable": true,
+  "temperature": 45.0    // 测试温度 (°C)
+}
+
+// 禁用手动模式
+POST /api/v1/temp.manual
+{
+  "enable": false
+}
+```
+
 ## 存储 API
 
 ### storage.status

@@ -481,25 +481,67 @@ async function loadSystemPage() {
                 </div>
             </div>
             
-            <!-- 快捷操作 - 放在首位，方便用户快速执行 -->
-            <div class="section">
-                <div class="section-header">
-                    <h2>⚡ 快捷操作</h2>
-                    <div class="section-actions">
-                        <button class="btn btn-sm" onclick="refreshQuickActions()">🔄 刷新</button>
-                        <button class="btn btn-sm" onclick="router.navigate('/automation')">⚙️ 管理</button>
+            <!-- 设备面板 + 风扇控制 并排 -->
+            <div class="panel-row">
+                <!-- 设备面板 -->
+                <div class="section device-panel-section">
+                    <div class="section-header">
+                        <h2>🖥️ 设备面板</h2>
+                        <div class="section-actions">
+                            <button class="btn btn-sm" onclick="refreshQuickActions();refreshDataWidgets()">🔄</button>
+                            <button class="btn btn-sm" onclick="router.navigate('/automation')">⚡</button>
+                            <button class="btn btn-sm btn-primary" onclick="showWidgetManager()">📊</button>
+                        </div>
+                    </div>
+                    <!-- 快捷操作区域 -->
+                    <div id="quick-actions-grid" class="quick-actions-grid">
+                        <div class="loading-inline">加载中...</div>
+                    </div>
+                    <!-- 分隔线 -->
+                    <div class="device-panel-divider"></div>
+                    <!-- 数据监控区域 -->
+                    <div id="data-widgets-grid" class="data-widgets-grid">
+                        <!-- 动态生成的组件 -->
+                    </div>
+                    <div id="data-widgets-empty" class="data-widgets-empty" style="display:none;">
+                        <div class="empty-icon">📊</div>
+                        <p>还没有添加数据组件</p>
+                        <button class="btn btn-primary" onclick="showWidgetManager()">⚙️ 打开管理面板</button>
                     </div>
                 </div>
-                <div id="quick-actions-grid" class="quick-actions-grid">
-                    <div class="loading-inline">加载中...</div>
-                </div>
-            </div>
-            
-            <!-- 风扇控制 -->
-            <div class="section">
-                <h2>🌀 风扇控制</h2>
-                <div class="fans-grid" id="fans-grid">
-                    <div class="loading">加载中...</div>
+                
+                <!-- 风扇控制 -->
+                <div class="section fan-control-section">
+                    <div class="section-header">
+                        <h2>🌀 风扇控制</h2>
+                        <div class="section-actions">
+                            <button class="btn btn-sm" onclick="refreshFans()">🔄</button>
+                            <button class="btn btn-sm" onclick="showFanCurveModal()">📈 曲线</button>
+                        </div>
+                    </div>
+                    <!-- 温度状态栏 -->
+                    <div class="fan-temp-status-bar" id="fan-temp-status-bar">
+                        <div class="temp-status-item">
+                            <span class="temp-label">🌡️ 有效温度</span>
+                            <span class="temp-value" id="fan-global-temp">--°C</span>
+                        </div>
+                        <div class="temp-status-item">
+                            <span class="temp-label">⚙️ 目标转速</span>
+                            <span class="temp-value" id="fan-global-duty">--%</span>
+                        </div>
+                        <div class="temp-status-item test-temp-control">
+                            <span class="temp-label">🧪 测试温度</span>
+                            <div class="test-temp-input-wrap">
+                                <input type="number" id="fan-test-temp" class="input input-sm" 
+                                       placeholder="--" min="0" max="100" step="1" style="width:60px;">
+                                <button class="btn btn-sm btn-warning" onclick="applyTestTemp()">测试</button>
+                                <button class="btn btn-sm" onclick="clearTestTemp()">清除</button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="fans-grid" id="fans-grid">
+                        <div class="loading">加载中...</div>
+                    </div>
                 </div>
             </div>
             
@@ -545,6 +587,9 @@ async function loadSystemPage() {
     
     // 初始加载
     await refreshSystemPageOnce();
+    
+    // 加载数据监控面板
+    await initDataWidgets();
     
     // 订阅 WebSocket 实时更新 - 使用聚合订阅（system.dashboard）
     if (subscriptionManager) {
@@ -824,23 +869,110 @@ function updatePowerInfo(data) {
 // 更新风扇信息
 function updateFanInfo(data) {
     const container = document.getElementById('fans-grid');
+    
+    // 更新全局温度状态栏（从 data.temperature 获取绑定变量的温度）
+    const globalTempEl = document.getElementById('fan-global-temp');
+    const globalDutyEl = document.getElementById('fan-global-duty');
+    if (globalTempEl && data?.temperature !== undefined) {
+        const temp = typeof data.temperature === 'number' ? data.temperature.toFixed(1) : '--';
+        globalTempEl.textContent = `${temp}°C`;
+        globalTempEl.style.color = data.temp_valid ? 'var(--primary)' : 'var(--warning)';
+    }
+    if (globalDutyEl && data?.fans?.length > 0) {
+        // 显示第一个曲线模式风扇的目标转速，或平均值
+        const curveFan = data.fans.find(f => f.mode === 'curve');
+        if (curveFan) {
+            globalDutyEl.textContent = `${curveFan.speed || curveFan.duty || 0}%`;
+        } else {
+            const avgDuty = Math.round(data.fans.reduce((s, f) => s + (f.speed || f.duty || 0), 0) / data.fans.length);
+            globalDutyEl.textContent = `${avgDuty}%`;
+        }
+    }
+    
     if (data?.fans && data.fans.length > 0) {
-        container.innerHTML = data.fans.map(fan => `
-            <div class="fan-card">
-                <h4>🌀 风扇 ${fan.id}</h4>
-                <p><strong>模式:</strong> ${fan.mode || 'auto'}</p>
-                <p><strong>转速:</strong> ${fan.speed || fan.duty || 0}%</p>
-                <p><strong>RPM:</strong> ${fan.rpm || '-'}</p>
-                <div class="fan-slider">
-                    <input type="range" min="0" max="100" value="${fan.speed || fan.duty || 0}" 
-                           onchange="setFanSpeed(${fan.id}, this.value)"
-                           oninput="this.nextElementSibling.textContent = this.value + '%'">
-                    <span>${fan.speed || fan.duty || 0}%</span>
+        container.innerHTML = data.fans.map(fan => {
+            const mode = fan.mode || 'auto';
+            const duty = fan.speed || fan.duty || 0;
+            const rpm = fan.rpm || 0;
+            const isManual = mode === 'manual';
+            const isOff = mode === 'off';
+            
+            const modeInfo = {
+                'off':    { label: '关闭', color: '#6b7280', icon: '⏹' },
+                'manual': { label: '手动', color: '#f59e0b', icon: '✋' },
+                'auto':   { label: '自动', color: '#10b981', icon: '⚙️' },
+                'curve':  { label: '曲线', color: '#3b82f6', icon: '📈' }
+            };
+            const currentMode = modeInfo[mode] || modeInfo['auto'];
+            
+            return `
+            <div class="fan-card ${isOff ? 'is-off' : ''}">
+                <!-- 顶部：风扇名 + 状态 -->
+                <div class="fan-header">
+                    <span class="fan-title">🌀 风扇 ${fan.id}</span>
+                    <span class="fan-status-badge" style="background:${currentMode.color}20;color:${currentMode.color}">
+                        ${currentMode.icon} ${currentMode.label}
+                    </span>
                 </div>
+                
+                <!-- 中间：大转速数字 -->
+                <div class="fan-speed-display">
+                    <span class="fan-speed-num">${duty}</span>
+                    <span class="fan-speed-percent">%</span>
+                    ${rpm > 0 ? `<div class="fan-rpm-small">${rpm} RPM</div>` : ''}
+                </div>
+                
+                <!-- 模式选择 -->
+                <div class="fan-mode-tabs">
+                    <button class="fan-mode-tab ${mode === 'off' ? 'active off' : ''}" 
+                            onclick="setFanMode(${fan.id}, 'off')">关闭</button>
+                    <button class="fan-mode-tab ${mode === 'manual' ? 'active manual' : ''}" 
+                            onclick="setFanMode(${fan.id}, 'manual')">手动</button>
+                    <button class="fan-mode-tab ${mode === 'auto' ? 'active auto' : ''}" 
+                            onclick="setFanMode(${fan.id}, 'auto')">自动</button>
+                    <button class="fan-mode-tab ${mode === 'curve' ? 'active curve' : ''}" 
+                            onclick="setFanMode(${fan.id}, 'curve')">曲线</button>
+                </div>
+                
+                <!-- 速度调节滑块 -->
+                <div class="fan-slider-wrap ${isManual ? '' : 'disabled'}">
+                    <div class="fan-slider-label">
+                        <span>转速调节</span>
+                        <span class="fan-slider-value">${duty}%</span>
+                    </div>
+                    <input type="range" class="fan-slider" min="0" max="100" value="${duty}" 
+                           id="fan-slider-${fan.id}"
+                           onchange="setFanSpeed(${fan.id}, this.value)"
+                           oninput="updateFanSliderUI(${fan.id}, this.value)"
+                           ${!isManual ? 'disabled title="切换到手动模式后可调节"' : ''}>
+                </div>
+                
+                <!-- 底部操作 -->
+                ${mode === 'curve' ? `
+                <button class="fan-curve-btn" onclick="showFanCurveModal(${fan.id})">
+                    ⚙️ 编辑温度曲线
+                </button>` : ''}
             </div>
-        `).join('');
+        `;
+        }).join('');
     } else {
         container.innerHTML = '<p class="text-muted">无可用风扇</p>';
+    }
+}
+
+// 更新滑块 UI（实时反馈）
+function updateFanSliderUI(fanId, value) {
+    const slider = document.getElementById(`fan-slider-${fanId}`);
+    if (!slider) return;
+    
+    const card = slider.closest('.fan-card');
+    if (card) {
+        // 更新大数字
+        const numSpan = card.querySelector('.fan-speed-num');
+        if (numSpan) numSpan.textContent = value;
+        // 更新滑块旁边的值
+        const valSpan = card.querySelector('.fan-slider-value');
+        if (valSpan) valSpan.textContent = value + '%';
     }
 }
 
@@ -886,6 +1018,57 @@ function showServicesModal() {
     if (modal) modal.classList.remove('hidden');
 }
 
+/**
+ * 应用测试温度
+ */
+async function applyTestTemp() {
+    const input = document.getElementById('fan-test-temp');
+    const temp = parseFloat(input?.value);
+    
+    if (isNaN(temp) || temp < 0 || temp > 100) {
+        showToast('请输入有效温度 (0-100°C)', 'warning');
+        return;
+    }
+    
+    try {
+        // 使用 temp.manual API 设置手动温度
+        const result = await api.call('temp.manual', { temperature: temp });
+        
+        if (result.code === 0) {
+            showToast(`测试温度已设置为 ${temp}°C`, 'success');
+            // 刷新风扇状态
+            await refreshFans();
+        } else {
+            showToast(`设置失败: ${result.message}`, 'error');
+        }
+    } catch (e) {
+        console.error('设置测试温度失败:', e);
+        showToast(`设置失败: ${e.message}`, 'error');
+    }
+}
+
+/**
+ * 清除测试温度（恢复正常模式）
+ */
+async function clearTestTemp() {
+    try {
+        // 清除手动温度，恢复自动模式
+        const result = await api.call('temp.select', { source: 'variable' });
+        
+        if (result.code === 0) {
+            showToast('测试温度已清除，恢复正常模式', 'success');
+            document.getElementById('fan-test-temp').value = '';
+            // 刷新风扇状态
+            await refreshFans();
+        } else {
+            showToast(`清除失败: ${result.message}`, 'error');
+        }
+    } catch (e) {
+        console.error('清除测试温度失败:', e);
+        showToast(`清除失败: ${e.message}`, 'error');
+    }
+}
+
 function hideServicesModal() {
     const modal = document.getElementById('services-modal');
     if (modal) modal.classList.add('hidden');
@@ -896,6 +1079,738 @@ async function setFanSpeed(id, speed) {
         await api.fanSet(id, parseInt(speed));
         showToast(`风扇 ${id} 速度已设置为 ${speed}%`, 'success');
     } catch (e) { showToast('设置风扇失败: ' + e.message, 'error'); }
+}
+
+async function setFanMode(id, mode) {
+    try {
+        await api.call('fan.mode', { id: id, mode: mode });
+        showToast(`风扇 ${id} 模式已切换为 ${mode}`, 'success');
+        await refreshFans();
+    } catch (e) { showToast('设置风扇模式失败: ' + e.message, 'error'); }
+}
+
+async function refreshFans() {
+    try {
+        const result = await api.call('fan.status');
+        if (result.data) {
+            updateFanInfo(result.data);
+        }
+    } catch (e) { console.error('刷新风扇状态失败:', e); }
+}
+
+/*===========================================================================*/
+/*                          风扇曲线管理                                       */
+/*===========================================================================*/
+
+// 存储当前编辑的风扇曲线配置
+let fanCurveConfig = {
+    fanId: 0,
+    hysteresis: 3.0,
+    minInterval: 2000,
+    minDuty: 20,
+    maxDuty: 100,
+    curve: [
+        { temp: 30, duty: 30 },
+        { temp: 50, duty: 60 },
+        { temp: 70, duty: 100 }
+    ]
+};
+
+/**
+ * 显示风扇曲线管理模态框
+ */
+async function showFanCurveModal(fanId = 0) {
+    fanCurveConfig.fanId = fanId;
+    
+    // 从设备加载配置
+    try {
+        const result = await api.call('fan.config', { id: fanId });
+        if (result.code === 0 && result.data) {
+            const cfg = result.data;
+            if (cfg.curve && cfg.curve.length >= 2) {
+                fanCurveConfig.curve = cfg.curve;
+            }
+            if (typeof cfg.hysteresis === 'number') {
+                fanCurveConfig.hysteresis = cfg.hysteresis;
+            }
+            if (typeof cfg.min_interval === 'number') {
+                fanCurveConfig.minInterval = cfg.min_interval;
+            }
+            if (typeof cfg.min_duty === 'number') {
+                fanCurveConfig.minDuty = cfg.min_duty;
+            }
+            if (typeof cfg.max_duty === 'number') {
+                fanCurveConfig.maxDuty = cfg.max_duty;
+            }
+            console.log('从设备加载风扇配置:', cfg);
+        }
+    } catch (e) {
+        console.warn('从设备加载配置失败，使用默认值:', e);
+    }
+    
+    const modal = document.createElement('div');
+    modal.id = 'fan-curve-modal';
+    modal.className = 'modal show';
+    modal.onclick = (e) => { if (e.target === modal) closeFanCurveModal(); };
+    
+    modal.innerHTML = `
+        <div class="modal-content" style="max-width:650px;">
+            <div class="modal-header">
+                <h3>📈 风扇曲线管理</h3>
+                <button class="modal-close" onclick="closeFanCurveModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <!-- 风扇选择 -->
+                <div class="form-group">
+                    <label>选择风扇</label>
+                    <select id="fan-curve-fan-select" class="input" onchange="updateFanCurvePreview()">
+                        <option value="0">风扇 0</option>
+                        <option value="1">风扇 1</option>
+                        <option value="2">风扇 2</option>
+                        <option value="3">风扇 3</option>
+                    </select>
+                </div>
+                
+                <!-- 温度变量绑定 -->
+                <div class="form-group" style="background:var(--bg-tertiary); border-radius:8px; padding:12px;">
+                    <label style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                        <span>🌡️ 绑定温度变量</span>
+                        <div style="display:flex; gap:8px; align-items:center;">
+                            <span id="variable-bind-status" class="badge badge-secondary">未绑定</span>
+                            <div id="fan-curve-temp-current" style="
+                                padding:4px 12px; background:var(--bg-secondary); border-radius:6px;
+                                font-size:16px; font-weight:bold; color:var(--primary);">
+                                --°C
+                            </div>
+                        </div>
+                    </label>
+                    <div style="display:flex; gap:8px; align-items:center;">
+                        <select id="temp-variable-select" class="input" style="flex:1;">
+                            <option value="">-- 选择变量 --</option>
+                        </select>
+                        <button class="btn btn-sm btn-primary" onclick="bindTempVariable()">💾 绑定</button>
+                        <button class="btn btn-sm btn-secondary" onclick="unbindTempVariable()">🗑️</button>
+                    </div>
+                    <small class="form-hint" id="temp-source-hint" style="margin-top:4px;">
+                        选择一个浮点类型变量作为温度源（如 agx.cpu_temp）
+                    </small>
+                </div>
+                
+                <!-- 曲线点编辑 -->
+                <div class="form-group">
+                    <label style="display:flex;justify-content:space-between;align-items:center;">
+                        <span>📊 温度-转速曲线</span>
+                        <button class="btn btn-sm btn-success" onclick="addCurvePoint()">➕ 添加点</button>
+                    </label>
+                    <div id="fan-curve-points" class="fan-curve-points">
+                        ${renderCurvePoints()}
+                    </div>
+                    <small class="form-hint">温度低于最小点时使用最小转速，高于最大点时使用最大转速</small>
+                </div>
+                
+                <!-- 曲线预览 -->
+                <div class="form-group">
+                    <label>📈 曲线预览</label>
+                    <div class="fan-curve-preview">
+                        <canvas id="fan-curve-canvas" width="560" height="200"></canvas>
+                    </div>
+                </div>
+                
+                <!-- 占空比限制 -->
+                <div class="form-row">
+                    <div class="form-group" style="flex:1;">
+                        <label>最小占空比 (%)</label>
+                        <input type="number" id="fan-curve-min-duty" class="input" 
+                               value="${fanCurveConfig.minDuty}" min="0" max="100" step="1">
+                        <small class="form-hint">低于此值时的最低转速</small>
+                    </div>
+                    <div class="form-group" style="flex:1;">
+                        <label>最大占空比 (%)</label>
+                        <input type="number" id="fan-curve-max-duty" class="input" 
+                               value="${fanCurveConfig.maxDuty}" min="0" max="100" step="1">
+                        <small class="form-hint">高于此值时的最高转速</small>
+                    </div>
+                </div>
+                
+                <!-- 迟滞设置 -->
+                <div class="form-row">
+                    <div class="form-group" style="flex:1;">
+                        <label>温度迟滞 (°C)</label>
+                        <input type="number" id="fan-curve-hysteresis" class="input" 
+                               value="${fanCurveConfig.hysteresis}" min="0" max="20" step="0.5">
+                        <small class="form-hint">防止频繁调速</small>
+                    </div>
+                    <div class="form-group" style="flex:1;">
+                        <label>最小间隔 (ms)</label>
+                        <input type="number" id="fan-curve-interval" class="input" 
+                               value="${fanCurveConfig.minInterval}" min="500" max="30000" step="100">
+                        <small class="form-hint">调速最小时间间隔</small>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn" onclick="closeFanCurveModal()">取消</button>
+                <button class="btn btn-primary" onclick="applyFanCurve()">✅ 应用曲线</button>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+    
+    // 设置当前风扇
+    document.getElementById('fan-curve-fan-select').value = fanId;
+    
+    // 加载温度源状态
+    loadTempSourceStatus();
+    
+    // 绘制曲线预览
+    setTimeout(() => drawCurvePreview(), 50);
+}
+
+/**
+ * 关闭风扇曲线模态框
+ */
+function closeFanCurveModal() {
+    const modal = document.getElementById('fan-curve-modal');
+    if (modal) modal.remove();
+}
+
+/**
+ * 渲染曲线点列表
+ */
+function renderCurvePoints() {
+    return fanCurveConfig.curve.map((point, index) => `
+        <div class="curve-point-row" data-index="${index}">
+            <div class="curve-point-inputs">
+                <div class="curve-point-field">
+                    <span class="field-icon">🌡️</span>
+                    <input type="number" class="input curve-temp-input" 
+                           value="${point.temp}" min="-20" max="120" step="1"
+                           onchange="updateCurvePoint(${index}, 'temp', this.value)"
+                           placeholder="温度">
+                    <span class="field-unit">°C</span>
+                </div>
+                <span class="curve-arrow">→</span>
+                <div class="curve-point-field">
+                    <span class="field-icon">🌀</span>
+                    <input type="number" class="input curve-duty-input" 
+                           value="${point.duty}" min="0" max="100" step="1"
+                           onchange="updateCurvePoint(${index}, 'duty', this.value)"
+                           placeholder="转速">
+                    <span class="field-unit">%</span>
+                </div>
+            </div>
+            <button class="btn btn-sm btn-danger curve-point-delete" 
+                    onclick="removeCurvePoint(${index})" 
+                    ${fanCurveConfig.curve.length <= 2 ? 'disabled' : ''}>
+                🗑️
+            </button>
+        </div>
+    `).join('');
+}
+
+/**
+ * 添加曲线点
+ */
+function addCurvePoint() {
+    if (fanCurveConfig.curve.length >= 10) {
+        showToast('最多支持 10 个曲线点', 'warning');
+        return;
+    }
+    
+    // 在最后一个点后添加
+    const lastPoint = fanCurveConfig.curve[fanCurveConfig.curve.length - 1];
+    const newTemp = Math.min(lastPoint.temp + 10, 100);
+    const newDuty = Math.min(lastPoint.duty + 10, 100);
+    
+    fanCurveConfig.curve.push({ temp: newTemp, duty: newDuty });
+    refreshCurveEditor();
+}
+
+/**
+ * 删除曲线点
+ */
+function removeCurvePoint(index) {
+    if (fanCurveConfig.curve.length <= 2) {
+        showToast('至少需要 2 个曲线点', 'warning');
+        return;
+    }
+    fanCurveConfig.curve.splice(index, 1);
+    refreshCurveEditor();
+}
+
+/**
+ * 更新曲线点
+ */
+function updateCurvePoint(index, field, value) {
+    fanCurveConfig.curve[index][field] = parseFloat(value);
+    // 排序（按温度升序）
+    fanCurveConfig.curve.sort((a, b) => a.temp - b.temp);
+    drawCurvePreview();
+}
+
+/**
+ * 刷新曲线编辑器
+ */
+function refreshCurveEditor() {
+    // 按温度排序
+    fanCurveConfig.curve.sort((a, b) => a.temp - b.temp);
+    
+    const container = document.getElementById('fan-curve-points');
+    if (container) {
+        container.innerHTML = renderCurvePoints();
+    }
+    drawCurvePreview();
+}
+
+/**
+ * 绘制曲线预览
+ */
+function drawCurvePreview() {
+    const canvas = document.getElementById('fan-curve-canvas');
+    if (!canvas) return;
+    
+    const ctx = canvas.getContext('2d');
+    const width = canvas.width;
+    const height = canvas.height;
+    const padding = { top: 20, right: 20, bottom: 35, left: 45 };
+    const plotWidth = width - padding.left - padding.right;
+    const plotHeight = height - padding.top - padding.bottom;
+    
+    // 清空画布
+    ctx.fillStyle = getComputedStyle(document.body).getPropertyValue('--bg-card').trim() || '#1a1a2e';
+    ctx.fillRect(0, 0, width, height);
+    
+    // 绘制网格
+    ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+    ctx.lineWidth = 1;
+    
+    // 垂直网格线 (温度轴)
+    for (let t = 0; t <= 100; t += 20) {
+        const x = padding.left + (t / 100) * plotWidth;
+        ctx.beginPath();
+        ctx.moveTo(x, padding.top);
+        ctx.lineTo(x, height - padding.bottom);
+        ctx.stroke();
+    }
+    
+    // 水平网格线 (转速轴)
+    for (let d = 0; d <= 100; d += 20) {
+        const y = height - padding.bottom - (d / 100) * plotHeight;
+        ctx.beginPath();
+        ctx.moveTo(padding.left, y);
+        ctx.lineTo(width - padding.right, y);
+        ctx.stroke();
+    }
+    
+    // 绘制坐标轴
+    ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(padding.left, padding.top);
+    ctx.lineTo(padding.left, height - padding.bottom);
+    ctx.lineTo(width - padding.right, height - padding.bottom);
+    ctx.stroke();
+    
+    // 坐标轴标签
+    ctx.fillStyle = 'rgba(255,255,255,0.7)';
+    ctx.font = '11px system-ui';
+    ctx.textAlign = 'center';
+    
+    // X 轴标签
+    for (let t = 0; t <= 100; t += 20) {
+        const x = padding.left + (t / 100) * plotWidth;
+        ctx.fillText(`${t}°C`, x, height - 8);
+    }
+    
+    // Y 轴标签
+    ctx.textAlign = 'right';
+    for (let d = 0; d <= 100; d += 20) {
+        const y = height - padding.bottom - (d / 100) * plotHeight;
+        ctx.fillText(`${d}%`, padding.left - 8, y + 4);
+    }
+    
+    // 绘制曲线
+    if (fanCurveConfig.curve.length < 2) return;
+    
+    const points = [...fanCurveConfig.curve].sort((a, b) => a.temp - b.temp);
+    
+    // 曲线路径
+    ctx.beginPath();
+    ctx.strokeStyle = '#4fc3f7';
+    ctx.lineWidth = 3;
+    
+    // 左侧延伸线（低于最低温度）
+    const firstPoint = points[0];
+    const firstX = padding.left;
+    const firstY = height - padding.bottom - (firstPoint.duty / 100) * plotHeight;
+    ctx.moveTo(firstX, firstY);
+    ctx.lineTo(padding.left + (firstPoint.temp / 100) * plotWidth, firstY);
+    
+    // 曲线点连接
+    points.forEach((point, i) => {
+        const x = padding.left + (point.temp / 100) * plotWidth;
+        const y = height - padding.bottom - (point.duty / 100) * plotHeight;
+        ctx.lineTo(x, y);
+    });
+    
+    // 右侧延伸线（高于最高温度）
+    const lastPoint = points[points.length - 1];
+    const lastX = padding.left + (lastPoint.temp / 100) * plotWidth;
+    const lastY = height - padding.bottom - (lastPoint.duty / 100) * plotHeight;
+    ctx.lineTo(width - padding.right, lastY);
+    
+    ctx.stroke();
+    
+    // 填充区域
+    ctx.lineTo(width - padding.right, height - padding.bottom);
+    ctx.lineTo(padding.left, height - padding.bottom);
+    ctx.closePath();
+    ctx.fillStyle = 'rgba(79, 195, 247, 0.15)';
+    ctx.fill();
+    
+    // 绘制曲线点
+    points.forEach((point, i) => {
+        const x = padding.left + (point.temp / 100) * plotWidth;
+        const y = height - padding.bottom - (point.duty / 100) * plotHeight;
+        
+        // 点
+        ctx.beginPath();
+        ctx.arc(x, y, 6, 0, Math.PI * 2);
+        ctx.fillStyle = '#4fc3f7';
+        ctx.fill();
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        
+        // 标签
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 10px system-ui';
+        ctx.textAlign = 'center';
+        ctx.fillText(`${point.temp}°/${point.duty}%`, x, y - 12);
+    });
+}
+
+/**
+ * 加载温度源状态
+ */
+async function loadTempSourceStatus() {
+    try {
+        const result = await api.call('temp.status');
+        
+        if (result.code === 0 && result.data) {
+            const data = result.data;
+            
+            // 更新当前温度显示
+            const tempEl = document.getElementById('fan-curve-temp-current');
+            if (tempEl) {
+                const temp = data.temperature_c?.toFixed(1) || '--';
+                tempEl.textContent = `${temp}°C`;
+                tempEl.style.color = data.valid ? 'var(--primary)' : 'var(--warning)';
+            }
+            
+            // 更新提示信息
+            const hintEl = document.getElementById('temp-source-hint');
+            if (hintEl && data.bound_variable) {
+                hintEl.textContent = `当前绑定: ${data.bound_variable}`;
+            }
+        }
+        
+        // 加载变量绑定状态
+        await loadVariableBindStatus();
+        
+    } catch (e) {
+        console.error('获取温度源状态失败:', e);
+        const tempEl = document.getElementById('fan-curve-temp-current');
+        if (tempEl) {
+            tempEl.textContent = '??°C';
+            tempEl.style.color = 'var(--error)';
+        }
+    }
+}
+
+/**
+ * 加载变量绑定状态和变量列表
+ */
+async function loadVariableBindStatus() {
+    try {
+        // 获取当前绑定状态
+        const bindResult = await api.call('temp.bind');
+        const statusEl = document.getElementById('variable-bind-status');
+        const selectEl = document.getElementById('temp-variable-select');
+        
+        if (bindResult.code === 0 && bindResult.data) {
+            const boundVar = bindResult.data.bound_variable;
+            if (statusEl) {
+                if (boundVar) {
+                    statusEl.textContent = `已绑定: ${boundVar}`;
+                    statusEl.className = 'badge badge-success';
+                } else {
+                    statusEl.textContent = '未绑定';
+                    statusEl.className = 'badge badge-secondary';
+                }
+            }
+            
+            // 设置选择器当前值
+            if (selectEl && boundVar) {
+                // 先检查选项是否存在，如果不存在则添加临时选项
+                let optionExists = false;
+                for (let opt of selectEl.options) {
+                    if (opt.value === boundVar) {
+                        optionExists = true;
+                        break;
+                    }
+                }
+                if (!optionExists) {
+                    const tempOpt = document.createElement('option');
+                    tempOpt.value = boundVar;
+                    tempOpt.textContent = `📊 ${boundVar} (当前)`;
+                    selectEl.appendChild(tempOpt);
+                }
+                selectEl.value = boundVar;
+            }
+        }
+        
+        // 获取可用变量列表
+        const varsResult = await api.call('automation.variables.list');
+        if (varsResult.code === 0 && varsResult.data?.variables && selectEl) {
+            // 保存当前选中值
+            const currentVal = selectEl.value;
+            
+            // 清空并重建选项
+            selectEl.innerHTML = '<option value="">-- 选择变量 --</option>';
+            
+            // 过滤并添加浮点类型变量（温度相关）
+            const tempVars = varsResult.data.variables.filter(v => 
+                v.type === 'float' || v.type === 'double' || v.type === 'number' ||
+                v.name.includes('temp') || v.name.includes('cpu') || v.name.includes('gpu')
+            );
+            
+            // 先添加温度相关的变量（优先显示）
+            const priorityVars = tempVars.filter(v => v.name.includes('temp'));
+            const otherVars = tempVars.filter(v => !v.name.includes('temp'));
+            
+            if (priorityVars.length > 0) {
+                const group1 = document.createElement('optgroup');
+                group1.label = '🌡️ 温度变量';
+                priorityVars.forEach(v => {
+                    const opt = document.createElement('option');
+                    opt.value = v.name;
+                    opt.textContent = `${v.name} (${v.value?.toFixed?.(1) || v.value})`;
+                    group1.appendChild(opt);
+                });
+                selectEl.appendChild(group1);
+            }
+            
+            if (otherVars.length > 0) {
+                const group2 = document.createElement('optgroup');
+                group2.label = '📊 其他数值变量';
+                otherVars.forEach(v => {
+                    const opt = document.createElement('option');
+                    opt.value = v.name;
+                    opt.textContent = `${v.name} (${v.value?.toFixed?.(1) || v.value})`;
+                    group2.appendChild(opt);
+                });
+                selectEl.appendChild(group2);
+            }
+            
+            // 如果没有找到匹配变量，显示所有浮点变量
+            if (tempVars.length === 0) {
+                const allFloats = varsResult.data.variables.filter(v => 
+                    v.type === 'float' || v.type === 'double' || typeof v.value === 'number'
+                );
+                allFloats.forEach(v => {
+                    const opt = document.createElement('option');
+                    opt.value = v.name;
+                    opt.textContent = `${v.name} (${v.value?.toFixed?.(1) || v.value})`;
+                    selectEl.appendChild(opt);
+                });
+            }
+            
+            // 恢复选中值
+            if (currentVal) {
+                selectEl.value = currentVal;
+            }
+        }
+    } catch (e) {
+        console.error('加载变量绑定状态失败:', e);
+    }
+}
+
+/**
+ * 绑定温度变量
+ */
+async function bindTempVariable() {
+    const selectEl = document.getElementById('temp-variable-select');
+    const varName = selectEl?.value;
+    
+    if (!varName) {
+        showToast('请选择要绑定的变量', 'warning');
+        return;
+    }
+    
+    try {
+        // 绑定变量
+        const result = await api.call('temp.bind', { variable: varName });
+        
+        if (result.code === 0) {
+            // 自动切换到变量模式
+            await api.call('temp.select', { source: 'variable' });
+            
+            showToast(`温度已绑定到变量: ${varName}`, 'success');
+            
+            // 刷新状态
+            await loadTempSourceStatus();
+        } else {
+            showToast(`绑定失败: ${result.message}`, 'error');
+        }
+    } catch (e) {
+        console.error('绑定温度变量失败:', e);
+        showToast(`绑定失败: ${e.message}`, 'error');
+    }
+}
+
+/**
+ * 解绑温度变量
+ */
+async function unbindTempVariable() {
+    try {
+        const result = await api.call('temp.bind', { variable: null });
+        
+        if (result.code === 0) {
+            showToast('温度变量绑定已解除', 'success');
+            
+            // 刷新状态
+            await loadTempSourceStatus();
+        } else {
+            showToast(`解绑失败: ${result.message}`, 'error');
+        }
+    } catch (e) {
+        console.error('解绑温度变量失败:', e);
+        showToast(`解绑失败: ${e.message}`, 'error');
+    }
+}
+
+/**
+ * 保存 AGX 服务器配置 (保留用于兼容)
+ */
+async function saveAgxConfig() {
+    showToast('AGX 配置已移至变量绑定', 'info');
+    await loadVariableBindStatus();
+}
+
+/**
+ * 应用风扇曲线
+ */
+async function applyFanCurve() {
+    const fanId = parseInt(document.getElementById('fan-curve-fan-select').value);
+    const hysteresis = parseFloat(document.getElementById('fan-curve-hysteresis').value);
+    const minInterval = parseInt(document.getElementById('fan-curve-interval').value);
+    const minDuty = parseInt(document.getElementById('fan-curve-min-duty').value);
+    const maxDuty = parseInt(document.getElementById('fan-curve-max-duty').value);
+    
+    // 验证
+    if (fanCurveConfig.curve.length < 2) {
+        showToast('至少需要 2 个曲线点', 'error');
+        return;
+    }
+    
+    if (minDuty > maxDuty) {
+        showToast('最小占空比不能大于最大占空比', 'error');
+        return;
+    }
+    
+    // 排序曲线点
+    const sortedCurve = [...fanCurveConfig.curve].sort((a, b) => a.temp - b.temp);
+    
+    try {
+        // 1. 设置占空比限制
+        const limitsResult = await api.call('fan.limits', {
+            id: fanId,
+            min_duty: minDuty,
+            max_duty: maxDuty
+        });
+        
+        if (limitsResult.code !== 0) {
+            throw new Error(limitsResult.message || '设置占空比限制失败');
+        }
+        
+        // 2. 设置曲线（同时传递 hysteresis 和 min_interval，会自动保存到 NVS）
+        const curveResult = await api.call('fan.curve', {
+            id: fanId,
+            curve: sortedCurve,
+            hysteresis: hysteresis,
+            min_interval: minInterval
+        });
+        
+        if (curveResult.code !== 0) {
+            throw new Error(curveResult.message || '设置曲线失败');
+        }
+        
+        // 3. 切换到曲线模式
+        const modeResult = await api.call('fan.mode', {
+            id: fanId,
+            mode: 'curve'
+        });
+        
+        if (modeResult.code !== 0) {
+            throw new Error(modeResult.message || '切换模式失败');
+        }
+        
+        showToast(`风扇 ${fanId} 曲线已应用并保存`, 'success');
+        closeFanCurveModal();
+        
+        // 刷新风扇状态
+        await refreshFans();
+        
+    } catch (e) {
+        console.error('应用曲线失败:', e);
+        showToast('应用曲线失败: ' + e.message, 'error');
+    }
+}
+
+/**
+ * 更新曲线预览（风扇选择变化时）
+ */
+async function updateFanCurvePreview() {
+    const newFanId = parseInt(document.getElementById('fan-curve-fan-select').value);
+    
+    // 如果切换了风扇，重新加载该风扇的配置
+    if (newFanId !== fanCurveConfig.fanId) {
+        fanCurveConfig.fanId = newFanId;
+        
+        try {
+            const result = await api.call('fan.config', { id: newFanId });
+            if (result.code === 0 && result.data) {
+                const cfg = result.data;
+                if (cfg.curve && cfg.curve.length >= 2) {
+                    fanCurveConfig.curve = cfg.curve;
+                }
+                if (typeof cfg.hysteresis === 'number') {
+                    fanCurveConfig.hysteresis = cfg.hysteresis;
+                    document.getElementById('fan-curve-hysteresis').value = cfg.hysteresis;
+                }
+                if (typeof cfg.min_interval === 'number') {
+                    fanCurveConfig.minInterval = cfg.min_interval;
+                    document.getElementById('fan-curve-interval').value = cfg.min_interval;
+                }
+                if (typeof cfg.min_duty === 'number') {
+                    fanCurveConfig.minDuty = cfg.min_duty;
+                    document.getElementById('fan-curve-min-duty').value = cfg.min_duty;
+                }
+                if (typeof cfg.max_duty === 'number') {
+                    fanCurveConfig.maxDuty = cfg.max_duty;
+                    document.getElementById('fan-curve-max-duty').value = cfg.max_duty;
+                }
+                // 刷新曲线点编辑器
+                refreshCurveEditor();
+            }
+        } catch (e) {
+            console.warn('加载风扇配置失败:', e);
+        }
+    }
+    
+    drawCurvePreview();
 }
 
 async function serviceAction(name, action) {
@@ -970,6 +1885,1354 @@ async function refreshSystemLeds() {
     }
 }
 
+// ==================== 数据监控面板 - 动态可视化组件系统 ====================
+
+/**
+ * 可用的组件类型定义
+ */
+const WIDGET_TYPES = {
+    ring: {
+        name: '环形进度',
+        icon: '⭕',
+        description: '圆环百分比，适合 CPU/内存/磁盘使用率',
+        defaultConfig: { min: 0, max: 100, unit: '%', color: '#4dabf7', decimals: 0 }
+    },
+    gauge: {
+        name: '仪表盘',
+        icon: '🎯',
+        description: '半圆仪表，适合带刻度的数值',
+        defaultConfig: { min: 0, max: 100, unit: '', color: '#69db7c', decimals: 1 }
+    },
+    temp: {
+        name: '温度计',
+        icon: '🌡️',
+        description: '垂直温度条，颜色随温度变化',
+        defaultConfig: { min: 0, max: 100, unit: '°C', color: '#ff8787', decimals: 0 }
+    },
+    number: {
+        name: '数字',
+        icon: '🔢',
+        description: '大号数字显示，适合功率/电压/电流',
+        defaultConfig: { unit: 'W', color: '#74c0fc', icon: '⚡', decimals: 1 }
+    },
+    bar: {
+        name: '进度条',
+        icon: '📊',
+        description: '水平进度条',
+        defaultConfig: { min: 0, max: 100, unit: '%', color: '#ffd43b', decimals: 1 }
+    },
+    text: {
+        name: '文本',
+        icon: '📝',
+        description: '显示文本或格式化字符串',
+        defaultConfig: { unit: '', color: '#868e96' }
+    },
+    status: {
+        name: '状态灯',
+        icon: '🔴',
+        description: '根据值显示不同颜色状态',
+        defaultConfig: { thresholds: [0, 50, 80], colors: ['#40c057', '#fab005', '#fa5252'] }
+    },
+    icon: {
+        name: '图标状态',
+        icon: '🎭',
+        description: '根据值显示不同图标',
+        defaultConfig: { icons: { '0': '❌', '1': '✅', 'default': '❓' } }
+    },
+    dual: {
+        name: '双数值',
+        icon: '📈',
+        description: '主值+副值，适合显示当前/最大等',
+        defaultConfig: { unit: '', color: '#74c0fc', decimals: 1 }
+    },
+    percent: {
+        name: '百分比',
+        icon: '💯',
+        description: '大号百分比数字',
+        defaultConfig: { min: 0, max: 100, color: '#4dabf7', decimals: 0 }
+    },
+    log: {
+        name: '日志流',
+        icon: '📜',
+        description: '从变量读取日志文本流，支持手动刷新',
+        defaultConfig: { maxLines: 15, color: '#495057', fullWidth: true }
+    }
+};
+
+/**
+ * 布局选项定义
+ */
+const LAYOUT_OPTIONS = {
+    width: [
+        { value: 'auto', label: '自动', desc: '根据内容自适应' },
+        { value: 'small', label: '小', desc: '1/4 宽度' },
+        { value: 'medium', label: '中', desc: '1/2 宽度' },
+        { value: 'large', label: '大', desc: '3/4 宽度' },
+        { value: 'full', label: '整行', desc: '独占一整行' }
+    ]
+};
+
+/**
+ * 预设组件模板
+ */
+const WIDGET_PRESETS = [
+    { id: 'cpu', label: 'CPU', type: 'ring', icon: '💻', color: '#4dabf7', unit: '%' },
+    { id: 'mem', label: '内存', type: 'ring', icon: '🧠', color: '#69db7c', unit: '%' },
+    { id: 'disk', label: '硬盘', type: 'ring', icon: '💾', color: '#ffd43b', unit: '%' },
+    { id: 'temp', label: '温度', type: 'temp', icon: '🌡️', color: '#ff8787', unit: '°C' },
+    { id: 'gpu', label: 'GPU', type: 'ring', icon: '🎮', color: '#da77f2', unit: '%' },
+    { id: 'power', label: '功耗', type: 'number', icon: '⚡', color: '#74c0fc', unit: 'W' },
+    { id: 'voltage', label: '电压', type: 'number', icon: '🔌', color: '#ffa94d', unit: 'V' },
+    { id: 'current', label: '电流', type: 'number', icon: '💡', color: '#ff6b6b', unit: 'A' },
+    { id: 'network', label: '网速', type: 'bar', icon: '🌐', color: '#38d9a9', unit: 'Mbps' },
+    { id: 'status', label: '状态', type: 'status', icon: '🔴', color: '#40c057', unit: '' },
+    { id: 'uptime', label: '运行时间', type: 'text', icon: '⏱️', color: '#868e96', unit: '' },
+    { id: 'log', label: '日志流', type: 'log', icon: '📜', color: '#495057', maxLines: 15, layout: 'full' },
+];
+
+// 当前配置的组件列表
+let dataWidgets = [];
+
+// 数据刷新间隔配置（毫秒）
+let dataWidgetsRefreshInterval = 5000;
+let dataWidgetsIntervalId = null;
+
+/**
+ * 加载数据组件配置（兼容旧版数据）
+ */
+function loadDataWidgets() {
+    try {
+        let saved = localStorage.getItem('data_widgets_v2');
+        
+        // 兼容旧版数据：从 data_widgets 迁移
+        if (!saved) {
+            const oldSaved = localStorage.getItem('data_widgets');
+            if (oldSaved) {
+                const oldWidgets = JSON.parse(oldSaved);
+                // 迁移旧数据：variable -> expression
+                dataWidgets = oldWidgets.map(w => ({
+                    ...w,
+                    expression: w.variable ? `\${${w.variable}}` : null,
+                    decimals: w.decimals || 1
+                }));
+                // 保存到新键
+                saveDataWidgets();
+                console.log('已迁移旧版数据组件配置');
+                return;
+            }
+        }
+        
+        if (saved) {
+            dataWidgets = JSON.parse(saved);
+        } else {
+            dataWidgets = [];
+        }
+    } catch (e) {
+        console.warn('加载数据组件配置失败:', e);
+        dataWidgets = [];
+    }
+}
+
+/**
+ * 保存数据组件配置
+ */
+function saveDataWidgets() {
+    try {
+        localStorage.setItem('data_widgets_v2', JSON.stringify(dataWidgets));
+    } catch (e) {
+        console.warn('保存数据组件配置失败:', e);
+    }
+}
+
+/**
+ * 加载刷新间隔配置
+ */
+function loadDataWidgetsRefreshInterval() {
+    try {
+        const saved = localStorage.getItem('data_widgets_refresh_interval');
+        if (saved) {
+            dataWidgetsRefreshInterval = parseInt(saved) || 5000;
+        }
+    } catch (e) {
+        dataWidgetsRefreshInterval = 5000;
+    }
+}
+
+/**
+ * 保存刷新间隔配置
+ */
+function saveDataWidgetsRefreshInterval() {
+    try {
+        localStorage.setItem('data_widgets_refresh_interval', dataWidgetsRefreshInterval.toString());
+    } catch (e) {
+        console.warn('保存刷新间隔失败:', e);
+    }
+}
+
+/**
+ * 启动自动刷新
+ */
+function startDataWidgetsAutoRefresh() {
+    stopDataWidgetsAutoRefresh();
+    if (dataWidgetsRefreshInterval > 0) {
+        dataWidgetsIntervalId = setInterval(() => {
+            refreshDataWidgets();
+        }, dataWidgetsRefreshInterval);
+    }
+}
+
+/**
+ * 停止自动刷新
+ */
+function stopDataWidgetsAutoRefresh() {
+    if (dataWidgetsIntervalId) {
+        clearInterval(dataWidgetsIntervalId);
+        dataWidgetsIntervalId = null;
+    }
+}
+
+/**
+ * 生成唯一 ID
+ */
+function generateWidgetId() {
+    return 'w_' + Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
+}
+
+/**
+ * 计算表达式值
+ * 支持: ${var}, 数学运算, 文本拼接
+ * @param {string} expression - 表达式，如 "${var} * 100" 或 "${var1} + ${var2}"
+ * @param {object} variables - 变量名到值的映射
+ * @returns {any} - 计算后的值
+ */
+function evaluateExpression(expression, variables) {
+    if (!expression) return null;
+    
+    // 替换所有 ${varName} 为实际值
+    let evalStr = expression.replace(/\$\{([^}]+)\}/g, (match, varName) => {
+        const val = variables[varName.trim()];
+        if (val === undefined || val === null) return 'null';
+        if (typeof val === 'string') return `"${val}"`;
+        return val;
+    });
+    
+    // 如果只是单个变量引用，直接返回
+    if (expression.match(/^\$\{[^}]+\}$/)) {
+        const varName = expression.slice(2, -1).trim();
+        return variables[varName];
+    }
+    
+    // 安全计算表达式
+    try {
+        // 只允许基本数学运算和字符串操作
+        if (evalStr.includes('null')) return null;
+        // eslint-disable-next-line no-new-func
+        const result = new Function('return ' + evalStr)();
+        return result;
+    } catch (e) {
+        console.warn('表达式计算失败:', expression, e);
+        return null;
+    }
+}
+
+/**
+ * 格式化显示值
+ * @param {any} value - 原始值
+ * @param {object} config - 格式化配置 { decimals, prefix, suffix, format }
+ */
+function formatDisplayValue(value, config) {
+    if (value === null || value === undefined) return '-';
+    
+    const { decimals = 1, prefix = '', suffix = '', format } = config || {};
+    
+    // 自定义格式
+    if (format) {
+        return format.replace('{value}', value).replace('{prefix}', prefix).replace('{suffix}', suffix);
+    }
+    
+    // 数字格式化
+    if (typeof value === 'number') {
+        return prefix + value.toFixed(decimals) + suffix;
+    }
+    
+    return prefix + String(value) + suffix;
+}
+
+/**
+ * 渲染单个组件的 HTML
+ */
+function renderWidgetHtml(widget) {
+    const { id, type, label, icon, color, unit } = widget;
+    
+    let contentHtml = '';
+    
+    switch (type) {
+        case 'ring':
+            contentHtml = `
+                <div class="dw-ring-container">
+                    <svg class="dw-ring" viewBox="0 0 100 100">
+                        <circle class="dw-ring-bg" cx="50" cy="50" r="42"/>
+                        <circle class="dw-ring-progress" id="dw-${id}-ring" cx="50" cy="50" r="42" style="stroke: ${color};"/>
+                    </svg>
+                    <div class="dw-ring-value" id="dw-${id}-value">-</div>
+                </div>`;
+            break;
+            
+        case 'gauge':
+            contentHtml = `
+                <div class="dw-gauge-container">
+                    <svg class="dw-gauge" viewBox="0 0 100 60">
+                        <path class="dw-gauge-bg" d="M10,50 A40,40 0 0,1 90,50"/>
+                        <path class="dw-gauge-progress" id="dw-${id}-gauge" d="M10,50 A40,40 0 0,1 90,50" style="stroke: ${color};"/>
+                    </svg>
+                    <div class="dw-gauge-value" id="dw-${id}-value">-</div>
+                </div>`;
+            break;
+            
+        case 'temp':
+            contentHtml = `
+                <div class="dw-temp-container">
+                    <div class="dw-temp-bar">
+                        <div class="dw-temp-fill" id="dw-${id}-fill"></div>
+                        <div class="dw-temp-scale"><span>100°</span><span>50°</span><span>0°</span></div>
+                    </div>
+                    <div class="dw-temp-value" id="dw-${id}-value">-</div>
+                </div>`;
+            break;
+            
+        case 'number':
+            contentHtml = `
+                <div class="dw-number-container">
+                    <div class="dw-number-icon" style="color: ${color};">${icon || '📊'}</div>
+                    <div class="dw-number-value">
+                        <span class="dw-number-num" id="dw-${id}-value" style="color: ${color};">-</span>
+                        <span class="dw-number-unit">${unit || ''}</span>
+                    </div>
+                </div>`;
+            break;
+            
+        case 'bar':
+            contentHtml = `
+                <div class="dw-bar-container">
+                    <div class="dw-bar-track">
+                        <div class="dw-bar-fill" id="dw-${id}-fill" style="background: ${color};"></div>
+                    </div>
+                    <div class="dw-bar-value" id="dw-${id}-value">-</div>
+                </div>`;
+            break;
+            
+        case 'status':
+            contentHtml = `
+                <div class="dw-status-container">
+                    <div class="dw-status-light" id="dw-${id}-light"></div>
+                    <div class="dw-status-label" id="dw-${id}-value">-</div>
+                </div>`;
+            break;
+            
+        case 'icon':
+            contentHtml = `
+                <div class="dw-icon-container">
+                    <div class="dw-icon-display" id="dw-${id}-icon">❓</div>
+                    <div class="dw-icon-label" id="dw-${id}-value">-</div>
+                </div>`;
+            break;
+            
+        case 'dual':
+            contentHtml = `
+                <div class="dw-dual-container">
+                    <div class="dw-dual-main" id="dw-${id}-value" style="color: ${color};">-</div>
+                    <div class="dw-dual-sep">/</div>
+                    <div class="dw-dual-sub" id="dw-${id}-sub">-</div>
+                    <div class="dw-dual-unit">${unit || ''}</div>
+                </div>`;
+            break;
+            
+        case 'percent':
+            contentHtml = `
+                <div class="dw-percent-container">
+                    <div class="dw-percent-value" id="dw-${id}-value" style="color: ${color};">-</div>
+                    <div class="dw-percent-symbol">%</div>
+                </div>`;
+            break;
+            
+        case 'log':
+            const maxLines = widget.maxLines || 15;
+            const isReading = widget._isReading || false;
+            // 默认折叠（除非明确设置了 _isCollapsed: false）
+            const isCollapsed = widget._isCollapsed !== false;
+            contentHtml = `
+                <div class="dw-log-toolbar ${isCollapsed ? 'dw-log-toolbar-collapsed' : ''}">
+                    <button class="btn btn-sm dw-log-collapse-btn" 
+                            id="dw-${id}-collapse" onclick="event.stopPropagation();toggleLogCollapse('${id}')"
+                            title="${isCollapsed ? '展开日志' : '折叠日志'}">
+                        ${isCollapsed ? '▼' : '▲'}
+                    </button>
+                    <button class="btn btn-sm ${isReading ? 'btn-danger' : 'btn-primary'}" 
+                            id="dw-${id}-toggle" onclick="event.stopPropagation();toggleLogReading('${id}')">
+                        ${isReading ? '⏹️ 停止' : '▶️ 读取'}
+                    </button>
+                    <button class="btn btn-sm" onclick="event.stopPropagation();refreshLogOnce('${id}')" title="刷新一次">
+                        🔄
+                    </button>
+                    <button class="btn btn-sm" onclick="event.stopPropagation();clearLogWidget('${id}')" title="清空">
+                        🗑️
+                    </button>
+                    <span class="dw-log-status" id="dw-${id}-status">${isReading ? '读取中...' : '已停止'}</span>
+                </div>
+                <div class="dw-log-container ${isCollapsed ? 'dw-log-collapsed' : ''}" id="dw-${id}-log" data-max-lines="${maxLines}">
+                    <div class="dw-log-empty">点击「读取」开始获取日志</div>
+                </div>`;
+            break;
+            
+        case 'text':
+        default:
+            contentHtml = `
+                <div class="dw-text-container">
+                    <div class="dw-text-icon">${icon || '📝'}</div>
+                    <div class="dw-text-value" id="dw-${id}-value" style="color: ${color};">-</div>
+                </div>`;
+            break;
+    }
+    
+    // 计算布局类名
+    const layout = widget.layout || 'auto';
+    const layoutClass = layout !== 'auto' ? `dw-layout-${layout}` : '';
+    
+    return `
+        <div class="dw-card ${layoutClass}" data-widget-id="${id}" data-layout="${layout}" onclick="event.target.closest('.dw-card-actions') || event.target.closest('.dw-log-toolbar') || showWidgetManager('${id}')">
+            <div class="dw-card-header">
+                <span class="dw-card-label">${icon ? icon + ' ' : ''}${label}</span>
+            </div>
+            ${contentHtml}
+        </div>
+    `;
+}
+
+/**
+ * 渲染所有组件
+ */
+function renderDataWidgets() {
+    const grid = document.getElementById('data-widgets-grid');
+    const empty = document.getElementById('data-widgets-empty');
+    if (!grid) return;
+    
+    if (dataWidgets.length === 0) {
+        grid.innerHTML = '';
+        if (empty) empty.style.display = 'block';
+    } else {
+        if (empty) empty.style.display = 'none';
+        grid.innerHTML = dataWidgets.map(w => renderWidgetHtml(w)).join('');
+    }
+}
+
+/**
+ * 更新单个组件的值
+ */
+function updateWidgetValue(widget, value) {
+    const { id, type, color, unit, min = 0, max = 100, decimals = 1, thresholds, colors, icons, expression2 } = widget;
+    
+    // 处理空值
+    if (value === null || value === undefined) {
+        const valueEl = document.getElementById(`dw-${id}-value`);
+        if (valueEl) valueEl.textContent = '-';
+        
+        // 重置视觉元素
+        if (type === 'ring') {
+            const ringEl = document.getElementById(`dw-${id}-ring`);
+            if (ringEl) ringEl.style.strokeDashoffset = 264;
+        } else if (type === 'gauge') {
+            const gaugeEl = document.getElementById(`dw-${id}-gauge`);
+            if (gaugeEl) gaugeEl.style.strokeDashoffset = 126;
+        } else if (type === 'temp' || type === 'bar') {
+            const fillEl = document.getElementById(`dw-${id}-fill`);
+            if (fillEl) {
+                fillEl.style.height = type === 'temp' ? '0%' : '';
+                if (type === 'bar') fillEl.style.width = '0%';
+            }
+        } else if (type === 'status') {
+            const lightEl = document.getElementById(`dw-${id}-light`);
+            if (lightEl) lightEl.style.background = '#868e96';
+        }
+        return;
+    }
+    
+    const numVal = typeof value === 'number' ? value : parseFloat(value);
+    const percent = isNaN(numVal) ? 0 : Math.min(100, Math.max(0, ((numVal - min) / (max - min)) * 100));
+    
+    switch (type) {
+        case 'ring': {
+            const ringEl = document.getElementById(`dw-${id}-ring`);
+            const valueEl = document.getElementById(`dw-${id}-value`);
+            if (ringEl) {
+                ringEl.style.strokeDashoffset = 264 - (percent / 100) * 264;
+            }
+            if (valueEl) valueEl.textContent = (isNaN(numVal) ? value : numVal.toFixed(decimals)) + (unit || '%');
+            break;
+        }
+        case 'gauge': {
+            const gaugeEl = document.getElementById(`dw-${id}-gauge`);
+            const valueEl = document.getElementById(`dw-${id}-value`);
+            if (gaugeEl) {
+                gaugeEl.style.strokeDashoffset = 126 - (percent / 100) * 126;
+            }
+            if (valueEl) valueEl.textContent = (isNaN(numVal) ? value : numVal.toFixed(decimals)) + (unit || '');
+            break;
+        }
+        case 'temp': {
+            const fillEl = document.getElementById(`dw-${id}-fill`);
+            const valueEl = document.getElementById(`dw-${id}-value`);
+            if (fillEl) fillEl.style.height = percent + '%';
+            if (valueEl) {
+                valueEl.textContent = (isNaN(numVal) ? value : numVal.toFixed(0)) + '°C';
+                if (!isNaN(numVal)) {
+                    if (numVal < 40) valueEl.style.color = '#4dabf7';
+                    else if (numVal < 60) valueEl.style.color = '#69db7c';
+                    else if (numVal < 80) valueEl.style.color = '#ffd43b';
+                    else valueEl.style.color = '#ff6b6b';
+                }
+            }
+            break;
+        }
+        case 'bar': {
+            const fillEl = document.getElementById(`dw-${id}-fill`);
+            const valueEl = document.getElementById(`dw-${id}-value`);
+            if (fillEl) fillEl.style.width = percent + '%';
+            if (valueEl) valueEl.textContent = (isNaN(numVal) ? value : numVal.toFixed(decimals)) + (unit || '%');
+            break;
+        }
+        case 'number': {
+            const valueEl = document.getElementById(`dw-${id}-value`);
+            if (valueEl) valueEl.textContent = isNaN(numVal) ? value : numVal.toFixed(decimals);
+            break;
+        }
+        case 'percent': {
+            const valueEl = document.getElementById(`dw-${id}-value`);
+            if (valueEl) valueEl.textContent = isNaN(numVal) ? value : numVal.toFixed(decimals);
+            break;
+        }
+        case 'status': {
+            const lightEl = document.getElementById(`dw-${id}-light`);
+            const valueEl = document.getElementById(`dw-${id}-value`);
+            const th = thresholds || [0, 50, 80];
+            const cl = colors || ['#40c057', '#fab005', '#fa5252'];
+            let statusColor = cl[0];
+            let statusText = '正常';
+            if (!isNaN(numVal)) {
+                if (numVal >= th[2]) { statusColor = cl[2]; statusText = '警告'; }
+                else if (numVal >= th[1]) { statusColor = cl[1]; statusText = '注意'; }
+            }
+            if (lightEl) lightEl.style.background = statusColor;
+            if (valueEl) valueEl.textContent = statusText;
+            break;
+        }
+        case 'icon': {
+            const iconEl = document.getElementById(`dw-${id}-icon`);
+            const valueEl = document.getElementById(`dw-${id}-value`);
+            const iconMap = icons || { '0': '❌', '1': '✅', 'default': '❓' };
+            const displayIcon = iconMap[String(value)] || iconMap['default'] || '❓';
+            if (iconEl) iconEl.textContent = displayIcon;
+            if (valueEl) valueEl.textContent = value;
+            break;
+        }
+        case 'dual': {
+            const valueEl = document.getElementById(`dw-${id}-value`);
+            const subEl = document.getElementById(`dw-${id}-sub`);
+            if (valueEl) valueEl.textContent = isNaN(numVal) ? value : numVal.toFixed(decimals);
+            // 副值需要从 expression2 获取
+            if (subEl && widget.subValue !== undefined) {
+                subEl.textContent = typeof widget.subValue === 'number' ? widget.subValue.toFixed(decimals) : widget.subValue;
+            }
+            break;
+        }
+        case 'log': {
+            // 日志组件特殊处理，在 refreshDataWidgets 中单独刷新
+            break;
+        }
+        case 'text':
+        default: {
+            const valueEl = document.getElementById(`dw-${id}-value`);
+            if (valueEl) valueEl.textContent = String(value);
+            break;
+        }
+    }
+}
+
+/**
+ * 初始化数据组件面板
+ */
+async function initDataWidgets() {
+    loadDataWidgets();
+    loadDataWidgetsRefreshInterval();
+    renderDataWidgets();
+    await refreshDataWidgets();
+    startDataWidgetsAutoRefresh();
+}
+
+/**
+ * 刷新所有组件的数据
+ */
+async function refreshDataWidgets() {
+    // 先批量获取所有需要的变量
+    const varNames = new Set();
+    dataWidgets.forEach(w => {
+        if (w.type !== 'log' && w.expression) {
+            // 从表达式中提取变量名
+            const matches = w.expression.match(/\$\{([^}]+)\}/g);
+            if (matches) {
+                matches.forEach(m => varNames.add(m.slice(2, -1).trim()));
+            }
+        }
+        if (w.expression2) {
+            const matches = w.expression2.match(/\$\{([^}]+)\}/g);
+            if (matches) {
+                matches.forEach(m => varNames.add(m.slice(2, -1).trim()));
+            }
+        }
+    });
+    
+    // 获取所有变量的值
+    const variables = {};
+    for (const name of varNames) {
+        try {
+            const resp = await api.call('automation.variables.get', { name });
+            if (resp.code === 0 && resp.data) {
+                variables[name] = resp.data.value;
+            }
+        } catch (e) {
+            console.warn('获取变量失败:', name, e);
+        }
+    }
+    
+    // 更新每个组件（日志组件不自动刷新）
+    for (const widget of dataWidgets) {
+        if (widget.type === 'log') {
+            // 日志组件由用户手动控制，不自动刷新
+            continue;
+        } else if (widget.expression) {
+            const value = evaluateExpression(widget.expression, variables);
+            updateWidgetValue(widget, value);
+            
+            // 处理副值
+            if (widget.expression2) {
+                widget.subValue = evaluateExpression(widget.expression2, variables);
+            }
+        } else {
+            updateWidgetValue(widget, null);
+        }
+    }
+}
+
+/**
+ * 日志组件读取状态和定时器
+ */
+const logWidgetTimers = {};
+
+/**
+ * 切换日志组件折叠状态
+ */
+function toggleLogCollapse(widgetId) {
+    const widget = dataWidgets.find(w => w.id === widgetId);
+    if (!widget) return;
+    
+    widget._isCollapsed = !widget._isCollapsed;
+    
+    // 更新 DOM
+    const container = document.getElementById(`dw-${widgetId}-log`);
+    const toolbar = container?.previousElementSibling;
+    const btn = document.getElementById(`dw-${widgetId}-collapse`);
+    
+    if (container) {
+        if (widget._isCollapsed) {
+            container.classList.add('dw-log-collapsed');
+        } else {
+            container.classList.remove('dw-log-collapsed');
+        }
+    }
+    
+    if (toolbar) {
+        if (widget._isCollapsed) {
+            toolbar.classList.add('dw-log-toolbar-collapsed');
+        } else {
+            toolbar.classList.remove('dw-log-toolbar-collapsed');
+        }
+    }
+    
+    if (btn) {
+        btn.textContent = widget._isCollapsed ? '▼' : '▲';
+        btn.title = widget._isCollapsed ? '展开日志' : '折叠日志';
+    }
+    
+    // 保存状态
+    saveDataWidgets();
+}
+
+/**
+ * 切换日志读取状态
+ */
+function toggleLogReading(widgetId) {
+    const widget = dataWidgets.find(w => w.id === widgetId);
+    if (!widget) return;
+    
+    if (widget._isReading) {
+        // 停止读取
+        stopLogReading(widgetId);
+    } else {
+        // 开始读取
+        startLogReading(widgetId);
+    }
+}
+
+/**
+ * 开始读取日志
+ */
+function startLogReading(widgetId) {
+    const widget = dataWidgets.find(w => w.id === widgetId);
+    if (!widget || !widget.expression) {
+        showToast('请先配置日志变量', 'warning');
+        return;
+    }
+    
+    widget._isReading = true;
+    
+    // 开始读取时自动展开
+    if (widget._isCollapsed !== false) {
+        widget._isCollapsed = false;
+        const container = document.getElementById(`dw-${widgetId}-log`);
+        const toolbar = container?.previousElementSibling;
+        const btn = document.getElementById(`dw-${widgetId}-collapse`);
+        if (container) container.classList.remove('dw-log-collapsed');
+        if (toolbar) toolbar.classList.remove('dw-log-toolbar-collapsed');
+        if (btn) {
+            btn.textContent = '▲';
+            btn.title = '折叠日志';
+        }
+    }
+    
+    updateLogToggleButton(widgetId, true);
+    
+    // 立即读取一次
+    refreshLogOnce(widgetId);
+    
+    // 设置定时器
+    const interval = widget.refreshInterval || 2000;
+    logWidgetTimers[widgetId] = setInterval(() => {
+        refreshLogOnce(widgetId);
+    }, interval);
+}
+
+/**
+ * 停止读取日志
+ */
+function stopLogReading(widgetId) {
+    const widget = dataWidgets.find(w => w.id === widgetId);
+    if (widget) {
+        widget._isReading = false;
+    }
+    
+    if (logWidgetTimers[widgetId]) {
+        clearInterval(logWidgetTimers[widgetId]);
+        delete logWidgetTimers[widgetId];
+    }
+    
+    updateLogToggleButton(widgetId, false);
+}
+
+/**
+ * 更新日志切换按钮状态
+ */
+function updateLogToggleButton(widgetId, isReading) {
+    const btn = document.getElementById(`dw-${widgetId}-toggle`);
+    const status = document.getElementById(`dw-${widgetId}-status`);
+    
+    if (btn) {
+        btn.className = `btn btn-sm ${isReading ? 'btn-danger' : 'btn-primary'}`;
+        btn.innerHTML = isReading ? '⏹️ 停止' : '▶️ 读取';
+    }
+    if (status) {
+        status.textContent = isReading ? '读取中...' : '已停止';
+    }
+}
+
+/**
+ * 刷新日志组件一次（从变量读取）
+ */
+async function refreshLogOnce(widgetId) {
+    const widget = dataWidgets.find(w => w.id === widgetId);
+    if (!widget) return;
+    
+    const container = document.getElementById(`dw-${widget.id}-log`);
+    if (!container) return;
+    
+    if (!widget.expression) {
+        container.innerHTML = '<div class="dw-log-empty">未配置日志变量</div>';
+        return;
+    }
+    
+    try {
+        // 从表达式中提取变量名
+        const varMatch = widget.expression.match(/\$\{([^}]+)\}/);
+        if (!varMatch) {
+            container.innerHTML = '<div class="dw-log-error">无效的变量表达式</div>';
+            return;
+        }
+        
+        const varName = varMatch[1].trim();
+        const result = await api.call('automation.variables.get', { name: varName });
+        
+        if (result.code !== 0 || result.data?.value === undefined) {
+            container.innerHTML = '<div class="dw-log-error">变量不存在或无数据</div>';
+            return;
+        }
+        
+        const logText = String(result.data.value);
+        appendLogToWidget(widget.id, logText, widget.maxLines || 15);
+        
+    } catch (e) {
+        console.warn('获取日志变量失败:', e);
+        container.innerHTML = '<div class="dw-log-error">读取失败</div>';
+    }
+}
+
+/**
+ * 追加日志到组件（去重、限制行数）
+ */
+function appendLogToWidget(widgetId, newText, maxLines) {
+    const container = document.getElementById(`dw-${widgetId}-log`);
+    if (!container) return;
+    
+    // 获取现有内容
+    let existingLines = [];
+    const existingElements = container.querySelectorAll('.dw-log-line');
+    existingElements.forEach(el => {
+        existingLines.push(el.dataset.text || el.textContent);
+    });
+    
+    // 处理新日志（可能是多行）
+    const newLines = newText.split('\\n').filter(l => l.trim());
+    
+    // 追加新行（去重）
+    newLines.forEach(line => {
+        const trimmed = line.trim();
+        if (trimmed && !existingLines.includes(trimmed)) {
+            existingLines.push(trimmed);
+        }
+    });
+    
+    // 限制行数
+    if (existingLines.length > maxLines) {
+        existingLines = existingLines.slice(-maxLines);
+    }
+    
+    // 渲染
+    if (existingLines.length === 0) {
+        container.innerHTML = '<div class="dw-log-empty">暂无日志</div>';
+    } else {
+        container.innerHTML = existingLines.map(line => {
+            const escaped = escapeHtml(line);
+            // 尝试检测日志级别着色
+            let colorClass = '';
+            if (/\bERR(OR)?\b/i.test(line)) colorClass = 'dw-log-error-line';
+            else if (/\bWARN(ING)?\b/i.test(line)) colorClass = 'dw-log-warn-line';
+            else if (/\bINFO\b/i.test(line)) colorClass = 'dw-log-info-line';
+            else if (/\bDEBUG\b/i.test(line)) colorClass = 'dw-log-debug-line';
+            
+            return `<div class="dw-log-line ${colorClass}" data-text="${escaped}">${escaped}</div>`;
+        }).join('');
+        
+        // 滚动到底部
+        container.scrollTop = container.scrollHeight;
+    }
+}
+
+/**
+ * 清空日志组件
+ */
+function clearLogWidget(widgetId) {
+    const container = document.getElementById(`dw-${widgetId}-log`);
+    if (container) {
+        container.innerHTML = '<div class="dw-log-empty">已清空</div>';
+    }
+}
+
+/**
+ * 显示组件管理器
+ */
+function showWidgetManager(editWidgetId = null) {
+    const modal = document.createElement('div');
+    modal.className = 'modal show';
+    modal.id = 'widget-manager-modal';
+    modal.onclick = (e) => { if (e.target === modal) closeModal('widget-manager-modal'); };
+    
+    modal.innerHTML = `
+        <div class="modal-content dw-manager-modal">
+            <div class="modal-header">
+                <h3>📊 数据监控管理</h3>
+                <button class="modal-close" onclick="closeModal('widget-manager-modal')">&times;</button>
+            </div>
+            <div class="modal-body dw-manager-body">
+                <div class="dw-manager-sidebar">
+                    <div class="dw-manager-section">
+                        <h4>⚙️ 面板设置</h4>
+                        <div class="form-group" style="margin-bottom:15px;">
+                            <label style="font-size:0.9em;">自动刷新间隔</label>
+                            <div style="display:flex;gap:8px;align-items:center;">
+                                <select id="dw-refresh-interval" onchange="updateRefreshInterval()" style="flex:1;">
+                                    <option value="0" ${dataWidgetsRefreshInterval === 0 ? 'selected' : ''}>禁用</option>
+                                    <option value="1000" ${dataWidgetsRefreshInterval === 1000 ? 'selected' : ''}>1 秒</option>
+                                    <option value="2000" ${dataWidgetsRefreshInterval === 2000 ? 'selected' : ''}>2 秒</option>
+                                    <option value="5000" ${dataWidgetsRefreshInterval === 5000 ? 'selected' : ''}>5 秒</option>
+                                    <option value="10000" ${dataWidgetsRefreshInterval === 10000 ? 'selected' : ''}>10 秒</option>
+                                    <option value="30000" ${dataWidgetsRefreshInterval === 30000 ? 'selected' : ''}>30 秒</option>
+                                    <option value="60000" ${dataWidgetsRefreshInterval === 60000 ? 'selected' : ''}>1 分钟</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="dw-manager-section">
+                        <h4>📦 已添加组件</h4>
+                        <div id="dw-manager-list" class="dw-manager-list"></div>
+                        <button class="btn btn-primary btn-block" onclick="showAddWidgetPanel()" style="margin-top:12px;">
+                            ➕ 添加新组件
+                        </button>
+                    </div>
+                </div>
+                <div class="dw-manager-main" id="dw-manager-main">
+                    <div class="dw-manager-empty">
+                        <div style="font-size:48px;opacity:0.3;">📊</div>
+                        <p>选择左侧组件进行编辑<br>或添加新组件</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+    
+    // 渲染组件列表
+    renderWidgetManagerList();
+    
+    // 如果指定了编辑的组件，直接打开编辑面板
+    if (editWidgetId) {
+        showWidgetEditPanel(editWidgetId);
+    }
+}
+
+/**
+ * 更新刷新间隔
+ */
+function updateRefreshInterval() {
+    const select = document.getElementById('dw-refresh-interval');
+    if (select) {
+        dataWidgetsRefreshInterval = parseInt(select.value) || 0;
+        saveDataWidgetsRefreshInterval();
+        startDataWidgetsAutoRefresh();
+        showToast(`刷新间隔已设置为 ${dataWidgetsRefreshInterval > 0 ? (dataWidgetsRefreshInterval / 1000) + ' 秒' : '禁用'}`, 'success');
+    }
+}
+
+/**
+ * 渲染管理器中的组件列表
+ */
+function renderWidgetManagerList() {
+    const list = document.getElementById('dw-manager-list');
+    if (!list) return;
+    
+    if (dataWidgets.length === 0) {
+        list.innerHTML = '<div class="dw-manager-empty-list">暂无组件</div>';
+        return;
+    }
+    
+    list.innerHTML = dataWidgets.map((w, idx) => `
+        <div class="dw-manager-item" data-id="${w.id}" onclick="showWidgetEditPanel('${w.id}')">
+            <span class="dw-manager-item-icon">${w.icon || WIDGET_TYPES[w.type]?.icon || '📊'}</span>
+            <span class="dw-manager-item-label">${w.label}</span>
+            <span class="dw-manager-item-type">${WIDGET_TYPES[w.type]?.name || w.type}</span>
+            <div class="dw-manager-item-actions">
+                <button class="dw-btn-icon" onclick="event.stopPropagation();moveWidget('${w.id}',-1)" title="上移" ${idx === 0 ? 'disabled' : ''}>⬆️</button>
+                <button class="dw-btn-icon" onclick="event.stopPropagation();moveWidget('${w.id}',1)" title="下移" ${idx === dataWidgets.length - 1 ? 'disabled' : ''}>⬇️</button>
+                <button class="dw-btn-icon" onclick="event.stopPropagation();deleteDataWidget('${w.id}')" title="删除">🗑️</button>
+            </div>
+        </div>
+    `).join('');
+}
+
+/**
+ * 移动组件位置
+ */
+function moveWidget(widgetId, direction) {
+    const idx = dataWidgets.findIndex(w => w.id === widgetId);
+    if (idx === -1) return;
+    
+    const newIdx = idx + direction;
+    if (newIdx < 0 || newIdx >= dataWidgets.length) return;
+    
+    [dataWidgets[idx], dataWidgets[newIdx]] = [dataWidgets[newIdx], dataWidgets[idx]];
+    saveDataWidgets();
+    renderWidgetManagerList();
+    renderDataWidgets();
+}
+
+/**
+ * 显示添加组件面板
+ */
+function showAddWidgetPanel() {
+    const main = document.getElementById('dw-manager-main');
+    if (!main) return;
+    
+    // 预设模板
+    const presetsHtml = WIDGET_PRESETS.map(p => `
+        <div class="dw-preset-item" onclick="addWidgetFromPreset('${p.id}')">
+            <span class="dw-preset-icon">${p.icon}</span>
+            <span class="dw-preset-label">${p.label}</span>
+        </div>
+    `).join('');
+    
+    // 组件类型
+    const typesHtml = Object.entries(WIDGET_TYPES).map(([key, t]) => `
+        <div class="dw-type-card" onclick="createNewWidget('${key}')">
+            <span class="dw-type-icon">${t.icon}</span>
+            <span class="dw-type-name">${t.name}</span>
+            <span class="dw-type-desc">${t.description}</span>
+        </div>
+    `).join('');
+    
+    main.innerHTML = `
+        <div class="dw-add-panel">
+            <h4>快速添加预设</h4>
+            <div class="dw-presets-grid">${presetsHtml}</div>
+            
+            <h4 style="margin-top:20px;">自定义组件类型</h4>
+            <div class="dw-types-grid">${typesHtml}</div>
+        </div>
+    `;
+}
+
+/**
+ * 从预设添加组件
+ */
+function addWidgetFromPreset(presetId) {
+    const preset = WIDGET_PRESETS.find(p => p.id === presetId);
+    if (!preset) return;
+    
+    const widget = {
+        id: generateWidgetId(),
+        type: preset.type,
+        label: preset.label,
+        icon: preset.icon,
+        color: preset.color,
+        unit: preset.unit,
+        min: 0,
+        max: 100,
+        decimals: WIDGET_TYPES[preset.type]?.defaultConfig?.decimals || 1,
+        expression: null
+    };
+    
+    dataWidgets.push(widget);
+    saveDataWidgets();
+    renderDataWidgets();
+    renderWidgetManagerList();
+    showWidgetEditPanel(widget.id);
+    showToast(`已添加 ${preset.label}`, 'success');
+}
+
+/**
+ * 创建新的自定义组件
+ */
+function createNewWidget(type) {
+    const typeConfig = WIDGET_TYPES[type];
+    if (!typeConfig) return;
+    
+    const defaults = typeConfig.defaultConfig || {};
+    
+    const widget = {
+        id: generateWidgetId(),
+        type,
+        label: '新组件',
+        icon: typeConfig.icon,
+        color: defaults.color || '#4dabf7',
+        unit: defaults.unit || '',
+        min: defaults.min || 0,
+        max: defaults.max || 100,
+        decimals: defaults.decimals || 1,
+        expression: null
+    };
+    
+    if (type === 'status') {
+        widget.thresholds = defaults.thresholds || [0, 50, 80];
+        widget.colors = defaults.colors || ['#40c057', '#fab005', '#fa5252'];
+    }
+    if (type === 'icon') {
+        widget.icons = defaults.icons || { '0': '❌', '1': '✅', 'default': '❓' };
+    }
+    if (type === 'log') {
+        widget.maxLines = defaults.maxLines || 15;
+        widget.refreshInterval = 2000;
+        widget.layout = 'full';  // 日志组件默认独占一行
+        widget.label = '日志流';
+    }
+    
+    dataWidgets.push(widget);
+    saveDataWidgets();
+    renderDataWidgets();
+    renderWidgetManagerList();
+    showWidgetEditPanel(widget.id);
+}
+
+/**
+ * 显示组件编辑面板
+ */
+function showWidgetEditPanel(widgetId) {
+    const widget = dataWidgets.find(w => w.id === widgetId);
+    if (!widget) return;
+    
+    const main = document.getElementById('dw-manager-main');
+    if (!main) return;
+    
+    // 高亮当前编辑项
+    document.querySelectorAll('.dw-manager-item').forEach(el => el.classList.remove('active'));
+    document.querySelector(`.dw-manager-item[data-id="${widgetId}"]`)?.classList.add('active');
+    
+    const typeConfig = WIDGET_TYPES[widget.type] || {};
+    
+    // 额外配置（根据组件类型）
+    let extraConfigHtml = '';
+    if (widget.type === 'status') {
+        extraConfigHtml = `
+            <div class="form-group">
+                <label>阈值设置（正常/注意/警告）</label>
+                <div class="form-row">
+                    <input type="number" id="edit-threshold-1" class="input" value="${widget.thresholds?.[0] || 0}" placeholder="0">
+                    <input type="number" id="edit-threshold-2" class="input" value="${widget.thresholds?.[1] || 50}" placeholder="50">
+                    <input type="number" id="edit-threshold-3" class="input" value="${widget.thresholds?.[2] || 80}" placeholder="80">
+                </div>
+            </div>`;
+    }
+    if (widget.type === 'dual') {
+        extraConfigHtml = `
+            <div class="form-group">
+                <label>副值表达式</label>
+                <input type="text" id="edit-expression2" class="input" value="${widget.expression2 || ''}" 
+                       placeholder="例如: \${max_value}">
+                <small class="form-hint">显示在主值右侧的副值</small>
+            </div>`;
+    }
+    if (widget.type === 'log') {
+        extraConfigHtml = `
+            <div class="form-row">
+                <div class="form-group">
+                    <label>显示行数</label>
+                    <input type="number" id="edit-max-lines" class="input" value="${widget.maxLines || 15}" min="5" max="100">
+                </div>
+                <div class="form-group">
+                    <label>刷新间隔（毫秒）</label>
+                    <input type="number" id="edit-refresh-interval" class="input" value="${widget.refreshInterval || 2000}" min="500" max="60000" step="500">
+                </div>
+            </div>
+            <div class="form-group dw-expression-group">
+                <label>日志变量 <span class="badge">核心</span></label>
+                <div class="dw-expression-input">
+                    <input type="text" id="edit-expression" class="input" value="${widget.expression || ''}" 
+                           placeholder="选择包含日志文本的变量">
+                    <button class="btn" onclick="selectVariableForWidget()">选择变量</button>
+                </div>
+                <small class="form-hint">
+                    选择一个包含日志文本的变量，日志会追加显示（支持多行，用 \\n 分隔）
+                </small>
+            </div>`;
+    }
+    
+    main.innerHTML = `
+        <div class="dw-edit-panel">
+            <div class="dw-edit-header">
+                <span class="dw-edit-type-badge">${typeConfig.icon || '📊'} ${typeConfig.name || widget.type}</span>
+            </div>
+            
+            <div class="form-group">
+                <label>标签名称</label>
+                <input type="text" id="edit-label" class="input" value="${widget.label}" placeholder="组件名称">
+            </div>
+            
+            <div class="form-row">
+                <div class="form-group">
+                    <label>图标</label>
+                    <input type="text" id="edit-icon" class="input" value="${widget.icon || ''}" placeholder="emoji">
+                </div>
+                <div class="form-group">
+                    <label>颜色</label>
+                    <input type="color" id="edit-color" class="input input-color" value="${widget.color || '#4dabf7'}">
+                </div>
+            </div>
+            
+            <!-- 布局选项 -->
+            <div class="form-group">
+                <label>📐 布局宽度</label>
+                <div class="dw-layout-options">
+                    ${LAYOUT_OPTIONS.width.map(opt => `
+                        <label class="dw-layout-option ${widget.layout === opt.value || (!widget.layout && opt.value === 'auto') ? 'active' : ''}">
+                            <input type="radio" name="edit-layout" value="${opt.value}" 
+                                   ${widget.layout === opt.value || (!widget.layout && opt.value === 'auto') ? 'checked' : ''}
+                                   onchange="updateLayoutPreview()">
+                            <span class="dw-layout-label">${opt.label}</span>
+                            <span class="dw-layout-desc">${opt.desc}</span>
+                        </label>
+                    `).join('')}
+                </div>
+            </div>
+            
+            ${widget.type !== 'log' ? `
+            <div class="form-row">
+                <div class="form-group">
+                    <label>单位</label>
+                    <input type="text" id="edit-unit" class="input" value="${widget.unit || ''}" placeholder="%、°C、W">
+                </div>
+                <div class="form-group">
+                    <label>小数位</label>
+                    <input type="number" id="edit-decimals" class="input" value="${widget.decimals || 1}" min="0" max="4">
+                </div>
+            </div>
+            ` : ''}
+            
+            ${widget.type !== 'text' && widget.type !== 'icon' && widget.type !== 'status' && widget.type !== 'log' ? `
+            <div class="form-row">
+                <div class="form-group">
+                    <label>最小值</label>
+                    <input type="number" id="edit-min" class="input" value="${widget.min || 0}">
+                </div>
+                <div class="form-group">
+                    <label>最大值</label>
+                    <input type="number" id="edit-max" class="input" value="${widget.max || 100}">
+                </div>
+            </div>
+            ` : ''}
+            
+            ${extraConfigHtml}
+            
+            ${widget.type !== 'log' ? `
+            <div class="form-group dw-expression-group">
+                <label>数据表达式 <span class="badge">核心</span></label>
+                <div class="dw-expression-input">
+                    <input type="text" id="edit-expression" class="input" value="${widget.expression || ''}" 
+                           placeholder="点击选择变量或输入表达式">
+                    <button class="btn" onclick="selectVariableForWidget()">选择变量</button>
+                </div>
+                <small class="form-hint">
+                    支持: <code>\${变量名}</code> 引用变量，<code>\${a} + \${b}</code> 数学运算，<code>\${a} + "单位"</code> 文本拼接
+                </small>
+            </div>
+            ` : ''}
+            
+            <div class="dw-edit-preview">
+                <label>预览</label>
+                <div class="dw-preview-card" id="dw-preview-card">
+                    ${renderWidgetHtml(widget)}
+                </div>
+            </div>
+            
+            <div class="dw-edit-actions">
+                <button class="btn btn-danger" onclick="deleteDataWidget('${widget.id}')">🗑️ 删除</button>
+                <button class="btn btn-primary" onclick="saveWidgetEdit('${widget.id}')">💾 保存</button>
+            </div>
+        </div>
+    `;
+}
+
+/**
+ * 选择变量插入到表达式
+ */
+async function selectVariableForWidget() {
+    await showVariableSelectModal(null, 'replace');
+    const modal = document.getElementById('variable-select-modal');
+    if (modal) {
+        modal.dataset.callback = 'widgetExpression';
+    }
+}
+
+/**
+ * 保存组件编辑
+ */
+function saveWidgetEdit(widgetId) {
+    const widget = dataWidgets.find(w => w.id === widgetId);
+    if (!widget) return;
+    
+    widget.label = document.getElementById('edit-label')?.value?.trim() || widget.label;
+    widget.icon = document.getElementById('edit-icon')?.value?.trim() || '';
+    widget.color = document.getElementById('edit-color')?.value || '#4dabf7';
+    
+    // 布局
+    const layoutRadio = document.querySelector('input[name="edit-layout"]:checked');
+    widget.layout = layoutRadio?.value || 'auto';
+    
+    // 非日志组件的通用属性
+    if (widget.type !== 'log') {
+        widget.unit = document.getElementById('edit-unit')?.value?.trim() || '';
+        widget.decimals = parseInt(document.getElementById('edit-decimals')?.value) || 1;
+        widget.min = parseFloat(document.getElementById('edit-min')?.value) || 0;
+        widget.max = parseFloat(document.getElementById('edit-max')?.value) || 100;
+        widget.expression = document.getElementById('edit-expression')?.value?.trim() || null;
+    }
+    
+    // 额外配置
+    if (widget.type === 'status') {
+        widget.thresholds = [
+            parseFloat(document.getElementById('edit-threshold-1')?.value) || 0,
+            parseFloat(document.getElementById('edit-threshold-2')?.value) || 50,
+            parseFloat(document.getElementById('edit-threshold-3')?.value) || 80
+        ];
+    }
+    if (widget.type === 'dual') {
+        widget.expression2 = document.getElementById('edit-expression2')?.value?.trim() || null;
+    }
+    if (widget.type === 'log') {
+        widget.maxLines = parseInt(document.getElementById('edit-max-lines')?.value) || 15;
+        widget.refreshInterval = parseInt(document.getElementById('edit-refresh-interval')?.value) || 2000;
+        widget.expression = document.getElementById('edit-expression')?.value?.trim() || null;
+        
+        // 如果日志正在读取，重启定时器以应用新配置
+        if (widget._isReading) {
+            stopLogReading(widgetId);
+            startLogReading(widgetId);
+        }
+    }
+    
+    saveDataWidgets();
+    renderDataWidgets();
+    renderWidgetManagerList();
+    refreshDataWidgets();
+    showToast('组件已保存', 'success');
+    
+    // 关闭管理器模态框
+    closeModal('widget-manager-modal');
+}
+
+/**
+ * 删除组件
+ */
+function deleteDataWidget(widgetId) {
+    const idx = dataWidgets.findIndex(w => w.id === widgetId);
+    if (idx === -1) return;
+    
+    const widget = dataWidgets[idx];
+    
+    if (!confirm(`确定要删除"${widget.label}"组件吗？`)) return;
+    
+    dataWidgets.splice(idx, 1);
+    saveDataWidgets();
+    renderDataWidgets();
+    renderWidgetManagerList();
+    
+    // 清空编辑面板
+    const main = document.getElementById('dw-manager-main');
+    if (main) {
+        main.innerHTML = `
+            <div class="dw-manager-empty">
+                <div style="font-size:48px;opacity:0.3;">📊</div>
+                <p>选择左侧组件进行编辑<br>或添加新组件</p>
+            </div>
+        `;
+    }
+    
+    showToast(`已删除 ${widget.label}`, 'info');
+}
+
 // ==================== 快捷操作（手动触发规则） ====================
 
 /**
@@ -984,6 +3247,12 @@ async function refreshQuickActions() {
     
     try {
         console.log('refreshQuickActions: Fetching rules...');
+        
+        // 确保 SSH 主机数据已加载（用于 nohup 按钮）
+        if (!window._sshHostsData || Object.keys(window._sshHostsData).length === 0) {
+            await loadSshHostsData();
+        }
+        
         const result = await api.call('automation.rules.list');
         console.log('refreshQuickActions: API result:', result);
         
@@ -1005,22 +3274,57 @@ async function refreshQuickActions() {
                     // 检查是否有 nohup SSH 命令动作
                     const nohupInfo = await checkRuleHasNohupSsh(rule);
                     
-                    // 基础卡片 + nohup 控制按钮
+                    // 基础卡片 + nohup 控制按钮（带运行状态）
                     let nohupBtns = '';
+                    let isRunning = false;
                     if (nohupInfo) {
+                        // 检测进程是否正在运行
+                        try {
+                            const host = window._sshHostsData?.[nohupInfo.hostId];
+                            if (host) {
+                                console.log('Checking process status:', nohupInfo.checkCmd);
+                                const checkResult = await api.call('ssh.exec', {
+                                    host: host.host,
+                                    port: host.port,
+                                    user: host.username,
+                                    keyid: host.keyid,
+                                    command: nohupInfo.checkCmd,
+                                    timeout_ms: 5000
+                                });
+                                const stdout = checkResult.data?.stdout?.trim() || '';
+                                console.log('Process check result:', stdout, 'code:', checkResult.code);
+                                isRunning = stdout === 'running';
+                            }
+                        } catch (e) {
+                            console.warn('Check process status failed:', e);
+                            isRunning = false;
+                        }
+                        
+                        const statusIcon = isRunning ? '🟢' : '⚫';
+                        const statusTitle = isRunning ? '进程运行中' : '进程未运行';
+                        // 状态徽章 + 底部操作栏
                         nohupBtns = `
-                            <div class="quick-action-nohup-btns" onclick="event.stopPropagation()">
-                                <button class="btn btn-xs" onclick="quickActionViewLog('${escapeHtml(nohupInfo.logFile)}', '${escapeHtml(nohupInfo.hostId)}')" title="查看日志">📄</button>
-                                <button class="btn btn-xs" onclick="quickActionStopProcess('${escapeHtml(nohupInfo.keyword)}', '${escapeHtml(nohupInfo.hostId)}')" title="终止进程">🛑</button>
+                            <span class="nohup-status-badge" title="${statusTitle}">${statusIcon}</span>
+                            <div class="quick-action-nohup-bar" onclick="event.stopPropagation()">
+                                <button onclick="quickActionViewLog('${escapeHtml(nohupInfo.logFile)}', '${escapeHtml(nohupInfo.hostId)}')" title="查看日志">
+                                    📄 日志
+                                </button>
+                                <button class="btn-stop" onclick="quickActionStopProcess('${escapeHtml(nohupInfo.progName)}', '${escapeHtml(nohupInfo.hostId)}')" title="终止进程" ${!isRunning ? 'disabled' : ''}>
+                                    ⏹ 停止
+                                </button>
                             </div>
                         `;
                     }
                     
+                    // 如果进程正在运行，点击卡片时提示而不是触发
+                    const cardOnClick = (nohupInfo && isRunning) 
+                        ? `showToast('进程正在运行中，请先停止', 'warning')`
+                        : `triggerQuickAction('${escapeHtml(rule.id)}')`;
+                    
                     return `
-                        <div class="quick-action-card${nohupInfo ? ' has-nohup' : ''}" onclick="triggerQuickAction('${escapeHtml(rule.id)}')" title="${escapeHtml(rule.name)}">
+                        <div class="quick-action-card${nohupInfo ? ' has-nohup' : ''}${isRunning ? ' is-running' : ''}" onclick="${cardOnClick}" title="${escapeHtml(rule.name)}">
                             <div class="quick-action-icon">${iconHtml}</div>
                             <div class="quick-action-name">${escapeHtml(rule.name)}</div>
-                            <div class="quick-action-count">${rule.trigger_count || 0}次</div>
                             ${nohupBtns}
                         </div>
                     `;
@@ -1072,49 +3376,101 @@ async function triggerQuickAction(ruleId) {
 
 /**
  * 检查规则是否包含 nohup SSH 命令
- * @param {object} rule - 规则对象
+ * @param {object} rule - 规则对象（列表中的简化数据）
  * @returns {object|null} - 返回 {logFile, keyword, hostId} 或 null
  */
 async function checkRuleHasNohupSsh(rule) {
-    if (!rule.actions || rule.actions.length === 0) return null;
-    
-    // 确保 SSH 命令已加载
-    if (Object.keys(sshCommands).length === 0) {
-        await loadSshCommands();
+    // 列表 API 只返回 actions_count，需要获取完整规则
+    if (!rule.actions_count || rule.actions_count === 0) {
+        console.log('checkRuleHasNohupSsh: rule', rule.id, 'has no actions');
+        return null;
     }
     
-    // 遍历所有动作，查找 ssh_cmd_ref 类型且对应命令有 nohup 标记的
-    for (const action of rule.actions) {
-        if (action.type === 'ssh_cmd_ref' && action.ssh_ref?.cmd_id) {
-            const cmdId = action.ssh_ref.cmd_id;
-            // 在所有主机的命令中查找
-            for (const [hostId, cmds] of Object.entries(sshCommands)) {
-                const cmd = cmds.find(c => c.id === cmdId);
-                if (cmd && cmd.nohup) {
-                    // 找到了 nohup 命令
-                    const safeName = cmd.name.replace(/[^a-zA-Z0-9]/g, '').slice(0, 20) || 'cmd';
-                    return {
-                        logFile: `/tmp/ts_nohup_${safeName}.log`,
-                        keyword: cmd.command.split(' ')[0],
-                        hostId: hostId,
-                        cmdName: cmd.name
-                    };
+    // 获取规则详情
+    try {
+        const detailResult = await api.call('automation.rules.get', { id: rule.id });
+        if (detailResult.code !== 0 || !detailResult.data || !detailResult.data.actions) {
+            console.log('checkRuleHasNohupSsh: failed to get rule details for', rule.id);
+            return null;
+        }
+        
+        const actions = detailResult.data.actions;
+        console.log('checkRuleHasNohupSsh: rule', rule.id, 'actions=', actions);
+        
+        // 确保 SSH 命令已加载
+        if (Object.keys(sshCommands).length === 0) {
+            await loadSshCommands();
+        }
+        
+        // 遍历所有动作
+        for (const action of actions) {
+            let sshCmdId = null;
+            
+            // 方式1: 动作本身是 ssh_cmd_ref 类型
+            if (action.type === 'ssh_cmd_ref' && action.ssh_ref?.cmd_id) {
+                sshCmdId = action.ssh_ref.cmd_id;
+            }
+            // 方式2: 动作有 template_id，需要查询模板获取实际类型
+            else if (action.template_id) {
+                try {
+                    const tplResult = await api.call('automation.actions.get', { id: action.template_id });
+                    if (tplResult.code === 0 && tplResult.data) {
+                        console.log('checkRuleHasNohupSsh: template', action.template_id, '=', tplResult.data);
+                        if (tplResult.data.type === 'ssh_cmd_ref' && tplResult.data.ssh_ref?.cmd_id) {
+                            sshCmdId = tplResult.data.ssh_ref.cmd_id;
+                        }
+                    }
+                } catch (e) {
+                    console.warn('checkRuleHasNohupSsh: failed to get template', action.template_id);
+                }
+            }
+            
+            if (sshCmdId) {
+                const cmdId = String(sshCmdId);
+                console.log('checkRuleHasNohupSsh: looking for cmdId=', cmdId);
+                // 在所有主机的命令中查找
+                for (const [hostId, cmds] of Object.entries(sshCommands)) {
+                    const cmd = cmds.find(c => String(c.id) === cmdId);
+                    if (cmd) {
+                        console.log('checkRuleHasNohupSsh: found cmd=', cmd.name, 'nohup=', cmd.nohup);
+                        if (cmd.nohup) {
+                            // 找到了 nohup 命令
+                            const safeName = cmd.name.replace(/[^a-zA-Z0-9]/g, '').slice(0, 20) || 'cmd';
+                            const logFile = `/tmp/ts_nohup_${safeName}.log`;
+                            // 提取命令的主程序名（第一个词）用于 pgrep -x 精确匹配
+                            const progName = cmd.command.split(' ')[0].split('/').pop();
+                            return {
+                                logFile: logFile,
+                                keyword: cmd.command,
+                                progName: progName,
+                                hostId: hostId,
+                                cmdName: cmd.name,
+                                // 用 pgrep -x 精确匹配程序名（不会匹配到 bash -c）
+                                checkCmd: `pgrep -x ${progName} -u $USER >/dev/null 2>&1 && echo 'running' || echo 'stopped'`
+                            };
+                        }
+                    }
                 }
             }
         }
+    } catch (e) {
+        console.error('checkRuleHasNohupSsh error:', e);
     }
     return null;
 }
 
 /**
- * 快捷操作 - 查看日志
+  * 快捷操作 - 查看日志
  */
 let quickActionTailInterval = null;
 let quickActionLastContent = '';
 
 async function quickActionViewLog(logFile, hostId) {
+    // 清空上次的日志缓存
+    quickActionLastContent = '';
+    
     // 获取主机信息
-    const host = sshHosts.find(h => h.id === hostId);
+    const host = window._sshHostsData?.[hostId];
     if (!host) {
         showToast('❌ 主机不存在', 'error');
         return;
@@ -1123,18 +3479,20 @@ async function quickActionViewLog(logFile, hostId) {
     // 显示日志模态框
     const modalHtml = `
         <div id="quick-log-modal" class="modal">
-            <div class="modal-content" style="max-width:700px">
+            <div class="modal-content" style="max-width:1400px;width:90%">
                 <div class="modal-header">
-                    <h2>📄 日志查看 - ${escapeHtml(logFile)}</h2>
+                    <h2>📄 日志 - <small style="font-weight:normal;font-size:0.7em;color:#888">${escapeHtml(logFile)}</small></h2>
                     <button class="modal-close" onclick="closeQuickLogModal()">&times;</button>
                 </div>
                 <div class="modal-body" style="padding:0">
                     <pre id="quick-log-content" style="max-height:400px;overflow:auto;padding:15px;margin:0;background:#1a1a2e;color:#eee;font-size:12px;white-space:pre-wrap">加载中...</pre>
                 </div>
-                <div class="modal-footer" style="display:flex;gap:10px;padding:10px 15px">
-                    <button class="btn" id="quick-log-tail-btn" onclick="toggleQuickLogTail('${escapeHtml(logFile)}', '${escapeHtml(hostId)}')">👁️ 实时跟踪</button>
-                    <button class="btn" onclick="quickActionRefreshLog('${escapeHtml(logFile)}', '${escapeHtml(hostId)}')">🔄 刷新</button>
-                    <button class="btn btn-secondary" onclick="closeQuickLogModal()">关闭</button>
+                <div class="modal-footer" style="display:flex;gap:10px;padding:10px 15px;justify-content:space-between;align-items:center">
+                    <div style="display:flex;gap:8px">
+                        <button class="btn btn-primary" id="quick-log-tail-btn" onclick="toggleQuickLogTail('${escapeHtml(logFile)}', '${escapeHtml(hostId)}')">▶️ 开始跟踪</button>
+                        <span id="quick-log-status" style="font-size:0.85em;color:#888;display:flex;align-items:center"></span>
+                    </div>
+                    <button class="btn" onclick="closeQuickLogModal()">关闭</button>
                 </div>
             </div>
         </div>
@@ -1150,23 +3508,31 @@ async function quickActionViewLog(logFile, hostId) {
 }
 
 async function quickActionRefreshLog(logFile, hostId) {
-    const host = sshHosts.find(h => h.id === hostId);
+    const host = window._sshHostsData?.[hostId];
     if (!host) return;
     
     const contentEl = document.getElementById('quick-log-content');
     if (!contentEl) return;
     
     try {
-        const result = await api.call('ssh.execute', {
-            host_id: hostId,
-            command: `cat ${logFile} 2>/dev/null || echo '[日志文件不存在]'`,
-            timeout: 10
+        // 使用 tail -n 200 限制行数，避免日志过大
+        const result = await api.call('ssh.exec', {
+            host: host.host,
+            port: host.port,
+            user: host.username,
+            keyid: host.keyid,
+            command: `if [ -f ${logFile} ]; then tail -n 200 ${logFile}; else echo '[日志文件不存在或为空]'; fi`,
+            timeout_ms: 10000
         });
         
         if (result.code === 0 && result.data) {
-            contentEl.textContent = result.data.output || '[空]';
-            contentEl.scrollTop = contentEl.scrollHeight;
-            quickActionLastContent = result.data.output || '';
+            const output = result.data.stdout || result.data.stderr || '[空]';
+            // 只有内容变化时才更新（避免闪烁）
+            if (output !== quickActionLastContent) {
+                contentEl.textContent = output;
+                contentEl.scrollTop = contentEl.scrollHeight;
+                quickActionLastContent = output;
+            }
         } else {
             contentEl.textContent = '[获取失败] ' + (result.message || '');
         }
@@ -1177,20 +3543,48 @@ async function quickActionRefreshLog(logFile, hostId) {
 
 function toggleQuickLogTail(logFile, hostId) {
     const btn = document.getElementById('quick-log-tail-btn');
+    const status = document.getElementById('quick-log-status');
+    
     if (quickActionTailInterval) {
         // 停止跟踪
         clearInterval(quickActionTailInterval);
         quickActionTailInterval = null;
-        if (btn) btn.textContent = '👁️ 实时跟踪';
-        showToast('已停止跟踪', 'info');
+        if (btn) {
+            btn.textContent = '▶️ 开始跟踪';
+            btn.classList.remove('btn-danger');
+            btn.classList.add('btn-primary');
+        }
+        if (status) status.textContent = '';
     } else {
         // 开始跟踪
-        if (btn) btn.textContent = '⏹️ 停止跟踪';
+        if (btn) {
+            btn.textContent = '⏹️ 停止跟踪';
+            btn.classList.remove('btn-primary');
+            btn.classList.add('btn-danger');
+        }
+        if (status) status.innerHTML = '<span style="color:#27ae60">● 实时更新中</span>';
         quickActionLastContent = '';
-        quickActionTailInterval = setInterval(async () => {
-            await quickActionRefreshLog(logFile, hostId);
-        }, 2000);
-        showToast('开始实时跟踪 (每2秒刷新)', 'info');
+        
+        // 定义刷新函数
+        const doRefresh = async () => {
+            // 检查模态框是否还存在
+            if (!document.getElementById('quick-log-modal')) {
+                clearInterval(quickActionTailInterval);
+                quickActionTailInterval = null;
+                return;
+            }
+            try {
+                await quickActionRefreshLog(logFile, hostId);
+            } catch (e) {
+                console.error('Tail refresh error:', e);
+            }
+        };
+        
+        // 立即执行一次
+        doRefresh();
+        
+        // 设置定时器（每2秒刷新）
+        quickActionTailInterval = setInterval(doRefresh, 2000);
     }
 }
 
@@ -1206,27 +3600,34 @@ function closeQuickLogModal() {
 /**
  * 快捷操作 - 终止进程
  */
-async function quickActionStopProcess(keyword, hostId) {
-    const host = sshHosts.find(h => h.id === hostId);
+async function quickActionStopProcess(progName, hostId) {
+    const host = window._sshHostsData?.[hostId];
     if (!host) {
         showToast('❌ 主机不存在', 'error');
         return;
     }
     
-    if (!confirm(`确定要终止包含 "${keyword}" 的进程吗？`)) {
+    if (!confirm(`确定要终止 ${progName} 进程吗？`)) {
         return;
     }
     
     try {
         showToast('正在终止进程...', 'info');
-        const result = await api.call('ssh.execute', {
-            host_id: hostId,
-            command: `pkill -f '${keyword}' && echo '进程已终止' || echo '未找到匹配进程'`,
-            timeout: 10
+        // 使用 pkill -x 精确匹配程序名
+        const result = await api.call('ssh.exec', {
+            host: host.host,
+            port: host.port,
+            user: host.username,
+            keyid: host.keyid,
+            command: `pkill -x ${progName} -u $USER && echo "已终止 ${progName} 进程" || echo "未找到运行中的 ${progName} 进程"`,
+            timeout_ms: 10000
         });
         
         if (result.code === 0 && result.data) {
-            showToast(result.data.output || '操作完成', 'success');
+            const output = result.data.stdout || result.data.stderr || '操作完成';
+            showToast(output.trim(), output.includes('已终止') ? 'success' : 'info');
+            // 刷新状态
+            setTimeout(() => refreshQuickActions(), 1000);
         } else {
             showToast('❌ ' + (result.message || '操作失败'), 'error');
         }
@@ -6684,7 +9085,7 @@ async function refreshSecurityPage() {
         tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#888">暂无密钥，点击上方按钮生成新密钥</td></tr>';
     }
     
-    // SSH 已部署主机列表
+    // SSH 已部署主机列表（加载数据并渲染到 DOM）
     await refreshSshHostsList();
     
     // 已知主机指纹列表
@@ -6697,22 +9098,36 @@ async function refreshSecurityPage() {
 /**
  * 刷新安全页面的已部署主机列表
  */
-async function refreshSshHostsList() {
-    const tbody = document.getElementById('ssh-hosts-table-body');
-    if (!tbody) return;
-    
+/**
+ * 仅加载 SSH hosts 数据到 window._sshHostsData（不渲染 DOM）
+ */
+async function loadSshHostsData() {
     try {
         const result = await api.call('ssh.hosts.list', {});
         const hosts = result.data?.hosts || [];
+        window._sshHostsData = {};
+        hosts.forEach(h => { window._sshHostsData[h.id] = h; });
+        console.log('loadSshHostsData: loaded', Object.keys(window._sshHostsData).length, 'hosts');
+    } catch (e) {
+        console.error('loadSshHostsData error:', e);
+        window._sshHostsData = {};
+    }
+}
+
+async function refreshSshHostsList() {
+    // 首先加载 SSH hosts 数据（无需 DOM）
+    await loadSshHostsData();
+    
+    const tbody = document.getElementById('ssh-hosts-table-body');
+    if (!tbody) return;  // DOM 渲染部分可选
+    
+    try {
+        const hosts = Object.values(window._sshHostsData || {});
         
         if (hosts.length === 0) {
             tbody.innerHTML = '<tr><td colspan="6" class="empty-state">暂无已部署主机，请先在上方密钥管理中点击「部署」</td></tr>';
             return;
         }
-        
-        // 存储主机数据供后续操作使用
-        window._sshHostsData = {};
-        hosts.forEach(h => { window._sshHostsData[h.id] = h; });
         
         tbody.innerHTML = hosts.map((h, idx) => `
             <tr>
@@ -6899,7 +9314,7 @@ async function removeHostByIndex(index) {
         const result = await api.call('ssh.hosts.remove', { id: host.id });
         if (result.code === 0) {
             showToast(`SSH 主机 ${host.id} 已从列表移除`, 'success');
-            await refreshSshHostsList();
+            await loadSshHostsData();
         } else {
             showToast('移除失败: ' + (result.message || '未知错误'), 'error');
         }
@@ -7020,7 +9435,7 @@ async function deleteSshHostFromSecurity(id) {
         const result = await api.call('ssh.hosts.remove', { id });
         if (result.code === 0) {
             showToast(`SSH 主机 ${id} 已从列表移除`, 'success');
-            await refreshSshHostsList();
+            await loadSshHostsData();
         } else {
             showToast('移除失败: ' + (result.message || '未知错误'), 'error');
         }
@@ -7261,7 +9676,7 @@ async function deployKey() {
             resultBox.classList.add('success');
             showToast('密钥部署成功', 'success');
             // 刷新已部署主机列表（后端 ssh.copyid 会自动注册主机）
-            await refreshSshHostsList();
+            await loadSshHostsData();
         } else {
             throw new Error('部署失败');
         }
@@ -8533,6 +10948,31 @@ window.loadDhcpClients = loadDhcpClients;
 window.setWifiMode = setWifiMode;
 window.setHostname = setHostname;
 window.saveNatConfig = saveNatConfig;
+// 数据监控组件
+window.refreshDataWidgets = refreshDataWidgets;
+window.showWidgetManager = showWidgetManager;
+window.showAddWidgetPanel = showAddWidgetPanel;
+window.addWidgetFromPreset = addWidgetFromPreset;
+window.createNewWidget = createNewWidget;
+window.showWidgetEditPanel = showWidgetEditPanel;
+window.saveWidgetEdit = saveWidgetEdit;
+window.deleteDataWidget = deleteDataWidget;
+window.moveWidget = moveWidget;
+window.selectVariableForWidget = selectVariableForWidget;
+window.updateRefreshInterval = updateRefreshInterval;
+// 日志组件
+window.toggleLogReading = toggleLogReading;
+window.startLogReading = startLogReading;
+window.stopLogReading = stopLogReading;
+window.refreshLogOnce = refreshLogOnce;
+window.clearLogWidget = clearLogWidget;
+window.updateLayoutPreview = function() {
+    // 更新布局选项的激活状态
+    document.querySelectorAll('.dw-layout-option').forEach(opt => {
+        const radio = opt.querySelector('input[type="radio"]');
+        opt.classList.toggle('active', radio?.checked);
+    });
+};
 
 // 初始化滑块事件
 document.addEventListener('DOMContentLoaded', function() {
@@ -11928,7 +14368,8 @@ async function showImageSelectModal(title, onSelect) {
     const modal = document.createElement('div');
     modal.id = 'image-select-modal';
     modal.className = 'modal show';
-    modal.onclick = (e) => { if (e.target === modal) closeModal('image-select-modal'); };
+    modal.onclick = (e) => { if (e.target === modal) closeModal('image-select-modal');
+                    };
     
     modal.innerHTML = `
         <div class="modal-content" style="max-width:500px;">
@@ -12062,7 +14503,8 @@ async function showVariableSelectModal(targetInputId, mode = 'insert') {
     const modal = document.createElement('div');
     modal.id = 'variable-select-modal';
     modal.className = 'modal show';
-    modal.onclick = (e) => { if (e.target === modal) closeModal('variable-select-modal'); };
+    modal.onclick = (e) => { if (e.target === modal) closeModal('variable-select-modal');
+                    };
     
     modal.innerHTML = `
         <div class="modal-content" style="max-width:550px;">
@@ -12230,8 +14672,52 @@ function filterVariableList(keyword) {
  * 选择变量
  */
 function selectVariable(varName) {
-    // 检查是否是动作条件回调模式
     const varSelectModal = document.getElementById('variable-select-modal');
+    
+    // 检查是否是数据组件表达式编辑回调模式
+    if (varSelectModal && varSelectModal.dataset.callback === 'widgetExpression') {
+        const input = document.getElementById('edit-expression');
+        if (input) {
+            const curVal = input.value || '';
+            // 在光标位置插入变量引用
+            const start = input.selectionStart || curVal.length;
+            const end = input.selectionEnd || curVal.length;
+            const text = `\${${varName}}`;
+            input.value = curVal.substring(0, start) + text + curVal.substring(end);
+            input.focus();
+            input.selectionStart = input.selectionEnd = start + text.length;
+        }
+        closeModal('variable-select-modal');
+        delete varSelectModal.dataset.callback;
+        return;
+    }
+    
+    // 检查是否是数据组件绑定回调模式
+    if (varSelectModal && varSelectModal.dataset.callback === 'widgetBind') {
+        const widgetId = varSelectModal.dataset.widgetId;
+        if (widgetId) {
+            const widget = dataWidgets.find(w => w.id === widgetId);
+            if (widget) {
+                widget.variable = varName;
+                saveDataWidgets();
+                renderDataWidgets();
+                refreshDataWidgets();
+                showToast(`已绑定 ${widget.label} → ${varName}`, 'success');
+            }
+        }
+        closeModal('variable-select-modal');
+        return;
+    }
+    
+    // 检查是否是数据组件编辑模态框回调模式
+    if (varSelectModal && varSelectModal.dataset.callback === 'widgetEdit') {
+        const input = document.getElementById('edit-widget-var');
+        if (input) input.value = varName;
+        closeModal('variable-select-modal');
+        return;
+    }
+    
+    // 检查是否是动作条件回调模式
     if (varSelectModal && varSelectModal.dataset.callback === 'actionCondition') {
         handleActionConditionVarSelect(varName);
         delete varSelectModal.dataset.callback;
@@ -13965,7 +16451,8 @@ async function openConditionVarSelector(rowId) {
     modal.id = 'variable-select-modal';
     modal.className = 'modal show';
     modal.dataset.callback = 'ruleCondition';
-    modal.onclick = (e) => { if (e.target === modal) closeModal('variable-select-modal'); };
+    modal.onclick = (e) => { if (e.target === modal) closeModal('variable-select-modal');
+                    };
     
     modal.innerHTML = `
         <div class="modal-content" style="max-width:550px;">
@@ -14316,7 +16803,8 @@ async function showVariableSelectModalForCondition() {
     modal.id = 'variable-select-modal';
     modal.className = 'modal show';
     modal.dataset.callback = 'actionCondition';
-    modal.onclick = (e) => { if (e.target === modal) closeModal('variable-select-modal'); };
+    modal.onclick = (e) => { if (e.target === modal) closeModal('variable-select-modal');
+                    };
     
     modal.innerHTML = `
         <div class="modal-content" style="max-width:550px;">

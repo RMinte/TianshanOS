@@ -51,6 +51,7 @@ static struct {
     struct arg_lit *mode;
     struct arg_lit *curve;
     struct arg_lit *hysteresis;
+    struct arg_lit *limits;
     struct arg_lit *enable;
     struct arg_lit *disable;
     struct arg_lit *save;
@@ -60,6 +61,8 @@ static struct {
     struct arg_str *points;      // 曲线点："30:20,50:40,70:80,80:100"
     struct arg_int *hyst_val;    // 迟滞温度 (0.1°C)
     struct arg_int *interval;    // 最小调速间隔 (ms)
+    struct arg_int *min_duty;    // 最小占空比 (%)
+    struct arg_int *max_duty;    // 最大占空比 (%)
     struct arg_lit *json;
     struct arg_lit *help;
     struct arg_end *end;
@@ -430,6 +433,42 @@ static int cmd_fan(int argc, char **argv)
         return do_fan_set_curve(fan_id, s_fan_args.points->sval[0]);
     }
     
+    // 设置占空比限制
+    if (s_fan_args.limits->count > 0) {
+        if (fan_id < 0) {
+            ts_console_error("--id required for --limits\n");
+            return 1;
+        }
+        
+        int min_d = s_fan_args.min_duty->count > 0 ? s_fan_args.min_duty->ival[0] : -1;
+        int max_d = s_fan_args.max_duty->count > 0 ? s_fan_args.max_duty->ival[0] : -1;
+        
+        if (min_d < 0 && max_d < 0) {
+            ts_console_error("--min or --max required for --limits\n");
+            return 1;
+        }
+        
+        cJSON *params = cJSON_CreateObject();
+        cJSON_AddNumberToObject(params, "id", fan_id);
+        if (min_d >= 0) cJSON_AddNumberToObject(params, "min_duty", min_d);
+        if (max_d >= 0) cJSON_AddNumberToObject(params, "max_duty", max_d);
+        
+        ts_api_result_t result;
+        esp_err_t ret = ts_api_call("fan.limits", params, &result);
+        cJSON_Delete(params);
+        
+        if (ret == ESP_OK && result.code == TS_API_OK) {
+            ts_console_success("Fan %d limits set: min=%d%%, max=%d%%\n", 
+                fan_id, 
+                min_d >= 0 ? min_d : -1,
+                max_d >= 0 ? max_d : -1);
+        } else {
+            ts_console_error("Failed: %s\n", result.message ? result.message : esp_err_to_name(ret));
+        }
+        ts_api_result_free(&result);
+        return (ret == ESP_OK) ? 0 : 1;
+    }
+    
     // 设置迟滞
     if (s_fan_args.hysteresis->count > 0) {
         if (fan_id < 0) {
@@ -500,6 +539,7 @@ esp_err_t ts_cmd_fan_register(void)
     s_fan_args.mode       = arg_lit0("m", "mode", "Set mode");
     s_fan_args.curve      = arg_lit0(NULL, "curve", "Set curve");
     s_fan_args.hysteresis = arg_lit0(NULL, "hysteresis", "Set hysteresis");
+    s_fan_args.limits     = arg_lit0(NULL, "limits", "Set duty limits");
     s_fan_args.enable     = arg_lit0(NULL, "enable", "Enable fan");
     s_fan_args.disable    = arg_lit0(NULL, "disable", "Disable fan");
     s_fan_args.save       = arg_lit0(NULL, "save", "Save config");
@@ -509,9 +549,11 @@ esp_err_t ts_cmd_fan_register(void)
     s_fan_args.points     = arg_str0(NULL, "points", "<curve>", "Curve points");
     s_fan_args.hyst_val   = arg_int0(NULL, "hyst", "<0.1C>", "Hysteresis");
     s_fan_args.interval   = arg_int0(NULL, "interval", "<ms>", "Min interval");
+    s_fan_args.min_duty   = arg_int0(NULL, "min", "<0-100>", "Min duty %");
+    s_fan_args.max_duty   = arg_int0(NULL, "max", "<0-100>", "Max duty %");
     s_fan_args.json       = arg_lit0("j", "json", "JSON output");
     s_fan_args.help       = arg_lit0("h", "help", "Show help");
-    s_fan_args.end        = arg_end(16);
+    s_fan_args.end        = arg_end(20);
     
     const ts_console_cmd_t cmd = {
         .command = "fan",

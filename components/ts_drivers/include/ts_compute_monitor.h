@@ -199,6 +199,42 @@ typedef void (*ts_compute_event_callback_t)(ts_compute_status_t status,
 esp_err_t ts_compute_monitor_get_default_config(ts_compute_config_t *config);
 
 /**
+ * @brief 获取当前配置
+ * 
+ * @param[out] config 配置结构体
+ * @return ESP_OK 成功
+ */
+esp_err_t ts_compute_monitor_get_config(ts_compute_config_t *config);
+
+/**
+ * @brief 设置服务器配置
+ * 
+ * 设置 AGX 监控服务器的 IP 和端口，并保存到 NVS。
+ * 如果监控正在运行，会自动重启以应用新配置。
+ * 
+ * @param server_ip 服务器 IP 地址
+ * @param server_port 服务器端口（0 使用默认端口）
+ * @return ESP_OK 成功
+ */
+esp_err_t ts_compute_monitor_set_server(const char *server_ip, uint16_t server_port);
+
+/**
+ * @brief 从 NVS 加载配置
+ * 
+ * @param[out] config 配置结构体
+ * @return ESP_OK 成功，ESP_ERR_NOT_FOUND 无保存的配置
+ */
+esp_err_t ts_compute_monitor_load_config(ts_compute_config_t *config);
+
+/**
+ * @brief 保存配置到 NVS
+ * 
+ * @param config 配置结构体
+ * @return ESP_OK 成功
+ */
+esp_err_t ts_compute_monitor_save_config(const ts_compute_config_t *config);
+
+/**
  * @brief 初始化 算力监控
  * 
  * @param config 配置（NULL 使用默认配置）

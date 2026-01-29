@@ -2011,51 +2011,368 @@ body {
 }
 
 /* 风扇卡片 */
+.fan-page-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+    gap: 12px;
+}
+
+.fan-page-header h2 {
+    margin: 0;
+    font-size: 1.2rem;
+}
+
+.fan-quick-actions {
+    display: flex;
+    gap: 8px;
+}
+
 .fans-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
     gap: 16px;
 }
 
+/* 风扇卡片 - 简洁版 */
 .fan-card {
     background: var(--bg-color);
-    padding: 16px;
-    border-radius: 8px;
-    border: 1px solid var(--border-color);
+    padding: 20px;
+    border-radius: 12px;
+    border: 2px solid var(--border-color);
+    transition: all 0.2s ease;
 }
 
-.fan-card h4 {
-    margin-bottom: 12px;
+.fan-card:hover {
+    border-color: var(--primary-color);
+}
+
+.fan-card.is-off {
+    opacity: 0.6;
+}
+
+/* 顶部 */
+.fan-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+}
+
+.fan-title {
+    font-size: 1.1rem;
+    font-weight: 600;
+}
+
+.fan-status-badge {
+    padding: 4px 10px;
+    border-radius: 20px;
+    font-size: 0.8rem;
+    font-weight: 500;
+}
+
+/* 转速大数字 */
+.fan-speed-display {
+    text-align: center;
+    padding: 12px 0;
+    margin-bottom: 16px;
+}
+
+.fan-speed-num {
+    font-size: 3.5rem;
+    font-weight: 700;
     color: var(--primary-color);
+    line-height: 1;
 }
 
-.fan-card p {
-    margin: 4px 0;
-    font-size: 0.9rem;
+.fan-speed-percent {
+    font-size: 1.5rem;
+    color: var(--text-light);
+    margin-left: 2px;
 }
 
-.fan-card input[type="range"] {
-    width: 100%;
-    margin-top: 8px;
+.fan-rpm-small {
+    font-size: 0.85rem;
+    color: var(--text-light);
+    margin-top: 6px;
+}
+
+/* 模式选择Tabs */
+.fan-mode-tabs {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 16px;
+    background: var(--bg-elevated);
+    padding: 4px;
+    border-radius: 8px;
+}
+
+.fan-mode-tab {
+    flex: 1;
+    padding: 10px 8px;
+    border: none;
+    background: transparent;
+    border-radius: 6px;
+    font-size: 0.85rem;
+    font-weight: 500;
+    cursor: pointer;
+    color: var(--text-light);
+    transition: all 0.2s;
+}
+
+.fan-mode-tab:hover {
+    background: var(--bg-hover);
+    color: var(--text-color);
+}
+
+.fan-mode-tab.active {
+    color: #fff;
+    font-weight: 600;
+}
+
+.fan-mode-tab.active.off {
+    background: #6b7280;
+}
+
+.fan-mode-tab.active.manual {
+    background: #f59e0b;
+}
+
+.fan-mode-tab.active.auto {
+    background: #10b981;
+}
+
+.fan-mode-tab.active.curve {
+    background: #3b82f6;
+}
+
+/* 滑块区域 */
+.fan-slider-wrap {
+    padding: 12px;
+    background: var(--bg-elevated);
+    border-radius: 8px;
+    margin-bottom: 12px;
+}
+
+.fan-slider-wrap.disabled {
+    opacity: 0.4;
+}
+
+.fan-slider-label {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+    font-size: 0.85rem;
+}
+
+.fan-slider-value {
+    font-weight: 600;
+    color: var(--primary-color);
 }
 
 .fan-slider {
+    width: 100%;
+    height: 8px;
+    border-radius: 4px;
+    -webkit-appearance: none;
+    appearance: none;
+    background: var(--border-color);
+    outline: none;
+}
+
+.fan-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: var(--primary-color);
+    cursor: pointer;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+    transition: transform 0.15s;
+}
+
+.fan-slider::-webkit-slider-thumb:hover {
+    transform: scale(1.1);
+}
+
+.fan-slider::-webkit-slider-thumb:active {
+    transform: scale(1.2);
+}
+
+.fan-slider:disabled {
+    cursor: not-allowed;
+}
+
+.fan-slider:disabled::-webkit-slider-thumb {
+    background: var(--text-light);
+    cursor: not-allowed;
+}
+
+/* 曲线编辑按钮 */
+.fan-curve-btn {
+    width: 100%;
+    padding: 10px;
+    background: transparent;
+    border: 1px dashed var(--border-color);
+    border-radius: 8px;
+    color: var(--text-light);
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: all 0.2s;
+    margin-bottom: 8px;
+}
+
+.fan-curve-btn:hover {
+    border-color: var(--primary-color);
+    color: var(--primary-color);
+    background: rgba(79, 195, 247, 0.1);
+}
+
+/* 温度信息 */
+.fan-temp-info {
+    text-align: center;
+    font-size: 0.85rem;
+    color: var(--text-light);
+    padding-top: 8px;
+    border-top: 1px solid var(--border-color);
+}
+
+/* 风扇曲线编辑器 */
+.fan-curve-points {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px;
+    background: var(--bg-elevated);
+    border-radius: 8px;
+    border: 1px solid var(--border-color);
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+.curve-point-row {
     display: flex;
     align-items: center;
     gap: 10px;
-    margin-top: 8px;
+    padding: 8px;
+    background: var(--bg-color);
+    border-radius: 6px;
+    transition: background 0.2s;
 }
 
-.fan-slider input[type="range"] {
+.curve-point-row:hover {
+    background: var(--bg-hover);
+}
+
+.curve-point-inputs {
+    display: flex;
+    align-items: center;
+    gap: 8px;
     flex: 1;
-    margin: 0;
 }
 
-.fan-slider span {
-    min-width: 40px;
-    text-align: right;
-    font-weight: bold;
+.curve-point-field {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.curve-point-field .field-icon {
+    font-size: 14px;
+}
+
+.curve-point-field input {
+    width: 70px;
+    padding: 6px 8px;
+    text-align: center;
+}
+
+.curve-point-field .field-unit {
+    font-size: 12px;
+    color: var(--text-light);
+    min-width: 20px;
+}
+
+.curve-arrow {
     color: var(--primary-color);
+    font-weight: bold;
+}
+
+.curve-point-delete {
+    padding: 4px 8px;
+    font-size: 14px;
+}
+
+.curve-point-delete:disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
+}
+
+/* 曲线预览画布 */
+.fan-curve-preview {
+    background: var(--bg-elevated);
+    border-radius: 8px;
+    padding: 10px;
+    border: 1px solid var(--border-color);
+}
+
+.fan-curve-preview canvas {
+    width: 100%;
+    border-radius: 4px;
+}
+
+/* 输入框带按钮 */
+.input-with-btn {
+    display: flex;
+    gap: 8px;
+}
+
+.input-with-btn input {
+    flex: 1;
+}
+
+/* 表单行 */
+.form-row {
+    display: flex;
+    gap: 16px;
+}
+
+.form-row .form-group {
+    flex: 1;
+}
+
+/* 风扇卡片模式指示 */
+.fan-mode-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.fan-mode-badge.mode-manual {
+    background: rgba(251, 191, 36, 0.2);
+    color: #fbbf24;
+}
+
+.fan-mode-badge.mode-auto {
+    background: rgba(52, 211, 153, 0.2);
+    color: #34d399;
+}
+
+.fan-mode-badge.mode-curve {
+    background: rgba(79, 195, 247, 0.2);
+    color: #4fc3f7;
+}
+
+.fan-mode-badge.mode-off {
+    background: rgba(156, 163, 175, 0.2);
+    color: #9ca3af;
 }
 
 /* 设备状态样式 */
@@ -5494,24 +5811,25 @@ body {
 
 .quick-actions-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
     gap: 12px;
     padding: 10px 0;
 }
 
 .quick-action-card {
+    position: relative;
     display: flex;
     flex-direction: column;
     align-items: center;
-    justify-content: center;
-    padding: 16px 12px;
+    justify-content: flex-start;
+    padding: 14px 10px 10px;
     background: var(--card-bg);
     border: 1px solid var(--border-color);
     border-radius: 12px;
     cursor: pointer;
     transition: all 0.2s ease;
     text-align: center;
-    min-height: 100px;
+    min-height: 110px;
 }
 
 .quick-action-card:hover {
@@ -5527,54 +5845,180 @@ body {
 }
 
 .quick-action-icon {
-    font-size: 2em;
-    margin-bottom: 8px;
-    width: 48px;
-    height: 48px;
+    font-size: 1.8em;
+    margin-bottom: 6px;
+    width: 44px;
+    height: 44px;
     display: flex;
     align-items: center;
     justify-content: center;
 }
 
 .quick-action-icon img {
-    max-width: 40px;
-    max-height: 40px;
+    max-width: 36px;
+    max-height: 36px;
     object-fit: contain;
 }
 
 .quick-action-name {
-    font-size: 0.85em;
+    font-size: 0.8em;
     font-weight: 500;
     color: var(--text-color);
-    margin-bottom: 4px;
+    margin-bottom: 2px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
     max-width: 100%;
+    line-height: 1.3;
 }
 
-.quick-action-count {
-    font-size: 0.75em;
+/* 设备面板分隔线 */
+.device-panel-divider {
+    height: 1px;
+    background: linear-gradient(90deg, transparent, var(--border-color) 20%, var(--border-color) 80%, transparent);
+    margin: 16px 0;
+}
+
+/* 设备面板 + 风扇控制并排布局 */
+.panel-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+    margin-bottom: 20px;
+}
+
+@media (max-width: 1200px) {
+    .panel-row {
+        grid-template-columns: 1fr;
+    }
+}
+
+.fan-control-section {
+    min-width: 0;
+}
+
+/* 风扇温度状态栏 */
+.fan-temp-status-bar {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 12px 16px;
+    background: var(--bg-elevated);
+    border-radius: 10px;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+}
+
+.temp-status-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.temp-status-item .temp-label {
+    font-size: 0.85rem;
     color: var(--text-light);
 }
 
-/* nohup 控制按钮（快捷操作卡片内） */
-.quick-action-nohup-btns {
+.temp-status-item .temp-value {
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: var(--primary-color);
+    min-width: 50px;
+}
+
+/* 测试温度控制 */
+.test-temp-control {
+    margin-left: auto;
+}
+
+.test-temp-input-wrap {
     display: flex;
-    gap: 4px;
-    margin-top: 6px;
-    justify-content: center;
+    align-items: center;
+    gap: 6px;
 }
 
-.quick-action-nohup-btns .btn-xs {
-    padding: 2px 6px;
-    font-size: 0.7em;
-    min-width: unset;
-    border-radius: 4px;
+.test-temp-input-wrap .input-sm {
+    padding: 4px 8px;
+    font-size: 0.85rem;
+    text-align: center;
 }
 
+.test-temp-input-wrap .btn-sm {
+    padding: 4px 10px;
+    font-size: 0.75rem;
+}
+
+/* nohup 后台任务卡片样式 */
 .quick-action-card.has-nohup {
-    border: 1px solid var(--primary-color);
+    padding-bottom: 36px;
+}
+
+.quick-action-card.has-nohup.is-running {
+    border-color: #27ae60;
+    background: linear-gradient(180deg, rgba(39, 174, 96, 0.05) 0%, transparent 50%);
+}
+
+/* 状态指示器 - 右上角 */
+.nohup-status-badge {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    font-size: 10px;
+    line-height: 1;
+}
+
+/* nohup 操作栏 - 底部固定 */
+.quick-action-nohup-bar {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    display: flex;
+    border-top: 1px solid var(--border-color);
+    border-radius: 0 0 11px 11px;
+    overflow: hidden;
+    background: var(--bg-color);
+}
+
+.quick-action-nohup-bar button {
+    flex: 1;
+    padding: 6px 4px;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    font-size: 0.75em;
+    color: var(--text-color);
+    transition: background 0.15s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+}
+
+.quick-action-nohup-bar button:hover {
+    background: rgba(52, 152, 219, 0.1);
+}
+
+.quick-action-nohup-bar button:first-child {
+    border-right: 1px solid var(--border-color);
+}
+
+.quick-action-nohup-bar button.btn-stop {
+    color: #e74c3c;
+}
+
+.quick-action-nohup-bar button.btn-stop:hover {
+    background: rgba(231, 76, 60, 0.1);
+}
+
+.quick-action-nohup-bar button:disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
+}
+
+.quick-action-nohup-bar button:disabled:hover {
+    background: transparent;
 }
 
 .quick-actions-empty {
@@ -5599,3 +6043,1003 @@ body {
     font-size: 0.8em;
     opacity: 0.7;
 }
+
+/* LPMu 监控面板 */
+/* ==================== 数据监控面板组件 ==================== */
+
+.data-widgets-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+}
+
+@media (max-width: 1200px) {
+    .data-widgets-grid {
+        grid-template-columns: repeat(3, 1fr);
+    }
+}
+
+@media (max-width: 900px) {
+    .data-widgets-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+@media (max-width: 600px) {
+    .data-widgets-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+.data-widgets-empty {
+    text-align: center;
+    padding: 40px 20px;
+    color: var(--text-light);
+}
+
+.data-widgets-empty .empty-icon {
+    font-size: 48px;
+    margin-bottom: 12px;
+    opacity: 0.5;
+}
+
+.data-widgets-empty p {
+    margin-bottom: 16px;
+}
+
+/* 组件卡片 */
+.dw-card {
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 12px;
+    text-align: center;
+    transition: all 0.2s;
+    display: flex;
+    flex-direction: column;
+    min-height: 160px;
+}
+
+.dw-card:hover {
+    border-color: var(--primary-color);
+    box-shadow: 0 2px 8px rgba(52, 152, 219, 0.1);
+}
+
+.dw-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+.dw-card-label {
+    font-size: 0.85em;
+    font-weight: 500;
+    color: var(--text-light);
+}
+
+.dw-card-actions {
+    display: flex;
+    gap: 2px;
+    opacity: 0;
+    transition: opacity 0.2s;
+}
+
+.dw-card:hover .dw-card-actions {
+    opacity: 1;
+}
+
+.dw-btn-icon {
+    background: none;
+    border: none;
+    padding: 2px 4px;
+    cursor: pointer;
+    font-size: 12px;
+    opacity: 0.6;
+    transition: opacity 0.2s;
+}
+
+.dw-btn-icon:hover {
+    opacity: 1;
+}
+
+.dw-card-var {
+    font-size: 0.7em;
+    color: var(--text-light);
+    background: var(--bg-color);
+    padding: 4px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.2s;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-top: auto;
+}
+
+.dw-card-var:hover {
+    background: var(--primary-color);
+    color: white;
+}
+
+.dw-card-var.bound {
+    color: var(--primary-color);
+    background: rgba(52, 152, 219, 0.1);
+}
+
+/* 环形进度条 */
+.dw-ring-container {
+    position: relative;
+    width: 85px;
+    height: 85px;
+    margin: 4px auto;
+}
+
+.dw-ring {
+    width: 100%;
+    height: 100%;
+    transform: rotate(-90deg);
+}
+
+.dw-ring-bg {
+    fill: none;
+    stroke: var(--border-color);
+    stroke-width: 8;
+}
+
+.dw-ring-progress {
+    fill: none;
+    stroke-width: 8;
+    stroke-linecap: round;
+    stroke-dasharray: 264;
+    stroke-dashoffset: 264;
+    transition: stroke-dashoffset 0.5s ease;
+}
+
+.dw-ring-value {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 1.2em;
+    font-weight: 600;
+    color: var(--text-color);
+}
+
+/* 仪表盘 */
+.dw-gauge-container {
+    position: relative;
+    width: 90px;
+    height: 55px;
+    margin: 8px auto;
+}
+
+.dw-gauge {
+    width: 100%;
+    height: 100%;
+}
+
+.dw-gauge-bg {
+    fill: none;
+    stroke: var(--border-color);
+    stroke-width: 8;
+    stroke-linecap: round;
+}
+
+.dw-gauge-progress {
+    fill: none;
+    stroke-width: 8;
+    stroke-linecap: round;
+    stroke-dasharray: 126;
+    stroke-dashoffset: 126;
+    transition: stroke-dashoffset 0.5s ease;
+}
+
+.dw-gauge-value {
+    position: absolute;
+    bottom: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 1.1em;
+    font-weight: 600;
+    color: var(--text-color);
+}
+
+/* 温度计 */
+.dw-temp-container {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    height: 75px;
+    margin: 4px 0;
+}
+
+.dw-temp-bar {
+    position: relative;
+    width: 22px;
+    height: 65px;
+    background: var(--bg-color);
+    border-radius: 11px;
+    overflow: hidden;
+    border: 2px solid var(--border-color);
+}
+
+.dw-temp-fill {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 0%;
+    background: linear-gradient(to top, #4dabf7, #69db7c, #ffd43b, #ff6b6b);
+    border-radius: 0 0 9px 9px;
+    transition: height 0.5s ease;
+}
+
+.dw-temp-scale {
+    position: absolute;
+    right: -26px;
+    top: 0;
+    bottom: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    font-size: 0.55em;
+    color: var(--text-light);
+}
+
+.dw-temp-value {
+    font-size: 1.4em;
+    font-weight: 600;
+    color: var(--text-color);
+    min-width: 45px;
+}
+
+/* 数字显示 */
+.dw-number-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 75px;
+    margin: 4px 0;
+}
+
+.dw-number-icon {
+    font-size: 1.6em;
+    margin-bottom: 4px;
+    animation: dw-pulse 2s ease-in-out infinite;
+}
+
+@keyframes dw-pulse {
+    0%, 100% { opacity: 0.7; transform: scale(1); }
+    50% { opacity: 1; transform: scale(1.05); }
+}
+
+.dw-number-value {
+    display: flex;
+    align-items: baseline;
+    gap: 2px;
+}
+
+.dw-number-num {
+    font-size: 1.6em;
+    font-weight: 700;
+}
+
+.dw-number-unit {
+    font-size: 0.85em;
+    color: var(--text-light);
+    font-weight: 500;
+}
+
+/* 进度条 */
+.dw-bar-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 75px;
+    margin: 4px 0;
+    padding: 0 8px;
+}
+
+.dw-bar-track {
+    width: 100%;
+    height: 12px;
+    background: var(--bg-color);
+    border-radius: 6px;
+    overflow: hidden;
+    margin-bottom: 8px;
+}
+
+.dw-bar-fill {
+    height: 100%;
+    width: 0%;
+    border-radius: 6px;
+    transition: width 0.5s ease;
+}
+
+.dw-bar-value {
+    font-size: 1.2em;
+    font-weight: 600;
+    color: var(--text-color);
+}
+
+/* 文本显示 */
+.dw-text-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 75px;
+    margin: 4px 0;
+}
+
+.dw-text-icon {
+    font-size: 1.6em;
+    margin-bottom: 6px;
+    opacity: 0.7;
+}
+
+.dw-text-value {
+    font-size: 1.1em;
+    font-weight: 500;
+    word-break: break-all;
+    max-width: 100%;
+}
+
+/* 添加组件模态框 */
+.dw-add-section {
+    margin-bottom: 20px;
+}
+
+.dw-add-section h4 {
+    font-size: 0.9em;
+    color: var(--text-light);
+    margin-bottom: 10px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.dw-presets-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+}
+
+.dw-preset-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 12px 8px;
+    background: var(--bg-color);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s;
+    border: 1px solid transparent;
+}
+
+.dw-preset-item:hover {
+    background: var(--bg-hover);
+    border-color: var(--primary-color);
+}
+
+.dw-preset-icon {
+    font-size: 1.5em;
+    margin-bottom: 4px;
+}
+
+.dw-preset-label {
+    font-size: 0.85em;
+    font-weight: 500;
+}
+
+.dw-preset-type {
+    font-size: 0.7em;
+    color: var(--text-light);
+}
+
+.dw-types-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.dw-type-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    background: var(--bg-color);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s;
+    border: 1px solid transparent;
+}
+
+.dw-type-item:hover {
+    background: var(--bg-hover);
+    border-color: var(--primary-color);
+}
+
+.dw-type-icon {
+    font-size: 1.4em;
+}
+
+.dw-type-info {
+    flex: 1;
+}
+
+.dw-type-name {
+    font-weight: 500;
+    margin-bottom: 2px;
+}
+
+.dw-type-desc {
+    font-size: 0.75em;
+    color: var(--text-light);
+}
+
+/* 表单行 */
+.form-row {
+    display: flex;
+    gap: 12px;
+}
+
+.form-row .form-group {
+    flex: 1;
+}
+
+/* ===================== 组件管理器样式 ===================== */
+
+/* 加大管理器模态框 */
+.dw-manager-modal {
+    max-width: 900px !important;
+    width: 95%;
+}
+
+.dw-manager-body {
+    display: flex;
+    gap: 20px;
+    padding: 0 !important;
+    min-height: 500px;
+}
+
+.dw-manager-sidebar {
+    width: 280px;
+    flex-shrink: 0;
+    border-right: 1px solid var(--border-color);
+    padding: 16px;
+    background: var(--bg-color);
+    overflow-y: auto;
+}
+
+.dw-manager-section h4 {
+    font-size: 0.85em;
+    color: var(--text-light);
+    margin-bottom: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.dw-manager-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.dw-manager-empty-list {
+    text-align: center;
+    padding: 30px 10px;
+    color: var(--text-light);
+    font-size: 0.9em;
+}
+
+.dw-manager-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.dw-manager-item:hover {
+    border-color: var(--primary-color);
+}
+
+.dw-manager-item.active {
+    border-color: var(--primary-color);
+    background: rgba(52, 152, 219, 0.1);
+}
+
+.dw-manager-item-icon {
+    font-size: 1.1em;
+}
+
+.dw-manager-item-label {
+    flex: 1;
+    font-weight: 500;
+    font-size: 0.9em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.dw-manager-item-type {
+    font-size: 0.7em;
+    color: var(--text-light);
+    background: var(--bg-color);
+    padding: 2px 6px;
+    border-radius: 3px;
+}
+
+.dw-manager-item-actions {
+    display: none;
+    gap: 2px;
+}
+
+.dw-manager-item:hover .dw-manager-item-actions {
+    display: flex;
+}
+
+.dw-manager-item-actions .dw-btn-icon {
+    padding: 2px 4px;
+    font-size: 11px;
+}
+
+.dw-manager-item-actions .dw-btn-icon:disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
+}
+
+.dw-manager-main {
+    flex: 1;
+    padding: 16px;
+    overflow-y: auto;
+}
+
+.dw-manager-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: var(--text-light);
+    text-align: center;
+}
+
+/* 添加面板 */
+.dw-add-panel h4 {
+    font-size: 0.9em;
+    color: var(--text-light);
+    margin-bottom: 12px;
+    border-bottom: 1px solid var(--border-color);
+    padding-bottom: 8px;
+}
+
+.dw-presets-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
+    gap: 10px;
+}
+
+.dw-types-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 10px;
+}
+
+.dw-type-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 12px;
+    background: var(--bg-color);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s;
+    text-align: center;
+}
+
+.dw-type-card:hover {
+    border-color: var(--primary-color);
+    background: var(--bg-hover);
+}
+
+.dw-type-card .dw-type-icon {
+    font-size: 1.8em;
+    margin-bottom: 6px;
+}
+
+.dw-type-card .dw-type-name {
+    font-weight: 500;
+    font-size: 0.9em;
+    margin-bottom: 4px;
+}
+
+.dw-type-card .dw-type-desc {
+    font-size: 0.7em;
+    color: var(--text-light);
+}
+
+/* 编辑面板 */
+.dw-edit-panel {
+    max-width: 500px;
+}
+
+.dw-edit-header {
+    margin-bottom: 16px;
+}
+
+.dw-edit-type-badge {
+    display: inline-block;
+    padding: 4px 12px;
+    background: var(--primary-color);
+    color: white;
+    border-radius: 20px;
+    font-size: 0.85em;
+}
+
+.dw-expression-group {
+    background: var(--bg-color);
+    padding: 12px;
+    border-radius: 8px;
+    margin-top: 16px;
+}
+
+.dw-expression-group label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.dw-expression-group .badge {
+    font-size: 0.65em;
+    background: var(--primary-color);
+    color: white;
+    padding: 2px 6px;
+    border-radius: 3px;
+}
+
+.dw-expression-input {
+    display: flex;
+    gap: 8px;
+    margin-top: 6px;
+}
+
+.dw-expression-input .input {
+    flex: 1;
+}
+
+.form-hint {
+    display: block;
+    font-size: 0.75em;
+    color: var(--text-light);
+    margin-top: 6px;
+}
+
+.form-hint code {
+    background: var(--card-bg);
+    padding: 1px 4px;
+    border-radius: 3px;
+    font-family: 'Consolas', monospace;
+}
+
+.dw-edit-preview {
+    margin-top: 20px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border-color);
+}
+
+.dw-edit-preview label {
+    font-size: 0.85em;
+    color: var(--text-light);
+    margin-bottom: 8px;
+    display: block;
+}
+
+.dw-preview-card {
+    background: var(--bg-color);
+    padding: 12px;
+    border-radius: 8px;
+}
+
+.dw-preview-card .dw-card {
+    max-width: 180px;
+    margin: 0 auto;
+}
+
+.dw-edit-actions {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 20px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border-color);
+}
+
+/* 新组件类型样式 */
+
+/* 状态灯 */
+.dw-status-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 75px;
+}
+
+.dw-status-light {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: #868e96;
+    box-shadow: 0 0 15px currentColor;
+    margin-bottom: 8px;
+    transition: all 0.3s;
+}
+
+.dw-status-label {
+    font-size: 0.9em;
+    font-weight: 500;
+    color: var(--text-color);
+}
+
+/* 图标状态 */
+.dw-icon-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 75px;
+}
+
+.dw-icon-display {
+    font-size: 2.5em;
+    margin-bottom: 6px;
+    transition: all 0.3s;
+}
+
+.dw-icon-label {
+    font-size: 0.85em;
+    color: var(--text-light);
+}
+
+/* 双数值 */
+.dw-dual-container {
+    display: flex;
+    align-items: baseline;
+    justify-content: center;
+    height: 75px;
+    gap: 4px;
+}
+
+.dw-dual-main {
+    font-size: 2em;
+    font-weight: 700;
+}
+
+.dw-dual-sep {
+    font-size: 1.2em;
+    color: var(--text-light);
+    margin: 0 2px;
+}
+
+.dw-dual-sub {
+    font-size: 1.2em;
+    color: var(--text-light);
+    font-weight: 500;
+}
+
+.dw-dual-unit {
+    font-size: 0.9em;
+    color: var(--text-light);
+    margin-left: 4px;
+}
+
+/* 百分比显示 */
+.dw-percent-container {
+    display: flex;
+    align-items: baseline;
+    justify-content: center;
+    height: 75px;
+}
+
+.dw-percent-value {
+    font-size: 2.4em;
+    font-weight: 700;
+}
+
+.dw-percent-symbol {
+    font-size: 1.4em;
+    font-weight: 500;
+    color: var(--text-light);
+    margin-left: 2px;
+}
+
+/* 日志组件样式 */
+.dw-log-container {
+    height: 160px;
+    overflow-y: auto;
+    background: #1a1a2e;
+    border-radius: 6px;
+    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+    font-size: 11px;
+    line-height: 1.4;
+    padding: 8px;
+}
+
+.dw-log-line {
+    white-space: nowrap;
+    padding: 3px 6px;
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+    font-size: 12px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.dw-log-line:last-child {
+    border-bottom: none;
+}
+
+/* 日志级别颜色 */
+.dw-log-error-line { color: #fa5252; }
+.dw-log-warn-line { color: #fab005; }
+.dw-log-info-line { color: #4dabf7; }
+.dw-log-debug-line { color: #69db7c; }
+
+.dw-log-loading,
+.dw-log-empty,
+.dw-log-error {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: #888;
+    font-family: inherit;
+    font-size: 13px;
+}
+
+.dw-log-error {
+    color: #fa5252;
+}
+
+/* 日志工具栏 */
+.dw-log-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 0;
+    border-bottom: 1px solid rgba(0,0,0,0.1);
+    margin-bottom: 8px;
+}
+
+/* 折叠时工具栏精简 */
+.dw-log-toolbar-collapsed {
+    border-bottom: none;
+    margin-bottom: 0;
+    padding: 2px 0;
+}
+
+.dw-log-toolbar .btn-sm {
+    padding: 2px 8px;
+    font-size: 11px;
+}
+
+.dw-log-collapse-btn {
+    min-width: 24px;
+    font-size: 9px !important;
+    padding: 2px 6px !important;
+}
+
+.dw-log-status {
+    margin-left: auto;
+    font-size: 11px;
+    color: #888;
+}
+
+/* 日志折叠状态 */
+.dw-log-collapsed {
+    height: 0 !important;
+    min-height: 0 !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    overflow: hidden;
+    border: none !important;
+}
+
+.dw-log-container {
+    transition: height 0.2s ease-out;
+}
+
+/* 日志组件卡片尺寸调整 */
+.dw-card .dw-log-container {
+    margin: 0 -12px -12px -12px;
+    border-radius: 0 0 8px 8px;
+    height: 200px;
+}
+
+/* 布局宽度类 */
+.dw-layout-small { 
+    grid-column: span 1; 
+    min-width: 120px;
+}
+.dw-layout-medium { 
+    grid-column: span 2; 
+}
+.dw-layout-large { 
+    grid-column: span 3; 
+}
+.dw-layout-full { 
+    grid-column: 1 / -1;  /* 独占一整行 */
+}
+
+/* 日志组件独占一行时高度更大 */
+.dw-layout-full .dw-log-container {
+    height: 250px;
+}
+
+/* 布局选项样式 */
+.dw-layout-options {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 6px;
+}
+
+.dw-layout-option {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 8px 12px;
+    border: 2px solid var(--border);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s;
+    min-width: 70px;
+}
+
+.dw-layout-option:hover {
+    border-color: var(--primary);
+    background: rgba(77, 171, 247, 0.05);
+}
+
+.dw-layout-option.active {
+    border-color: var(--primary);
+    background: rgba(77, 171, 247, 0.1);
+}
+
+.dw-layout-option input[type="radio"] {
+    display: none;
+}
+
+.dw-layout-label {
+    font-weight: 600;
+    font-size: 14px;
+}
+
+.dw-layout-desc {
+    font-size: 11px;
+    color: var(--text-light);
+    margin-top: 2px;
+}
+
+/* 颜色输入框样式 */
+.input-color {
+    width: 60px;
+    height: 36px;
+    padding: 2px;
+    cursor: pointer;
+}
+
+/* 按钮块级 */
+.btn-block {
+    display: block;
+    width: 100%;
+}
+

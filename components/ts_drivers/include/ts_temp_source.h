@@ -66,6 +66,7 @@ typedef enum {
     TS_TEMP_SOURCE_DEFAULT = 0,     /**< 默认值（25°C）- 最低优先级 */
     TS_TEMP_SOURCE_SENSOR_LOCAL,    /**< 本地温度传感器 */
     TS_TEMP_SOURCE_AGX_AUTO,        /**< AGX WebSocket 自动获取 */
+    TS_TEMP_SOURCE_VARIABLE,        /**< 绑定系统变量 */
     TS_TEMP_SOURCE_MANUAL,          /**< 手动设置 - 最高优先级 */
     TS_TEMP_SOURCE_MAX
 } ts_temp_source_type_t;
@@ -102,12 +103,17 @@ typedef struct {
     bool active;                    /**< 是否激活 */
 } ts_temp_provider_info_t;
 
+/** 最大绑定变量名长度 */
+#define TS_TEMP_MAX_VARNAME_LEN     64
+
 /**
  * @brief 温度源状态信息
  */
 typedef struct {
     bool initialized;                       /**< 初始化状态 */
     ts_temp_source_type_t active_source;    /**< 当前活动源 */
+    ts_temp_source_type_t preferred_source; /**< 用户首选源（0 表示自动选择）*/
+    char bound_variable[TS_TEMP_MAX_VARNAME_LEN]; /**< 绑定的变量名 */
     int16_t current_temp;                   /**< 当前温度 */
     bool manual_mode;                       /**< 手动模式启用 */
     uint32_t provider_count;                /**< 注册的 provider 数量 */
@@ -220,6 +226,66 @@ esp_err_t ts_temp_set_manual_mode(bool enable);
  * @return true 手动模式启用
  */
 bool ts_temp_is_manual_mode(void);
+
+/*---------------------------------------------------------------------------*/
+/*                          首选温度源选择                                    */
+/*---------------------------------------------------------------------------*/
+
+/**
+ * @brief 设置首选温度源
+ * 
+ * 在非手动模式下，系统将优先使用指定的温度源。
+ * 如果首选源不可用或数据过期，会自动降级到下一个可用源。
+ * 
+ * @param type 首选温度源类型（不能选择 MANUAL 或 DEFAULT）
+ * @return ESP_OK 成功
+ */
+esp_err_t ts_temp_set_preferred_source(ts_temp_source_type_t type);
+
+/**
+ * @brief 获取首选温度源
+ * 
+ * @return 当前设置的首选温度源类型
+ */
+ts_temp_source_type_t ts_temp_get_preferred_source(void);
+
+/**
+ * @brief 清除首选温度源（恢复优先级自动选择）
+ * 
+ * @return ESP_OK 成功
+ */
+esp_err_t ts_temp_clear_preferred_source(void);
+
+/*---------------------------------------------------------------------------*/
+/*                          变量绑定                                          */
+/*---------------------------------------------------------------------------*/
+
+/**
+ * @brief 绑定温度源到系统变量
+ * 
+ * 当首选源设置为 TS_TEMP_SOURCE_VARIABLE 时，系统将从指定的变量读取温度值。
+ * 变量值应为浮点数（单位：°C）。
+ * 
+ * @param var_name 变量名（如 "agx.cpu_temp"）
+ * @return ESP_OK 成功
+ */
+esp_err_t ts_temp_bind_variable(const char *var_name);
+
+/**
+ * @brief 获取绑定的变量名
+ * 
+ * @param buffer 输出缓冲区
+ * @param buffer_size 缓冲区大小
+ * @return ESP_OK 成功，ESP_ERR_NOT_FOUND 未绑定
+ */
+esp_err_t ts_temp_get_bound_variable(char *buffer, size_t buffer_size);
+
+/**
+ * @brief 清除变量绑定
+ * 
+ * @return ESP_OK 成功
+ */
+esp_err_t ts_temp_unbind_variable(void);
 
 /*---------------------------------------------------------------------------*/
 /*                          状态查询                                          */

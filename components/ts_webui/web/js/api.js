@@ -18,7 +18,7 @@ function getApiHost() {
     // 检测是否是本地开发环境（localhost 或 127.0.0.1）
     const host = window.location.host;
     if (host.startsWith('localhost') || host.startsWith('127.0.0.1')) {
-        console.warn('WebUI running on localhost - WebSocket/API may not work. Set DEV_ESP32_HOST in api.js if needed.');
+        console.debug('WebUI running on localhost - WebSocket/API may not work. Set DEV_ESP32_HOST in api.js if needed.');
     }
     return host;
 }
