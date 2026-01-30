@@ -198,3 +198,4 @@ idf.py -p /dev/ttyACM0 flash monitor
 ## 👥 贡献者
 
 - Thomas (项目负责人)
+- massif-01
