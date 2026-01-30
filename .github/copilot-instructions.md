@@ -109,6 +109,21 @@ idf.py build
 idf.py fullclean && idf.py build
 ```
 
+### 重要：Copilot 构建规则
+
+**当用户要求构建/编译项目时，Copilot 必须执行以下操作：**
+
+1. **始终使用 `./tools/build.sh --fresh`** 而不是 `idf.py build`
+2. 这确保每次构建都有唯一的版本号时间戳
+3. 构建完成后，如果 OTA 服务器正在运行，提示用户重启服务器
+
+```bash
+# Copilot 执行构建的标准流程
+./tools/build.sh --fresh
+# 如果需要更新 OTA 服务器
+sudo systemctl restart tianshan-ota
+```
+
 ### 重要：OTA 发布前必须刷新版本号
 
 **发布 OTA 更新时，必须使用 `--fresh` 或 `--clean` 选项确保版本号更新**：
