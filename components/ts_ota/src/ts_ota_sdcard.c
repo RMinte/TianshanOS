@@ -86,6 +86,9 @@ static void sdcard_ota_task(void *arg)
     
     ESP_LOGI(TAG, "Starting SD Card OTA from: %s", s_ota_config.url);
 
+    // Update global state - starting
+    ts_ota_update_progress(TS_OTA_STATE_DOWNLOADING, 0, 0, "正在读取固件文件...");
+
     // Post start event
     ts_event_post(TS_EVENT_BASE_OTA, TS_EVENT_OTA_STARTED, NULL, 0, 0);
 
@@ -93,6 +96,7 @@ static void sdcard_ota_task(void *arg)
     f = fopen(s_ota_config.url, "rb");
     if (!f) {
         ESP_LOGE(TAG, "Failed to open firmware file");
+        ts_ota_set_error(TS_OTA_ERR_FILE_NOT_FOUND, "打开固件文件失败");
         ret = ESP_ERR_NOT_FOUND;
         goto cleanup;
     }
@@ -108,14 +112,19 @@ static void sdcard_ota_task(void *arg)
     buffer = OTA_MALLOC(CONFIG_TS_OTA_BUFFER_SIZE);
     if (!buffer) {
         ESP_LOGE(TAG, "Failed to allocate buffer");
+        ts_ota_set_error(TS_OTA_ERR_INTERNAL, "内存分配失败");
         ret = ESP_ERR_NO_MEM;
         goto cleanup;
     }
+
+    // Update state - verifying
+    ts_ota_update_progress(TS_OTA_STATE_VERIFYING, 0, file_size, "正在验证固件...");
 
     // Read and verify app description
     size_t read_len = fread(buffer, 1, sizeof(esp_image_header_t) + sizeof(esp_image_segment_header_t) + sizeof(esp_app_desc_t), f);
     if (read_len < sizeof(esp_image_header_t) + sizeof(esp_image_segment_header_t) + sizeof(esp_app_desc_t)) {
         ESP_LOGE(TAG, "Failed to read firmware header");
+        ts_ota_set_error(TS_OTA_ERR_VERIFY_FAILED, "读取固件头部失败");
         ret = ESP_ERR_INVALID_SIZE;
         goto cleanup;
     }
@@ -125,6 +134,7 @@ static void sdcard_ota_task(void *arg)
     
     if (app_desc->magic_word != ESP_APP_DESC_MAGIC_WORD) {
         ESP_LOGE(TAG, "Invalid firmware magic word");
+        ts_ota_set_error(TS_OTA_ERR_VERIFY_FAILED, "无效的固件格式");
         ret = ESP_ERR_INVALID_ARG;
         goto cleanup;
     }
@@ -140,6 +150,7 @@ static void sdcard_ota_task(void *arg)
         if (cmp < 0) {
             ESP_LOGE(TAG, "Downgrade not allowed: %s -> %s", 
                      running_app->version, app_desc->version);
+            ts_ota_set_error(TS_OTA_ERR_VERSION_MISMATCH, "不允许固件降级");
             ret = ESP_ERR_INVALID_VERSION;
             goto cleanup;
         }
@@ -153,6 +164,7 @@ static void sdcard_ota_task(void *arg)
     update_partition = esp_ota_get_next_update_partition(NULL);
     if (!update_partition) {
         ESP_LOGE(TAG, "No OTA partition available");
+        ts_ota_set_error(TS_OTA_ERR_NO_PARTITION, "没有可用的 OTA 分区");
         ret = ESP_ERR_NOT_FOUND;
         goto cleanup;
     }
@@ -164,14 +176,19 @@ static void sdcard_ota_task(void *arg)
     // Check partition size
     if (file_size > update_partition->size) {
         ESP_LOGE(TAG, "Firmware too large for partition");
+        ts_ota_set_error(TS_OTA_ERR_PARTITION_FULL, "固件过大，超出分区容量");
         ret = ESP_ERR_INVALID_SIZE;
         goto cleanup;
     }
+
+    // Update state - writing
+    ts_ota_update_progress(TS_OTA_STATE_WRITING, 0, file_size, "正在开始写入...");
 
     // Begin OTA
     ret = esp_ota_begin(update_partition, OTA_WITH_SEQUENTIAL_WRITES, &ota_handle);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "esp_ota_begin failed: %s", esp_err_to_name(ret));
+        ts_ota_set_error(TS_OTA_ERR_WRITE_FAILED, "OTA 初始化失败");
         goto cleanup;
     }
 
@@ -184,6 +201,7 @@ static void sdcard_ota_task(void *arg)
                 break;
             }
             ESP_LOGE(TAG, "Read error");
+            ts_ota_set_error(TS_OTA_ERR_DOWNLOAD_FAILED, "读取文件失败");
             ret = ESP_ERR_INVALID_STATE;
             goto cleanup;
         }
@@ -191,6 +209,7 @@ static void sdcard_ota_task(void *arg)
         ret = esp_ota_write(ota_handle, buffer, read_len);
         if (ret != ESP_OK) {
             ESP_LOGE(TAG, "esp_ota_write failed: %s", esp_err_to_name(ret));
+            ts_ota_set_error(TS_OTA_ERR_WRITE_FAILED, "写入闪存失败");
             goto cleanup;
         }
 
@@ -200,7 +219,8 @@ static void sdcard_ota_task(void *arg)
         int percent = (written * 100) / file_size;
         ESP_LOGI(TAG, "Written: %zu / %zu bytes (%d%%)", written, file_size, percent);
 
-        // Call progress callback
+        // Update global state
+        ts_ota_update_progress(TS_OTA_STATE_WRITING, written, file_size, "正在写入固件...");
         if (s_ota_config.progress_cb) {
             ts_ota_progress_t progress = {
                 .state = TS_OTA_STATE_WRITING,
@@ -227,14 +247,18 @@ static void sdcard_ota_task(void *arg)
     }
 
     // End OTA
+    ts_ota_update_progress(TS_OTA_STATE_VERIFYING, written, file_size, "正在验证固件...");
+    
     ret = esp_ota_end(ota_handle);
     ota_handle = 0;
     
     if (ret != ESP_OK) {
         if (ret == ESP_ERR_OTA_VALIDATE_FAILED) {
             ESP_LOGE(TAG, "Image validation failed");
+            ts_ota_set_error(TS_OTA_ERR_VERIFY_FAILED, "固件验证失败");
         } else {
             ESP_LOGE(TAG, "esp_ota_end failed: %s", esp_err_to_name(ret));
+            ts_ota_set_error(TS_OTA_ERR_WRITE_FAILED, "OTA 完成失败");
         }
         goto cleanup;
     }
@@ -243,10 +267,14 @@ static void sdcard_ota_task(void *arg)
     ret = esp_ota_set_boot_partition(update_partition);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "esp_ota_set_boot_partition failed: %s", esp_err_to_name(ret));
+        ts_ota_set_error(TS_OTA_ERR_WRITE_FAILED, "设置启动分区失败");
         goto cleanup;
     }
 
     ESP_LOGI(TAG, "OTA update successful!");
+
+    // Set global state - completed
+    ts_ota_set_completed("升级完成，等待重启");
 
     // Post completion event
     ts_event_post(TS_EVENT_BASE_OTA, TS_EVENT_OTA_COMPLETED, NULL, 0, 0);
@@ -276,19 +304,12 @@ cleanup:
     if (buffer) free(buffer);
     if (ota_handle) esp_ota_abort(ota_handle);
 
-    if (ret != ESP_OK) {
-        // Post failure event
-        ts_ota_error_t error = TS_OTA_ERR_WRITE_FAILED;
-        ts_event_post(TS_EVENT_BASE_OTA, TS_EVENT_OTA_FAILED, &error, sizeof(error), 0);
-
-        if (s_ota_config.progress_cb) {
-            ts_ota_progress_t progress = {
-                .state = TS_OTA_STATE_ERROR,
-                .error = error,
-                .status_msg = "升级失败"
-            };
-            s_ota_config.progress_cb(&progress, s_ota_config.user_data);
-        }
+    // Error state already set by ts_ota_set_error calls above
+    // Just notify callback if provided
+    if (ret != ESP_OK && s_ota_config.progress_cb) {
+        ts_ota_progress_t progress;
+        ts_ota_get_progress(&progress);  // Get current error state
+        s_ota_config.progress_cb(&progress, s_ota_config.user_data);
     }
 
     s_ota_running = false;

@@ -82,14 +82,48 @@ led --effect --device matrix --name fire --speed 50
 3. 在 `ts_cmd_register.c` 调用 `ts_cmd_xxx_register()`
 4. 在 `include/ts_cmd_all.h` 添加函数声明
 
+## 版本管理
+
+版本号格式：`MAJOR.MINOR.PATCH+HASH.TIMESTAMP`，例如 `0.3.1+7fdcca4d.01311234`
+
+- `version.txt` - 语义版本号（手动维护）
+- `tools/gen_version.py` - 自动生成完整版本字符串
+- 版本号嵌入 `esp_app_desc_t`，可通过 `system --info` 或 WebUI 查看
+
+**版本号只在 CMake 配置阶段更新**，增量编译不会改变版本号。
+
 ## 开发工作流
 
-推荐使用 VS Code ESP-IDF 扩展的 GUI 操作，或命令行：
+### 构建命令
+
+```bash
+# 日常开发 - 快速增量编译（版本号不变）
+idf.py build
+
+# 发布构建 - 强制更新版本号（推荐用于 OTA 发布）
+./tools/build.sh --fresh
+
+# 完整清理构建（最干净但最慢）
+./tools/build.sh --clean
+# 或
+idf.py fullclean && idf.py build
+```
+
+### 重要：OTA 发布前必须刷新版本号
+
+**发布 OTA 更新时，必须使用 `--fresh` 或 `--clean` 选项确保版本号更新**：
+
+```bash
+./tools/build.sh --fresh          # 刷新版本号并构建
+sudo systemctl restart tianshan-ota  # 重启 OTA 服务器
+```
+
+### 其他常用命令
 
 ```bash
 idf.py set-target esp32s3      # 设置目标芯片
 idf.py menuconfig              # TianShanOS 选项在顶层菜单
-idf.py build flash monitor     # 构建、烧录、串口监控
+idf.py flash monitor           # 烧录并监控
 ```
 
 ## 代码约定
@@ -208,6 +242,11 @@ idf_component_register(
 | 安全/SSH 模块 | `components/ts_security/include/ts_ssh_client.h` |
 | 设备驱动框架 | `components/ts_drivers/` |
 | 分区表 | `partitions.csv`（factory 3MB / storage SPIFFS / www WebUI）|
+| 版本号文件 | `version.txt` |
+| 版本生成脚本 | `tools/gen_version.py` |
+| 构建脚本 | `tools/build.sh` |
+| OTA 服务器 | `tools/ota_server/ota_server.py` |
+| OTA 服务管理 | `tools/ota_server/ota_service.sh` |
 
 ## 参考项目
 

@@ -34,9 +34,10 @@ extern "C" {
  * @brief OTA update source type
  */
 typedef enum {
-    TS_OTA_SOURCE_HTTPS,    ///< Download from HTTPS URL
-    TS_OTA_SOURCE_SDCARD,   ///< Load from SD card file
+    TS_OTA_SOURCE_HTTPS,    ///< Download from HTTPS URL (direct flash, esp_https_ota)
+    TS_OTA_SOURCE_SDCARD,   ///< Load from SD card file (direct flash)
     TS_OTA_SOURCE_UPLOAD,   ///< Upload via WebUI/API
+    TS_OTA_SOURCE_DOWNLOAD, ///< Download to recovery dir first, then flash (unified mode)
 } ts_ota_source_t;
 
 /**
@@ -451,6 +452,127 @@ bool ts_ota_www_is_running(void);
  * @return ESP_OK on success
  */
 esp_err_t ts_ota_www_get_progress(ts_ota_progress_t *progress);
+
+// ============================================================================
+//                           SD Card Recovery
+// ============================================================================
+
+/**
+ * @brief Check for SD card recovery and execute if needed
+ *
+ * This function should be called immediately after SD card is mounted.
+ * It checks for /sdcard/recovery/ directory and performs recovery if:
+ * - manifest.json has different version than current
+ * - force flag is set in manifest
+ *
+ * Recovery will:
+ * 1. Flash firmware to OTA partition
+ * 2. Flash WebUI to www partition (if present)
+ * 3. Delete recovery files (if delete_after is true)
+ * 4. Reboot device
+ *
+ * @return
+ *   - ESP_OK: No recovery needed or recovery successful (will reboot)
+ *   - ESP_ERR_NOT_FOUND: No recovery directory/files
+ *   - Other: Recovery failed
+ */
+esp_err_t ts_ota_check_recovery(void);
+
+/**
+ * @brief Create recovery manifest file
+ *
+ * Used to prepare for recovery update. After creating manifest,
+ * copy firmware and www.bin to /sdcard/recovery/ and reboot.
+ *
+ * @param version Target version string (for comparison)
+ * @param force Force recovery regardless of version
+ * @return ESP_OK on success
+ */
+esp_err_t ts_ota_create_recovery_manifest(const char *version, bool force);
+
+// ============================================================================
+//                    Unified Download API (Recovery Directory Mode)
+// ============================================================================
+
+/**
+ * @brief Download firmware from URL to recovery directory
+ *
+ * All OTA sources (HTTPS/HTTP) use this unified download API.
+ * Files are saved to /sdcard/recovery/ then flashed using sd card OTA.
+ *
+ * @param url Firmware download URL (http:// or https://)
+ * @param skip_cert_verify Skip SSL certificate verification
+ * @param progress_cb Progress callback (optional)
+ * @param user_data User data for callback
+ * @param auto_flash Automatically flash after download
+ * @return ESP_OK if download started successfully
+ */
+esp_err_t ts_ota_download_firmware(const char *url, bool skip_cert_verify,
+                                    ts_ota_progress_cb_t progress_cb, void *user_data,
+                                    bool auto_flash);
+
+/**
+ * @brief Save uploaded firmware/www data to recovery directory
+ *
+ * Used by WebUI upload handlers. Data is saved to /sdcard/recovery/
+ * then optionally flashed.
+ *
+ * @param data Binary data
+ * @param len Data length
+ * @param is_firmware true for firmware, false for www
+ * @param auto_flash Automatically flash after saving
+ * @return ESP_OK on success
+ */
+esp_err_t ts_ota_save_upload(const void *data, size_t len, bool is_firmware, bool auto_flash);
+
+/**
+ * @brief Flash firmware from recovery directory
+ *
+ * Reads /sdcard/recovery/TianShanOS.bin and writes to OTA partition.
+ *
+ * @param auto_reboot Reboot after flashing
+ * @return ESP_OK if started successfully
+ */
+esp_err_t ts_ota_flash_from_recovery(bool auto_reboot);
+
+/**
+ * @brief Flash www from recovery directory
+ *
+ * Reads /sdcard/recovery/www.bin and writes to www partition.
+ *
+ * @return ESP_OK if started successfully
+ */
+esp_err_t ts_ota_www_from_recovery(void);
+
+/**
+ * @brief Check recovery directory status
+ *
+ * @param has_firmware Output: firmware file exists
+ * @param has_www Output: www file exists
+ * @param firmware_version Output: firmware version (64 byte buffer)
+ * @return ESP_OK on success
+ */
+esp_err_t ts_ota_check_recovery_files(bool *has_firmware, bool *has_www, char *firmware_version);
+
+/**
+ * @brief Clean recovery directory
+ *
+ * Removes all files in /sdcard/recovery/
+ *
+ * @return ESP_OK on success
+ */
+esp_err_t ts_ota_clean_recovery(void);
+
+/**
+ * @brief Abort ongoing download
+ */
+void ts_ota_download_abort(void);
+
+/**
+ * @brief Check if download is running
+ * @return true if running
+ */
+bool ts_ota_download_is_running(void);
 
 // ============================================================================
 //                           Event IDs

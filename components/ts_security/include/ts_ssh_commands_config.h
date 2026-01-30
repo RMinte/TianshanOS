@@ -36,10 +36,10 @@ extern "C" {
 
 #define TS_SSH_CMD_ID_MAX         32   /**< 指令 ID 最大长度（自动生成） */
 #define TS_SSH_CMD_NAME_MAX       64   /**< 指令名称最大长度 */
-#define TS_SSH_CMD_COMMAND_MAX   256   /**< SSH 命令最大长度 */
+#define TS_SSH_CMD_COMMAND_MAX  1024   /**< SSH 命令最大长度 */
 #define TS_SSH_CMD_DESC_MAX      128   /**< 描述最大长度 */
 #define TS_SSH_CMD_ICON_MAX       64   /**< 图标最大长度（emoji 或 SD 卡路径） */
-#define TS_SSH_CMD_PATTERN_MAX    64   /**< 模式匹配最大长度 */
+#define TS_SSH_CMD_PATTERN_MAX   128   /**< 模式匹配最大长度 */
 #define TS_SSH_CMD_VARNAME_MAX    32   /**< 变量名最大长度 */
 #define TS_SSH_CMD_HOST_ID_MAX    32   /**< 主机 ID 最大长度 */
 #define TS_SSH_COMMANDS_MAX       64   /**< 最大指令数量 */

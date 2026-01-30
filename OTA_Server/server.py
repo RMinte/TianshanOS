@@ -40,6 +40,9 @@ WWW_NAME = "www.bin"
 class OTAHandler(http.server.BaseHTTPRequestHandler):
     """OTA HTTP 请求处理器"""
     
+    # 强制使用 HTTP/1.1 响应
+    protocol_version = "HTTP/1.1"
+    
     def log_message(self, format, *args):
         """自定义日志格式"""
         print(f"[{datetime.now().strftime('%H:%M:%S')}] {args[0]}")
@@ -48,6 +51,7 @@ class OTAHandler(http.server.BaseHTTPRequestHandler):
         """发送 CORS 头"""
         self.send_header('Access-Control-Allow-Origin', '*')
         self.send_header('Access-Control-Allow-Methods', 'GET, OPTIONS')
+        self.send_header('Connection', 'close')  # 明确关闭连接，避免 keep-alive 问题
         self.send_header('Access-Control-Allow-Headers', 'Content-Type')
     
     def do_OPTIONS(self):
@@ -55,6 +59,37 @@ class OTAHandler(http.server.BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_cors_headers()
         self.end_headers()
+    
+    def do_HEAD(self):
+        """处理 HEAD 请求 - ESP-IDF OTA 客户端需要"""
+        path = self.path.split('?')[0]
+        
+        if path == '/firmware' or path == '/firmware.bin' or path == '/TianShanOS.bin':
+            firmware_path = BUILD_DIR / FIRMWARE_NAME
+            if firmware_path.exists():
+                stat = firmware_path.stat()
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/octet-stream')
+                self.send_header('Content-Length', str(stat.st_size))
+                self.send_header('Accept-Ranges', 'bytes')
+                self.send_cors_headers()
+                self.end_headers()
+            else:
+                self.send_error(404, "Firmware not found")
+        elif path == '/www.bin':
+            www_path = BUILD_DIR / WWW_NAME
+            if www_path.exists():
+                stat = www_path.stat()
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/octet-stream')
+                self.send_header('Content-Length', str(stat.st_size))
+                self.send_header('Accept-Ranges', 'bytes')
+                self.send_cors_headers()
+                self.end_headers()
+            else:
+                self.send_error(404, "www.bin not found")
+        else:
+            self.send_error(404, "Not Found")
     
     def do_GET(self):
         """处理 GET 请求"""
@@ -318,8 +353,11 @@ def main():
         print(f"⚠️  WebUI 未找到: {www_path}")
         print(f"   请先运行: idf.py build")
     
-    # 启动服务器
-    with socketserver.TCPServer(("", port), OTAHandler) as httpd:
+    # 启动服务器 - 允许端口重用
+    class ReusableTCPServer(socketserver.TCPServer):
+        allow_reuse_address = True
+    
+    with ReusableTCPServer(("", port), OTAHandler) as httpd:
         print(f"\n🚀 OTA 服务器启动")
         print(f"   地址: http://0.0.0.0:{port}")
         print(f"   版本信息: http://localhost:{port}/version")

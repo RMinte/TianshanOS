@@ -8,11 +8,14 @@
 
 #include <string.h>
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "cJSON.h"
 #include "ts_api.h"
 #include "ts_ota.h"
 #include "nvs_flash.h"
 #include "nvs.h"
+#include "lwip/netdb.h"
+#include "lwip/sockets.h"
 
 static const char *TAG = "ts_api_ota";
 
@@ -808,6 +811,180 @@ static esp_err_t api_ota_www_start_sdcard(const cJSON *params, ts_api_result_t *
     return ESP_OK;
 }
 
+/**
+ * @brief API: ota.test_connection - 测试 OTA 服务器连接
+ * Params: url (required) - 要测试的 URL
+ * 
+ * 此 API 从 ESP32 设备测试到 OTA 服务器的连接
+ */
+static esp_err_t api_ota_test_connection(const cJSON *params, ts_api_result_t *result)
+{
+    if (!params) {
+        ts_api_result_error(result, TS_API_ERR_INVALID_ARG, "缺少参数");
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    cJSON *url_item = cJSON_GetObjectItem(params, "url");
+    if (!url_item || !cJSON_IsString(url_item) || !url_item->valuestring[0]) {
+        ts_api_result_error(result, TS_API_ERR_INVALID_ARG, "缺少 url 参数");
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    const char *url = url_item->valuestring;
+    ESP_LOGI(TAG, "Testing connection to: %s", url);
+
+    cJSON *json = cJSON_CreateObject();
+    cJSON_AddStringToObject(json, "url", url);
+
+    // 解析 URL 获取主机名
+    const char *host_start = strstr(url, "://");
+    if (!host_start) {
+        ts_api_result_error(result, TS_API_ERR_INVALID_ARG, "URL 格式无效");
+        cJSON_Delete(json);
+        return ESP_ERR_INVALID_ARG;
+    }
+    host_start += 3;
+
+    char host[128] = {0};
+    char port_str[8] = "80";
+    const char *port_pos = strchr(host_start, ':');
+    const char *path_pos = strchr(host_start, '/');
+    
+    if (port_pos && (!path_pos || port_pos < path_pos)) {
+        // 有端口号
+        size_t host_len = port_pos - host_start;
+        if (host_len >= sizeof(host)) host_len = sizeof(host) - 1;
+        strncpy(host, host_start, host_len);
+        
+        const char *port_end = path_pos ? path_pos : port_pos + strlen(port_pos);
+        size_t port_len = port_end - (port_pos + 1);
+        if (port_len >= sizeof(port_str)) port_len = sizeof(port_str) - 1;
+        strncpy(port_str, port_pos + 1, port_len);
+    } else if (path_pos) {
+        size_t host_len = path_pos - host_start;
+        if (host_len >= sizeof(host)) host_len = sizeof(host) - 1;
+        strncpy(host, host_start, host_len);
+    } else {
+        strncpy(host, host_start, sizeof(host) - 1);
+    }
+
+    cJSON_AddStringToObject(json, "host", host);
+    cJSON_AddStringToObject(json, "port", port_str);
+
+    // DNS 解析测试
+    struct addrinfo hints = {
+        .ai_family = AF_INET,
+        .ai_socktype = SOCK_STREAM,
+    };
+    struct addrinfo *res = NULL;
+    
+    int64_t dns_start = esp_timer_get_time();
+    int dns_err = getaddrinfo(host, port_str, &hints, &res);
+    int64_t dns_time = (esp_timer_get_time() - dns_start) / 1000;  // ms
+    
+    cJSON_AddNumberToObject(json, "dns_time_ms", dns_time);
+
+    if (dns_err != 0 || res == NULL) {
+        cJSON_AddBoolToObject(json, "dns_ok", false);
+        cJSON_AddStringToObject(json, "dns_error", "DNS 解析失败");
+        ESP_LOGE(TAG, "DNS lookup failed for %s: %d", host, dns_err);
+        ts_api_result_ok(result, json);
+        return ESP_OK;
+    }
+
+    struct sockaddr_in *addr = (struct sockaddr_in *)res->ai_addr;
+    char ip_str[16];
+    inet_ntoa_r(addr->sin_addr, ip_str, sizeof(ip_str));
+    cJSON_AddBoolToObject(json, "dns_ok", true);
+    cJSON_AddStringToObject(json, "resolved_ip", ip_str);
+    ESP_LOGI(TAG, "DNS resolved %s -> %s", host, ip_str);
+
+    // TCP 连接测试
+    int sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (sock < 0) {
+        freeaddrinfo(res);
+        cJSON_AddBoolToObject(json, "tcp_ok", false);
+        cJSON_AddStringToObject(json, "tcp_error", "创建 socket 失败");
+        ts_api_result_ok(result, json);
+        return ESP_OK;
+    }
+
+    // 设置超时
+    struct timeval tv = {
+        .tv_sec = 5,
+        .tv_usec = 0,
+    };
+    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+
+    int64_t tcp_start = esp_timer_get_time();
+    int conn_err = connect(sock, res->ai_addr, res->ai_addrlen);
+    int64_t tcp_time = (esp_timer_get_time() - tcp_start) / 1000;  // ms
+    
+    freeaddrinfo(res);
+    cJSON_AddNumberToObject(json, "tcp_time_ms", tcp_time);
+
+    if (conn_err != 0) {
+        close(sock);
+        cJSON_AddBoolToObject(json, "tcp_ok", false);
+        cJSON_AddStringToObject(json, "tcp_error", "TCP 连接失败");
+        ESP_LOGE(TAG, "TCP connect failed to %s:%s", host, port_str);
+        ts_api_result_ok(result, json);
+        return ESP_OK;
+    }
+
+    cJSON_AddBoolToObject(json, "tcp_ok", true);
+    ESP_LOGI(TAG, "TCP connection successful to %s:%s in %lld ms", host, port_str, tcp_time);
+
+    // HTTP 请求测试
+    char request[512];
+    snprintf(request, sizeof(request),
+             "GET / HTTP/1.1\r\n"
+             "Host: %s:%s\r\n"
+             "Connection: close\r\n"
+             "\r\n",
+             host, port_str);
+
+    int64_t http_start = esp_timer_get_time();
+    int sent = send(sock, request, strlen(request), 0);
+    if (sent <= 0) {
+        close(sock);
+        cJSON_AddBoolToObject(json, "http_ok", false);
+        cJSON_AddStringToObject(json, "http_error", "HTTP 发送失败");
+        ts_api_result_ok(result, json);
+        return ESP_OK;
+    }
+
+    char response[1024];
+    int received = recv(sock, response, sizeof(response) - 1, 0);
+    int64_t http_time = (esp_timer_get_time() - http_start) / 1000;  // ms
+    close(sock);
+
+    cJSON_AddNumberToObject(json, "http_time_ms", http_time);
+
+    if (received <= 0) {
+        cJSON_AddBoolToObject(json, "http_ok", false);
+        cJSON_AddStringToObject(json, "http_error", "HTTP 无响应");
+        ts_api_result_ok(result, json);
+        return ESP_OK;
+    }
+
+    response[received] = '\0';
+    
+    // 解析 HTTP 状态码
+    int http_status = 0;
+    if (strncmp(response, "HTTP/", 5) == 0) {
+        sscanf(response + 9, "%d", &http_status);
+    }
+
+    cJSON_AddBoolToObject(json, "http_ok", true);
+    cJSON_AddNumberToObject(json, "http_status", http_status);
+    ESP_LOGI(TAG, "HTTP response: status=%d, time=%lld ms", http_status, http_time);
+
+    ts_api_result_ok(result, json);
+    return ESP_OK;
+}
+
 // ============================================================================
 //                           API Registration
 // ============================================================================
@@ -964,6 +1141,14 @@ esp_err_t ts_api_ota_register(void)
             .handler = api_ota_www_abort,
             .requires_auth = true,
             .description = "中止 WWW OTA",
+        },
+        // Network diagnostics
+        {
+            .name = "ota.test_connection",
+            .category = TS_API_CAT_SYSTEM,
+            .handler = api_ota_test_connection,
+            .requires_auth = false,
+            .description = "测试 OTA 服务器连接",
         },
     };
 

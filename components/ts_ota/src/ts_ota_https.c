@@ -13,6 +13,8 @@
 #include "esp_heap_caps.h"
 #include "ts_ota.h"
 #include "ts_event.h"
+#include "lwip/netdb.h"
+#include "lwip/sockets.h"
 
 /* PSRAM-first allocation */
 #define OTA_STRDUP(s) ({ const char *_s = (s); size_t _len = _s ? strlen(_s) + 1 : 0; char *_p = _len ? heap_caps_malloc(_len, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) : NULL; if (_p) memcpy(_p, _s, _len); else if (_len) { _p = strdup(_s); } _p; })
@@ -87,25 +89,25 @@ static esp_err_t http_event_handler(esp_http_client_event_t *evt)
 {
     switch (evt->event_id) {
         case HTTP_EVENT_ERROR:
-            ESP_LOGD(TAG, "HTTP_EVENT_ERROR");
+            ESP_LOGE(TAG, "HTTP_EVENT_ERROR");
             break;
         case HTTP_EVENT_ON_CONNECTED:
-            ESP_LOGD(TAG, "HTTP_EVENT_ON_CONNECTED");
+            ESP_LOGI(TAG, "HTTP_EVENT_ON_CONNECTED");
             break;
         case HTTP_EVENT_HEADERS_SENT:
-            ESP_LOGD(TAG, "HTTP_EVENT_HEADERS_SENT");
+            ESP_LOGI(TAG, "HTTP_EVENT_HEADERS_SENT");
             break;
         case HTTP_EVENT_ON_HEADER:
-            ESP_LOGD(TAG, "HTTP_EVENT_ON_HEADER: %s: %s", evt->header_key, evt->header_value);
+            ESP_LOGI(TAG, "HTTP_EVENT_ON_HEADER: %s: %s", evt->header_key, evt->header_value);
             break;
         case HTTP_EVENT_ON_DATA:
             ESP_LOGD(TAG, "HTTP_EVENT_ON_DATA, len=%d", evt->data_len);
             break;
         case HTTP_EVENT_ON_FINISH:
-            ESP_LOGD(TAG, "HTTP_EVENT_ON_FINISH");
+            ESP_LOGI(TAG, "HTTP_EVENT_ON_FINISH");
             break;
         case HTTP_EVENT_DISCONNECTED:
-            ESP_LOGD(TAG, "HTTP_EVENT_DISCONNECTED");
+            ESP_LOGW(TAG, "HTTP_EVENT_DISCONNECTED");
             break;
         default:
             break;
@@ -124,6 +126,39 @@ static void https_ota_task(void *arg)
     
     // Update global state - connecting
     ts_ota_update_progress(TS_OTA_STATE_DOWNLOADING, 0, 0, "正在连接服务器...");
+
+    // 预先检查网络连通性 - 解析 URL 中的主机名
+    // 提取主机名进行 DNS 查询
+    const char *url = s_ota_config.url;
+    const char *host_start = strstr(url, "://");
+    if (host_start) {
+        host_start += 3;  // 跳过 "://"
+        char host[128] = {0};
+        const char *host_end = strchr(host_start, ':');
+        if (!host_end) host_end = strchr(host_start, '/');
+        if (!host_end) host_end = host_start + strlen(host_start);
+        
+        size_t host_len = host_end - host_start;
+        if (host_len < sizeof(host)) {
+            strncpy(host, host_start, host_len);
+            ESP_LOGI(TAG, "OTA target host: %s", host);
+            
+            // 尝试 DNS 解析
+            struct addrinfo hints = {
+                .ai_family = AF_INET,
+                .ai_socktype = SOCK_STREAM,
+            };
+            struct addrinfo *res = NULL;
+            int dns_err = getaddrinfo(host, "80", &hints, &res);
+            if (dns_err != 0 || res == NULL) {
+                ESP_LOGE(TAG, "DNS lookup failed for %s: %d", host, dns_err);
+            } else {
+                struct sockaddr_in *addr = (struct sockaddr_in *)res->ai_addr;
+                ESP_LOGI(TAG, "DNS resolved %s -> %s", host, inet_ntoa(addr->sin_addr));
+                freeaddrinfo(res);
+            }
+        }
+    }
 
     // Check if URL is HTTP or HTTPS
     bool is_http = (strncmp(s_ota_config.url, "http://", 7) == 0);
@@ -171,10 +206,40 @@ static void https_ota_task(void *arg)
 
     esp_https_ota_handle_t https_ota_handle = NULL;
     
+    ESP_LOGI(TAG, "Calling esp_https_ota_begin with URL: %s", s_ota_config.url);
+    ESP_LOGI(TAG, "HTTP config: timeout=%d, buffer_size=%d, skip_cert=%d",
+             (int)http_config.timeout_ms, (int)http_config.buffer_size,
+             (int)http_config.skip_cert_common_name_check);
+    
     ret = esp_https_ota_begin(&ota_config, &https_ota_handle);
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "esp_https_ota_begin failed: %s", esp_err_to_name(ret));
-        ts_ota_set_error(TS_OTA_ERR_CONNECTION_FAILED, "连接服务器失败");
+        ESP_LOGE(TAG, "esp_https_ota_begin failed: %s (0x%x)", esp_err_to_name(ret), ret);
+        // 更详细的错误信息
+        const char *error_detail;
+        switch (ret) {
+            case ESP_ERR_INVALID_ARG:
+                error_detail = "参数无效";
+                break;
+            case ESP_ERR_NO_MEM:
+                error_detail = "内存不足";
+                break;
+            case ESP_ERR_HTTP_CONNECT:
+                error_detail = "HTTP连接失败";
+                break;
+            case ESP_ERR_HTTP_FETCH_HEADER:
+                error_detail = "获取响应头失败";
+                break;
+            case ESP_ERR_INVALID_STATE:
+                error_detail = "状态无效";
+                break;
+            case ESP_ERR_HTTP_INVALID_TRANSPORT:
+                error_detail = "传输协议无效";
+                break;
+            default:
+                error_detail = "连接服务器失败";
+                break;
+        }
+        ts_ota_set_error(TS_OTA_ERR_CONNECTION_FAILED, error_detail);
         goto cleanup;
     }
     

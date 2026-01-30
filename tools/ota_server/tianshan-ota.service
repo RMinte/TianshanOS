@@ -1,0 +1,22 @@
+[Unit]
+Description=TianShanOS OTA Update Server
+After=network.target
+
+[Service]
+Type=simple
+User=tom
+Group=tom
+WorkingDirectory=/home/tom/TianshanOS/tools/ota_server
+# 使用 conda base 环境的 Python（已安装 Flask）
+ExecStart=/home/tom/miniconda3/bin/python3 /home/tom/TianshanOS/tools/ota_server/ota_server.py --build-dir /home/tom/TianshanOS/build
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+# 环境变量
+Environment=PYTHONUNBUFFERED=1
+Environment=PATH=/home/tom/miniconda3/bin:/usr/local/bin:/usr/bin:/bin
+
+[Install]
+WantedBy=multi-user.target

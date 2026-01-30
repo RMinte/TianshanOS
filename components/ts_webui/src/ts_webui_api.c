@@ -9,10 +9,12 @@
 #include "ts_security.h"
 #include "ts_storage.h"
 #include "ts_log.h"
+#include "ts_ota.h"
 #include "cJSON.h"
 #include "esp_http_server.h"
 #include <string.h>
 #include <sys/stat.h>
+#include <unistd.h>
 #include "esp_heap_caps.h"
 
 /* PSRAM 优先分配宏 */
@@ -488,6 +490,110 @@ static esp_err_t file_upload_handler(ts_http_request_t *req, void *user_data)
     return ret;
 }
 
+/**
+ * @brief Handle OTA firmware upload request (Browser Proxy Upgrade)
+ * POST /api/v1/ota/firmware
+ * Body: firmware binary content
+ * Query: auto_reboot (optional, default true)
+ * 
+ * This allows browsers to upload firmware directly to ESP32 devices
+ * that cannot access external networks.
+ * 
+ * 使用统一 recovery 目录模式：保存到 /sdcard/recovery/ 然后刷入
+ */
+static esp_err_t ota_firmware_upload_handler(ts_http_request_t *req, void *user_data)
+{
+    (void)user_data;
+    
+#ifdef CONFIG_TS_WEBUI_CORS_ENABLE
+    ts_http_set_cors(req, "*");
+#endif
+
+    // 检查请求体
+    if (!req->body || req->body_len == 0) {
+        return ts_http_send_error(req, 400, "Empty firmware content");
+    }
+    
+    // 获取 auto_reboot 参数
+    char auto_reboot_str[8] = "true";
+    ts_http_get_query_param(req, "auto_reboot", auto_reboot_str, sizeof(auto_reboot_str));
+    bool auto_reboot = (strcmp(auto_reboot_str, "false") != 0);
+    
+    TS_LOGI(TAG, "OTA firmware upload: %zu bytes, auto_reboot=%d", req->body_len, auto_reboot);
+    
+    // 使用统一的 recovery 目录模式
+    esp_err_t ret = ts_ota_save_upload(req->body, req->body_len, true, auto_reboot);
+    if (ret != ESP_OK) {
+        TS_LOGE(TAG, "ts_ota_save_upload failed: %s", esp_err_to_name(ret));
+        if (ret == ESP_ERR_INVALID_STATE) {
+            return ts_http_send_error(req, 409, "OTA already in progress");
+        }
+        return ts_http_send_error(req, 500, "Firmware save/flash failed");
+    }
+    
+    // 如果 auto_reboot=true，设备会重启，不会执行到这里
+    TS_LOGI(TAG, "OTA firmware upload successful");
+    
+    // 返回成功响应
+    cJSON *response = cJSON_CreateObject();
+    cJSON_AddStringToObject(response, "status", "success");
+    cJSON_AddNumberToObject(response, "size", req->body_len);
+    cJSON_AddBoolToObject(response, "reboot_pending", auto_reboot);
+    cJSON_AddStringToObject(response, "message", auto_reboot ? "Firmware uploaded, rebooting..." : "Firmware uploaded, pending reboot");
+    
+    char *json = cJSON_PrintUnformatted(response);
+    cJSON_Delete(response);
+    
+    ret = ts_http_send_json(req, 200, json);
+    free(json);
+    return ret;
+}
+
+/**
+ * @brief Handle WWW partition upload request
+ * POST /api/v1/ota/www
+ * Body: www.bin content
+ * 
+ * 使用统一 recovery 目录模式：保存到 /sdcard/recovery/www.bin 然后刷入
+ */
+static esp_err_t ota_www_upload_handler(ts_http_request_t *req, void *user_data)
+{
+    (void)user_data;
+    
+#ifdef CONFIG_TS_WEBUI_CORS_ENABLE
+    ts_http_set_cors(req, "*");
+#endif
+
+    // 检查请求体
+    if (!req->body || req->body_len == 0) {
+        return ts_http_send_error(req, 400, "Empty www content");
+    }
+    
+    TS_LOGI(TAG, "WWW partition upload: %zu bytes", req->body_len);
+    
+    // 使用统一的 recovery 目录模式
+    esp_err_t ret = ts_ota_save_upload(req->body, req->body_len, false, true);
+    if (ret != ESP_OK) {
+        TS_LOGE(TAG, "ts_ota_save_upload failed: %s", esp_err_to_name(ret));
+        return ts_http_send_error(req, 500, "WWW partition save/flash failed");
+    }
+    
+    TS_LOGI(TAG, "WWW partition upload successful");
+    
+    // 返回成功响应
+    cJSON *response = cJSON_CreateObject();
+    cJSON_AddStringToObject(response, "status", "success");
+    cJSON_AddNumberToObject(response, "size", req->body_len);
+    cJSON_AddStringToObject(response, "message", "WWW partition updated");
+    
+    char *json = cJSON_PrintUnformatted(response);
+    cJSON_Delete(response);
+    
+    ret = ts_http_send_json(req, 200, json);
+    free(json);
+    return ret;
+}
+
 esp_err_t ts_webui_api_init(void)
 {
     TS_LOGI(TAG, "Initializing API routes");
@@ -530,6 +636,26 @@ esp_err_t ts_webui_api_init(void)
         .user_data = NULL
     };
     ts_http_server_register_route(&file_upload);
+    
+    // OTA firmware upload route (Browser Proxy Upgrade)
+    ts_http_route_t ota_firmware = {
+        .uri = API_PREFIX "/ota/firmware",
+        .method = TS_HTTP_POST,
+        .handler = ota_firmware_upload_handler,
+        .requires_auth = false,  // TODO: 生产环境应设为 true
+        .user_data = NULL
+    };
+    ts_http_server_register_route(&ota_firmware);
+    
+    // WWW partition upload route
+    ts_http_route_t ota_www = {
+        .uri = API_PREFIX "/ota/www",
+        .method = TS_HTTP_POST,
+        .handler = ota_www_upload_handler,
+        .requires_auth = false,  // TODO: 生产环境应设为 true
+        .user_data = NULL
+    };
+    ts_http_server_register_route(&ota_www);
     
     // Generic API handler for all other routes
     ts_http_method_t methods[] = {TS_HTTP_GET, TS_HTTP_POST, TS_HTTP_PUT, TS_HTTP_DELETE};

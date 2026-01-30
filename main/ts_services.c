@@ -121,6 +121,9 @@ static esp_err_t storage_service_init(ts_service_handle_t handle, void *user_dat
     return ESP_OK;
 }
 
+// Forward declaration for recovery check
+extern esp_err_t ts_ota_check_recovery(void);
+
 static esp_err_t storage_service_start(ts_service_handle_t handle, void *user_data)
 {
     (void)handle;
@@ -146,6 +149,20 @@ static esp_err_t storage_service_start(ts_service_handle_t handle, void *user_da
         ESP_LOGI(TAG, "Use 'storage --mount' to try again after inserting card");
     } else {
         ESP_LOGI(TAG, "SD card mounted at /sdcard");
+        
+        // ====== SD 卡 Recovery 检查 ======
+        // 检查 /sdcard/recovery/ 目录，如果存在且版本不同则自动恢复
+        // 这是最低级别的恢复机制，即使 OTA 完全损坏也能工作
+        ret = ts_ota_check_recovery();
+        if (ret == ESP_OK) {
+            // 如果执行了恢复，函数不会返回（会重启）
+            // 返回 ESP_OK 表示无需恢复
+            ESP_LOGI(TAG, "Recovery check passed");
+        } else if (ret != ESP_ERR_NOT_FOUND) {
+            // 恢复失败（不是"未找到"错误）
+            ESP_LOGE(TAG, "Recovery check failed: %s", esp_err_to_name(ret));
+        }
+        // ESP_ERR_NOT_FOUND 表示没有 recovery 目录，正常情况
     }
     
     return ESP_OK;

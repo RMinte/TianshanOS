@@ -1,0 +1,9 @@
+# TianShanOS OTA Server 依赖
+
+# Web 框架
+flask>=2.0.0
+flask-cors>=3.0.0
+
+# 可选：更好的 WSGI 服务器（生产环境）
+gunicorn>=20.0.0; sys_platform != 'win32'
+waitress>=2.0.0; sys_platform == 'win32'

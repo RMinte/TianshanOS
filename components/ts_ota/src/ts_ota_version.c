@@ -214,6 +214,7 @@ esp_err_t ts_ota_start(const ts_ota_config_t *config)
     // Forward declarations
     extern esp_err_t ts_ota_start_https(const ts_ota_config_t *config);
     extern esp_err_t ts_ota_start_sdcard(const ts_ota_config_t *config);
+    // ts_ota_download_firmware is declared in ts_ota.h
 
     switch (config->source) {
         case TS_OTA_SOURCE_HTTPS:
@@ -221,6 +222,12 @@ esp_err_t ts_ota_start(const ts_ota_config_t *config)
 
         case TS_OTA_SOURCE_SDCARD:
             return ts_ota_start_sdcard(config);
+
+        case TS_OTA_SOURCE_DOWNLOAD:
+            // 统一下载模式：先下载到 /sdcard/recovery/ 然后刷入
+            return ts_ota_download_firmware(config->url, config->skip_cert_verify,
+                                            config->progress_cb, config->user_data,
+                                            config->auto_reboot);
 
         case TS_OTA_SOURCE_UPLOAD:
             // Upload is handled by ts_ota_upload_* functions

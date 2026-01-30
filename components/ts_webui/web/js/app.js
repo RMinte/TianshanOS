@@ -12678,7 +12678,31 @@ async function checkForUpdates() {
     statusDiv.innerHTML = '<p>🔍 正在检查更新...</p>';
     
     try {
-        // 获取服务器版本信息
+        // 尝试通过设备测试连接（如果 API 存在）
+        try {
+            console.log('Testing device connectivity to:', serverUrl);
+            const testResult = await api.call('ota.test_connection', { url: serverUrl }, 'POST');
+            if (testResult && testResult.data) {
+                const testData = testResult.data;
+                console.log('Device connection test result:', testData);
+                
+                if (!testData.dns_ok) {
+                    throw new Error(`设备 DNS 解析失败: ${testData.host}`);
+                }
+                if (!testData.tcp_ok) {
+                    throw new Error(`设备 TCP 连接失败: ${testData.resolved_ip}:${testData.port}`);
+                }
+                if (!testData.http_ok) {
+                    throw new Error(`设备 HTTP 请求失败: ${testData.http_error || '无响应'}`);
+                }
+                console.log(`Device connectivity OK: DNS=${testData.dns_time_ms}ms, TCP=${testData.tcp_time_ms}ms, HTTP=${testData.http_time_ms}ms`);
+            }
+        } catch (testError) {
+            // 连接测试 API 可能不存在（旧固件），跳过测试继续检查版本
+            console.warn('Device connection test skipped:', testError.message);
+        }
+        
+        // 获取服务器版本信息（从浏览器获取）
         const versionUrl = serverUrl.replace(/\/$/, '') + '/version';
         console.log('Checking for updates:', versionUrl);
         
@@ -12788,18 +12812,269 @@ async function upgradeFromServer() {
         return;
     }
     
-    // 构建固件下载 URL
-    const firmwareUrl = serverUrl.replace(/\/$/, '') + '/firmware';
+    // 立即显示进度区域，给用户即时反馈
+    const progressSection = document.getElementById('ota-progress-section');
+    progressSection.style.display = 'block';
+    document.getElementById('ota-state-text').textContent = '⏳ 准备升级...';
+    document.getElementById('ota-progress-bar').style.width = '0%';
+    document.getElementById('ota-progress-percent').textContent = '';
+    document.getElementById('ota-progress-size').textContent = '正在初始化...';
+    document.getElementById('ota-message').textContent = serverUrl;
+    document.getElementById('ota-abort-btn').style.display = 'none';
     
-    // 填入 URL 输入框并执行升级
-    document.getElementById('ota-url-input').value = firmwareUrl;
-    document.getElementById('ota-url-skip-verify').checked = true;  // 本地服务器通常是 HTTP
+    // 隐藏更新状态区域
+    const statusDiv = document.getElementById('ota-update-status');
+    if (statusDiv) statusDiv.style.display = 'none';
     
-    // 保存原始服务器地址（不含具体文件路径，用于后续 www 升级时推导）
-    await api.call('ota.server.set', { url: serverUrl.replace(/\/$/, ''), save: false });
+    // 使用浏览器代理模式：浏览器下载固件后转发给 ESP32
+    await upgradeViaProxy(serverUrl);
+}
+
+/**
+ * 浏览器代理升级模式
+ * 浏览器从 OTA 服务器下载固件，然后转发给 ESP32
+ * 优势：ESP32 无需上网，只需要浏览器能访问 OTA 服务器
+ */
+async function upgradeViaProxy(serverUrl) {
+    const includeWww = document.getElementById('ota-url-include-www')?.checked ?? true;
     
-    // 执行两步升级
-    await otaFromUrl();
+    // 获取进度区域元素（已在 upgradeFromServer 中显示）
+    const progressSection = document.getElementById('ota-progress-section');
+    const stateEl = document.getElementById('ota-state-text');
+    const progressBar = document.getElementById('ota-progress-bar');
+    const progressPercent = document.getElementById('ota-progress-percent');
+    const progressSize = document.getElementById('ota-progress-size');
+    const messageEl = document.getElementById('ota-message');
+    const abortBtn = document.getElementById('ota-abort-btn');
+    
+    // 设置 OTA 步骤
+    otaStep = 'app';
+    wwwOtaEnabled = includeWww;
+    
+    // 计算总步骤数
+    const totalSteps = includeWww ? 4 : 2;  // 下载固件、上传固件、[下载WebUI、上传WebUI]
+    let currentStep = 0;
+    
+    const updateStep = (step, desc) => {
+        currentStep = step;
+        const prefix = `[${step}/${totalSteps}] `;
+        stateEl.textContent = prefix + desc;
+    };
+    
+    try {
+        // ===== 第一步：浏览器下载固件 =====
+        updateStep(1, '📥 下载固件中...');
+        const firmwareUrl = serverUrl.replace(/\/$/, '') + '/firmware';
+        messageEl.textContent = '从 OTA 服务器下载';
+        progressBar.style.width = '0%';
+        progressPercent.textContent = '0%';
+        progressSize.textContent = '正在连接服务器...';
+        abortBtn.style.display = 'none';  // 浏览器下载阶段暂不支持中止
+        
+        console.log('Proxy OTA: Downloading firmware from', firmwareUrl);
+        
+        // 使用 fetch 下载固件（带进度）
+        const firmwareData = await downloadWithProgress(firmwareUrl, (loaded, total) => {
+            const percent = total > 0 ? Math.round((loaded / total) * 100) : 0;
+            progressBar.style.width = percent + '%';
+            progressPercent.textContent = percent + '%';
+            progressSize.textContent = `${formatSize(loaded)} / ${formatSize(total)}`;
+        });
+        
+        console.log('Proxy OTA: Firmware downloaded,', firmwareData.byteLength, 'bytes');
+        showToast(`固件下载完成 (${formatSize(firmwareData.byteLength)})`, 'success');
+        
+        // ===== 第二步：上传固件到 ESP32 =====
+        updateStep(2, '📤 上传固件到设备...');
+        messageEl.textContent = `固件大小: ${formatSize(firmwareData.byteLength)}`;
+        progressBar.style.width = '0%';
+        progressPercent.textContent = '';
+        progressSize.textContent = '正在写入 Flash（这可能需要1-2分钟）...';
+        
+        // 调用 ESP32 上传接口（复用现有的 /api/v1/ota/firmware）
+        // 注意：不自动重启，等 www 也完成后再重启
+        const uploadResult = await uploadFirmwareToDevice(firmwareData, !includeWww);
+        
+        if (!uploadResult.success) {
+            throw new Error(uploadResult.error || '上传固件失败');
+        }
+        
+        console.log('Proxy OTA: Firmware uploaded to device');
+        showToast('固件写入完成！', 'success');
+        progressBar.style.width = '100%';
+        progressPercent.textContent = '✓';
+        
+        // ===== 第三步：处理 WebUI（如果启用）=====
+        if (includeWww) {
+            updateStep(3, '📥 下载 WebUI...');
+            const wwwUrl = serverUrl.replace(/\/$/, '') + '/www';
+            messageEl.textContent = '从 OTA 服务器下载';
+            progressBar.style.width = '0%';
+            progressPercent.textContent = '0%';
+            progressSize.textContent = '正在连接...';
+            
+            try {
+                // 下载 www.bin
+                const wwwData = await downloadWithProgress(wwwUrl, (loaded, total) => {
+                    const percent = total > 0 ? Math.round((loaded / total) * 100) : 0;
+                    progressBar.style.width = percent + '%';
+                    progressPercent.textContent = percent + '%';
+                    progressSize.textContent = `${formatSize(loaded)} / ${formatSize(total)}`;
+                });
+                
+                console.log('Proxy OTA: WWW downloaded,', wwwData.byteLength, 'bytes');
+                showToast(`WebUI 下载完成 (${formatSize(wwwData.byteLength)})`, 'success');
+                
+                // 上传 www.bin
+                updateStep(4, '📤 上传 WebUI 到设备...');
+                messageEl.textContent = `WebUI 大小: ${formatSize(wwwData.byteLength)}`;
+                progressBar.style.width = '0%';
+                progressPercent.textContent = '';
+                progressSize.textContent = '正在写入 SPIFFS...';
+                
+                const wwwResult = await uploadWwwToDevice(wwwData);
+                
+                if (!wwwResult.success) {
+                    console.warn('WWW upload failed:', wwwResult.error);
+                    showToast('WebUI 升级跳过: ' + wwwResult.error, 'warning');
+                } else {
+                    console.log('Proxy OTA: WWW uploaded to device');
+                    showToast('WebUI 写入完成！', 'success');
+                    progressBar.style.width = '100%';
+                    progressPercent.textContent = '✓';
+                }
+            } catch (wwwError) {
+                console.warn('WWW download/upload failed:', wwwError);
+                showToast('WebUI 升级跳过: ' + wwwError.message, 'warning');
+            }
+        }
+        
+        // ===== 最终步骤：升级完成，触发重启 =====
+        stateEl.textContent = '✅ 全部升级完成！';
+        progressBar.style.width = '100%';
+        progressBar.style.background = 'linear-gradient(90deg, #27ae60, #2ecc71)';
+        progressPercent.textContent = '✓';
+        messageEl.innerHTML = `
+            <div style="text-align:center">
+                <p>固件${includeWww ? '和 WebUI ' : ''}升级完成，设备正在重启...</p>
+                <p id="reboot-countdown" style="color:#888;margin-top:5px">正在触发重启...</p>
+            </div>
+        `;
+        
+        otaStep = 'idle';
+        
+        // 触发设备重启
+        try {
+            await api.call('system.reboot', { delay: 1 });
+        } catch (e) {
+            console.log('Reboot triggered (connection may have closed)');
+        }
+        
+        // 检测设备重启
+        startRebootDetection();
+        
+    } catch (error) {
+        console.error('Proxy OTA failed:', error);
+        stateEl.textContent = '❌ 升级失败';
+        messageEl.textContent = error.message;
+        progressBar.style.width = '0%';
+        progressPercent.textContent = '';
+        otaStep = 'idle';
+        showToast('升级失败: ' + error.message, 'error');
+    }
+}
+
+/**
+ * 带进度的文件下载
+ */
+async function downloadWithProgress(url, onProgress) {
+    const response = await fetch(url);
+    if (!response.ok) {
+        throw new Error(`下载失败: HTTP ${response.status}`);
+    }
+    
+    const contentLength = response.headers.get('content-length');
+    const total = contentLength ? parseInt(contentLength, 10) : 0;
+    
+    const reader = response.body.getReader();
+    const chunks = [];
+    let loaded = 0;
+    
+    while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        
+        chunks.push(value);
+        loaded += value.length;
+        
+        if (onProgress) {
+            onProgress(loaded, total);
+        }
+    }
+    
+    // 合并所有块
+    const result = new Uint8Array(loaded);
+    let position = 0;
+    for (const chunk of chunks) {
+        result.set(chunk, position);
+        position += chunk.length;
+    }
+    
+    return result.buffer;
+}
+
+/**
+ * 上传固件到设备
+ */
+async function uploadFirmwareToDevice(firmwareData, autoReboot = false) {
+    try {
+        const url = getApiUrl(`/ota/firmware?auto_reboot=${autoReboot}`);
+        
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/octet-stream'
+            },
+            body: firmwareData
+        });
+        
+        const result = await response.json();
+        
+        if (response.ok && result.status === 'success') {
+            return { success: true, data: result };
+        } else {
+            return { success: false, error: result.message || result.error || '上传失败' };
+        }
+    } catch (error) {
+        return { success: false, error: error.message };
+    }
+}
+
+/**
+ * 上传 WebUI 到设备
+ */
+async function uploadWwwToDevice(wwwData) {
+    try {
+        const url = getApiUrl('/ota/www');
+        
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/octet-stream'
+            },
+            body: wwwData
+        });
+        
+        const result = await response.json();
+        
+        if (response.ok && result.status === 'success') {
+            return { success: true, data: result };
+        } else {
+            return { success: false, error: result.message || result.error || '上传失败' };
+        }
+    } catch (error) {
+        return { success: false, error: error.message };
+    }
 }
 
 // 导出全局函数
@@ -12813,6 +13088,7 @@ window.abortOta = abortOta;
 window.saveOtaServer = saveOtaServer;
 window.checkForUpdates = checkForUpdates;
 window.upgradeFromServer = upgradeFromServer;
+window.upgradeViaProxy = upgradeViaProxy;
 
 // =========================================================================
 //                         日志页面
