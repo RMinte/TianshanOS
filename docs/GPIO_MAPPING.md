@@ -2,8 +2,8 @@
 
 > **目标板**: RM01_ESP32S3  
 > **芯片**: ESP32-S3  
-> **最后更新**: 2026-01-19  
-> **验证状态**: ✅ 已与 PCB 图纸及 robOS 代码核对一致
+> **最后更新**: 2026-01-31  
+> **验证状态**: ✅ 已与 PCB 图纸及实际硬件测试核对
 
 ---
 
@@ -12,9 +12,9 @@
 | GPIO | 功能 | 方向 | 电平逻辑 | 初始状态 | 备注 |
 |------|------|------|----------|----------|------|
 | 0 | (保留) | - | - | - | Strapping pin |
-| 1 | AGX_RESET | OUT | HIGH=复位 | LOW | 脉冲 1000ms |
+| 1 | AGX_POWER_CTRL | OUT | LOW=通电, HIGH=断电 | LOW | **主电源控制引脚** |
 | 2 | LPMU_RESET | OUT | HIGH=复位 | LOW | 脉冲 300ms |
-| 3 | AGX_FORCE_SHUTDOWN | OUT | LOW=开机, HIGH=关机 | LOW | Strapping pin |
+| 3 | AGX_FORCE_SHUTDOWN | OUT | HIGH=强制关机 | LOW | ⚠️ **禁止正常使用** |
 | 4 | SD_D0 | IO | - | - | SDMMC |
 | 5 | SD_D1 | IO | - | - | SDMMC |
 | 6 | SD_D2 | IO | - | - | SDMMC |
@@ -51,11 +51,42 @@
 
 | GPIO | 功能 | 电平逻辑 | 时序 |
 |------|------|----------|------|
-| 1 | AGX_RESET | HIGH=断电/复位, LOW=正常 | 脉冲或持续 |
+| 1 | **AGX_POWER_CTRL** | LOW=通电, HIGH=断电 | **主电源控制** |
 | 2 | LPMU_RESET | HIGH=复位, LOW=正常 | 脉冲 300ms |
-| 3 | AGX_FORCE_SHUTDOWN | LOW=开机, HIGH=关机 | 持续 |
+| 3 | AGX_FORCE_SHUTDOWN | HIGH=强制关机 | ⚠️ **禁止使用** |
 | 40 | AGX_RECOVERY | HIGH=恢复模式, LOW=正常 | 持续 HIGH |
 | 46 | LPMU_POWER | HIGH=按下电源键 | 脉冲 300ms |
+
+#### ⚠️ AGX 电源控制（重要）
+
+**GPIO 1 是唯一应该使用的电源控制引脚**：
+
+| 操作 | GPIO 1 电平 | 说明 |
+|------|-------------|------|
+| 开机 | 持续 LOW | 接通电源 |
+| 关机 | 持续 HIGH | 断开电源 |
+| 重启 | LOW→HIGH→LOW | 断电后重新通电 |
+
+**GPIO 3 (FORCE_SHUTDOWN) 危险警告**：
+- 操作 GPIO 3 会导致 AGX 强制关机
+- **除非物理断电，否则无法恢复开机**
+- 正常电源控制**禁止操作 GPIO 3**
+
+```c
+// ✅ 正确：使用 GPIO 1 控制电源
+gpio_set_level(1, 0);  // LOW = 通电（开机）
+gpio_set_level(1, 1);  // HIGH = 断电（关机）
+
+// 重启序列
+gpio_set_level(1, 0);  // 确保通电
+vTaskDelay(pdMS_TO_TICKS(50));
+gpio_set_level(1, 1);  // 断电
+vTaskDelay(pdMS_TO_TICKS(500));
+gpio_set_level(1, 0);  // 恢复通电
+
+// ❌ 错误：不要操作 GPIO 3
+// gpio_set_level(3, 1);  // 强制关机，无法恢复！
+```
 
 #### ⚠️ AGX 模组差异（重要）
 
@@ -212,6 +243,7 @@ CONFIG_TS_STORAGE_SD_D3_GPIO=7
 
 | 日期 | 变更内容 |
 |------|----------|
+| 2026-01-31 | **重大更新**：AGX 电源控制改用 GPIO 1，GPIO 3 标记为禁止使用 |
 | 2026-01-20 | 添加 T234 vs T5000/T4000 模组电源控制差异说明 |
 | 2026-01-19 | 初始版本，与 PCB 图纸及 robOS 核对完成 |
 | 2026-01-19 | 修正 SD 卡引脚 (4,5,6,7,15,16) |

@@ -3822,8 +3822,9 @@ async function refreshQuickActions() {
                                     timeout_ms: 5000
                                 });
                                 const stdout = checkResult.data?.stdout?.trim() || '';
-                                console.log('Process check result:', stdout, 'code:', checkResult.code);
-                                isRunning = stdout === 'running';
+                                console.log('Process check result:', stdout, 'code:', checkResult.code, 'full result:', checkResult);
+                                // 检查 stdout 是否包含 'running'（兼容可能的额外输出）
+                                isRunning = stdout.includes('running');
                             }
                         } catch (e) {
                             console.warn('Check process status failed:', e);
@@ -3832,14 +3833,14 @@ async function refreshQuickActions() {
                         
                         const statusIcon = isRunning ? '🟢' : '⚫';
                         const statusTitle = isRunning ? '进程运行中' : '进程未运行';
-                        // 状态徽章 + 底部操作栏
+                        // 状态徽章 + 底部操作栏（传递 pidFile 用于精确停止）
                         nohupBtns = `
                             <span class="nohup-status-badge" title="${statusTitle}">${statusIcon}</span>
                             <div class="quick-action-nohup-bar" onclick="event.stopPropagation()">
                                 <button onclick="quickActionViewLog('${escapeHtml(nohupInfo.logFile)}', '${escapeHtml(nohupInfo.hostId)}')" title="查看日志">
                                     📄 日志
                                 </button>
-                                <button class="btn-stop" onclick="quickActionStopProcess('${escapeHtml(nohupInfo.progName)}', '${escapeHtml(nohupInfo.hostId)}')" title="终止进程" ${!isRunning ? 'disabled' : ''}>
+                                <button class="btn-stop" onclick="quickActionStopProcess('${escapeHtml(nohupInfo.pidFile)}', '${escapeHtml(nohupInfo.hostId)}', '${escapeHtml(nohupInfo.cmdName)}')" title="终止进程" ${!isRunning ? 'disabled' : ''}>
                                     ⏹ 停止
                                 </button>
                             </div>
@@ -3852,7 +3853,11 @@ async function refreshQuickActions() {
                         : `triggerQuickAction('${escapeHtml(rule.id)}')`;
                     
                     return `
-                        <div class="quick-action-card${nohupInfo ? ' has-nohup' : ''}${isRunning ? ' is-running' : ''}" onclick="${cardOnClick}" title="${escapeHtml(rule.name)}">
+                        <div class="quick-action-card${nohupInfo ? ' has-nohup' : ''}${isRunning ? ' is-running' : ''}" 
+                             id="quick-action-${escapeHtml(rule.id)}"
+                             data-rule-id="${escapeHtml(rule.id)}"
+                             onclick="${cardOnClick}" 
+                             title="${escapeHtml(rule.name)}">
                             <div class="quick-action-icon">${iconHtml}</div>
                             <div class="quick-action-name">${escapeHtml(rule.name)}</div>
                             ${nohupBtns}
@@ -3880,27 +3885,62 @@ async function refreshQuickActions() {
 
 /**
  * 触发快捷操作
+ * @param {string} ruleId - 规则 ID
  */
 async function triggerQuickAction(ruleId) {
+    // 获取卡片元素
+    const card = event?.currentTarget || document.getElementById(`quick-action-${ruleId}`);
+    if (!card) {
+        console.error('triggerQuickAction: card not found for ruleId=', ruleId);
+        showToast('❌ 无法找到操作卡片', 'error');
+        return;
+    }
+    
+    // 检查是否已经在执行中（防止重复点击）
+    if (card.classList.contains('triggering')) {
+        showToast('⏳ 操作正在执行中...', 'warning');
+        return;
+    }
+    
     try {
-        // 添加按下效果
-        const card = event.currentTarget;
+        // 添加按下效果并禁用点击
         card.classList.add('triggering');
+        card.style.pointerEvents = 'none';  // 禁用点击防止重复
         
+        // 更新图标显示加载状态
+        const iconEl = card.querySelector('.quick-action-icon');
+        const originalIcon = iconEl?.innerHTML;
+        if (iconEl) {
+            iconEl.innerHTML = '<span class="spinner-small">⏳</span>';
+        }
+        
+        console.log('triggerQuickAction: calling API for ruleId=', ruleId);
         const result = await api.call('automation.rules.trigger', { id: ruleId });
+        console.log('triggerQuickAction: result=', result);
         
         if (result.code === 0) {
             showToast('✅ 操作已执行', 'success');
-            // 刷新计数
-            setTimeout(() => refreshQuickActions(), 500);
+            // 对于 nohup 命令，需要等待更长时间让进程启动并创建 PID 文件
+            // 先显示执行中状态，然后延迟刷新获取实际状态
+            card.classList.add('is-running');
+            setTimeout(() => refreshQuickActions(), 2500);  // 等待 2.5 秒让进程启动
         } else {
             showToast('❌ ' + (result.message || '执行失败'), 'error');
+            card.style.pointerEvents = '';  // 失败时恢复点击
+            // 恢复原始图标
+            if (iconEl && originalIcon) {
+                iconEl.innerHTML = originalIcon;
+            }
         }
         
         card.classList.remove('triggering');
     } catch (e) {
+        console.error('triggerQuickAction error:', e);
         showToast('❌ 执行失败: ' + e.message, 'error');
-        event.currentTarget?.classList.remove('triggering');
+        if (card) {
+            card.classList.remove('triggering');
+            card.style.pointerEvents = '';
+        }
     }
 }
 
@@ -3967,16 +4007,20 @@ async function checkRuleHasNohupSsh(rule) {
                             // 找到了 nohup 命令
                             const safeName = cmd.name.replace(/[^a-zA-Z0-9]/g, '').slice(0, 20) || 'cmd';
                             const logFile = `/tmp/ts_nohup_${safeName}.log`;
-                            // 提取命令的主程序名（第一个词）用于 pgrep -x 精确匹配
-                            const progName = cmd.command.split(' ')[0].split('/').pop();
+                            const pidFile = `/tmp/ts_nohup_${safeName}.pid`;
+                            
+                            // 使用 PID 文件检测进程状态（最可靠）
+                            // 检查 PID 文件存在且进程仍在运行
+                            const checkCmd = `[ -f ${pidFile} ] && kill -0 $(cat ${pidFile}) 2>/dev/null && echo 'running' || echo 'stopped'`;
+                            
                             return {
                                 logFile: logFile,
+                                pidFile: pidFile,
                                 keyword: cmd.command,
-                                progName: progName,
+                                progName: safeName,
                                 hostId: hostId,
                                 cmdName: cmd.name,
-                                // 用 pgrep -x 精确匹配程序名（不会匹配到 bash -c）
-                                checkCmd: `pgrep -x ${progName} -u $USER >/dev/null 2>&1 && echo 'running' || echo 'stopped'`
+                                checkCmd: checkCmd
                             };
                         }
                     }
@@ -4018,9 +4062,20 @@ async function quickActionViewLog(logFile, hostId) {
                     <pre id="quick-log-content" style="max-height:400px;overflow:auto;padding:15px;margin:0;background:#1a1a2e;color:#eee;font-size:12px;white-space:pre-wrap">加载中...</pre>
                 </div>
                 <div class="modal-footer" style="display:flex;gap:10px;padding:10px 15px;justify-content:space-between;align-items:center">
-                    <div style="display:flex;gap:8px">
-                        <button class="btn btn-primary" id="quick-log-tail-btn" onclick="toggleQuickLogTail('${escapeHtml(logFile)}', '${escapeHtml(hostId)}')">▶️ 开始跟踪</button>
-                        <span id="quick-log-status" style="font-size:0.85em;color:#888;display:flex;align-items:center"></span>
+                    <div style="display:flex;gap:8px;align-items:center">
+                        <button class="btn btn-danger" id="quick-log-tail-btn" onclick="toggleQuickLogTail('${escapeHtml(logFile)}', '${escapeHtml(hostId)}')">⏹️ 停止跟踪</button>
+                        <label style="display:flex;align-items:center;gap:4px;font-size:0.85em;color:#888">
+                            间隔
+                            <select id="quick-log-interval" onchange="updateQuickLogInterval('${escapeHtml(logFile)}', '${escapeHtml(hostId)}')" style="padding:2px 6px;border-radius:4px;border:1px solid var(--border-color);background:var(--bg-color);color:var(--text-color);font-size:0.9em">
+                                <option value="1000">1秒</option>
+                                <option value="2000">2秒</option>
+                                <option value="3000">3秒</option>
+                                <option value="5000" selected>5秒</option>
+                                <option value="10000">10秒</option>
+                                <option value="30000">30秒</option>
+                            </select>
+                        </label>
+                        <span id="quick-log-status" style="font-size:0.85em;color:#888;display:flex;align-items:center"><span style="color:#27ae60">● 实时更新中</span></span>
                     </div>
                     <button class="btn" onclick="closeQuickLogModal()">关闭</button>
                 </div>
@@ -4033,8 +4088,11 @@ async function quickActionViewLog(logFile, hostId) {
     if (existing) existing.remove();
     document.body.insertAdjacentHTML('beforeend', modalHtml);
     
-    // 加载日志
+    // 加载日志并自动开始跟踪
     await quickActionRefreshLog(logFile, hostId);
+    
+    // 自动开始实时跟踪（默认5秒间隔）
+    startQuickLogTail(logFile, hostId, 5000);
 }
 
 async function quickActionRefreshLog(logFile, hostId) {
@@ -4071,50 +4129,102 @@ async function quickActionRefreshLog(logFile, hostId) {
     }
 }
 
-function toggleQuickLogTail(logFile, hostId) {
+// 保存当前跟踪的参数，用于更新间隔时重启
+let quickActionTailParams = { logFile: null, hostId: null };
+
+/**
+ * 开始日志跟踪
+ * @param {string} logFile - 日志文件路径
+ * @param {string} hostId - 主机 ID
+ * @param {number} intervalMs - 刷新间隔（毫秒），默认 5000
+ */
+function startQuickLogTail(logFile, hostId, intervalMs = 5000) {
+    if (quickActionTailInterval) {
+        clearInterval(quickActionTailInterval);
+    }
+    
+    // 保存参数
+    quickActionTailParams = { logFile, hostId };
+    
     const btn = document.getElementById('quick-log-tail-btn');
     const status = document.getElementById('quick-log-status');
     
+    if (btn) {
+        btn.textContent = '⏹️ 停止跟踪';
+        btn.classList.remove('btn-primary');
+        btn.classList.add('btn-danger');
+    }
+    if (status) status.innerHTML = '<span style="color:#27ae60">● 实时更新中</span>';
+    quickActionLastContent = '';
+    
+    // 定义刷新函数
+    const doRefresh = async () => {
+        // 检查模态框是否还存在
+        if (!document.getElementById('quick-log-modal')) {
+            clearInterval(quickActionTailInterval);
+            quickActionTailInterval = null;
+            return;
+        }
+        try {
+            await quickActionRefreshLog(logFile, hostId);
+        } catch (e) {
+            console.error('Tail refresh error:', e);
+        }
+    };
+    
+    // 立即执行一次
+    doRefresh();
+    
+    // 设置定时器
+    quickActionTailInterval = setInterval(doRefresh, intervalMs);
+}
+
+/**
+ * 更新日志刷新间隔
+ */
+function updateQuickLogInterval(logFile, hostId) {
+    const select = document.getElementById('quick-log-interval');
+    if (!select) return;
+    
+    const intervalMs = parseInt(select.value, 10);
+    
+    // 如果正在跟踪，重新启动以应用新间隔
     if (quickActionTailInterval) {
-        // 停止跟踪
+        startQuickLogTail(logFile, hostId, intervalMs);
+    }
+}
+
+/**
+ * 停止日志跟踪
+ */
+function stopQuickLogTail() {
+    if (quickActionTailInterval) {
         clearInterval(quickActionTailInterval);
         quickActionTailInterval = null;
-        if (btn) {
-            btn.textContent = '▶️ 开始跟踪';
-            btn.classList.remove('btn-danger');
-            btn.classList.add('btn-primary');
-        }
-        if (status) status.textContent = '';
+    }
+    
+    const btn = document.getElementById('quick-log-tail-btn');
+    const status = document.getElementById('quick-log-status');
+    
+    if (btn) {
+        btn.textContent = '▶️ 开始跟踪';
+        btn.classList.remove('btn-danger');
+        btn.classList.add('btn-primary');
+    }
+    if (status) status.textContent = '已暂停';
+}
+
+/**
+ * 切换日志跟踪状态
+ */
+function toggleQuickLogTail(logFile, hostId) {
+    if (quickActionTailInterval) {
+        stopQuickLogTail();
     } else {
-        // 开始跟踪
-        if (btn) {
-            btn.textContent = '⏹️ 停止跟踪';
-            btn.classList.remove('btn-primary');
-            btn.classList.add('btn-danger');
-        }
-        if (status) status.innerHTML = '<span style="color:#27ae60">● 实时更新中</span>';
-        quickActionLastContent = '';
-        
-        // 定义刷新函数
-        const doRefresh = async () => {
-            // 检查模态框是否还存在
-            if (!document.getElementById('quick-log-modal')) {
-                clearInterval(quickActionTailInterval);
-                quickActionTailInterval = null;
-                return;
-            }
-            try {
-                await quickActionRefreshLog(logFile, hostId);
-            } catch (e) {
-                console.error('Tail refresh error:', e);
-            }
-        };
-        
-        // 立即执行一次
-        doRefresh();
-        
-        // 设置定时器（每2秒刷新）
-        quickActionTailInterval = setInterval(doRefresh, 2000);
+        // 获取当前选择的间隔
+        const select = document.getElementById('quick-log-interval');
+        const intervalMs = select ? parseInt(select.value, 10) : 5000;
+        startQuickLogTail(logFile, hostId, intervalMs);
     }
 }
 
@@ -4128,28 +4238,28 @@ function closeQuickLogModal() {
 }
 
 /**
- * 快捷操作 - 终止进程
+ * 快捷操作 - 终止进程（基于 PID 文件精确停止）
  */
-async function quickActionStopProcess(progName, hostId) {
+async function quickActionStopProcess(pidFile, hostId, cmdName) {
     const host = window._sshHostsData?.[hostId];
     if (!host) {
         showToast('❌ 主机不存在', 'error');
         return;
     }
     
-    if (!confirm(`确定要终止 ${progName} 进程吗？`)) {
+    if (!confirm(`确定要终止 "${cmdName}" 吗？`)) {
         return;
     }
     
     try {
         showToast('正在终止进程...', 'info');
-        // 使用 pkill -x 精确匹配程序名
+        // 使用 PID 文件精确终止进程
         const result = await api.call('ssh.exec', {
             host: host.host,
             port: host.port,
             user: host.username,
             keyid: host.keyid,
-            command: `pkill -x ${progName} -u $USER && echo "已终止 ${progName} 进程" || echo "未找到运行中的 ${progName} 进程"`,
+            command: `if [ -f ${pidFile} ]; then kill $(cat ${pidFile}) 2>/dev/null && rm -f ${pidFile} && echo "已终止进程" || echo "进程已不存在"; else echo "PID 文件不存在"; fi`,
             timeout_ms: 10000
         });
         
@@ -8695,34 +8805,36 @@ function nohupStopTail() {
     resultPre.scrollTop = resultPre.scrollHeight;
 }
 
-/* nohup 快捷操作：检查进程 */
+/* nohup 快捷操作：检查进程（使用 PID 文件） */
 async function nohupCheckProcess() {
-    if (!currentNohupInfo.processKeyword || !currentNohupInfo.hostId) {
+    if (!currentNohupInfo.pidFile || !currentNohupInfo.hostId) {
         showToast('没有可用的进程信息', 'warning');
         return;
     }
-    await executeNohupHelperCommand(`ps aux | grep -v grep | grep "${currentNohupInfo.processKeyword}" || echo "进程未找到（可能已完成）"`);
+    // 使用 PID 文件检查进程状态，并显示进程详情
+    await executeNohupHelperCommand(`if [ -f ${currentNohupInfo.pidFile} ]; then PID=$(cat ${currentNohupInfo.pidFile}); if kill -0 $PID 2>/dev/null; then echo "✅ 进程运行中 (PID: $PID)"; ps -p $PID -o pid,user,%cpu,%mem,etime,args --no-headers 2>/dev/null || ps -p $PID 2>/dev/null; else echo "⚠️ 进程已退出 (PID: $PID)"; fi; else echo "❌ PID 文件不存在"; fi`);
 }
 
-/* nohup 快捷操作：停止进程 */
+/* nohup 快捷操作：停止进程（使用 PID 文件） */
 async function nohupStopProcess() {
-    if (!currentNohupInfo.processKeyword || !currentNohupInfo.hostId) {
+    if (!currentNohupInfo.pidFile || !currentNohupInfo.hostId) {
         showToast('没有可用的进程信息', 'warning');
         return;
     }
     
     // 确认对话框
-    if (!confirm(`确定要停止所有 "${currentNohupInfo.processKeyword}" 进程吗？`)) {
+    if (!confirm(`确定要停止此后台进程吗？`)) {
         return;
     }
     
     // 停止实时跟踪（如果正在进行）
     nohupStopTail();
     
-    await executeNohupHelperCommand(`pkill -f "${currentNohupInfo.processKeyword}" && echo "✅ 进程已停止" || echo "⚠️ 没有找到匹配的进程"`);
+    // 使用 PID 文件精确停止
+    await executeNohupHelperCommand(`if [ -f ${currentNohupInfo.pidFile} ]; then kill $(cat ${currentNohupInfo.pidFile}) 2>/dev/null && rm -f ${currentNohupInfo.pidFile} && echo "✅ 进程已停止"; else echo "⚠️ PID 文件不存在"; fi`);
     
     // 再次检查进程状态
-    await executeNohupHelperCommand(`ps aux | grep -v grep | grep "${currentNohupInfo.processKeyword}" || echo "✅ 确认：进程已全部停止"`);
+    await executeNohupHelperCommand(`[ -f ${currentNohupInfo.pidFile} ] && kill -0 $(cat ${currentNohupInfo.pidFile}) 2>/dev/null && echo "⚠️ 进程仍在运行" || echo "✅ 确认：进程已停止"`);
 }
 
 /* 执行 nohup 辅助命令 */
@@ -8796,21 +8908,25 @@ async function executeCommand(idx) {
         nohupActions.style.display = 'none';
     }
     
-    // 对于 nohup 命令，包装命令以实现后台执行，并记录日志
+    // 对于 nohup 命令，包装命令以实现后台执行，并记录日志和 PID
     let actualCommand = cmd.command;
     let nohupLogFile = null;
+    let nohupPidFile = null;
     if (cmd.nohup) {
-        // 基于命令名生成固定日志文件名（每次执行会覆盖）
+        // 基于命令名生成固定文件名（每次执行会覆盖）
         const safeName = cmd.name.replace(/[^a-zA-Z0-9]/g, '').slice(0, 20) || 'cmd';
         nohupLogFile = `/tmp/ts_nohup_${safeName}.log`;
+        nohupPidFile = `/tmp/ts_nohup_${safeName}.pid`;
         
-        // 最简单的 nohup 方案 - 已验证可行
-        actualCommand = `nohup ${cmd.command} > ${nohupLogFile} 2>&1 & sleep 0.3; pgrep -f '${cmd.command.split(' ')[0]}'`;
+        // 使用 PID 文件方式（最可靠，能区分任意数量的不同命令）
+        // 启动命令：nohup cmd > log 2>&1 & echo $! > pidfile; 检测启动
+        actualCommand = `nohup ${cmd.command} > ${nohupLogFile} 2>&1 & echo $! > ${nohupPidFile}; sleep 0.3; cat ${nohupPidFile}`;
         
         // 保存 nohup 信息供快捷按钮使用
         currentNohupInfo = {
             logFile: nohupLogFile,
-            processKeyword: cmd.command.split(' ')[0],
+            pidFile: nohupPidFile,
+            processKeyword: safeName,
             hostId: selectedHostId
         };
     }
@@ -15605,8 +15721,19 @@ async function testAction(id) {
     try {
         showToast(`正在执行动作: ${id}...`, 'info');
         const result = await api.call('automation.actions.execute', { id });
-        showToast(`动作 ${id}: ${result.message || 'OK'}`, result.code === 0 ? 'success' : 'error');
+        console.log('Action execute result:', result);
+        
+        if (result.code === 0) {
+            let msg = result.message || '执行成功';
+            if (result.data?.output) {
+                msg += ` - 输出: ${result.data.output.substring(0, 100)}`;
+            }
+            showToast(msg, 'success');
+        } else {
+            showToast(`动作 ${id} 失败: ${result.message || '未知错误'}`, 'error');
+        }
     } catch (error) {
+        console.error('Action execute error:', error);
         showToast(`动作执行失败: ${error.message}`, 'error');
     }
 }

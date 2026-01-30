@@ -150,29 +150,29 @@ static void shutdown_req_callback(ts_gpio_handle_t handle, void *arg)
 /*===========================================================================*/
 
 /**
- * AGX 电源控制说明（基于 robOS 硬件设计）：
+ * AGX 电源控制说明（基于硬件设计）：
  * 
- * AGX 没有独立的"电源开关"引脚！它是上电自启动的设计。
+ * GPIO 1 (AGX_RESET / gpio_reset) - 主电源控制引脚：
+ *   - 持续 LOW  = 通电（开机状态）
+ *   - 持续 HIGH = 断电（关机状态）
+ *   - LOW → HIGH → LOW 脉冲 = 重启
  * 
- * GPIO 3 (AGX_FORCE_SHUTDOWN / gpio_power_en):
- *   - LOW  = 允许开机/正常运行
- *   - HIGH = 强制关机
+ * GPIO 3 (AGX_FORCE_SHUTDOWN / gpio_power_en) - 强制关机引脚：
+ *   - HIGH = 强制关机，除非物理断电否则无法恢复开机
+ *   - **禁止在正常操作中使用！**
  * 
- * GPIO 1 (AGX_RESET):
- *   - LOW  = 正常运行（必须保持）
- *   - HIGH = 断电（持续）或 重置（脉冲）
- * 
- * 开机/关机流程：只操作 FORCE_SHUTDOWN (GPIO3)，不操作 RESET
- * 重置流程：RESET 脉冲 HIGH 后回 LOW
+ * 开机流程：GPIO 1 设置为 LOW（持续）
+ * 关机流程：GPIO 1 设置为 HIGH（持续）
+ * 重启流程：GPIO 1 脉冲 LOW → HIGH → LOW
  * 
  * 注意：
- * 1. 只要不断电，就不要操作 RESET
- * 2. 避免操作 GPIO 后立即读取状态，可能导致状态变化（robOS 经验）
+ * 1. 避免操作 GPIO 后立即读取状态，可能导致状态变化（robOS 经验）
+ * 2. GPIO 3 (FORCE_SHUTDOWN) 不应在正常电源控制中使用
  */
 
 static esp_err_t agx_power_on(void)
 {
-    TS_LOGI(TAG, "AGX powering on (force_shutdown=GPIO%d)...", s_agx.pins.gpio_power_en);
+    TS_LOGI(TAG, "AGX powering on (reset=GPIO%d)...", s_agx.pins.gpio_reset);
     
     if (s_agx.state == TS_DEVICE_STATE_ON) {
         TS_LOGI(TAG, "AGX already ON");
@@ -181,17 +181,17 @@ static esp_err_t agx_power_on(void)
     
     s_agx.state = TS_DEVICE_STATE_BOOTING;
     
-    int pin_force_off = s_agx.pins.gpio_power_en;  // GPIO 3 = FORCE_SHUTDOWN
+    int pin_reset = s_agx.pins.gpio_reset;  // GPIO 1 = 电源控制引脚
     
-    if (pin_force_off < 0) {
-        TS_LOGE(TAG, "Invalid FORCE_SHUTDOWN pin: %d", pin_force_off);
+    if (pin_reset < 0) {
+        TS_LOGE(TAG, "Invalid RESET pin: %d", pin_reset);
         return ESP_ERR_INVALID_STATE;
     }
     
-    // 直接设置 FORCE_SHUTDOWN = LOW（允许开机）
+    // 设置 RESET = LOW（通电/开机）
     // 注意：不要调用 gpio_reset_pin，会导致电平毛刺
-    gpio_set_level(pin_force_off, 0);  // LOW = 允许开机
-    TS_LOGI(TAG, "FORCE_SHUTDOWN set to LOW (GPIO%d), AGX powering on", pin_force_off);
+    gpio_set_level(pin_reset, 0);  // LOW = 通电（持续）
+    TS_LOGI(TAG, "RESET set to LOW (GPIO%d), AGX powering on", pin_reset);
     
     // Wait for power stabilization
     vTaskDelay(pdMS_TO_TICKS(TS_AGX_POWER_ON_DELAY_MS));
@@ -223,19 +223,19 @@ static esp_err_t agx_power_on(void)
 
 static esp_err_t agx_power_off(void)
 {
-    TS_LOGI(TAG, "AGX powering off (force_shutdown=GPIO%d)...", s_agx.pins.gpio_power_en);
+    TS_LOGI(TAG, "AGX powering off (reset=GPIO%d)...", s_agx.pins.gpio_reset);
     
-    int pin_force_off = s_agx.pins.gpio_power_en;  // GPIO 3 = FORCE_SHUTDOWN
+    int pin_reset = s_agx.pins.gpio_reset;  // GPIO 1 = 电源控制引脚
     
-    if (pin_force_off < 0) {
-        TS_LOGE(TAG, "Invalid FORCE_SHUTDOWN pin: %d", pin_force_off);
+    if (pin_reset < 0) {
+        TS_LOGE(TAG, "Invalid RESET pin: %d", pin_reset);
         return ESP_ERR_INVALID_STATE;
     }
     
-    // 直接设置 FORCE_SHUTDOWN = HIGH（强制关机）
+    // 设置 RESET = HIGH（断电/关机）
     // 注意：不要调用 gpio_reset_pin，会导致电平毛刺
-    gpio_set_level(pin_force_off, 1);  // HIGH = 强制关机
-    TS_LOGI(TAG, "FORCE_SHUTDOWN set to HIGH (GPIO%d), AGX powered off", pin_force_off);
+    gpio_set_level(pin_reset, 1);  // HIGH = 断电（持续）
+    TS_LOGI(TAG, "RESET set to HIGH (GPIO%d), AGX powered off", pin_reset);
     
     s_agx.state = TS_DEVICE_STATE_OFF;
     TS_LOGI(TAG, "AGX powered off");
@@ -262,21 +262,23 @@ static esp_err_t agx_reset(void)
 {
     TS_LOGI(TAG, "AGX resetting (reset=GPIO%d)...", s_agx.pins.gpio_reset);
     
-    int pin_reset = s_agx.pins.gpio_reset;  // GPIO 1 = RESET
+    int pin_reset = s_agx.pins.gpio_reset;  // GPIO 1 = 电源控制引脚
     
     if (pin_reset < 0) {
         TS_LOGE(TAG, "Invalid RESET pin");
         return ESP_ERR_INVALID_STATE;
     }
     
-    // 发送 RESET 脉冲：HIGH -> 延时 -> LOW
+    // 重启脉冲：LOW → HIGH → LOW（断电后重新通电）
     // 注意：不要调用 gpio_reset_pin()，避免电平毛刺（robOS 经验）
-    TS_LOGI(TAG, "Sending RESET pulse (GPIO%d HIGH for %dms)...", 
+    TS_LOGI(TAG, "Sending RESET pulse (GPIO%d: LOW->HIGH->LOW, HIGH for %dms)...", 
             pin_reset, TS_AGX_RESET_PULSE_MS);
-    gpio_set_level(pin_reset, 1);  // HIGH = 重置
+    gpio_set_level(pin_reset, 0);  // LOW = 确保通电状态
+    vTaskDelay(pdMS_TO_TICKS(50)); // 短暂延时
+    gpio_set_level(pin_reset, 1);  // HIGH = 断电
     vTaskDelay(pdMS_TO_TICKS(TS_AGX_RESET_PULSE_MS));
-    gpio_set_level(pin_reset, 0);  // LOW = 恢复正常
-    TS_LOGI(TAG, "RESET pulse complete, GPIO%d back to LOW", pin_reset);
+    gpio_set_level(pin_reset, 0);  // LOW = 重新通电
+    TS_LOGI(TAG, "RESET pulse complete, GPIO%d back to LOW (powered on)", pin_reset);
     
     s_agx.boot_count++;
     s_agx.state = TS_DEVICE_STATE_BOOTING;
