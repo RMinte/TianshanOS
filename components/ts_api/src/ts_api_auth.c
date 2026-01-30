@@ -1,8 +1,7 @@
 /**
- * @file ts_api_auth.c
- * @brief Authentication API Handlers
- * 
- * 提供 auth.login / auth.logout / auth.status / auth.change_password API
+ * @file ts_ap
+ * @brief Authentication API and
+ * 提供 auth.login / auth.lout / auth.status / auth.change_password API
  * 
  * @author TianShanOS Team
  * @version 1.0.0

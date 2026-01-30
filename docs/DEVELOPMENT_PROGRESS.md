@@ -1,9 +1,9 @@
 # TianShanOS 开发进度跟踪
 
 > **项目**：TianShanOS（天山操作系统）  
-> **版本**：0.3.5  
+> **版本**：0.3.6  
 > **最后更新**：2026年1月30日  
-> **代码统计**：115+ 个 C 源文件，85+ 个头文件
+> **代码统计**：116+ 个 C 源文件，86+ 个头文件
 
 ---
 
@@ -38,6 +38,155 @@
 | Phase 24: 风扇曲线控制增强 | ✅ 完成 | 100% | 2026-01-30 |
 | Phase 25: 配置系统修复 & 内存优化 | ✅ 完成 | 100% | 2026-01-30 |
 | Phase 26: WebUI 认证系统 | ✅ 完成 | 100% | 2026-01-30 |
+| Phase 27: UI Widget 持久化 | ✅ 完成 | 100% | 2026-01-30 |
+
+---
+
+## 📋 Phase 27: UI Widget 持久化 ✅
+
+**时间**：2026年1月30日  
+**目标**：实现 WebUI 数据监控组件（Data Widgets）的后端持久化存储
+
+### 问题背景
+
+WebUI 首页的数据监控组件（显示 AGX 状态、功耗、温度等）原先只存储在浏览器 localStorage 中，导致：
+- 更换浏览器/设备后配置丢失
+- 无法在多设备间同步配置
+- 不符合 TianShanOS 配置持久化原则
+
+### 解决方案
+
+实现完整的后端 API，支持 SD 卡 + NVS 双存储：
+
+#### 配置优先级
+
+```
+SD 卡文件 > NVS 持久化 > 默认空配置
+```
+
+#### 加载逻辑
+
+1. **SD 卡有配置** → 使用 SD 卡配置，返回 `source: "sdcard"`
+2. **SD 卡无，NVS 有** → 使用 NVS 配置，**并自动复制到 SD 卡**，返回 `source: "nvs"`
+3. **都没有** → 返回空配置，`source: "default"`
+
+#### 保存逻辑
+
+同时写入 SD 卡 + NVS（双写，确保持久化和可编辑性）
+
+### 新增 API
+
+#### 1. ui.widgets.get - 获取组件配置
+
+```json
+GET /api/v1/call
+{
+    "method": "ui.widgets.get"
+}
+
+Response:
+{
+    "code": 0,
+    "data": {
+        "widgets": [
+            {"id": "w1", "type": "power", "config": {...}},
+            {"id": "w2", "type": "temp", "config": {...}}
+        ],
+        "refresh_interval": 5000,
+        "source": "sdcard"
+    }
+}
+```
+
+#### 2. ui.widgets.set - 保存组件配置
+
+```json
+POST /api/v1/call
+{
+    "method": "ui.widgets.set",
+    "params": {
+        "widgets": [...],
+        "refresh_interval": 5000
+    }
+}
+
+Response:
+{
+    "code": 0,
+    "data": {
+        "sdcard_saved": true,
+        "nvs_saved": true
+    }
+}
+```
+
+### 存储位置
+
+| 存储 | 路径/Key | 限制 |
+|------|---------|------|
+| SD 卡 | `/sdcard/config/ui_widgets.json` | 无限制 |
+| NVS | namespace: `ts_ui`, key: `widgets` | 4000 字节 |
+
+### 技术实现
+
+#### 后端（ts_api_ui.c）
+
+```c
+// 从 SD 卡加载
+static cJSON *load_widgets_from_sdcard(void) {
+    char *content = ts_storage_read_file(WIDGETS_SD_PATH);
+    return cJSON_Parse(content);
+}
+
+// 从 NVS 加载
+static cJSON *load_widgets_from_nvs(void) {
+    nvs_handle_t handle;
+    nvs_open(NVS_NAMESPACE, NVS_READONLY, &handle);
+    nvs_get_blob(handle, NVS_KEY, buffer, &len);
+    return cJSON_Parse(buffer);
+}
+
+// SD 卡无配置时，从 NVS 同步到 SD 卡
+if (!config_from_sdcard && config_from_nvs) {
+    save_widgets_to_sdcard(config_from_nvs);
+}
+```
+
+#### 前端（app.js）
+
+```javascript
+async function loadDataWidgets() {
+    const result = await api.call('ui.widgets.get');
+    if (result.code === 0 && result.data?.widgets) {
+        widgets = result.data.widgets;
+        refreshInterval = result.data.refresh_interval || 5000;
+    }
+}
+
+async function saveDataWidgets() {
+    await api.call('ui.widgets.set', {
+        widgets: widgets,
+        refresh_interval: refreshInterval
+    });
+}
+```
+
+### 代码变更
+
+| 文件 | 变更内容 |
+|------|---------|
+| `ts_api_ui.c` | **新增**：UI 配置 API 处理器（408 行） |
+| `ts_api.c` | 新增 `ts_api_ui_register()` 调用 |
+| `ts_api.h` | 新增函数声明 |
+| `CMakeLists.txt` | 添加 `ts_api_ui.c` 源文件 |
+| `app.js` | 修改 `loadDataWidgets()` 和 `saveDataWidgets()` 使用后端 API |
+
+### 设计优势
+
+1. **SD 卡优先**：方便用户直接编辑 JSON 文件修改配置
+2. **自动同步**：NVS 配置自动复制到 SD 卡，确保可见可编辑
+3. **双写保障**：同时写入两个存储，防止数据丢失
+4. **兼容性**：前端保留 localStorage 作为最终 fallback
 
 ---
 

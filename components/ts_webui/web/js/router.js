@@ -50,6 +50,11 @@ class Router {
         
         let hash = window.location.hash.slice(1) || '/';
         
+        // 页面切换前的清理 - 停止定时器等
+        if (typeof stopDeviceStateMonitor === 'function') {
+            stopDeviceStateMonitor();
+        }
+        
         // 检查访问权限
         const access = this.checkAccess(hash);
         if (!access.allowed) {

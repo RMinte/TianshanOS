@@ -37,6 +37,7 @@
 #include "ts_power_monitor.h"
 #include "ts_power_policy.h"
 #include "ts_automation.h"
+#include "ts_device_ctrl.h"
 #include "esp_log.h"
 
 static const char *TAG = "ts_services";
@@ -402,6 +403,12 @@ static esp_err_t network_service_start(ts_service_handle_t handle, void *user_da
     if (ret != ESP_OK) {
         ESP_LOGW(TAG, "Failed to init time sync: %s", esp_err_to_name(ret));
         /* 不是致命错误，继续 */
+    }
+    
+    /* 启动 LPMU 开机状态检测（异步任务）*/
+    ret = ts_device_lpmu_start_detection();
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to start LPMU detection: %s", esp_err_to_name(ret));
     }
     
     return ESP_OK;

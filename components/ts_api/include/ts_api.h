@@ -399,6 +399,11 @@ esp_err_t ts_api_cert_register(void);
  */
 esp_err_t ts_api_auth_register(void);
 
+/**
+ * @brief Register UI Configuration APIs
+ */
+esp_err_t ts_api_ui_register(void);
+
 /* ts_api_var_register 已废弃，统一使用 ts_api_automation_register */
 
 #ifdef __cplusplus

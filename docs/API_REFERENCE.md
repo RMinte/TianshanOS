@@ -1245,6 +1245,69 @@ POST /api/v1/ota/www/start_sdcard
 
 **请求**: `POST /api/v1/ota/abort`
 
+## UI 配置 API
+
+### ui.widgets.get
+获取 WebUI 数据监控组件配置。
+
+**请求**: `POST /api/v1/call`
+```json
+{
+  "method": "ui.widgets.get"
+}
+```
+
+**响应**:
+```json
+{
+  "code": 0,
+  "data": {
+    "widgets": [
+      {"id": "w1", "type": "power", "title": "总功耗", "config": {...}},
+      {"id": "w2", "type": "temp", "title": "CPU温度", "config": {...}}
+    ],
+    "refresh_interval": 5000,
+    "source": "sdcard"
+  }
+}
+```
+
+**source 字段说明**:
+- `"sdcard"`: 从 SD 卡加载
+- `"nvs"`: 从 NVS 加载（并已同步到 SD 卡）
+- `"default"`: 使用默认空配置
+
+### ui.widgets.set
+保存 WebUI 数据监控组件配置（双写 SD 卡 + NVS）。
+
+**请求**: `POST /api/v1/call`
+```json
+{
+  "method": "ui.widgets.set",
+  "params": {
+    "widgets": [
+      {"id": "w1", "type": "power", "title": "总功耗", "config": {...}}
+    ],
+    "refresh_interval": 5000
+  }
+}
+```
+
+**响应**:
+```json
+{
+  "code": 0,
+  "data": {
+    "sdcard_saved": true,
+    "nvs_saved": true
+  }
+}
+```
+
+**存储位置**:
+- SD 卡: `/sdcard/config/ui_widgets.json`
+- NVS: namespace `ts_ui`, key `widgets`
+
 ## 错误码
 
 | 代码 | 含义 |

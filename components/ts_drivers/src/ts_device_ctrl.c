@@ -16,8 +16,16 @@
 #include "freertos/task.h"
 #include "cJSON.h"
 #include <string.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <unistd.h>
+#include "lwip/inet_chksum.h"
 
 #define TAG "ts_device"
+
+// LPMU 默认 IP 地址
+#define LPMU_DEFAULT_IP "10.10.99.99"
 
 /*===========================================================================*/
 /*                          AGX Instance                                      */
@@ -630,6 +638,22 @@ esp_err_t ts_device_force_off(ts_device_id_t device)
     }
 }
 
+esp_err_t ts_device_power_toggle(ts_device_id_t device)
+{
+    switch (device) {
+        case TS_DEVICE_AGX:
+            // AGX 没有 toggle，返回不支持
+            TS_LOGW(TAG, "AGX does not support power toggle");
+            return ESP_ERR_NOT_SUPPORTED;
+        case TS_DEVICE_LPMU:
+            if (!s_lpmu.configured) return ESP_ERR_INVALID_STATE;
+            TS_LOGI(TAG, "LPMU power toggle (direct pulse)");
+            return lpmu_power_toggle();
+        default:
+            return ESP_ERR_INVALID_ARG;
+    }
+}
+
 esp_err_t ts_device_reset(ts_device_id_t device)
 {
     switch (device) {
@@ -758,4 +782,186 @@ const char *ts_device_state_to_str(ts_device_state_t state)
         case TS_DEVICE_STATE_ERROR:    return "error";
         default:                       return "unknown";
     }
+}
+
+/*===========================================================================*/
+/*                          LPMU Network Detection                            */
+/*===========================================================================*/
+
+/**
+ * @brief Ping an IP address using ICMP
+ * @param ip IP address string
+ * @param timeout_ms Timeout in milliseconds
+ * @return true if reachable, false otherwise
+ */
+static bool ping_host(const char *ip, int timeout_ms)
+{
+    int sock = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
+    if (sock < 0) {
+        TS_LOGW(TAG, "Failed to create ICMP socket");
+        return false;
+    }
+    
+    // 设置接收超时
+    struct timeval tv;
+    tv.tv_sec = timeout_ms / 1000;
+    tv.tv_usec = (timeout_ms % 1000) * 1000;
+    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    inet_pton(AF_INET, ip, &addr.sin_addr);
+    
+    // 构建 ICMP echo request
+    struct {
+        uint8_t type;
+        uint8_t code;
+        uint16_t checksum;
+        uint16_t id;
+        uint16_t seq;
+        uint8_t data[32];
+    } icmp_pkt;
+    
+    memset(&icmp_pkt, 0, sizeof(icmp_pkt));
+    icmp_pkt.type = 8;  // ICMP_ECHO
+    icmp_pkt.code = 0;
+    icmp_pkt.id = htons(0x1234);
+    icmp_pkt.seq = htons(1);
+    memset(icmp_pkt.data, 0xAB, sizeof(icmp_pkt.data));
+    
+    // 计算校验和
+    icmp_pkt.checksum = 0;
+    icmp_pkt.checksum = inet_chksum(&icmp_pkt, sizeof(icmp_pkt));
+    
+    // 发送
+    int sent = sendto(sock, &icmp_pkt, sizeof(icmp_pkt), 0, 
+                      (struct sockaddr *)&addr, sizeof(addr));
+    
+    bool reachable = false;
+    if (sent > 0) {
+        char recv_buf[64];
+        struct sockaddr_in from;
+        socklen_t from_len = sizeof(from);
+        
+        int recv_len = recvfrom(sock, recv_buf, sizeof(recv_buf), 0,
+                                (struct sockaddr *)&from, &from_len);
+        
+        if (recv_len >= 28) {
+            uint8_t icmp_type = recv_buf[20];
+            if (icmp_type == 0) {  // ICMP_ECHOREPLY
+                reachable = true;
+            }
+        }
+    }
+    
+    close(sock);
+    return reachable;
+}
+
+// LPMU 启动检测任务句柄
+static TaskHandle_t s_lpmu_detect_task = NULL;
+
+/**
+ * @brief LPMU 启动状态检测任务
+ * 在网络就绪后检测 LPMU 是否已经在运行
+ */
+static void lpmu_startup_detect_task(void *arg)
+{
+    TS_LOGI(TAG, "LPMU startup detection: waiting for network...");
+    
+    // 等待一段时间让网络稳定（网络服务启动后）
+    vTaskDelay(pdMS_TO_TICKS(5000));
+    
+    TS_LOGI(TAG, "LPMU startup detection: checking if LPMU is online...");
+    
+    // 尝试 ping LPMU 3 次
+    bool is_online = false;
+    for (int i = 0; i < 3; i++) {
+        if (ping_host(LPMU_DEFAULT_IP, 1000)) {
+            is_online = true;
+            break;
+        }
+        vTaskDelay(pdMS_TO_TICKS(1000));
+    }
+    
+    if (is_online) {
+        // LPMU 已经在运行
+        TS_LOGI(TAG, "LPMU detected online at %s, setting state to ON", LPMU_DEFAULT_IP);
+        s_lpmu.state = TS_DEVICE_STATE_ON;
+        s_lpmu.power_on_time = esp_timer_get_time() / 1000;
+    } else {
+        // LPMU 不在线，尝试开机
+        TS_LOGI(TAG, "LPMU not detected, attempting power on...");
+        s_lpmu.state = TS_DEVICE_STATE_BOOTING;
+        
+        // 发送开机脉冲
+        if (s_lpmu.gpio.power_btn) {
+            ts_gpio_set_level(s_lpmu.gpio.power_btn, 1);
+            vTaskDelay(pdMS_TO_TICKS(TS_LPMU_POWER_PULSE_MS));
+            ts_gpio_set_level(s_lpmu.gpio.power_btn, 0);
+        }
+        
+        // 等待 LPMU 启动（最多 80 秒）
+        TS_LOGI(TAG, "LPMU power pulse sent, waiting for boot (max 80s)...");
+        bool booted = false;
+        for (int i = 0; i < 16; i++) {  // 16 * 5s = 80s
+            vTaskDelay(pdMS_TO_TICKS(5000));
+            if (ping_host(LPMU_DEFAULT_IP, 1000)) {
+                booted = true;
+                break;
+            }
+            TS_LOGI(TAG, "LPMU boot wait: %d/80 seconds...", (i + 1) * 5);
+        }
+        
+        if (booted) {
+            TS_LOGI(TAG, "LPMU boot successful, state set to ON");
+            s_lpmu.state = TS_DEVICE_STATE_ON;
+            s_lpmu.power_on_time = esp_timer_get_time() / 1000;
+            s_lpmu.boot_count++;
+        } else {
+            TS_LOGW(TAG, "LPMU boot timeout, state remains OFF");
+            s_lpmu.state = TS_DEVICE_STATE_OFF;
+        }
+    }
+    
+    // 发送状态事件
+    cJSON *status = cJSON_CreateObject();
+    if (status) {
+        cJSON_AddStringToObject(status, "device", "lpmu");
+        cJSON_AddBoolToObject(status, "power", s_lpmu.state == TS_DEVICE_STATE_ON);
+        cJSON_AddStringToObject(status, "state", ts_device_state_to_str(s_lpmu.state));
+        char *json_str = cJSON_PrintUnformatted(status);
+        if (json_str) {
+            ts_event_post(TS_EVENT_BASE_DEVICE_MON, TS_EVENT_DEVICE_STATUS_CHANGED, 
+                         json_str, strlen(json_str) + 1, 0);
+            cJSON_free(json_str);
+        }
+        cJSON_Delete(status);
+    }
+    
+    s_lpmu_detect_task = NULL;
+    vTaskDelete(NULL);
+}
+
+esp_err_t ts_device_lpmu_start_detection(void)
+{
+    if (!s_lpmu.configured) {
+        TS_LOGW(TAG, "LPMU not configured, skip detection");
+        return ESP_ERR_INVALID_STATE;
+    }
+    
+    if (s_lpmu_detect_task != NULL) {
+        TS_LOGW(TAG, "LPMU detection already running");
+        return ESP_ERR_INVALID_STATE;
+    }
+    
+    BaseType_t ret = xTaskCreate(lpmu_startup_detect_task, "lpmu_detect", 4096, NULL, 5, &s_lpmu_detect_task);
+    if (ret != pdPASS) {
+        TS_LOGE(TAG, "Failed to create LPMU detection task");
+        return ESP_FAIL;
+    }
+    
+    TS_LOGI(TAG, "LPMU startup detection task started");
+    return ESP_OK;
 }

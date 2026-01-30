@@ -135,6 +135,13 @@ esp_err_t ts_device_power_off(ts_device_id_t device);
 esp_err_t ts_device_force_off(ts_device_id_t device);
 
 /**
+ * @brief Toggle power (send pulse, for LPMU physical button simulation)
+ * @param device Device ID
+ * @return ESP_OK on success
+ */
+esp_err_t ts_device_power_toggle(ts_device_id_t device);
+
+/**
  * @brief Reset device
  * @param device Device ID
  * @return ESP_OK on success
@@ -198,6 +205,16 @@ esp_err_t ts_device_handle_shutdown_request(ts_device_id_t device);
  * @return State name string
  */
 const char *ts_device_state_to_str(ts_device_state_t state);
+
+/**
+ * @brief Start LPMU startup detection task
+ * 
+ * This should be called after network is ready.
+ * It will detect if LPMU is already online, or attempt to power it on.
+ * 
+ * @return ESP_OK on success
+ */
+esp_err_t ts_device_lpmu_start_detection(void);
 
 #ifdef __cplusplus
 }

@@ -14,6 +14,15 @@
 #include "ts_power.h"
 #include "ts_usb_mux.h"
 #include <string.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <errno.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include "lwip/inet_chksum.h"
+#include "lwip/ip.h"
+#include "lwip/icmp.h"
 
 #define TAG "api_device"
 
@@ -119,6 +128,8 @@ static esp_err_t api_device_power(const cJSON *params, ts_api_result_t *result)
         ret = ts_device_power_on(device_id);
     } else if (strcmp(action_str, "off") == 0) {
         ret = ts_device_power_off(device_id);
+    } else if (strcmp(action_str, "toggle") == 0) {
+        ret = ts_device_power_toggle(device_id);
     } else if (strcmp(action_str, "force_off") == 0) {
         ret = ts_device_force_off(device_id);
     } else {
@@ -385,6 +396,124 @@ static esp_err_t api_device_usb_set(const cJSON *params, ts_api_result_t *result
     return ESP_OK;
 }
 
+/**
+ * @brief device.ping - Test network connectivity using ICMP ping
+ * @param host: IP address (default: "10.10.99.99" for LPMU)
+ * @param timeout: timeout in ms (default: 1000)
+ */
+static esp_err_t api_device_ping(const cJSON *params, ts_api_result_t *result)
+{
+    const char *host = "10.10.99.99";
+    int timeout_ms = 1000;
+    
+    cJSON *host_json = cJSON_GetObjectItem(params, "host");
+    if (host_json && cJSON_IsString(host_json)) {
+        host = host_json->valuestring;
+    }
+    
+    cJSON *timeout_json = cJSON_GetObjectItem(params, "timeout");
+    if (timeout_json && cJSON_IsNumber(timeout_json)) {
+        timeout_ms = timeout_json->valueint;
+    }
+    
+    // 创建 ICMP raw socket
+    int sock = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
+    if (sock < 0) {
+        cJSON *data = cJSON_CreateObject();
+        cJSON_AddStringToObject(data, "host", host);
+        cJSON_AddBoolToObject(data, "reachable", false);
+        cJSON_AddStringToObject(data, "error", "socket creation failed");
+        ts_api_result_ok(result, data);
+        return ESP_OK;
+    }
+    
+    // 设置接收超时
+    struct timeval tv;
+    tv.tv_sec = timeout_ms / 1000;
+    tv.tv_usec = (timeout_ms % 1000) * 1000;
+    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    inet_pton(AF_INET, host, &addr.sin_addr);
+    
+    // 构建 ICMP echo request
+    struct {
+        uint8_t type;
+        uint8_t code;
+        uint16_t checksum;
+        uint16_t id;
+        uint16_t seq;
+        uint8_t data[32];
+    } icmp_pkt;
+    
+    memset(&icmp_pkt, 0, sizeof(icmp_pkt));
+    icmp_pkt.type = 8;  // ICMP_ECHO
+    icmp_pkt.code = 0;
+    icmp_pkt.id = htons(0x1234);
+    icmp_pkt.seq = htons(1);
+    memset(icmp_pkt.data, 0xAB, sizeof(icmp_pkt.data));
+    
+    // 计算校验和
+    icmp_pkt.checksum = 0;
+    icmp_pkt.checksum = inet_chksum(&icmp_pkt, sizeof(icmp_pkt));
+    
+    int64_t start_time = esp_timer_get_time();
+    
+    // 发送 ICMP echo request
+    int sent = sendto(sock, &icmp_pkt, sizeof(icmp_pkt), 0, 
+                      (struct sockaddr *)&addr, sizeof(addr));
+    
+    bool reachable = false;
+    int latency_ms = 0;
+    const char *error_msg = NULL;
+    
+    if (sent > 0) {
+        // 等待 ICMP echo reply
+        char recv_buf[64];
+        struct sockaddr_in from;
+        socklen_t from_len = sizeof(from);
+        
+        int recv_len = recvfrom(sock, recv_buf, sizeof(recv_buf), 0,
+                                (struct sockaddr *)&from, &from_len);
+        
+        if (recv_len > 0) {
+            // IP 头部通常是 20 字节，ICMP 回复在其后
+            // 检查是否是 ICMP echo reply (type = 0)
+            if (recv_len >= 28) {  // 20 (IP) + 8 (ICMP header)
+                uint8_t icmp_type = recv_buf[20];
+                if (icmp_type == 0) {  // ICMP_ECHOREPLY
+                    reachable = true;
+                    latency_ms = (int)((esp_timer_get_time() - start_time) / 1000);
+                } else {
+                    error_msg = "unexpected icmp type";
+                }
+            } else {
+                error_msg = "short packet";
+            }
+        } else {
+            error_msg = "timeout";
+        }
+    } else {
+        error_msg = "send failed";
+    }
+    
+    close(sock);
+    
+    cJSON *data = cJSON_CreateObject();
+    cJSON_AddStringToObject(data, "host", host);
+    cJSON_AddBoolToObject(data, "reachable", reachable);
+    if (reachable) {
+        cJSON_AddNumberToObject(data, "latency_ms", latency_ms);
+    } else if (error_msg) {
+        cJSON_AddStringToObject(data, "error", error_msg);
+    }
+    
+    ts_api_result_ok(result, data);
+    return ESP_OK;
+}
+
 /*===========================================================================*/
 /*                          Registration                                      */
 /*===========================================================================*/
@@ -449,6 +578,13 @@ static const ts_api_endpoint_t device_endpoints[] = {
         .handler = api_device_usb_set,
         .requires_auth = true,
         .permission = "device.control",
+    },
+    {
+        .name = "device.ping",
+        .description = "Test network connectivity (TCP port check)",
+        .category = TS_API_CAT_DEVICE,
+        .handler = api_device_ping,
+        .requires_auth = false,
     },
 };
 

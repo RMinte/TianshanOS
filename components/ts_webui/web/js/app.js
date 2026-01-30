@@ -563,7 +563,7 @@ async function loadSystemPage() {
                     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
                         <h3 style="margin:0">📟 系统总览</h3>
                         <div style="display:flex;gap:8px">
-                            <button class="btn btn-primary btn-small" onclick="router.navigate('/ota')" style="font-size:0.85em">📦 OTA</button>
+                            <button class="btn btn-small" onclick="toggleUsbMux()" style="font-size:0.85em" id="usb-mux-btn" title="切换 USB 连接目标">🔌 USB: <span id="usb-mux-target">-</span></button>
                             <button class="btn btn-warning btn-small" onclick="confirmReboot()" style="font-size:0.85em">🔄 重启</button>
                         </div>
                     </div>
@@ -586,7 +586,10 @@ async function loadSystemPage() {
                 
                 <!-- 网络 & 时间 -->
                 <div class="card">
-                    <h3>🌐 网络 & 时间</h3>
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+                        <h3 style="margin:0">🌐 网络 & 时间</h3>
+                        <button class="btn btn-primary btn-small" onclick="router.navigate('/ota')" style="font-size:0.85em">📦 OTA</button>
+                    </div>
                     <div class="card-content" style="display:flex;gap:20px">
                         <div style="flex:1">
                             <p style="font-size:0.9em;color:#888;margin-bottom:5px">网络连接</p>
@@ -615,9 +618,9 @@ async function loadSystemPage() {
                     <div class="section-header">
                         <h2>🖥️ 设备面板</h2>
                         <div class="section-actions">
-                            <button class="btn btn-sm" onclick="refreshQuickActions();refreshDataWidgets()">🔄</button>
-                            <button class="btn btn-sm" onclick="router.navigate('/automation')">⚡</button>
-                            <button class="btn btn-sm btn-primary" onclick="showWidgetManager()">📊</button>
+                            <button class="btn btn-sm" id="agx-power-btn" onclick="toggleAgxPower()" title="AGX 电源控制">🔴 AGX 已关闭</button>
+                            <button class="btn btn-sm" id="lpmu-power-btn" onclick="toggleLpmuPower()" title="LPMU 电源按钮（脉冲触发）">⚠️ LPMU 检测中</button>
+                            <button class="btn btn-sm btn-primary" onclick="showWidgetManager()">📊 组件管理</button>
                         </div>
                     </div>
                     <!-- 快捷操作区域 -->
@@ -739,6 +742,9 @@ async function loadSystemPage() {
     
     // 启动浏览器本地时间更新定时器
     startLocalTimeUpdate();
+    
+    // 启动设备状态实时监控
+    startDeviceStateMonitor();
 }
 
 // 单次刷新（初始加载）
@@ -817,6 +823,15 @@ async function refreshSystemPageOnce() {
     
     // 快捷操作
     await refreshQuickActions();
+    
+    // USB Mux 状态
+    await refreshUsbMuxStatus();
+    
+    // AGX 电源状态
+    await refreshAgxPowerState();
+    
+    // LPMU 状态检测
+    await refreshLpmuState();
 }
 
 // 更新系统信息
@@ -1973,6 +1988,330 @@ function confirmReboot() {
     }
 }
 
+// USB Mux 状态和切换 (支持 ESP32 / AGX / LPMU 三设备循环)
+let usbMuxTarget = 'esp32';
+let usbMuxConfigured = false;
+
+// 目标循环顺序和显示名称
+const USB_MUX_TARGETS = ['esp32', 'agx', 'lpmu'];
+const USB_MUX_DISPLAY = { 'esp32': 'ESP', 'agx': 'AGX', 'lpmu': 'LPMU' };
+const USB_MUX_COLORS = { 'esp32': '', 'agx': 'btn-primary', 'lpmu': 'btn-success' };
+
+async function refreshUsbMuxStatus() {
+    try {
+        const result = await api.call('device.usb.status');
+        if (result.code === 0 && result.data) {
+            usbMuxConfigured = result.data.configured !== false;
+            usbMuxTarget = result.data.target || 'esp32';
+            updateUsbMuxButton();
+        }
+    } catch (e) {
+        console.warn('USB Mux status unavailable:', e.message);
+        usbMuxConfigured = false;
+        updateUsbMuxButton();
+    }
+}
+
+function updateUsbMuxButton() {
+    const targetEl = document.getElementById('usb-mux-target');
+    const btn = document.getElementById('usb-mux-btn');
+    
+    if (!usbMuxConfigured) {
+        if (targetEl) targetEl.textContent = '未配置';
+        if (btn) {
+            btn.className = 'btn btn-small';
+            btn.disabled = true;
+        }
+        return;
+    }
+    
+    const displayName = USB_MUX_DISPLAY[usbMuxTarget] || usbMuxTarget.toUpperCase();
+    if (targetEl) {
+        targetEl.textContent = displayName;
+    }
+    if (btn) {
+        btn.disabled = false;
+        const colorClass = USB_MUX_COLORS[usbMuxTarget] || '';
+        btn.className = 'btn btn-small ' + colorClass;
+    }
+}
+
+async function toggleUsbMux() {
+    if (!usbMuxConfigured) {
+        showToast('USB MUX 未配置', 'warning');
+        return;
+    }
+    
+    // 循环切换: esp32 → agx → lpmu → esp32
+    const currentIdx = USB_MUX_TARGETS.indexOf(usbMuxTarget);
+    const nextIdx = (currentIdx + 1) % USB_MUX_TARGETS.length;
+    const newTarget = USB_MUX_TARGETS[nextIdx];
+    const displayName = USB_MUX_DISPLAY[newTarget];
+    
+    try {
+        showToast(`切换 USB 到 ${displayName}...`, 'info');
+        const result = await api.call('device.usb.set', { target: newTarget }, 'POST');
+        
+        if (result.code === 0) {
+            usbMuxTarget = newTarget;
+            updateUsbMuxButton();
+            showToast(`USB 已切换到 ${displayName}`, 'success');
+        } else {
+            showToast(`切换失败: ${result.message || '未知错误'}`, 'error');
+        }
+    } catch (e) {
+        showToast(`切换失败: ${e.message}`, 'error');
+    }
+}
+
+// AGX 电源控制（持续电平：LOW=上电，HIGH=断电）
+let agxPowerState = false;  // false=断电(HIGH), true=上电(LOW)
+
+async function refreshAgxPowerState() {
+    try {
+        const result = await api.call('device.status', { device: 'agx' });
+        if (result.code === 0 && result.data) {
+            agxPowerState = result.data.state === 'on' || result.data.state === 'booting';
+            updateAgxPowerButton();
+        }
+    } catch (e) {
+        console.warn('AGX status unavailable:', e.message);
+    }
+}
+
+function updateAgxPowerButton() {
+    const btn = document.getElementById('agx-power-btn');
+    if (!btn) return;
+    
+    if (agxPowerState) {
+        btn.innerHTML = '🟢 AGX 运行中';
+        btn.className = 'btn btn-sm btn-success';
+        btn.title = '点击关闭 AGX 电源';
+    } else {
+        btn.innerHTML = '🔴 AGX 已关闭';
+        btn.className = 'btn btn-sm btn-danger';
+        btn.title = '点击开启 AGX 电源';
+    }
+}
+
+async function toggleAgxPower() {
+    const action = agxPowerState ? 'off' : 'on';
+    const actionText = agxPowerState ? '断电' : '上电';
+    
+    try {
+        showToast(`AGX ${actionText}中...`, 'info');
+        const result = await api.call('device.power', { device: 'agx', action: action }, 'POST');
+        
+        if (result.code === 0) {
+            agxPowerState = !agxPowerState;
+            updateAgxPowerButton();
+            showToast(`AGX 已${actionText}`, 'success');
+        } else {
+            showToast(`AGX ${actionText}失败: ${result.message || '未知错误'}`, 'error');
+        }
+    } catch (e) {
+        showToast(`AGX ${actionText}失败: ${e.message}`, 'error');
+    }
+}
+
+// LPMU 电源控制（脉冲触发，像按物理按钮）
+async function toggleLpmuPower() {
+    if (!confirm('确定要触发 LPMU 电源按钮吗？\n\n这将发送一个脉冲信号，效果类似按物理电源按钮。')) {
+        return;
+    }
+    
+    try {
+        showToast('LPMU 电源触发中...', 'info');
+        // 记录触发前的状态（用于决定检测逻辑）
+        const wasOnline = (lpmuState === 'online');
+        
+        // 使用 toggle 动作直接发送脉冲，不检查当前状态
+        const result = await api.call('device.power', { device: 'lpmu', action: 'toggle' }, 'POST');
+        
+        if (result.code === 0) {
+            showToast('LPMU 电源已触发，开始检测状态...', 'success');
+            // 启动状态检测（传入之前的状态）
+            startLpmuStatePolling(wasOnline);
+        } else {
+            showToast(`LPMU 触发失败: ${result.message || '未知错误'}`, 'error');
+        }
+    } catch (e) {
+        showToast(`LPMU 触发失败: ${e.message}`, 'error');
+    }
+}
+
+// LPMU 状态: 'unknown' | 'online' | 'offline' | 'detecting'
+let lpmuState = 'unknown';
+let deviceStateInterval = null;
+let lpmuPollingInterval = null;
+let lpmuPollingStartTime = 0;
+let lpmuPollingMode = 'startup';  // 'startup' | 'shutdown'
+
+// 启动 LPMU 状态轮询（触发电源后调用）
+// wasOnline: 触发前是否在线，决定检测模式
+function startLpmuStatePolling(wasOnline = false) {
+    // 清除旧的轮询
+    stopLpmuStatePolling();
+    
+    // 设为"状态获取中"
+    lpmuState = 'detecting';
+    lpmuPollingMode = wasOnline ? 'shutdown' : 'startup';
+    updateLpmuPowerButton();
+    
+    // 记录开始时间
+    lpmuPollingStartTime = Date.now();
+    
+    // 检测参数
+    // 开机检测：最少等待0秒，最多80秒，检测到在线即成功
+    // 关机检测：最少等待40秒，最多60秒，检测到离线即成功
+    const minWaitSec = wasOnline ? 40 : 0;
+    const maxWaitSec = wasOnline ? 60 : 80;
+    
+    // 每 5 秒检测一次
+    lpmuPollingInterval = setInterval(async () => {
+        const elapsed = (Date.now() - lpmuPollingStartTime) / 1000;
+        const remaining = Math.round(maxWaitSec - elapsed);
+        
+        // 检测网络连通性
+        let isReachable = false;
+        try {
+            const result = await api.call('device.ping', { host: '10.10.99.99', timeout: 1000 });
+            isReachable = result.code === 0 && result.data && result.data.reachable;
+        } catch (e) {
+            // 忽略错误
+        }
+        
+        if (lpmuPollingMode === 'startup') {
+            // 开机检测：等待上线
+            if (isReachable) {
+                lpmuState = 'online';
+                updateLpmuPowerButton();
+                stopLpmuStatePolling();
+                showToast(`LPMU 已上线 (${Math.round(elapsed)}秒)`, 'success');
+                return;
+            }
+            // 更新按钮显示
+            updateLpmuPowerButton(remaining);
+            // 超时则认为关机
+            if (elapsed >= maxWaitSec) {
+                lpmuState = 'offline';
+                updateLpmuPowerButton();
+                stopLpmuStatePolling();
+                showToast('LPMU 开机检测超时，认定为已关闭', 'warning');
+            }
+        } else {
+            // 关机检测：等待离线
+            // 前 minWaitSec 秒无条件等待（系统正在关机，ping 可能仍可达）
+            if (elapsed < minWaitSec) {
+                // 只更新按钮显示，不做判断
+                updateLpmuPowerButton(remaining);
+                return;
+            }
+            // minWaitSec 秒后，检测到不可达则确认关机
+            if (!isReachable) {
+                lpmuState = 'offline';
+                updateLpmuPowerButton();
+                stopLpmuStatePolling();
+                showToast(`LPMU 已关闭 (${Math.round(elapsed)}秒)`, 'success');
+                return;
+            }
+            // 更新按钮显示
+            updateLpmuPowerButton(remaining);
+            // 超时则认为仍在运行（关机失败）
+            if (elapsed >= maxWaitSec) {
+                lpmuState = 'online';
+                updateLpmuPowerButton();
+                stopLpmuStatePolling();
+                showToast('LPMU 关机检测超时，设备可能仍在运行', 'warning');
+            }
+        }
+    }, 5000);
+}
+
+// 停止 LPMU 状态轮询
+function stopLpmuStatePolling() {
+    if (lpmuPollingInterval) {
+        clearInterval(lpmuPollingInterval);
+        lpmuPollingInterval = null;
+    }
+}
+
+// 启动设备状态实时监控（LPMU 网络检测）
+function startDeviceStateMonitor() {
+    // 清除旧定时器
+    if (deviceStateInterval) {
+        clearInterval(deviceStateInterval);
+    }
+    
+    // 如果不在轮询状态，立即刷新一次
+    if (!lpmuPollingInterval) {
+        refreshLpmuState();
+    }
+    refreshAgxPowerState();
+    
+    // 每 10 秒检测一次 LPMU 状态（如果不在轮询中）
+    deviceStateInterval = setInterval(() => {
+        if (!lpmuPollingInterval) {
+            refreshLpmuState();
+        }
+    }, 10000);
+}
+
+// 停止设备状态监控（页面切换时调用）
+function stopDeviceStateMonitor() {
+    if (deviceStateInterval) {
+        clearInterval(deviceStateInterval);
+        deviceStateInterval = null;
+    }
+    // 注意：不停止 lpmuPollingInterval，让它继续完成
+}
+
+// 检测 LPMU 网络连通性（ICMP ping）
+async function refreshLpmuState() {
+    // 如果正在轮询检测，跳过
+    if (lpmuPollingInterval) return;
+    
+    try {
+        const result = await api.call('device.ping', { host: '10.10.99.99', timeout: 1000 });
+        if (result.code === 0 && result.data) {
+            lpmuState = result.data.reachable ? 'online' : 'offline';
+        } else {
+            lpmuState = 'unknown';
+        }
+    } catch (e) {
+        lpmuState = 'unknown';
+    }
+    updateLpmuPowerButton();
+}
+
+function updateLpmuPowerButton(remainingSec = 0) {
+    const btn = document.getElementById('lpmu-power-btn');
+    if (!btn) return;
+    
+    switch (lpmuState) {
+        case 'online':
+            btn.innerHTML = '🟢 LPMU 运行中';
+            btn.className = 'btn btn-sm btn-success';
+            btn.title = 'LPMU 在线 (ping 10.10.99.99 可达)\n点击触发电源按钮';
+            break;
+        case 'offline':
+            btn.innerHTML = '🔴 LPMU 已关闭';
+            btn.className = 'btn btn-sm btn-danger';
+            btn.title = 'LPMU 离线 (ping 10.10.99.99 不可达)\n点击触发电源按钮';
+            break;
+        case 'detecting':
+            const timeText = remainingSec > 0 ? ` (${remainingSec}s)` : '';
+            btn.innerHTML = `⏳ 状态获取中${timeText}`;
+            btn.className = 'btn btn-sm btn-warning';
+            btn.title = '正在检测 LPMU 状态...\n最多等待 80 秒';
+            break;
+        default:
+            btn.innerHTML = '⚠️ LPMU 状态未知';
+            btn.className = 'btn btn-sm btn-warning';
+            btn.title = 'LPMU 状态未知\n点击触发电源按钮';
+    }
+}
+
 // LED 控制（系统页面内嵌版）
 async function refreshSystemLeds() {
     const container = document.getElementById('system-led-devices-grid');
@@ -2130,10 +2469,54 @@ let dataWidgets = [];
 let dataWidgetsRefreshInterval = 5000;
 let dataWidgetsIntervalId = null;
 
+// 标记是否正在保存（防止重复保存）
+let dataWidgetsSaving = false;
+
 /**
- * 加载数据组件配置（兼容旧版数据）
+ * 加载数据组件配置
+ * 优先级：后端 API (SD卡/NVS) > localStorage (兼容旧版)
  */
-function loadDataWidgets() {
+async function loadDataWidgets() {
+    try {
+        // 1. 尝试从后端加载
+        const response = await api.call('ui.widgets.get');
+        // API 响应格式: {code: 0, data: {widgets: [...], refresh_interval: 5000, source: "sdcard"}}
+        if (response && response.code === 0 && response.data && response.data.widgets) {
+            const result = response.data;
+            dataWidgets = result.widgets;
+            dataWidgetsRefreshInterval = result.refresh_interval || 5000;
+            console.log(`已从后端加载数据组件配置 (来源: ${result.source}, ${dataWidgets.length} 个组件)`);
+            
+            // 如果后端是默认空配置，检查 localStorage 是否有旧数据需要迁移
+            if (result.source === 'default' && dataWidgets.length === 0) {
+                const localData = loadDataWidgetsFromLocalStorage();
+                if (localData && localData.length > 0) {
+                    dataWidgets = localData;
+                    console.log(`从 localStorage 迁移 ${localData.length} 个组件到后端`);
+                    // 保存到后端
+                    await saveDataWidgets();
+                }
+            }
+            return;
+        }
+    } catch (e) {
+        console.warn('从后端加载数据组件配置失败:', e);
+    }
+    
+    // 2. 后端失败，回退到 localStorage
+    const localData = loadDataWidgetsFromLocalStorage();
+    if (localData) {
+        dataWidgets = localData;
+        console.log('从 localStorage 加载数据组件配置');
+    } else {
+        dataWidgets = [];
+    }
+}
+
+/**
+ * 从 localStorage 加载（兼容旧版）
+ */
+function loadDataWidgetsFromLocalStorage() {
     try {
         let saved = localStorage.getItem('data_widgets_v2');
         
@@ -2143,44 +2526,61 @@ function loadDataWidgets() {
             if (oldSaved) {
                 const oldWidgets = JSON.parse(oldSaved);
                 // 迁移旧数据：variable -> expression
-                dataWidgets = oldWidgets.map(w => ({
+                return oldWidgets.map(w => ({
                     ...w,
                     expression: w.variable ? `\${${w.variable}}` : null,
                     decimals: w.decimals || 1
                 }));
-                // 保存到新键
-                saveDataWidgets();
-                console.log('已迁移旧版数据组件配置');
-                return;
             }
         }
         
         if (saved) {
-            dataWidgets = JSON.parse(saved);
-        } else {
-            dataWidgets = [];
+            return JSON.parse(saved);
         }
     } catch (e) {
-        console.warn('加载数据组件配置失败:', e);
-        dataWidgets = [];
+        console.warn('从 localStorage 加载失败:', e);
     }
+    return null;
 }
 
 /**
  * 保存数据组件配置
+ * 双写：后端 API (SD卡/NVS) + localStorage (备份)
  */
-function saveDataWidgets() {
+async function saveDataWidgets() {
+    // 防止重复保存
+    if (dataWidgetsSaving) return;
+    dataWidgetsSaving = true;
+    
     try {
+        // 1. 保存到 localStorage（本地备份）
         localStorage.setItem('data_widgets_v2', JSON.stringify(dataWidgets));
+        localStorage.setItem('data_widgets_refresh_interval', dataWidgetsRefreshInterval.toString());
+        
+        // 2. 保存到后端（SD卡 + NVS）
+        const response = await api.call('ui.widgets.set', {
+            widgets: dataWidgets,
+            refresh_interval: dataWidgetsRefreshInterval
+        }, 'POST');
+        
+        // API 响应格式: {code: 0, data: {sdcard_saved: true, nvs_saved: true}}
+        if (response && response.code === 0 && response.data) {
+            console.log(`数据组件配置已保存 (sdcard=${response.data.sdcard_saved}, nvs=${response.data.nvs_saved})`);
+        }
     } catch (e) {
-        console.warn('保存数据组件配置失败:', e);
+        console.warn('保存数据组件配置到后端失败:', e);
+        // localStorage 已保存，不影响使用
+    } finally {
+        dataWidgetsSaving = false;
     }
 }
 
 /**
- * 加载刷新间隔配置
+ * 加载刷新间隔配置（已整合到 loadDataWidgets）
  */
 function loadDataWidgetsRefreshInterval() {
+    // 刷新间隔已在 loadDataWidgets 中一起加载
+    // 此函数保留用于兼容性
     try {
         const saved = localStorage.getItem('data_widgets_refresh_interval');
         if (saved) {
@@ -2192,14 +2592,11 @@ function loadDataWidgetsRefreshInterval() {
 }
 
 /**
- * 保存刷新间隔配置
+ * 保存刷新间隔配置（已整合到 saveDataWidgets）
  */
 function saveDataWidgetsRefreshInterval() {
-    try {
-        localStorage.setItem('data_widgets_refresh_interval', dataWidgetsRefreshInterval.toString());
-    } catch (e) {
-        console.warn('保存刷新间隔失败:', e);
-    }
+    // 触发完整保存
+    saveDataWidgets();
 }
 
 /**
@@ -2594,8 +2991,8 @@ function updateWidgetValue(widget, value) {
  * 初始化数据组件面板
  */
 async function initDataWidgets() {
-    loadDataWidgets();
-    loadDataWidgetsRefreshInterval();
+    await loadDataWidgets();  // 异步加载（优先后端 API）
+    loadDataWidgetsRefreshInterval();  // 兼容性保留
     renderDataWidgets();
     await refreshDataWidgets();
     startDataWidgetsAutoRefresh();
