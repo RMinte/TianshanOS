@@ -16,6 +16,8 @@
 | [命令参考](COMMAND_REFERENCE.md) | CLI 命令完整手册：系统、网络、LED、设备、配置等 |
 | [配置指南](CONFIGURATION_GUIDE.md) | 板级配置、GPIO 映射、运行时配置说明 |
 
+**用户操作类帮助**：WebUI 各页面的详细使用说明见项目根目录下的 `help/` 目录（如 [安全页面操作指南](../help/security-guide.mdx)）。
+
 **推荐阅读顺序**：QUICK_START → CONFIGURATION_GUIDE → COMMAND_REFERENCE
 
 ---
