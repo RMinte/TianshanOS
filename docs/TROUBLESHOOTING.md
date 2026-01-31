@@ -1353,7 +1353,7 @@ I (65000) ts_time_sync: Time synchronized from 10.10.99.99
 
 | 场景 | 推荐方案 | 说明 |
 |------|---------|------|
-| 内网环境 | 双 NTP 服务器 | 10.10.99.99 + 10.10.99.98 |
+| 内网环境 | 三 NTP 服务器 | 10.10.99.99 + 10.10.99.98 + 10.10.99.100 |
 | 互联网环境 | pool.ntp.org | 使用公共 NTP 池 |
 | 离线环境 | 浏览器同步 | WebUI 手动同步时间 |
 | 开发调试 | 禁用 NTP | 避免启动延迟 |
@@ -1364,6 +1364,7 @@ I (65000) ts_time_sync: Time synchronized from 10.10.99.99
 # CLI 配置 NTP 服务器
 config --set time.ntp1 --value 10.10.99.99 --persist
 config --set time.ntp2 --value 10.10.99.98 --persist
+config --set time.ntp3 --value 10.10.99.100 --persist
 
 # 启动 NTP 同步
 system --time --sync-ntp

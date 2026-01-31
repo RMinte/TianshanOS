@@ -409,9 +409,9 @@ static esp_err_t network_service_start(ts_service_handle_t handle, void *user_da
     
     /* 初始化时间同步（NTP） */
     ts_time_sync_config_t time_config = {
-        .ntp_server1 = "10.10.99.100",   /* 本地 NTP 服务器（首选） */
-        .ntp_server2 = "10.10.99.99",    /* 本地 NTP 服务器（备用 1） */
-        .ntp_server3 = "10.10.99.98",    /* 本地 NTP 服务器（备用 2） */
+        .ntp_server1 = "10.10.99.99",    /* 本地 NTP 服务器（首选） */
+        .ntp_server2 = "10.10.99.98",    /* 本地 NTP 服务器（备用 1） */
+        .ntp_server3 = "10.10.99.100",   /* 本地 NTP 服务器（备用 2） */
         .timezone = "CST-8",            /* 中国标准时间 */
         .sync_interval_ms = 3600000,    /* 每小时同步一次 */
         .auto_start = true,             /* 自动启动 NTP */
