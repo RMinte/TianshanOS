@@ -683,15 +683,21 @@ static void check_voltage(float voltage)
             break;
             
         case TS_POWER_POLICY_STATE_RECOVERY:
-            /* 恢复期间电压再次下降 → 回到低电压或正常状态 */
+            /* 恢复期间电压再次下降 → 回到保护状态或低电压状态 */
             if (voltage < s_pp.config.recovery_voltage_threshold) {
                 s_pp.recovery_timer_sec = 0;
                 
                 if (voltage < s_pp.config.low_voltage_threshold) {
+                    /* 电压再次过低，重新进入低电压倒计时（但设备已关机） */
+                    TS_LOGW(TAG, "[STATE] RECOVERY -> LOW_VOLTAGE: %.2fV < %.2fV",
+                            voltage, s_pp.config.low_voltage_threshold);
                     s_pp.state = TS_POWER_POLICY_STATE_LOW_VOLTAGE;
                     s_pp.countdown_remaining_sec = s_pp.config.shutdown_delay_sec;
                 } else {
-                    s_pp.state = TS_POWER_POLICY_STATE_NORMAL;
+                    /* 电压不够恢复阈值，回到保护状态继续等待 */
+                    TS_LOGI(TAG, "[STATE] RECOVERY -> PROTECTED: %.2fV < %.2fV (voltage dropped)",
+                            voltage, s_pp.config.recovery_voltage_threshold);
+                    s_pp.state = TS_POWER_POLICY_STATE_PROTECTED;
                 }
             }
             break;
@@ -733,14 +739,16 @@ static void execute_shutdown(void)
         return;
     }
     
-    /* AGX: 拉高 reset 引脚保持复位状态 */
+    /* AGX: 通过 device_ctrl 执行关机（拉高 reset 引脚保持断电状态）*/
     if (s_pp.agx_powered) {
-        TS_LOGI(TAG, "Asserting AGX reset");
-        /* 直接操作 GPIO1 (AGX_RESET) */
-        gpio_set_level(1, 1);  /* HIGH = 复位 */
+        TS_LOGI(TAG, "Powering off AGX via device_ctrl");
+        esp_err_t ret = ts_device_power_off(TS_DEVICE_AGX);
+        if (ret != ESP_OK) {
+            TS_LOGE(TAG, "Failed to power off AGX: %s", esp_err_to_name(ret));
+        }
     }
     
-    /* LPMU: 发送电源切换信号 */
+    /* LPMU: 发送电源切换信号（脉冲触发）*/
     if (s_pp.lpmu_powered) {
         TS_LOGI(TAG, "Sending LPMU power toggle");
         /* TODO: 检查 LPMU 是否在线（ping），如果在线才执行关机 */

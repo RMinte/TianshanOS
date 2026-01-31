@@ -72,7 +72,7 @@
             "active_high": true,
             "initial_state": "low",
             "pulse_ms": 1000,
-            "description": "AGX reset control (HIGH=reset, LOW=normal, pulse 1000ms)"
+            "description": "AGX power control (LOW=power on, HIGH=power off/reset, pulse for reboot)"
         },
         "AGX_RECOVERY": {
             "gpio": 40,

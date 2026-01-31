@@ -40,6 +40,218 @@
 | Phase 26: WebUI 认证系统 | ✅ 完成 | 100% | 2026-01-30 |
 | Phase 27: UI Widget 持久化 | ✅ 完成 | 100% | 2026-01-30 |
 | Phase 28: OTA 服务器重构 & 版本管理 | ✅ 完成 | 100% | 2026-01-31 |
+| Phase 29: AGX 电源控制 GPIO 修正 | ✅ 完成 | 100% | 2026-01-31 |
+| Phase 30: 规则引擎模板执行修复 & 电压保护代码审查 | ✅ 完成 | 100% | 2026-01-31 |
+
+---
+
+## 📋 Phase 30: 规则引擎模板执行修复 & 电压保护代码审查 ✅
+
+**时间**：2026年1月31日  
+**目标**：修复规则引擎中模板动作不执行的问题；审查并修正电压保护代码逻辑
+
+### 问题 1：规则引擎模板动作不执行
+
+**现象**：
+- 通过模板直接执行 LED Matrix 动作正常（`action --exec show_qwen_logo`）
+- 但规则触发时模板动作不生效，Matrix 显示黑屏
+
+**根本原因**：
+`ts_action_execute()` 直接使用 `action->led` 数据，但规则存储的是 `template_id`，实际数据在模板中。
+
+**日志分析**：
+```
+LED action: device=led_matrix, ctrl_type=0  ← 应该是 ctrl_type=5 (IMAGE)
+```
+- 规则只存储了 `template_id="show_qwen_logo"`
+- `action->led` 结构体是空的（`ctrl_type=0`，`image_path=""`）
+- 代码忽略了 `template_id`，直接用空数据执行
+
+**修复方案**（`ts_rule_engine.c`）：
+
+```c
+esp_err_t ts_action_execute(const ts_auto_action_t *action)
+{
+    // 如果有 template_id，使用模板执行（模板包含完整的动作数据）
+    if (action->template_id[0] != '\0') {
+        ESP_LOGD(TAG, "Executing action via template: %s", action->template_id);
+        ret = ts_action_template_execute(action->template_id, &result);
+        // ...
+        return ret;
+    }
+    
+    // 内联动作（无模板引用）
+    switch (action->type) {
+        case TS_AUTO_ACT_LED:
+            ret = ts_action_exec_led(&action->led, &result);
+            // ...
+    }
+}
+```
+
+### 问题 2：电压保护代码审查
+
+**审查发现的问题**：
+
+1. **`execute_shutdown()` 硬编码 GPIO**：
+   ```c
+   // 修复前（硬编码）
+   gpio_set_level(1, 1);  // 直接操作 GPIO 1
+   
+   // 修复后（通过 device_ctrl）
+   ts_device_power_off(TS_DEVICE_AGX);  // 使用统一接口
+   ```
+
+2. **RECOVERY 状态转换逻辑错误**：
+   ```c
+   // 修复前：电压下降但未到低电压阈值时回到 NORMAL（错误！设备已关机）
+   s_pp.state = TS_POWER_POLICY_STATE_NORMAL;
+   
+   // 修复后：回到 PROTECTED 状态继续等待
+   s_pp.state = TS_POWER_POLICY_STATE_PROTECTED;
+   ```
+
+3. **`pins.json` 描述不准确**：
+   ```json
+   // 修复前
+   "description": "AGX reset control (HIGH=reset, LOW=normal, pulse 1000ms)"
+   
+   // 修复后
+   "description": "AGX power control (LOW=power on, HIGH=power off/reset, pulse for reboot)"
+   ```
+
+### 修正后的电压保护状态机
+
+```
+                    电压 < 12.6V
+        ┌─────────────────────────┐
+        │                         ▼
+    ┌───────┐    60s倒计时    ┌─────────────┐
+    │ NORMAL │ ──────────────▶│ LOW_VOLTAGE │
+    └───────┘                 └─────────────┘
+        ▲                         │
+        │ 电压 ≥ 18.0V            │ 倒计时归零
+        │ (取消关机)              ▼
+        │                    ┌──────────┐
+        │                    │ SHUTDOWN │ ─ AGX: GPIO1=HIGH
+        │                    └──────────┘   LPMU: 脉冲
+        │                         │
+        │                         ▼
+        │                    ┌───────────┐
+        │                    │ PROTECTED │◀─┐
+        │                    └───────────┘  │
+        │                         │         │ 电压 < 18.0V
+        │ 电压 ≥ 18.0V            ▼         │ (但 ≥ 12.6V)
+        │                    ┌──────────┐   │
+        └────────────────────│ RECOVERY │───┘
+              esp_restart()  └──────────┘
+              (稳定5s后)
+```
+
+### 文件变更
+
+| 文件 | 变更 |
+|------|------|
+| `components/ts_automation/src/ts_rule_engine.c` | 修复：模板动作执行逻辑 |
+| `components/ts_drivers/src/ts_power_policy.c` | 修复：RECOVERY 状态转换、shutdown 使用 device_ctrl |
+| `boards/rm01_esp32s3/pins.json` | 更新：AGX_RESET 描述 |
+| `docs/DEVELOPMENT_PROGRESS.md` | 新增：Phase 30 记录 |
+
+### 测试验证
+
+- [x] 规则触发时模板动作正确执行
+- [x] LED Matrix 多动作组合正常工作
+- [x] 电压保护代码逻辑符合状态机设计
+
+---
+
+## 📋 Phase 29: AGX 电源控制 GPIO 修正 ✅
+
+**时间**：2026年1月31日  
+**目标**：修正 AGX 电源控制引脚逻辑，使用正确的 GPIO 控制电源
+
+### 问题背景
+
+原代码使用 GPIO 3 (FORCE_SHUTDOWN) 作为主电源控制引脚：
+- GPIO 3 操作会导致 AGX **强制关机**
+- **关键问题**：GPIO 3 拉高后，除非物理断电否则无法恢复开机
+- 这导致 WebUI 设备面板的电源按钮实际上是"永久关机"按钮
+
+### 正确的 GPIO 控制逻辑
+
+| 引脚 | 功能 | 说明 |
+|------|------|------|
+| **GPIO 1** | 主电源控制 | LOW=通电, HIGH=断电, 脉冲=重启 |
+| GPIO 3 | 强制关机 | ⚠️ **禁止正常使用**，操作后无法恢复 |
+
+### 代码修改
+
+**文件**: `components/ts_drivers/src/ts_device_ctrl.c`
+
+#### 1. 更新电源控制注释说明
+```c
+/**
+ * AGX 电源控制说明（基于硬件设计）：
+ * 
+ * GPIO 1 (AGX_RESET / gpio_reset) - 主电源控制引脚：
+ *   - 持续 LOW  = 通电（开机状态）
+ *   - 持续 HIGH = 断电（关机状态）
+ *   - LOW → HIGH → LOW 脉冲 = 重启
+ * 
+ * GPIO 3 (AGX_FORCE_SHUTDOWN / gpio_power_en) - 强制关机引脚：
+ *   - HIGH = 强制关机，除非物理断电否则无法恢复开机
+ *   - **禁止在正常操作中使用！**
+ */
+```
+
+#### 2. 修改 `agx_power_on()` 函数
+```c
+static esp_err_t agx_power_on(void)
+{
+    int pin_reset = s_agx.pins.gpio_reset;  // GPIO 1 = 电源控制引脚
+    gpio_set_level(pin_reset, 0);  // LOW = 通电（持续）
+    // ...
+}
+```
+
+#### 3. 修改 `agx_power_off()` 函数
+```c
+static esp_err_t agx_power_off(void)
+{
+    int pin_reset = s_agx.pins.gpio_reset;  // GPIO 1 = 电源控制引脚
+    gpio_set_level(pin_reset, 1);  // HIGH = 断电（持续）
+    // ...
+}
+```
+
+#### 4. 修改 `agx_reset()` 函数
+```c
+static esp_err_t agx_reset(void)
+{
+    int pin_reset = s_agx.pins.gpio_reset;  // GPIO 1
+    // 重启脉冲：LOW → HIGH → LOW（断电后重新通电）
+    gpio_set_level(pin_reset, 0);  // 确保通电
+    vTaskDelay(pdMS_TO_TICKS(50));
+    gpio_set_level(pin_reset, 1);  // 断电
+    vTaskDelay(pdMS_TO_TICKS(TS_AGX_RESET_PULSE_MS));
+    gpio_set_level(pin_reset, 0);  // 恢复通电
+    // ...
+}
+```
+
+### 文件变更
+
+| 文件 | 变更 |
+|------|------|
+| `components/ts_drivers/src/ts_device_ctrl.c` | 修改：电源控制改用 GPIO 1 |
+| `docs/GPIO_MAPPING.md` | 更新：GPIO 1/3 功能说明及警告 |
+| `docs/DEVELOPMENT_PROGRESS.md` | 新增：Phase 29 记录 |
+
+### 测试验证
+
+- [ ] WebUI 设备面板电源按钮功能正常
+- [ ] AGX 开机/关机/重启均可正常操作
+- [ ] 不再出现"关机后无法恢复"的问题
 
 ---
 

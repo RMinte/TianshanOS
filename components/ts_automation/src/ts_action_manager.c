@@ -59,8 +59,9 @@ static const char *TAG = "ts_action_mgr";
  * CRITICAL: Must use DRAM stack (not PSRAM) because this task performs
  * NVS/Flash operations. SPI Flash operations disable cache, and accessing
  * PSRAM with cache disabled causes a crash.
+ * NOTE: SSH execution requires ~12KB stack (libssh2 + mbedTLS), so 16KB is safe.
  */
-#define ACTION_TASK_STACK_SIZE      8192
+#define ACTION_TASK_STACK_SIZE      16384
 
 /** Action executor task priority */
 #define ACTION_TASK_PRIORITY        5
@@ -527,9 +528,19 @@ esp_err_t ts_action_exec_ssh(const ts_auto_action_ssh_t *ssh,
         return ESP_ERR_NOT_FOUND;
     }
     
-    /* Expand variables in command */
-    char expanded_cmd[256];
-    ts_action_expand_variables(ssh->command, expanded_cmd, sizeof(expanded_cmd));
+    /* Expand variables in command
+     * Use heap allocation to avoid stack overflow with large commands
+     */
+    char *expanded_cmd = heap_caps_malloc(TS_SSH_CMD_COMMAND_MAX, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!expanded_cmd) {
+        expanded_cmd = malloc(TS_SSH_CMD_COMMAND_MAX);
+    }
+    if (!expanded_cmd) {
+        result->status = TS_ACTION_STATUS_FAILED;
+        snprintf(result->output, sizeof(result->output), "Out of memory");
+        return ESP_ERR_NO_MEM;
+    }
+    ts_action_expand_variables(ssh->command, expanded_cmd, TS_SSH_CMD_COMMAND_MAX);
     
     ESP_LOGI(TAG, "SSH [%s]: %s", ssh->host_ref, expanded_cmd);
     
@@ -580,6 +591,8 @@ esp_err_t ts_action_exec_ssh(const ts_auto_action_ssh_t *ssh,
         snprintf(result->output, sizeof(result->output), 
                  "SSH session create failed: %s", esp_err_to_name(ret));
         result->status = TS_ACTION_STATUS_FAILED;
+        free(expanded_cmd);
+        if (key_data) free(key_data);
         return ret;
     }
     
@@ -590,6 +603,8 @@ esp_err_t ts_action_exec_ssh(const ts_auto_action_ssh_t *ssh,
                  "SSH connect failed: %s", esp_err_to_name(ret));
         result->status = TS_ACTION_STATUS_FAILED;
         ts_ssh_session_destroy(session);
+        free(expanded_cmd);
+        if (key_data) free(key_data);
         return ret;
     }
     
@@ -647,6 +662,9 @@ esp_err_t ts_action_exec_ssh(const ts_auto_action_ssh_t *ssh,
     
     ESP_LOGD(TAG, "SSH result: exit=%d, duration=%lu ms", 
              result->exit_code, result->duration_ms);
+    
+    /* Free heap allocated buffer */
+    free(expanded_cmd);
     
     return ret;
 }
@@ -1141,12 +1159,31 @@ esp_err_t ts_action_exec_ssh_ref(const ts_auto_action_ssh_ref_t *ssh_ref,
         return ESP_ERR_NOT_FOUND;
     }
     
-    /* Expand variables in command */
-    char expanded_cmd[256];
-    ts_action_expand_variables(cmd_config.command, expanded_cmd, sizeof(expanded_cmd));
+    /* Expand variables in command
+     * Use heap allocation to avoid stack overflow with large commands (up to 1024 bytes)
+     */
+    char *expanded_cmd = heap_caps_malloc(TS_SSH_CMD_COMMAND_MAX, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!expanded_cmd) {
+        expanded_cmd = malloc(TS_SSH_CMD_COMMAND_MAX);
+    }
+    if (!expanded_cmd) {
+        result->status = TS_ACTION_STATUS_FAILED;
+        snprintf(result->output, sizeof(result->output), "Out of memory");
+        return ESP_ERR_NO_MEM;
+    }
+    ts_action_expand_variables(cmd_config.command, expanded_cmd, TS_SSH_CMD_COMMAND_MAX);
     
     /* Handle nohup mode: wrap command for background execution */
-    char nohup_cmd[512];
+    char *nohup_cmd = heap_caps_malloc(TS_SSH_CMD_COMMAND_MAX + 128, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!nohup_cmd) {
+        nohup_cmd = malloc(TS_SSH_CMD_COMMAND_MAX + 128);
+    }
+    if (!nohup_cmd) {
+        free(expanded_cmd);
+        result->status = TS_ACTION_STATUS_FAILED;
+        snprintf(result->output, sizeof(result->output), "Out of memory");
+        return ESP_ERR_NO_MEM;
+    }
     if (cmd_config.nohup) {
         /* Generate safe name from command name for log file */
         char safe_name[32] = {0};
@@ -1163,9 +1200,13 @@ esp_err_t ts_action_exec_ssh_ref(const ts_auto_action_ssh_ref_t *ssh_ref,
             strcpy(safe_name, "cmd");
         }
         
-        snprintf(nohup_cmd, sizeof(nohup_cmd),
-                 "nohup %s > /tmp/ts_nohup_%s.log 2>&1 &",
-                 expanded_cmd, safe_name);
+        /* nohup command with PID file for process tracking
+         * Format: nohup <cmd> > <log> 2>&1 & echo $! > <pid>
+         * The echo $! captures the background process PID
+         */
+        snprintf(nohup_cmd, TS_SSH_CMD_COMMAND_MAX + 128,
+                 "nohup %s > /tmp/ts_nohup_%s.log 2>&1 & echo $! > /tmp/ts_nohup_%s.pid",
+                 expanded_cmd, safe_name, safe_name);
         ESP_LOGI(TAG, "SSH nohup mode: %s", nohup_cmd);
     }
     
@@ -1215,6 +1256,9 @@ esp_err_t ts_action_exec_ssh_ref(const ts_auto_action_ssh_ref_t *ssh_ref,
         snprintf(result->output, sizeof(result->output), 
                  "SSH session create failed: %s", esp_err_to_name(ret));
         result->status = TS_ACTION_STATUS_FAILED;
+        free(expanded_cmd);
+        free(nohup_cmd);
+        if (key_data) free(key_data);
         return ret;
     }
     
@@ -1225,12 +1269,16 @@ esp_err_t ts_action_exec_ssh_ref(const ts_auto_action_ssh_ref_t *ssh_ref,
                  "SSH connect failed: %s", esp_err_to_name(ret));
         result->status = TS_ACTION_STATUS_FAILED;
         ts_ssh_session_destroy(session);
+        free(expanded_cmd);
+        free(nohup_cmd);
+        if (key_data) free(key_data);
         return ret;
     }
     
     /* Execute command */
     ts_ssh_exec_result_t exec_result = {0};
     const char *cmd_to_exec = cmd_config.nohup ? nohup_cmd : expanded_cmd;
+    ESP_LOGI(TAG, "SSH exec command: [%s]", cmd_to_exec);
     ret = ts_ssh_exec(session, cmd_to_exec, &exec_result);
     
     if (ret == ESP_OK) {
@@ -1304,6 +1352,10 @@ esp_err_t ts_action_exec_ssh_ref(const ts_auto_action_ssh_ref_t *ssh_ref,
     
     ESP_LOGD(TAG, "SSH ref result: cmd=%s, exit=%d, duration=%lu ms", 
              ssh_ref->cmd_id, result->exit_code, result->duration_ms);
+    
+    /* Free heap allocated buffers */
+    free(expanded_cmd);
+    free(nohup_cmd);
     
     return ret;
 }

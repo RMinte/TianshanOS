@@ -449,7 +449,11 @@ body {
     margin-top: 12px;
 }
 
-/* 文件选择器模态框 */
+/* 文件选择器模态框 - 需要比其他模态框更高的 z-index，因为它会从其他模态框内打开 */
+#file-picker-modal {
+    z-index: 1100;
+}
+
 .file-picker-modal {
     min-width: 480px;
     max-width: 600px;
@@ -5853,10 +5857,37 @@ body {
     transform: translateY(-2px);
 }
 
-.quick-action-card:active,
+.quick-action-card:active {
+    transform: scale(0.95);
+    background: rgba(52, 152, 219, 0.1);
+}
+
 .quick-action-card.triggering {
     transform: scale(0.95);
     background: rgba(52, 152, 219, 0.1);
+    pointer-events: none;
+    opacity: 0.7;
+}
+
+/* 触发中的加载动画 */
+.quick-action-card.triggering .quick-action-icon {
+    animation: pulse-icon 0.8s ease-in-out infinite;
+}
+
+@keyframes pulse-icon {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.6; transform: scale(0.9); }
+}
+
+/* 小型加载指示器 */
+.spinner-small {
+    display: inline-block;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
 }
 
 .quick-action-icon {

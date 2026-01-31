@@ -2772,8 +2772,13 @@ static esp_err_t api_automation_actions_execute(const cJSON *params, ts_api_resu
         return ESP_OK;
     }
     
+    TS_LOGI(TAG, "Executing action template: %s", id->valuestring);
+    
     ts_action_result_t exec_result = {0};
     esp_err_t ret = ts_action_template_execute(id->valuestring, &exec_result);
+    
+    TS_LOGI(TAG, "Execute result: ret=%s, status=%d, output=%s", 
+            esp_err_to_name(ret), exec_result.status, exec_result.output ? exec_result.output : "(null)");
     
     result->data = cJSON_CreateObject();
     
@@ -2795,8 +2800,12 @@ static esp_err_t api_automation_actions_execute(const cJSON *params, ts_api_resu
         result->code = TS_API_ERR_INTERNAL;
         if (exec_result.output[0]) {
             result->message = strdup(exec_result.output);
+            cJSON_AddStringToObject(result->data, "output", exec_result.output);
         } else {
-            result->message = strdup("Action execution failed");
+            char err_msg[128];
+            snprintf(err_msg, sizeof(err_msg), "Action failed: %s (status=%d)", 
+                     esp_err_to_name(ret), exec_result.status);
+            result->message = strdup(err_msg);
         }
     }
     

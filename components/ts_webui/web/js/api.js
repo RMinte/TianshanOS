@@ -39,7 +39,24 @@ function getApiUrl(endpoint) {
 
 class TianShanAPI {
     constructor() {
-        this.token = localStorage.getItem('token');
+        // 从 localStorage 恢复 token（注意 key 是 ts_token）
+        this.token = localStorage.getItem('ts_token');
+        this.username = localStorage.getItem('ts_username');
+        this.level = localStorage.getItem('ts_level');
+        
+        // 检查 token 是否过期
+        const expires = localStorage.getItem('ts_expires');
+        if (expires && Date.now() > parseInt(expires)) {
+            // Token 已过期，清除
+            console.log('Token expired, clearing...');
+            this.token = null;
+            this.username = null;
+            this.level = null;
+            localStorage.removeItem('ts_token');
+            localStorage.removeItem('ts_username');
+            localStorage.removeItem('ts_level');
+            localStorage.removeItem('ts_expires');
+        }
     }
     
     /**
