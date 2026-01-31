@@ -1090,12 +1090,32 @@ esp_err_t ts_action_execute(const ts_auto_action_t *action)
     }
 
     esp_err_t ret = ESP_OK;
+    ts_action_result_t result = {0};
 
-    ESP_LOGD(TAG, "Executing action type: %d", action->type);
+    /* 如果有 template_id，使用模板执行（模板包含完整的动作数据） */
+    if (action->template_id[0] != '\0') {
+        ESP_LOGD(TAG, "Executing action via template: %s", action->template_id);
+        ret = ts_action_template_execute(action->template_id, &result);
+        if (ret != ESP_OK) {
+            ESP_LOGW(TAG, "Template action failed: %s - %s", action->template_id, result.output);
+        }
+        s_rule_ctx.stats.total_actions++;
+        if (ret != ESP_OK) {
+            s_rule_ctx.stats.failed_actions++;
+        }
+        return ret;
+    }
+
+    /* 内联动作（无模板引用） */
+    ESP_LOGD(TAG, "Executing inline action type: %d", action->type);
 
     switch (action->type) {
         case TS_AUTO_ACT_LED:
-            ret = execute_led_action(action);
+            // 使用 ts_action_manager 的完整实现（支持所有 ctrl_type）
+            ret = ts_action_exec_led(&action->led, &result);
+            if (ret != ESP_OK) {
+                ESP_LOGW(TAG, "LED action failed: %s", result.output);
+            }
             break;
 
         case TS_AUTO_ACT_SSH_CMD:
@@ -1258,16 +1278,58 @@ esp_err_t ts_action_execute_array(const ts_auto_action_t *actions, int count,
         return ESP_ERR_INVALID_ARG;
     }
 
-    ESP_LOGD(TAG, "Executing %d actions", count);
+    ESP_LOGI(TAG, "Executing %d actions sequentially", count);
 
     for (int i = 0; i < count; i++) {
-        // 延迟
+        ESP_LOGI(TAG, "Action [%d/%d]: type=%d, template=%s, delay=%dms", 
+                 i + 1, count, actions[i].type, 
+                 actions[i].template_id[0] ? actions[i].template_id : "(inline)",
+                 actions[i].delay_ms);
+        
+        // 动作前延迟
         if (actions[i].delay_ms > 0) {
+            ESP_LOGI(TAG, "  Waiting %dms before action", actions[i].delay_ms);
             vTaskDelay(pdMS_TO_TICKS(actions[i].delay_ms));
         }
 
         execute_action_with_repeat(&actions[i], callback, user_data);
+        
+        // LED Matrix 动作后自动添加延迟，确保渲染完成
+        // 这对于连续的 LED 操作（如 image + filter）很重要
+        if (actions[i].type == TS_AUTO_ACT_LED) {
+            const ts_auto_action_led_t *led = &actions[i].led;
+            ESP_LOGI(TAG, "  LED action: device=%s, ctrl_type=%d", led->device, led->ctrl_type);
+            
+            // Matrix 设备的渲染操作需要等待
+            if (strcmp(led->device, "matrix") == 0 || 
+                strcmp(led->device, "led_matrix") == 0) {
+                int delay_after = 0;
+                switch (led->ctrl_type) {
+                    case TS_LED_CTRL_IMAGE:
+                    case TS_LED_CTRL_TEXT:
+                    case TS_LED_CTRL_QRCODE:
+                    case TS_LED_CTRL_EFFECT:
+                        // 等待渲染稳定
+                        delay_after = 100;
+                        break;
+                    case TS_LED_CTRL_FILTER:
+                        // 滤镜启动需要一点时间
+                        delay_after = 50;
+                        break;
+                    default:
+                        // 其他 LED 操作添加小延迟
+                        delay_after = 20;
+                        break;
+                }
+                if (delay_after > 0) {
+                    ESP_LOGI(TAG, "  Auto delay %dms after LED Matrix action", delay_after);
+                    vTaskDelay(pdMS_TO_TICKS(delay_after));
+                }
+            }
+        }
     }
+    
+    ESP_LOGI(TAG, "All %d actions executed", count);
 
     return ESP_OK;
 }

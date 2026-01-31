@@ -41,6 +41,127 @@
 | Phase 27: UI Widget 持久化 | ✅ 完成 | 100% | 2026-01-30 |
 | Phase 28: OTA 服务器重构 & 版本管理 | ✅ 完成 | 100% | 2026-01-31 |
 | Phase 29: AGX 电源控制 GPIO 修正 | ✅ 完成 | 100% | 2026-01-31 |
+| Phase 30: 规则引擎模板执行修复 & 电压保护代码审查 | ✅ 完成 | 100% | 2026-01-31 |
+
+---
+
+## 📋 Phase 30: 规则引擎模板执行修复 & 电压保护代码审查 ✅
+
+**时间**：2026年1月31日  
+**目标**：修复规则引擎中模板动作不执行的问题；审查并修正电压保护代码逻辑
+
+### 问题 1：规则引擎模板动作不执行
+
+**现象**：
+- 通过模板直接执行 LED Matrix 动作正常（`action --exec show_qwen_logo`）
+- 但规则触发时模板动作不生效，Matrix 显示黑屏
+
+**根本原因**：
+`ts_action_execute()` 直接使用 `action->led` 数据，但规则存储的是 `template_id`，实际数据在模板中。
+
+**日志分析**：
+```
+LED action: device=led_matrix, ctrl_type=0  ← 应该是 ctrl_type=5 (IMAGE)
+```
+- 规则只存储了 `template_id="show_qwen_logo"`
+- `action->led` 结构体是空的（`ctrl_type=0`，`image_path=""`）
+- 代码忽略了 `template_id`，直接用空数据执行
+
+**修复方案**（`ts_rule_engine.c`）：
+
+```c
+esp_err_t ts_action_execute(const ts_auto_action_t *action)
+{
+    // 如果有 template_id，使用模板执行（模板包含完整的动作数据）
+    if (action->template_id[0] != '\0') {
+        ESP_LOGD(TAG, "Executing action via template: %s", action->template_id);
+        ret = ts_action_template_execute(action->template_id, &result);
+        // ...
+        return ret;
+    }
+    
+    // 内联动作（无模板引用）
+    switch (action->type) {
+        case TS_AUTO_ACT_LED:
+            ret = ts_action_exec_led(&action->led, &result);
+            // ...
+    }
+}
+```
+
+### 问题 2：电压保护代码审查
+
+**审查发现的问题**：
+
+1. **`execute_shutdown()` 硬编码 GPIO**：
+   ```c
+   // 修复前（硬编码）
+   gpio_set_level(1, 1);  // 直接操作 GPIO 1
+   
+   // 修复后（通过 device_ctrl）
+   ts_device_power_off(TS_DEVICE_AGX);  // 使用统一接口
+   ```
+
+2. **RECOVERY 状态转换逻辑错误**：
+   ```c
+   // 修复前：电压下降但未到低电压阈值时回到 NORMAL（错误！设备已关机）
+   s_pp.state = TS_POWER_POLICY_STATE_NORMAL;
+   
+   // 修复后：回到 PROTECTED 状态继续等待
+   s_pp.state = TS_POWER_POLICY_STATE_PROTECTED;
+   ```
+
+3. **`pins.json` 描述不准确**：
+   ```json
+   // 修复前
+   "description": "AGX reset control (HIGH=reset, LOW=normal, pulse 1000ms)"
+   
+   // 修复后
+   "description": "AGX power control (LOW=power on, HIGH=power off/reset, pulse for reboot)"
+   ```
+
+### 修正后的电压保护状态机
+
+```
+                    电压 < 12.6V
+        ┌─────────────────────────┐
+        │                         ▼
+    ┌───────┐    60s倒计时    ┌─────────────┐
+    │ NORMAL │ ──────────────▶│ LOW_VOLTAGE │
+    └───────┘                 └─────────────┘
+        ▲                         │
+        │ 电压 ≥ 18.0V            │ 倒计时归零
+        │ (取消关机)              ▼
+        │                    ┌──────────┐
+        │                    │ SHUTDOWN │ ─ AGX: GPIO1=HIGH
+        │                    └──────────┘   LPMU: 脉冲
+        │                         │
+        │                         ▼
+        │                    ┌───────────┐
+        │                    │ PROTECTED │◀─┐
+        │                    └───────────┘  │
+        │                         │         │ 电压 < 18.0V
+        │ 电压 ≥ 18.0V            ▼         │ (但 ≥ 12.6V)
+        │                    ┌──────────┐   │
+        └────────────────────│ RECOVERY │───┘
+              esp_restart()  └──────────┘
+              (稳定5s后)
+```
+
+### 文件变更
+
+| 文件 | 变更 |
+|------|------|
+| `components/ts_automation/src/ts_rule_engine.c` | 修复：模板动作执行逻辑 |
+| `components/ts_drivers/src/ts_power_policy.c` | 修复：RECOVERY 状态转换、shutdown 使用 device_ctrl |
+| `boards/rm01_esp32s3/pins.json` | 更新：AGX_RESET 描述 |
+| `docs/DEVELOPMENT_PROGRESS.md` | 新增：Phase 30 记录 |
+
+### 测试验证
+
+- [x] 规则触发时模板动作正确执行
+- [x] LED Matrix 多动作组合正常工作
+- [x] 电压保护代码逻辑符合状态机设计
 
 ---
 
