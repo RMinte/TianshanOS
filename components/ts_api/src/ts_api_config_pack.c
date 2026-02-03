@@ -17,6 +17,7 @@
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include <string.h>
+#include <stdio.h>
 #include <sys/stat.h>
 #include <dirent.h>
 
@@ -208,24 +209,64 @@ static esp_err_t api_config_pack_import(const cJSON *params, ts_api_result_t *re
     
     const cJSON *content = cJSON_GetObjectItem(params, "content");
     const cJSON *path = cJSON_GetObjectItem(params, "path");
-    const cJSON *apply = cJSON_GetObjectItem(params, "apply");
     
-    ts_config_pack_t *pack = NULL;
-    ts_config_pack_result_t pack_result;
+    const char *tscfg_json = NULL;
+    size_t tscfg_len = 0;
+    char *file_buf = NULL;
     
     if (content && cJSON_IsString(content)) {
-        pack_result = ts_config_pack_load_mem(
-            content->valuestring,
-            strlen(content->valuestring),
-            &pack
-        );
+        tscfg_json = content->valuestring;
+        tscfg_len = strlen(tscfg_json);
     } else if (path && cJSON_IsString(path)) {
-        pack_result = ts_config_pack_load(path->valuestring, &pack);
+        /* 从文件读取 */
+        FILE *f = fopen(path->valuestring, "r");
+        if (!f) {
+            ts_api_result_error(result, TS_API_ERR_NOT_FOUND, "File not found");
+            return ESP_ERR_NOT_FOUND;
+        }
+        
+        fseek(f, 0, SEEK_END);
+        long file_size = ftell(f);
+        fseek(f, 0, SEEK_SET);
+        
+        if (file_size <= 0 || file_size > 65536) {
+            fclose(f);
+            ts_api_result_error(result, TS_API_ERR_INVALID_ARG, "Invalid file size");
+            return ESP_ERR_INVALID_SIZE;
+        }
+        
+        file_buf = malloc(file_size + 1);
+        if (!file_buf) {
+            fclose(f);
+            ts_api_result_error(result, TS_API_ERR_NO_MEM, "Memory allocation failed");
+            return ESP_ERR_NO_MEM;
+        }
+        
+        fread(file_buf, 1, file_size, f);
+        fclose(f);
+        file_buf[file_size] = '\0';
+        
+        tscfg_json = file_buf;
+        tscfg_len = file_size;
     } else {
         ts_api_result_error(result, TS_API_ERR_INVALID_ARG,
                            "Missing 'content' or 'path' parameter");
         return ESP_ERR_INVALID_ARG;
     }
+    
+    /* 使用新的导入函数：验证 + 保存加密文件（不解密） */
+    ts_config_pack_metadata_t metadata = {0};
+    char saved_path[128] = {0};
+    
+    ts_config_pack_result_t pack_result = ts_config_pack_import(
+        tscfg_json,
+        tscfg_len,
+        &metadata,
+        saved_path,
+        sizeof(saved_path)
+    );
+    
+    free(file_buf);  /* 如果是从文件读取的，释放缓冲区 */
     
     if (pack_result != TS_CONFIG_PACK_OK) {
         ts_api_result_error(result, TS_API_ERR_INTERNAL, 
@@ -233,50 +274,37 @@ static esp_err_t api_config_pack_import(const cJSON *params, ts_api_result_t *re
         return ESP_FAIL;
     }
     
+    /* 构建响应 */
     cJSON *data = cJSON_CreateObject();
     if (!data) {
-        ts_config_pack_free(pack);
         ts_api_result_error(result, TS_API_ERR_NO_MEM, "Memory allocation failed");
         return ESP_ERR_NO_MEM;
     }
     
-    /* 元数据 */
-    cJSON_AddStringToObject(data, "name", pack->name ? pack->name : "");
-    cJSON_AddStringToObject(data, "description", pack->description ? pack->description : "");
-    cJSON_AddStringToObject(data, "source_file", pack->source_file ? pack->source_file : "");
-    cJSON_AddStringToObject(data, "target_device", pack->target_device ? pack->target_device : "");
-    cJSON_AddNumberToObject(data, "created_at", (double)pack->created_at);
+    /* 元数据（不含解密内容） */
+    cJSON_AddStringToObject(data, "name", metadata.name);
+    cJSON_AddStringToObject(data, "description", metadata.description);
+    cJSON_AddStringToObject(data, "source_file", metadata.source_file);
+    cJSON_AddStringToObject(data, "target_device", metadata.target_device);
+    cJSON_AddNumberToObject(data, "created_at", (double)metadata.created_at);
+    cJSON_AddStringToObject(data, "saved_path", saved_path);
     
     /* 签名信息 */
     cJSON *sig = cJSON_CreateObject();
-    cJSON_AddBoolToObject(sig, "valid", pack->sig_info.valid);
-    cJSON_AddBoolToObject(sig, "is_official", pack->sig_info.is_official);
-    cJSON_AddStringToObject(sig, "signer_cn", pack->sig_info.signer_cn);
-    cJSON_AddStringToObject(sig, "signer_ou", pack->sig_info.signer_ou);
-    cJSON_AddNumberToObject(sig, "signed_at", (double)pack->sig_info.signed_at);
+    cJSON_AddBoolToObject(sig, "valid", metadata.sig_info.valid);
+    cJSON_AddBoolToObject(sig, "is_official", metadata.sig_info.is_official);
+    cJSON_AddStringToObject(sig, "signer_cn", metadata.sig_info.signer_cn);
+    cJSON_AddStringToObject(sig, "signer_ou", metadata.sig_info.signer_ou);
+    cJSON_AddNumberToObject(sig, "signed_at", (double)metadata.sig_info.signed_at);
     cJSON_AddItemToObject(data, "signature", sig);
     
-    /* 解密后的内容 */
-    if (pack->content) {
-        cJSON *content_json = cJSON_Parse(pack->content);
-        if (content_json) {
-            cJSON_AddItemToObject(data, "content", content_json);
-        } else {
-            /* 如果不是有效 JSON，作为字符串返回 */
-            cJSON_AddStringToObject(data, "content_raw", pack->content);
-        }
-    }
+    /* 标记：配置已保存（加密状态），未解密 */
+    cJSON_AddBoolToObject(data, "imported", true);
+    cJSON_AddBoolToObject(data, "decrypted", false);
+    cJSON_AddStringToObject(data, "note", "Config saved encrypted. Use config.pack.content to decrypt.");
     
-    /* 如果需要应用配置 */
-    bool should_apply = apply && cJSON_IsBool(apply) && cJSON_IsTrue(apply);
-    cJSON_AddBoolToObject(data, "applied", should_apply);
+    TS_LOGI(TAG, "Config pack imported: %s -> %s", metadata.name, saved_path);
     
-    if (should_apply && pack->content) {
-        /* TODO: 实际应用配置的逻辑 */
-        TS_LOGI(TAG, "Config pack imported: %s (apply=true)", pack->name);
-    }
-    
-    ts_config_pack_free(pack);
     ts_api_result_ok(result, data);
     return ESP_OK;
 }
@@ -348,7 +376,7 @@ static esp_err_t api_config_pack_export(const cJSON *params, ts_api_result_t *re
     /* 准备导出选项 */
     ts_config_pack_export_opts_t opts = {
         .recipient_cert_pem = recipient_cert->valuestring,
-        .recipient_cert_len = strlen(recipient_cert->valuestring),
+        .recipient_cert_len = strlen(recipient_cert->valuestring) + 1,  /* +1 for null terminator, required by mbedtls */
         .description = (description && cJSON_IsString(description)) 
                        ? description->valuestring : NULL
     };
@@ -389,6 +417,41 @@ static esp_err_t api_config_pack_export(const cJSON *params, ts_api_result_t *re
     char filename[128];
     snprintf(filename, sizeof(filename), "%s%s", name->valuestring, TS_CONFIG_PACK_EXT);
     cJSON_AddStringToObject(data, "filename", filename);
+    
+    /* 如果提供了保存路径，保存到文件 */
+    cJSON *save_path = cJSON_GetObjectItem(params, "save_path");
+    if (save_path && cJSON_IsString(save_path) && strlen(save_path->valuestring) > 0) {
+        const char *path = save_path->valuestring;
+        
+        /* 确保目录存在 */
+        char dir_path[256];
+        strncpy(dir_path, path, sizeof(dir_path) - 1);
+        dir_path[sizeof(dir_path) - 1] = '\0';
+        char *last_slash = strrchr(dir_path, '/');
+        if (last_slash && last_slash != dir_path) {
+            *last_slash = '\0';
+            struct stat st;
+            if (stat(dir_path, &st) != 0) {
+                /* 目录不存在，尝试创建 */
+                mkdir(dir_path, 0755);
+            }
+        }
+        
+        /* 写入文件 */
+        FILE *f = fopen(path, "w");
+        if (f) {
+            size_t written = fwrite(output, 1, output_len, f);
+            fclose(f);
+            if (written == output_len) {
+                cJSON_AddStringToObject(data, "saved_path", path);
+                TS_LOGI(TAG, "Config pack saved to: %s", path);
+            } else {
+                TS_LOGW(TAG, "Partial write to %s (%zu/%zu)", path, written, output_len);
+            }
+        } else {
+            TS_LOGW(TAG, "Failed to save config pack to: %s", path);
+        }
+    }
     
     free(output);
     ts_api_result_ok(result, data);
@@ -480,6 +543,68 @@ static esp_err_t api_config_pack_list(const cJSON *params, ts_api_result_t *resu
     return ESP_OK;
 }
 
+/**
+ * @brief config.pack.content - Get decrypted content of an imported config
+ * 
+ * Parameters:
+ * - name: Config pack name (without .tscfg extension)
+ * 
+ * Returns decrypted JSON content. Only works for configs imported to this device.
+ */
+static esp_err_t api_config_pack_content(const cJSON *params, ts_api_result_t *result)
+{
+    if (!params) {
+        ts_api_result_error(result, TS_API_ERR_INVALID_ARG, "Missing parameters");
+        return ESP_ERR_INVALID_ARG;
+    }
+    
+    const cJSON *name = cJSON_GetObjectItem(params, "name");
+    if (!name || !cJSON_IsString(name)) {
+        ts_api_result_error(result, TS_API_ERR_INVALID_ARG, "Missing 'name' parameter");
+        return ESP_ERR_INVALID_ARG;
+    }
+    
+    /* 获取解密内容 */
+    char *content = NULL;
+    size_t content_len = 0;
+    
+    ts_config_pack_result_t pack_result = ts_config_pack_get_content(
+        name->valuestring,
+        &content,
+        &content_len
+    );
+    
+    if (pack_result != TS_CONFIG_PACK_OK) {
+        ts_api_result_error(result, TS_API_ERR_INTERNAL,
+                           ts_config_pack_strerror(pack_result));
+        return ESP_FAIL;
+    }
+    
+    /* 构建响应 */
+    cJSON *data = cJSON_CreateObject();
+    if (!data) {
+        free(content);
+        ts_api_result_error(result, TS_API_ERR_NO_MEM, "Memory allocation failed");
+        return ESP_ERR_NO_MEM;
+    }
+    
+    cJSON_AddStringToObject(data, "name", name->valuestring);
+    
+    /* 尝试解析为 JSON 对象 */
+    cJSON *content_json = cJSON_Parse(content);
+    if (content_json) {
+        cJSON_AddItemToObject(data, "content", content_json);
+    } else {
+        /* 如果不是有效 JSON，作为字符串返回 */
+        cJSON_AddStringToObject(data, "content_raw", content);
+    }
+    
+    free(content);
+    
+    ts_api_result_ok(result, data);
+    return ESP_OK;
+}
+
 /*===========================================================================*/
 /*                          Registration                                      */
 /*===========================================================================*/
@@ -534,8 +659,24 @@ esp_err_t ts_api_config_pack_register(void)
             .handler = api_config_pack_list,
             .requires_auth = false,
             .permission = NULL
+        },
+        {
+            .name = "config.pack.content",
+            .description = "Decrypt and get content of imported config pack",
+            .category = TS_API_CAT_CONFIG,
+            .handler = api_config_pack_content,
+            .requires_auth = true,
+            .permission = "config.read"
         }
     };
+    
+    /* 初始化 config pack 子系统 */
+    esp_err_t init_ret = ts_config_pack_init();
+    if (init_ret != ESP_OK) {
+        ESP_LOGW(TAG, "Config pack init failed: %s (may not have certificate)", 
+                 esp_err_to_name(init_ret));
+        /* 继续注册 API，即使没有证书也可以查看信息 */
+    }
     
     esp_err_t ret = ts_api_register_multiple(pack_apis,
                                               sizeof(pack_apis) / sizeof(pack_apis[0]));

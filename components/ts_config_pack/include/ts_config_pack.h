@@ -217,6 +217,74 @@ ts_config_pack_result_t ts_config_pack_verify_mem(
 );
 
 /*===========================================================================*/
+/*                      Import Functions                                      */
+/*===========================================================================*/
+
+/**
+ * @brief Config pack metadata (without decryption)
+ */
+typedef struct {
+    char name[64];                       /**< Config name */
+    char description[128];               /**< Description */
+    char source_file[64];                /**< Original filename */
+    char target_device[64];              /**< Target device CN */
+    int64_t created_at;                  /**< Creation timestamp */
+    ts_config_pack_sig_info_t sig_info;  /**< Signature info */
+} ts_config_pack_metadata_t;
+
+/**
+ * @brief Import config pack (verify and save encrypted file)
+ * 
+ * Validates signature, verifies recipient, and saves the encrypted
+ * .tscfg file to the config directory without decryption.
+ * The config is only decrypted on-demand when needed.
+ * 
+ * @param tscfg_json Config pack JSON content
+ * @param tscfg_len Content length
+ * @param metadata Output metadata (optional, can be NULL)
+ * @param saved_path Output: path where file was saved (optional, can be NULL)
+ * @param saved_path_len Buffer size for saved_path
+ * @return TS_CONFIG_PACK_OK on success
+ */
+ts_config_pack_result_t ts_config_pack_import(
+    const char *tscfg_json,
+    size_t tscfg_len,
+    ts_config_pack_metadata_t *metadata,
+    char *saved_path,
+    size_t saved_path_len
+);
+
+/**
+ * @brief List imported config packs
+ * 
+ * @param names Array of config names (caller allocates)
+ * @param max_count Maximum number of entries
+ * @param count Output: actual number of configs found
+ * @return ESP_OK on success
+ */
+esp_err_t ts_config_pack_list(
+    char (*names)[64],
+    size_t max_count,
+    size_t *count
+);
+
+/**
+ * @brief Get decrypted content of an imported config pack
+ * 
+ * Loads and decrypts a previously imported config pack by name.
+ * 
+ * @param name Config name (without .tscfg extension)
+ * @param content Output: decrypted JSON content (caller must free)
+ * @param content_len Output: content length
+ * @return TS_CONFIG_PACK_OK on success
+ */
+ts_config_pack_result_t ts_config_pack_get_content(
+    const char *name,
+    char **content,
+    size_t *content_len
+);
+
+/*===========================================================================*/
 /*                      Utility Functions                                     */
 /*===========================================================================*/
 

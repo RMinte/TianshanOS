@@ -27,8 +27,11 @@
 #include "cJSON.h"
 #include "esp_log.h"
 #include <string.h>
+#include <stdlib.h>
 #include <time.h>
 #include <sys/stat.h>
+#include <dirent.h>
+#include <errno.h>
 
 static const char *TAG = "ts_config_pack";
 
@@ -143,12 +146,17 @@ esp_err_t ts_config_pack_init(void)
         return ESP_OK;
     }
     
-    /* 获取设备证书指纹 */
-    char cert_pem[TS_CERT_PEM_MAX_LEN];
-    size_t cert_len = sizeof(cert_pem);
+    /* 获取设备证书指纹 - 使用堆分配避免栈溢出 */
+    char *cert_pem = TS_MALLOC_PSRAM(TS_CERT_PEM_MAX_LEN);
+    if (!cert_pem) {
+        ESP_LOGE(TAG, "Failed to allocate cert buffer");
+        return ESP_ERR_NO_MEM;
+    }
+    size_t cert_len = TS_CERT_PEM_MAX_LEN;
     
     esp_err_t ret = ts_cert_get_certificate(cert_pem, &cert_len);
     if (ret != ESP_OK) {
+        free(cert_pem);
         ESP_LOGW(TAG, "No device certificate, config pack import disabled");
         /* 没有证书也可以初始化，但无法解密 */
         s_initialized = true;
@@ -157,6 +165,7 @@ esp_err_t ts_config_pack_init(void)
     
     ret = compute_cert_fingerprint(cert_pem, cert_len, 
                                     s_device_fingerprint, sizeof(s_device_fingerprint));
+    free(cert_pem);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to compute certificate fingerprint");
         return ret;
@@ -275,7 +284,8 @@ ts_config_pack_result_t ts_config_pack_load_mem(
     /* 验证接收方指纹 */
     if (strcmp(params.recipient_fingerprint, s_device_fingerprint) != 0) {
         ESP_LOGE(TAG, "Config pack not intended for this device");
-        ESP_LOGD(TAG, "Expected: %s, Got: %s", s_device_fingerprint, params.recipient_fingerprint);
+        ESP_LOGE(TAG, "Device fingerprint: %s", s_device_fingerprint);
+        ESP_LOGE(TAG, "Pack fingerprint:   %s", params.recipient_fingerprint);
         result = TS_CONFIG_PACK_ERR_RECIPIENT;
         goto cleanup;
     }
@@ -432,6 +442,8 @@ ts_config_pack_result_t ts_config_pack_create(
         ts_crypto_keypair_free(recipient_key);
         return TS_CONFIG_PACK_ERR_INVALID_ARG;
     }
+    ESP_LOGI(TAG, "Export: recipient fingerprint = %s (cert_len=%zu)", 
+             recipient_fingerprint, opts->recipient_cert_len);
     
     /* 生成临时密钥对 */
     ts_keypair_t ephemeral_key = NULL;
@@ -550,11 +562,16 @@ ts_config_pack_result_t ts_config_pack_create(
         return TS_CONFIG_PACK_ERR_PERMISSION;
     }
     
-    /* 获取设备证书 */
-    char cert_pem[TS_CERT_PEM_MAX_LEN];
-    size_t cert_len = sizeof(cert_pem);
+    /* 获取设备证书 - 使用堆分配避免栈溢出 */
+    char *cert_pem = TS_MALLOC_PSRAM(TS_CERT_PEM_MAX_LEN);
+    if (!cert_pem) {
+        free(ciphertext);
+        return TS_CONFIG_PACK_ERR_NO_MEM;
+    }
+    size_t cert_len = TS_CERT_PEM_MAX_LEN;
     ret = ts_cert_get_certificate(cert_pem, &cert_len);
     if (ret != ESP_OK) {
+        free(cert_pem);
         free(ciphertext);
         return TS_CONFIG_PACK_ERR_PERMISSION;
     }
@@ -648,6 +665,7 @@ ts_config_pack_result_t ts_config_pack_create(
     size_t payload_b64_max = ((ciphertext_len + 2) / 3) * 4 + 1;
     char *payload_b64 = TS_MALLOC_PSRAM(payload_b64_max);
     if (!payload_b64) {
+        free(cert_pem);
         free(ciphertext);
         cJSON_Delete(root);
         return TS_CONFIG_PACK_ERR_NO_MEM;
@@ -663,6 +681,7 @@ ts_config_pack_result_t ts_config_pack_create(
     /* 输出 JSON */
     char *json_output = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
+    free(cert_pem);  /* cert_pem 内容已复制到 JSON，可以释放 */
     
     if (!json_output) {
         return TS_CONFIG_PACK_ERR_NO_MEM;
@@ -810,6 +829,292 @@ ts_config_pack_result_t ts_config_pack_verify_mem(
 }
 
 /*===========================================================================*/
+/*                          Import Functions                                  */
+/*===========================================================================*/
+
+/** 配置包存储目录（与 .json 配置文件同目录，便于优先级处理） */
+#define CONFIG_PACK_DIR "/sdcard/config"
+
+/**
+ * @brief 确保目录存在
+ */
+static esp_err_t ensure_dir_exists(const char *dir)
+{
+    struct stat st;
+    if (stat(dir, &st) == 0) {
+        return ESP_OK;
+    }
+    
+    /* 递归创建父目录 */
+    char *parent = strdup(dir);
+    if (!parent) return ESP_ERR_NO_MEM;
+    
+    char *slash = strrchr(parent, '/');
+    if (slash && slash != parent) {
+        *slash = '\0';
+        ensure_dir_exists(parent);
+    }
+    free(parent);
+    
+    if (mkdir(dir, 0755) != 0 && errno != EEXIST) {
+        ESP_LOGE(TAG, "Failed to create directory: %s", dir);
+        return ESP_FAIL;
+    }
+    
+    return ESP_OK;
+}
+
+ts_config_pack_result_t ts_config_pack_import(
+    const char *tscfg_json,
+    size_t tscfg_len,
+    ts_config_pack_metadata_t *metadata,
+    char *saved_path,
+    size_t saved_path_len)
+{
+    if (!tscfg_json || tscfg_len == 0) {
+        return TS_CONFIG_PACK_ERR_INVALID_ARG;
+    }
+    
+    if (!s_initialized) {
+        return TS_CONFIG_PACK_ERR_NOT_INIT;
+    }
+    
+    /* 解析 JSON 获取元数据和加密参数 */
+    cJSON *root = NULL;
+    ts_config_pack_crypto_params_t params = {0};
+    char *payload_b64 = NULL;
+    char *signer_cert_pem = NULL;
+    char *signature_b64 = NULL;
+    ts_config_pack_sig_info_t sig_info = {0};
+    
+    ts_config_pack_result_t result = parse_tscfg_json(
+        tscfg_json, tscfg_len,
+        &root, &params, &payload_b64, &signer_cert_pem, &signature_b64, &sig_info);
+    
+    if (result != TS_CONFIG_PACK_OK) {
+        if (root) cJSON_Delete(root);
+        return result;
+    }
+    
+    /* 验证接收方指纹 - 必须是本设备 */
+    if (strcmp(params.recipient_fingerprint, s_device_fingerprint) != 0) {
+        ESP_LOGE(TAG, "Config pack not intended for this device");
+        ESP_LOGE(TAG, "Device fingerprint: %s", s_device_fingerprint);
+        ESP_LOGE(TAG, "Pack fingerprint:   %s", params.recipient_fingerprint);
+        cJSON_Delete(root);
+        return TS_CONFIG_PACK_ERR_RECIPIENT;
+    }
+    
+    /* Base64 解码 payload 用于签名验证 */
+    size_t payload_b64_len = strlen(payload_b64);
+    size_t ciphertext_max_len = (payload_b64_len * 3) / 4 + 4;
+    uint8_t *ciphertext = TS_MALLOC_PSRAM(ciphertext_max_len);
+    if (!ciphertext) {
+        cJSON_Delete(root);
+        return TS_CONFIG_PACK_ERR_NO_MEM;
+    }
+    
+    size_t ciphertext_len = ciphertext_max_len;
+    if (ts_crypto_base64_decode(payload_b64, payload_b64_len,
+                                 ciphertext, &ciphertext_len) != ESP_OK) {
+        free(ciphertext);
+        cJSON_Delete(root);
+        return TS_CONFIG_PACK_ERR_PARSE;
+    }
+    
+    /* Base64 解码签名 */
+    size_t sig_b64_len = strlen(signature_b64);
+    uint8_t signature[MAX_SIGNATURE_LEN];
+    size_t sig_len = sizeof(signature);
+    if (ts_crypto_base64_decode(signature_b64, sig_b64_len,
+                                 signature, &sig_len) != ESP_OK) {
+        free(ciphertext);
+        cJSON_Delete(root);
+        return TS_CONFIG_PACK_ERR_PARSE;
+    }
+    
+    /* 验证签名 */
+    result = verify_signature(signer_cert_pem, ciphertext, ciphertext_len,
+                               signature, sig_len);
+    free(ciphertext);
+    
+    if (result != TS_CONFIG_PACK_OK) {
+        cJSON_Delete(root);
+        return result;
+    }
+    
+    sig_info.valid = true;
+    
+    /* 提取元数据（不解密） */
+    char name[64] = "unnamed";
+    char description[128] = "";
+    char source_file[64] = "";
+    char target_device[64] = "";
+    int64_t created_at = 0;
+    
+    cJSON *meta = cJSON_GetObjectItem(root, "metadata");
+    if (meta) {
+        cJSON *j_name = cJSON_GetObjectItem(meta, "name");
+        cJSON *j_desc = cJSON_GetObjectItem(meta, "description");
+        cJSON *j_src = cJSON_GetObjectItem(meta, "source_file");
+        cJSON *j_target = cJSON_GetObjectItem(meta, "target_device");
+        cJSON *j_created = cJSON_GetObjectItem(meta, "created_at");
+        
+        if (j_name && cJSON_IsString(j_name)) {
+            strncpy(name, j_name->valuestring, sizeof(name) - 1);
+        }
+        if (j_desc && cJSON_IsString(j_desc)) {
+            strncpy(description, j_desc->valuestring, sizeof(description) - 1);
+        }
+        if (j_src && cJSON_IsString(j_src)) {
+            strncpy(source_file, j_src->valuestring, sizeof(source_file) - 1);
+        }
+        if (j_target && cJSON_IsString(j_target)) {
+            strncpy(target_device, j_target->valuestring, sizeof(target_device) - 1);
+        }
+        if (j_created && cJSON_IsString(j_created)) {
+            /* ISO 8601 时间戳解析 */
+            int year, month, day, hour, min, sec;
+            if (sscanf(j_created->valuestring, "%d-%d-%dT%d:%d:%dZ",
+                       &year, &month, &day, &hour, &min, &sec) == 6) {
+                struct tm tm_info = {
+                    .tm_year = year - 1900,
+                    .tm_mon = month - 1,
+                    .tm_mday = day,
+                    .tm_hour = hour,
+                    .tm_min = min,
+                    .tm_sec = sec,
+                    .tm_isdst = 0
+                };
+                char *old_tz = getenv("TZ");
+                setenv("TZ", "UTC0", 1);
+                tzset();
+                created_at = mktime(&tm_info);
+                if (old_tz) {
+                    setenv("TZ", old_tz, 1);
+                } else {
+                    unsetenv("TZ");
+                }
+                tzset();
+            }
+        }
+    }
+    
+    cJSON_Delete(root);
+    
+    /* 确保目录存在 */
+    if (ensure_dir_exists(CONFIG_PACK_DIR) != ESP_OK) {
+        return TS_CONFIG_PACK_ERR_IO;
+    }
+    
+    /* 构建保存路径 */
+    char path[128];
+    snprintf(path, sizeof(path), "%s/%s.tscfg", CONFIG_PACK_DIR, name);
+    
+    /* 保存加密的配置包文件（原样保存，不解密） */
+    FILE *f = fopen(path, "w");
+    if (!f) {
+        ESP_LOGE(TAG, "Failed to open file for writing: %s", path);
+        return TS_CONFIG_PACK_ERR_IO;
+    }
+    
+    size_t written = fwrite(tscfg_json, 1, tscfg_len, f);
+    fclose(f);
+    
+    if (written != tscfg_len) {
+        ESP_LOGE(TAG, "Failed to write config pack");
+        return TS_CONFIG_PACK_ERR_IO;
+    }
+    
+    ESP_LOGI(TAG, "Config pack imported: %s -> %s", name, path);
+    
+    /* 填充返回的元数据 */
+    if (metadata) {
+        strncpy(metadata->name, name, sizeof(metadata->name) - 1);
+        strncpy(metadata->description, description, sizeof(metadata->description) - 1);
+        strncpy(metadata->source_file, source_file, sizeof(metadata->source_file) - 1);
+        strncpy(metadata->target_device, target_device, sizeof(metadata->target_device) - 1);
+        metadata->created_at = created_at;
+        metadata->sig_info = sig_info;
+    }
+    
+    if (saved_path && saved_path_len > 0) {
+        strncpy(saved_path, path, saved_path_len - 1);
+        saved_path[saved_path_len - 1] = '\0';
+    }
+    
+    return TS_CONFIG_PACK_OK;
+}
+
+esp_err_t ts_config_pack_list(
+    char (*names)[64],
+    size_t max_count,
+    size_t *count)
+{
+    if (!names || !count || max_count == 0) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    
+    *count = 0;
+    
+    DIR *dir = opendir(CONFIG_PACK_DIR);
+    if (!dir) {
+        /* 目录不存在是正常的（没有导入过配置包） */
+        return ESP_OK;
+    }
+    
+    struct dirent *entry;
+    while ((entry = readdir(dir)) != NULL && *count < max_count) {
+        /* 跳过 . 和 .. */
+        if (entry->d_name[0] == '.') continue;
+        
+        /* 检查 .tscfg 扩展名 */
+        size_t name_len = strlen(entry->d_name);
+        if (name_len > 6 && strcmp(entry->d_name + name_len - 6, ".tscfg") == 0) {
+            /* 复制名字（去掉扩展名） */
+            size_t copy_len = name_len - 6;
+            if (copy_len >= 64) copy_len = 63;
+            strncpy(names[*count], entry->d_name, copy_len);
+            names[*count][copy_len] = '\0';
+            (*count)++;
+        }
+    }
+    
+    closedir(dir);
+    return ESP_OK;
+}
+
+ts_config_pack_result_t ts_config_pack_get_content(
+    const char *name,
+    char **content,
+    size_t *content_len)
+{
+    if (!name || !content || !content_len) {
+        return TS_CONFIG_PACK_ERR_INVALID_ARG;
+    }
+    
+    /* 构建文件路径 */
+    char path[128];
+    snprintf(path, sizeof(path), "%s/%s.tscfg", CONFIG_PACK_DIR, name);
+    
+    /* 使用现有的加载函数（会解密） */
+    ts_config_pack_t *pack = NULL;
+    ts_config_pack_result_t result = ts_config_pack_load(path, &pack);
+    
+    if (result != TS_CONFIG_PACK_OK) {
+        return result;
+    }
+    
+    /* 移交内容所有权 */
+    *content = pack->content;
+    *content_len = pack->content_len;
+    pack->content = NULL;  /* 防止 free 释放 */
+    
+    ts_config_pack_free(pack);
+    return TS_CONFIG_PACK_OK;
+}
+
+/*===========================================================================*/
 /*                          Utility Functions                                 */
 /*===========================================================================*/
 
@@ -839,6 +1144,9 @@ esp_err_t ts_config_pack_get_cert_fingerprint(char *fingerprint, size_t len)
 
 /**
  * @brief 计算证书 SHA-256 指纹
+ * 
+ * 注意：只计算实际 PEM 内容的哈希，去除尾部空白和 null 终止符，
+ * 确保相同证书无论复制方式如何都能得到一致的指纹。
  */
 static esp_err_t compute_cert_fingerprint(const char *cert_pem, size_t cert_len,
                                            char *fingerprint, size_t fp_len)
@@ -847,9 +1155,23 @@ static esp_err_t compute_cert_fingerprint(const char *cert_pem, size_t cert_len,
         return ESP_ERR_INVALID_ARG;
     }
     
-    /* 计算 PEM 内容的 SHA-256 */
+    /* 计算实际内容长度，去除尾部空白和 null */
+    size_t actual_len = strlen(cert_pem);
+    while (actual_len > 0 && 
+           (cert_pem[actual_len - 1] == ' ' || 
+            cert_pem[actual_len - 1] == '\t' ||
+            cert_pem[actual_len - 1] == '\r' ||
+            cert_pem[actual_len - 1] == '\n')) {
+        actual_len--;
+    }
+    
+    if (actual_len == 0) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    
+    /* 计算 PEM 内容的 SHA-256（不包含尾部空白） */
     uint8_t hash[SHA256_LEN];
-    esp_err_t ret = ts_crypto_hash(TS_HASH_SHA256, cert_pem, cert_len, hash, sizeof(hash));
+    esp_err_t ret = ts_crypto_hash(TS_HASH_SHA256, cert_pem, actual_len, hash, sizeof(hash));
     if (ret != ESP_OK) {
         return ret;
     }
@@ -962,6 +1284,37 @@ static ts_config_pack_result_t parse_tscfg_json(
     if (sig_info) {
         sig_info->valid = false;  /* 稍后验证 */
         sig_info->is_official = is_official ? cJSON_IsTrue(is_official) : false;
+        sig_info->signed_at = 0;  /* 默认值 */
+        
+        /* 解析 signed_at 时间戳 (ISO 8601 格式: "2026-02-04T02:30:00Z") */
+        cJSON *signed_at = cJSON_GetObjectItem(signature_obj, "signed_at");
+        if (signed_at && cJSON_IsString(signed_at)) {
+            const char *time_str = cJSON_GetStringValue(signed_at);
+            /* 手动解析 ISO 8601 格式 */
+            int year, month, day, hour, min, sec;
+            if (sscanf(time_str, "%d-%d-%dT%d:%d:%dZ", 
+                       &year, &month, &day, &hour, &min, &sec) == 6) {
+                struct tm tm = {0};
+                tm.tm_year = year - 1900;
+                tm.tm_mon = month - 1;
+                tm.tm_mday = day;
+                tm.tm_hour = hour;
+                tm.tm_min = min;
+                tm.tm_sec = sec;
+                tm.tm_isdst = 0;
+                /* 设置环境变量为 UTC 然后调用 mktime */
+                char *old_tz = getenv("TZ");
+                setenv("TZ", "UTC0", 1);
+                tzset();
+                sig_info->signed_at = mktime(&tm);
+                if (old_tz) {
+                    setenv("TZ", old_tz, 1);
+                } else {
+                    unsetenv("TZ");
+                }
+                tzset();
+            }
+        }
         
         /* 解析签名者证书获取 CN 和 OU */
         ts_cert_info_t cert_info;
@@ -1011,13 +1364,16 @@ static ts_config_pack_result_t verify_signature(
         return TS_CONFIG_PACK_ERR_SIGNATURE;
     }
     
-    /* TODO: 验证证书链 */
+    /* 
+     * TODO: 验证证书链
+     * 签名本身已验证成功，但还应该验证签名者证书是否由受信任的 CA 签发
+     */
 #if CONFIG_TS_CONFIG_PACK_VERIFY_CERT_CHAIN
     /* 
      * 应该验证 signer_cert_pem 是由受信任的 CA 签发的
      * 这需要加载 CA 链并进行验证
      */
-    ESP_LOGW(TAG, "Certificate chain verification not yet implemented");
+    ESP_LOGD(TAG, "Certificate chain verification not yet implemented (signature OK)");
 #endif
     
     return TS_CONFIG_PACK_OK;

@@ -510,6 +510,14 @@ esp_err_t ts_config_save_to_backend(ts_config_backend_t backend);
 esp_err_t ts_config_load_json_file(const char *filepath);
 
 /**
+ * @brief 从 JSON 字符串加载配置
+ *
+ * @param json_str JSON 字符串
+ * @return ESP_OK 成功
+ */
+esp_err_t ts_config_load_json_string(const char *json_str);
+
+/**
  * @brief 保存配置到 JSON 文件
  *
  * @param filepath 文件路径

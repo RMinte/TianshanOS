@@ -18,6 +18,7 @@
 #include "mbedtls/entropy.h"
 #include "mbedtls/ctr_drbg.h"
 #include "mbedtls/pem.h"
+#include "mbedtls/x509_crt.h"
 #include "esp_log.h"
 #include <string.h>
 #include <stdio.h>
@@ -568,9 +569,33 @@ esp_err_t ts_crypto_keypair_import(const char *pem, size_t pem_len, ts_keypair_t
         /* Try as public key */
         ret = mbedtls_pk_parse_public_key(&kp->pk, (const unsigned char *)pem, pem_len);
         if (ret != 0) {
-            mbedtls_pk_free(&kp->pk);
-            free(kp);
-            return ESP_FAIL;
+            /* Try as X.509 certificate - extract public key from it */
+            mbedtls_x509_crt crt;
+            mbedtls_x509_crt_init(&crt);
+            ret = mbedtls_x509_crt_parse(&crt, (const unsigned char *)pem, pem_len);
+            if (ret == 0) {
+                /* Copy public key context from certificate */
+                /* We need to serialize and re-parse to get an independent copy */
+                unsigned char pubkey_buf[512];
+                ret = mbedtls_pk_write_pubkey_der(&crt.pk, pubkey_buf, sizeof(pubkey_buf));
+                mbedtls_x509_crt_free(&crt);
+                
+                if (ret > 0) {
+                    /* DER data is written at the end of buffer */
+                    int der_len = ret;
+                    unsigned char *der_start = pubkey_buf + sizeof(pubkey_buf) - der_len;
+                    ret = mbedtls_pk_parse_public_key(&kp->pk, der_start, der_len);
+                }
+            } else {
+                mbedtls_x509_crt_free(&crt);
+            }
+            
+            if (ret != 0) {
+                mbedtls_pk_free(&kp->pk);
+                free(kp);
+                ESP_LOGD(TAG, "Failed to parse PEM: not a valid key or certificate");
+                return ESP_FAIL;
+            }
         }
     }
     
@@ -759,17 +784,44 @@ esp_err_t ts_crypto_ecdh_compute_shared(ts_keypair_t local_keypair,
         return ESP_ERR_INVALID_ARG;
     }
     
-    /* Parse peer public key */
+    /* Parse peer public key (or extract from X.509 certificate) */
     mbedtls_pk_context peer_pk;
     mbedtls_pk_init(&peer_pk);
     
+    size_t pem_len = strlen(peer_pubkey_pem) + 1;
     int ret = mbedtls_pk_parse_public_key(&peer_pk,
                                            (const unsigned char *)peer_pubkey_pem,
-                                           strlen(peer_pubkey_pem) + 1);
+                                           pem_len);
     if (ret != 0) {
-        ESP_LOGE(TAG, "Failed to parse peer public key: -0x%04x", (unsigned int)-ret);
-        mbedtls_pk_free(&peer_pk);
-        return ESP_ERR_INVALID_ARG;
+        /* Try parsing as X.509 certificate */
+        mbedtls_x509_crt cert;
+        mbedtls_x509_crt_init(&cert);
+        ret = mbedtls_x509_crt_parse(&cert, (const unsigned char *)peer_pubkey_pem, pem_len);
+        if (ret == 0) {
+            /* Extract public key from certificate via DER serialization */
+            unsigned char der_buf[256];
+            ret = mbedtls_pk_write_pubkey_der(&cert.pk, der_buf, sizeof(der_buf));
+            if (ret > 0) {
+                /* DER data is written at end of buffer */
+                unsigned char *der_start = der_buf + sizeof(der_buf) - ret;
+                int parse_ret = mbedtls_pk_parse_public_key(&peer_pk, der_start, ret);
+                if (parse_ret != 0) {
+                    ESP_LOGE(TAG, "Failed to re-parse extracted pubkey: -0x%04x", (unsigned int)-parse_ret);
+                    ret = parse_ret;
+                } else {
+                    ret = 0;  /* Success */
+                }
+            } else {
+                ESP_LOGE(TAG, "Failed to export cert pubkey to DER");
+            }
+        }
+        mbedtls_x509_crt_free(&cert);
+        
+        if (ret != 0) {
+            ESP_LOGE(TAG, "Failed to parse peer public key or certificate: -0x%04x", (unsigned int)-ret);
+            mbedtls_pk_free(&peer_pk);
+            return ESP_ERR_INVALID_ARG;
+        }
     }
     
     /* Verify peer key is EC type */

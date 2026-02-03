@@ -104,6 +104,9 @@ static void hosts_deferred_export_task(void *arg)
         ts_ssh_hosts_config_import_from_sdcard(false);
         count = ts_ssh_hosts_config_count();
         ESP_LOGI(TAG, "Loaded %d hosts from SD card", (int)count);
+    } else if (import_ret == ESP_OK) {
+        /* SD 卡加载成功，但数据量不比 NVS 多（已合并） */
+        ESP_LOGI(TAG, "Merged SD card data with NVS (%d hosts total)", (int)count);
     } else if (import_ret == ESP_ERR_NOT_FOUND) {
         /* SD 卡文件不存在/无效，导出 NVS 数据到 SD 卡 */
         if (nvs_count > 0) {

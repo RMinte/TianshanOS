@@ -21,6 +21,7 @@ idf_component_register(
         ts_event
     PRIV_REQUIRES
         esp_system
+        ts_config_pack
 )
 
 # 添加版本信息

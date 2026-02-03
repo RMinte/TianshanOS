@@ -386,6 +386,7 @@ class TianShanAPI {
     async storageMount() { return this.call('storage.mount', null, 'POST'); }
     async storageUnmount() { return this.call('storage.unmount', null, 'POST'); }
     async storageList(path = '/sdcard') { return this.call('storage.list', { path }, 'POST'); }
+    async storageRead(path) { return this.call('storage.read', { path }, 'POST'); }
     async storageDelete(path) { return this.call('storage.delete', { path }, 'POST'); }
     async storageMkdir(path) { return this.call('storage.mkdir', { path }, 'POST'); }
     async storageRename(from, to) { return this.call('storage.rename', { from, to }, 'POST'); }
@@ -581,13 +582,14 @@ class TianShanAPI {
     }
     
     /** 导出配置为加密 .tscfg（仅 Developer 设备可用） */
-    async configPackExport(name, content, recipientCert, description = null) { 
+    async configPackExport(name, content, recipientCert, description = null, savePath = null) { 
         const params = { 
             name, 
             content,
             recipient_cert: recipientCert
         };
         if (description) params.description = description;
+        if (savePath) params.save_path = savePath;
         return this.call('config.pack.export', params, 'POST'); 
     }
     

@@ -38,6 +38,7 @@
 #include "ts_power_policy.h"
 #include "ts_automation.h"
 #include "ts_device_ctrl.h"
+#include "ts_config_file.h"
 #include "esp_log.h"
 
 static const char *TAG = "ts_services";
@@ -554,6 +555,13 @@ static esp_err_t security_service_start(ts_service_handle_t handle, void *user_d
         ESP_LOGI(TAG, "Certificate status: %s (valid for %d days)",
                  ts_cert_status_to_str(cert_status.status),
                  cert_status.cert_info.days_until_expiry);
+    }
+    
+    /* 证书已就绪，现在加载加密的配置文件 (.tscfg) */
+    ret = ts_config_file_load_encrypted();
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to load encrypted configs: %s", esp_err_to_name(ret));
+        /* 不是致命错误，继续 */
     }
     
     return ESP_OK;  /* Security 在 init 时已启动 */

@@ -131,9 +131,8 @@ static void update_status(void)
          * 但如果系统时间未同步，跳过过期检查（使用统一的 ts_time_sync API）
          */
         if (ts_time_sync_needs_sync()) {
-            /* 时间未同步，假设证书有效 */
-            ESP_LOGW(TAG, "System time not synced (year < %d), assuming cert valid", 
-                     TS_TIME_MIN_VALID_YEAR);
+            /* 时间未同步，假设证书有效（这是正常的启动顺序，NTP 同步在网络就绪后完成） */
+            ESP_LOGI(TAG, "Time not synced yet, deferring cert expiry check");
             s_status = TS_CERT_STATUS_ACTIVATED;
         } else {
             ts_cert_info_t info;

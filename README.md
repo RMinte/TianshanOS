@@ -156,7 +156,7 @@ idf.py -p /dev/ttyACM0 flash monitor
 ## 🎯 当前状态
 
 **版本**: 0.3.1  
-**阶段**: Phase 33 完成 - 自动化配置独立文件 & PSRAM 优化
+**阶段**: Phase 36 完成 - 启动日志优化 & Config Pack 完善
 
 ### 已完成功能
 
@@ -164,6 +164,7 @@ idf.py -p /dev/ttyACM0 flash monitor
 |-----|------|
 | 核心框架 | 配置管理、事件总线、8 阶段服务管理、日志系统 |
 | 配置系统 | SD 卡优先 + NVS 备份双写、热插拔同步、Schema 版本迁移、独立文件存储 |
+| **配置包加密** | ECDH + AES-256-GCM 混合加密、ECDSA 签名、PKI 集成、启动自动加载 |
 | 硬件抽象 | GPIO、PWM、I2C、SPI、UART、ADC |
 | LED 系统 | WS2812 驱动、多设备多图层、特效引擎、BMP/PNG/JPG/GIF |
 | 控制台 | 命令系统、多语言、脚本引擎、配置持久化 |
@@ -173,6 +174,15 @@ idf.py -p /dev/ttyACM0 flash monitor
 | WebUI | REST API 网关、WebSocket 广播、前端仪表盘、认证系统 |
 | OTA | 双分区升级、版本检测、完整性校验、自动回滚 |
 | 自动化引擎 | 触发器-条件-动作系统、SSH 远程执行、正则解析、变量系统、电压保护集成 |
+
+### 配置包加密系统 (Config Pack)
+
+- **混合加密**：ECDH (P-256) 密钥协商 + AES-256-GCM 对称加密
+- **数字签名**：ECDSA-SHA256，使用设备 PKI 证书签名
+- **权限控制**：Developer 设备可导出，Device 设备仅可导入
+- **启动加载**：`.tscfg` 文件在 SECURITY 阶段自动加载并解密
+- **CLI 命令**：`config --pack-export/import/verify/info`
+- **WebUI**：安全页面提供完整的配置包管理界面
 
 ### 自动化引擎特性
 

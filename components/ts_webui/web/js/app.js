@@ -9913,7 +9913,7 @@ async function loadSecurityPage() {
             <div class="modal hidden" id="pack-import-modal">
                 <div class="modal-content" style="max-width:700px">
                     <h2>📥 导入配置包</h2>
-                    <p style="color:#666;margin-bottom:15px">上传或粘贴 .tscfg 配置包内容</p>
+                    <p style="color:#666;margin-bottom:15px">上传或粘贴 .tscfg 配置包，验证后保存到设备（加密存储）</p>
                     <div class="form-group">
                         <label>选择文件</label>
                         <input type="file" id="pack-import-file" accept=".tscfg,.json" onchange="handlePackFileSelect(event)">
@@ -9921,9 +9921,6 @@ async function loadSecurityPage() {
                     <div class="form-group">
                         <label>或粘贴 JSON 内容</label>
                         <textarea id="pack-import-content" placeholder='{"tscfg_version":"1.0", ...}' style="width:100%;height:150px;font-family:monospace;font-size:11px"></textarea>
-                    </div>
-                    <div class="form-group">
-                        <label><input type="checkbox" id="pack-import-apply"> 导入后立即应用配置</label>
                     </div>
                     <div id="pack-import-result" class="result-box hidden" style="margin-top:10px"></div>
                     <div id="pack-import-preview" class="hidden" style="margin-top:15px;padding:10px;background:#f8f9fa;border-radius:4px">
@@ -9940,38 +9937,57 @@ async function loadSecurityPage() {
             
             <!-- 配置包：导出弹窗（仅 Developer 可用） -->
             <div class="modal hidden" id="pack-export-modal">
-                <div class="modal-content" style="max-width:700px">
+                <div class="modal-content" style="width:800px;max-width:90vw;height:auto;min-height:600px;max-height:90vh;overflow-y:auto">
                     <h2>📦 导出加密配置包</h2>
-                    <p style="color:#666;margin-bottom:15px">创建加密配置包发送给目标设备</p>
+                    <p style="color:#666;margin-bottom:15px">选择配置文件并加密发送给目标设备（支持多选）</p>
+                    
+                    <!-- 文件浏览器 -->
+                    <div class="form-group">
+                        <label>选择配置文件 <span style="color:#999;font-size:0.9em">(可多选)</span></label>
+                        <div style="display:flex;gap:8px;margin-bottom:8px">
+                            <input type="text" id="pack-export-browse-path" value="/sdcard/config" style="flex:1" readonly>
+                            <button class="btn btn-small" onclick="packExportBrowseUp()">⬆️ 上级</button>
+                            <button class="btn btn-small" onclick="packExportBrowseRefresh()">🔄 刷新</button>
+                        </div>
+                        <div style="display:flex;gap:8px;margin-bottom:8px">
+                            <button class="btn btn-small" onclick="packExportSelectAll()">☑️ 全选</button>
+                            <button class="btn btn-small" onclick="packExportDeselectAll()">☐ 取消全选</button>
+                            <button class="btn btn-small" onclick="packExportSelectDir()">📁 选择整个目录</button>
+                        </div>
+                        <div id="pack-export-file-list" style="border:1px solid #ddd;border-radius:4px;height:180px;overflow-y:auto;background:#f9f9f9">
+                            <div style="padding:20px;text-align:center;color:#666">🔄 加载中...</div>
+                        </div>
+                        <div id="pack-export-selected" style="margin-top:8px;padding:8px;background:#e8f5e9;border-radius:4px;min-height:36px;display:none">
+                            <strong>已选择:</strong> <span id="pack-export-selected-file"></span>
+                        </div>
+                    </div>
+                    
                     <div class="form-group">
                         <label>配置名称</label>
-                        <input type="text" id="pack-export-name" placeholder="led_effects" required>
+                        <input type="text" id="pack-export-name" placeholder="自动从文件名获取" required>
                     </div>
                     <div class="form-group">
                         <label>描述 (可选)</label>
                         <input type="text" id="pack-export-desc" placeholder="LED 特效配置">
                     </div>
                     <div class="form-group">
-                        <label>配置内容 (JSON)</label>
-                        <textarea id="pack-export-content" placeholder='{"brightness": 80, "effects": [...]}' style="width:100%;height:120px;font-family:monospace;font-size:11px" required></textarea>
-                    </div>
-                    <div class="form-group">
                         <label>目标设备证书 (PEM)</label>
-                        <textarea id="pack-export-recipient-cert" placeholder="-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----" style="width:100%;height:120px;font-family:monospace;font-size:11px" required></textarea>
+                        <textarea id="pack-export-recipient-cert" placeholder="-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----" style="width:100%;height:100px;font-family:monospace;font-size:11px" required></textarea>
                         <div style="font-size:0.85em;color:#666;margin-top:4px">💡 粘贴目标设备导出的证书</div>
                     </div>
-                    <div id="pack-export-result" class="result-box hidden" style="margin-top:10px"></div>
-                    <div id="pack-export-output" class="hidden" style="margin-top:15px">
+                    <div id="pack-export-result" class="result-box" style="margin-top:10px;min-height:24px;visibility:hidden"></div>
+                    <div id="pack-export-output" style="margin-top:15px">
                         <label>生成的配置包 (.tscfg)</label>
-                        <textarea id="pack-export-tscfg" readonly style="width:100%;height:150px;font-family:monospace;font-size:10px"></textarea>
-                        <div style="margin-top:8px;display:flex;gap:8px">
-                            <button class="btn btn-small" onclick="copyPackTscfgToClipboard()">📋 复制</button>
-                            <button class="btn btn-small btn-primary" onclick="downloadPackTscfg()">💾 下载</button>
+                        <textarea id="pack-export-tscfg" readonly style="width:100%;height:100px;font-family:monospace;font-size:10px" placeholder="配置包将在此显示..."></textarea>
+                        <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+                            <button class="btn btn-small" onclick="copyPackTscfgToClipboard()" id="btn-pack-copy" style="display:none">📋 复制到剪贴板</button>
+                            <button class="btn btn-small btn-primary" onclick="downloadPackTscfg()" id="btn-pack-download" style="display:none">💾 下载到本地</button>
+                            <span id="pack-export-saved-path" style="color:#4caf50;font-size:0.9em;display:none"></span>
                         </div>
                     </div>
                     <div class="form-actions" style="margin-top:15px">
                         <button class="btn" onclick="hideConfigPackExportModal()">取消</button>
-                        <button class="btn btn-primary" onclick="exportConfigPack()">📦 生成配置包</button>
+                        <button class="btn btn-primary" id="btn-pack-export-generate" onclick="exportConfigPack()" disabled>📦 生成配置包</button>
                     </div>
                 </div>
             </div>
@@ -11198,7 +11214,6 @@ function showConfigPackImportModal() {
     document.getElementById('pack-import-modal').classList.remove('hidden');
     document.getElementById('pack-import-file').value = '';
     document.getElementById('pack-import-content').value = '';
-    document.getElementById('pack-import-apply').checked = false;
     document.getElementById('pack-import-result').classList.add('hidden');
     document.getElementById('pack-import-preview').classList.add('hidden');
 }
@@ -11269,7 +11284,6 @@ async function verifyConfigPack() {
 
 async function importConfigPack() {
     const content = document.getElementById('pack-import-content').value.trim();
-    const apply = document.getElementById('pack-import-apply').checked;
     const resultBox = document.getElementById('pack-import-result');
     const preview = document.getElementById('pack-import-preview');
     
@@ -11285,16 +11299,14 @@ async function importConfigPack() {
     resultBox.classList.remove('hidden');
     
     try {
-        const result = await api.configPackImport(content, null, apply);
+        const result = await api.configPackImport(content, null, false);
         if (result.code !== 0) throw new Error(result.message || result.error);
         
         const data = result.data;
         resultBox.className = 'result-box success';
-        resultBox.innerHTML = apply 
-            ? '✅ 配置包已导入并应用' 
-            : '✅ 配置包已解密成功';
+        resultBox.innerHTML = `✅ 配置包已导入<br><small>保存至: ${data.saved_path || '未知'}</small>`;
         
-        // 显示详细信息
+        // 显示详细信息（无解密内容）
         const sig = data.signature || {};
         document.getElementById('pack-preview-content').innerHTML = `
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:0.9em">
@@ -11303,9 +11315,13 @@ async function importConfigPack() {
                 <div><strong>目标设备：</strong>${data.target_device || '-'}</div>
                 <div><strong>创建时间：</strong>${data.created_at ? formatTimestamp(data.created_at) : '-'}</div>
                 <div><strong>签名者：</strong>${sig.signer_cn || '-'} (${sig.signer_ou || '-'})</div>
+                <div><strong>签名时间：</strong>${sig.signed_at ? formatTimestamp(sig.signed_at) : '-'}</div>
                 <div><strong>官方签名：</strong>${sig.is_official ? '✅ 是' : '❌ 否'}</div>
+                <div><strong>保存路径：</strong>${data.saved_path || '-'}</div>
             </div>
-            ${data.content ? `<div style="margin-top:10px"><strong>配置内容：</strong><pre style="background:#fff;padding:8px;border-radius:4px;max-height:200px;overflow:auto;font-size:11px">${JSON.stringify(data.content, null, 2)}</pre></div>` : ''}
+            <div style="margin-top:10px;padding:8px;background:#e8f5e9;border-radius:4px;font-size:12px">
+                📦 配置包已加密保存，使用 <code>config.pack.content</code> API 可按需解密
+            </div>
         `;
         preview.classList.remove('hidden');
         
@@ -11314,6 +11330,13 @@ async function importConfigPack() {
         resultBox.textContent = '❌ 导入失败: ' + e.message;
     }
 }
+
+// 配置包导出：文件浏览器状态
+let packExportCurrentPath = '/sdcard/config';
+let packExportSelectedFile = null;
+let packExportFileContent = null;
+let packExportSelectedFiles = new Map();  // Map<fullPath, {name, content, status}>
+let packExportCurrentEntries = [];  // 当前目录的条目缓存
 
 // 配置包：导出弹窗（仅 Developer）
 function showConfigPackExportModal() {
@@ -11324,74 +11347,358 @@ function showConfigPackExportModal() {
     document.getElementById('pack-export-modal').classList.remove('hidden');
     document.getElementById('pack-export-name').value = '';
     document.getElementById('pack-export-desc').value = '';
-    document.getElementById('pack-export-content').value = '';
     document.getElementById('pack-export-recipient-cert').value = '';
     document.getElementById('pack-export-result').classList.add('hidden');
     document.getElementById('pack-export-output').classList.add('hidden');
+    document.getElementById('pack-export-selected').style.display = 'none';
+    document.getElementById('btn-pack-export-generate').disabled = true;
+    
+    // 重置文件选择状态
+    packExportSelectedFile = null;
+    packExportFileContent = null;
+    packExportSelectedFiles.clear();
+    packExportCurrentEntries = [];
+    packExportCurrentPath = '/sdcard/config';
+    document.getElementById('pack-export-browse-path').value = packExportCurrentPath;
+    
+    // 加载文件列表
+    packExportBrowseRefresh();
 }
 
 function hideConfigPackExportModal() {
     document.getElementById('pack-export-modal').classList.add('hidden');
+    // 重置按钮状态
+    document.getElementById('btn-pack-copy').style.display = 'none';
+    document.getElementById('btn-pack-download').style.display = 'none';
+    document.getElementById('pack-export-saved-path').style.display = 'none';
+}
+
+// 文件浏览器：刷新当前目录
+async function packExportBrowseRefresh() {
+    const fileList = document.getElementById('pack-export-file-list');
+    fileList.innerHTML = '<div style="padding:20px;text-align:center;color:#666">🔄 加载中...</div>';
+    
+    try {
+        const result = await api.storageList(packExportCurrentPath);
+        if (result.code !== 0) throw new Error(result.message);
+        
+        const entries = result.data?.entries || [];
+        
+        // 排序：目录在前，然后按名称排序
+        entries.sort((a, b) => {
+            if (a.type === 'dir' && b.type !== 'dir') return -1;
+            if (a.type !== 'dir' && b.type === 'dir') return 1;
+            return a.name.localeCompare(b.name);
+        });
+        
+        // 只显示 .json 文件和目录
+        const filteredEntries = entries.filter(e => 
+            e.type === 'dir' || e.name.endsWith('.json')
+        );
+        
+        // 缓存当前目录条目
+        packExportCurrentEntries = filteredEntries;
+        
+        if (filteredEntries.length === 0) {
+            fileList.innerHTML = '<div style="padding:20px;text-align:center;color:#999">📁 没有配置文件 (.json)</div>';
+            return;
+        }
+        
+        let html = '<div style="padding:4px">';
+        for (const entry of filteredEntries) {
+            const icon = entry.type === 'dir' ? '📁' : '📄';
+            const size = entry.type === 'file' ? ` <span style="color:#999;font-size:0.9em">(${formatFileSize(entry.size)})</span>` : '';
+            const fullPath = packExportCurrentPath + '/' + entry.name;
+            const isSelected = packExportSelectedFiles.has(fullPath);
+            const bgColor = isSelected ? '#e3f2fd' : '';
+            // 转义文件名中的特殊字符
+            const safeName = entry.name.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+            
+            if (entry.type === 'dir') {
+                // 目录：点击进入，无复选框
+                html += `<div onclick="packExportBrowseInto('${safeName}')" 
+                    style="padding:8px 12px;cursor:pointer;border-bottom:1px solid #eee;display:flex;align-items:center" 
+                    onmouseover="this.style.background='#f0f0f0'" onmouseout="this.style.background=''">
+                    <span style="margin-right:8px">${icon}</span>
+                    <span style="flex:1">${entry.name}</span>
+                </div>`;
+            } else {
+                // 文件：带复选框
+                const checkboxId = 'pack-export-cb-' + entry.name.replace(/[^a-zA-Z0-9]/g, '_');
+                html += `<div style="padding:8px 12px;border-bottom:1px solid #eee;background:${bgColor};display:flex;align-items:center">
+                    <input type="checkbox" id="${checkboxId}" ${isSelected ? 'checked' : ''} 
+                        onclick="packExportToggleFile('${safeName}', this.checked)" style="margin-right:8px">
+                    <label for="${checkboxId}" style="flex:1;cursor:pointer;margin:0;display:flex;align-items:center">
+                        <span style="margin-right:4px">${icon}</span>
+                        <span>${entry.name}</span>${size}
+                    </label>
+                </div>`;
+            }
+        }
+        html += '</div>';
+        fileList.innerHTML = html;
+        
+        // 更新选择状态显示
+        packExportUpdateSelectedDisplay();
+        
+    } catch (e) {
+        fileList.innerHTML = `<div style="padding:20px;text-align:center;color:#e74c3c">❌ 加载失败: ${e.message}</div>`;
+    }
+}
+
+// 文件浏览器：进入子目录
+function packExportBrowseInto(dirName) {
+    packExportCurrentPath = packExportCurrentPath + '/' + dirName;
+    document.getElementById('pack-export-browse-path').value = packExportCurrentPath;
+    packExportBrowseRefresh();
+}
+
+// 文件浏览器：返回上级目录
+function packExportBrowseUp() {
+    const parts = packExportCurrentPath.split('/').filter(p => p);
+    if (parts.length <= 1) {
+        // 不能再往上了
+        return;
+    }
+    parts.pop();
+    packExportCurrentPath = '/' + parts.join('/');
+    document.getElementById('pack-export-browse-path').value = packExportCurrentPath;
+    packExportBrowseRefresh();
+}
+
+// 文件浏览器：切换文件选中状态
+async function packExportToggleFile(fileName, checked) {
+    const fullPath = packExportCurrentPath + '/' + fileName;
+    
+    if (!checked) {
+        // 取消选择
+        packExportSelectedFiles.delete(fullPath);
+        packExportUpdateSelectedDisplay();
+        packExportBrowseRefresh();
+        return;
+    }
+    
+    // 选中文件，读取内容
+    packExportSelectedFiles.set(fullPath, { name: fileName, content: null, status: 'loading' });
+    packExportUpdateSelectedDisplay();
+    
+    try {
+        const result = await api.storageRead(fullPath);
+        if (result.code !== 0) throw new Error(result.message);
+        
+        const rawContent = result.data?.content;
+        if (rawContent === undefined || rawContent === null) throw new Error('文件内容为空');
+        
+        // 后端 storage.read 会自动解析 JSON
+        let contentStr;
+        if (typeof rawContent === 'object') {
+            contentStr = JSON.stringify(rawContent, null, 2);
+        } else {
+            contentStr = rawContent;
+            JSON.parse(contentStr);  // 验证
+        }
+        
+        packExportSelectedFiles.set(fullPath, { name: fileName, content: contentStr, status: 'ok' });
+        
+    } catch (e) {
+        packExportSelectedFiles.set(fullPath, { name: fileName, content: null, status: 'error', error: e.message });
+    }
+    
+    packExportUpdateSelectedDisplay();
+    packExportBrowseRefresh();
+}
+
+// 更新选择状态显示
+function packExportUpdateSelectedDisplay() {
+    const selectedDiv = document.getElementById('pack-export-selected');
+    const selectedSpan = document.getElementById('pack-export-selected-file');
+    const generateBtn = document.getElementById('btn-pack-export-generate');
+    
+    const files = Array.from(packExportSelectedFiles.entries());
+    const okFiles = files.filter(([_, v]) => v.status === 'ok');
+    const loadingFiles = files.filter(([_, v]) => v.status === 'loading');
+    const errorFiles = files.filter(([_, v]) => v.status === 'error');
+    
+    if (files.length === 0) {
+        selectedDiv.style.display = 'none';
+        generateBtn.disabled = true;
+        return;
+    }
+    
+    selectedDiv.style.display = 'block';
+    
+    let text = `已选择 ${files.length} 个文件`;
+    if (loadingFiles.length > 0) {
+        text += ` (${loadingFiles.length} 个加载中...)`;
+        selectedDiv.style.background = '#fff3e0';
+        generateBtn.disabled = true;
+    } else if (errorFiles.length > 0) {
+        text += ` (${errorFiles.length} 个错误: ${errorFiles[0][1].error})`;
+        selectedDiv.style.background = '#ffebee';
+        generateBtn.disabled = errorFiles.length === files.length;  // 全部错误则禁用
+    } else {
+        selectedDiv.style.background = '#e8f5e9';
+        generateBtn.disabled = false;
+    }
+    
+    selectedSpan.textContent = text;
+    
+    // 自动填充配置名称
+    const nameInput = document.getElementById('pack-export-name');
+    if (!nameInput.value && okFiles.length > 0) {
+        if (okFiles.length === 1) {
+            nameInput.value = okFiles[0][1].name.replace(/\.json$/i, '');
+        } else {
+            nameInput.value = 'batch_config_' + okFiles.length;
+        }
+    }
+}
+
+// 全选当前目录的文件
+async function packExportSelectAll() {
+    const files = packExportCurrentEntries.filter(e => e.type === 'file');
+    if (files.length === 0) return;
+    
+    for (const file of files) {
+        const fullPath = packExportCurrentPath + '/' + file.name;
+        if (!packExportSelectedFiles.has(fullPath)) {
+            await packExportToggleFile(file.name, true);
+        }
+    }
+}
+
+// 取消全选
+function packExportDeselectAll() {
+    packExportSelectedFiles.clear();
+    packExportUpdateSelectedDisplay();
+    packExportBrowseRefresh();
+}
+
+// 选择整个目录（当前目录下的所有 JSON 文件）
+async function packExportSelectDir() {
+    // 与全选功能相同，但可以在 UI 上有区分
+    await packExportSelectAll();
+    showToast(`已选择当前目录下的所有 JSON 文件`, 'success');
+}
+
+// 文件大小格式化
+function formatFileSize(bytes) {
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
 }
 
 async function exportConfigPack() {
     const name = document.getElementById('pack-export-name').value.trim();
     const desc = document.getElementById('pack-export-desc').value.trim();
-    const contentStr = document.getElementById('pack-export-content').value.trim();
     const recipientCert = document.getElementById('pack-export-recipient-cert').value.trim();
     const resultBox = document.getElementById('pack-export-result');
     const outputBox = document.getElementById('pack-export-output');
+    const copyBtn = document.getElementById('btn-pack-copy');
+    const downloadBtn = document.getElementById('btn-pack-download');
+    
+    // 重置按钮状态
+    copyBtn.disabled = true;
+    downloadBtn.disabled = true;
     
     // 验证输入
     if (!name) {
         resultBox.className = 'result-box error';
+        resultBox.style.visibility = 'visible';
         resultBox.textContent = '请输入配置名称';
-        resultBox.classList.remove('hidden');
-        return;
-    }
-    if (!contentStr) {
-        resultBox.className = 'result-box error';
-        resultBox.textContent = '请输入配置内容';
-        resultBox.classList.remove('hidden');
-        return;
-    }
-    if (!recipientCert) {
-        resultBox.className = 'result-box error';
-        resultBox.textContent = '请粘贴目标设备证书';
-        resultBox.classList.remove('hidden');
         return;
     }
     
-    // 解析 JSON 内容
+    // 收集所有成功加载的文件
+    const okFiles = Array.from(packExportSelectedFiles.entries()).filter(([_, v]) => v.status === 'ok');
+    if (okFiles.length === 0) {
+        resultBox.className = 'result-box error';
+        resultBox.style.visibility = 'visible';
+        resultBox.textContent = '请选择配置文件';
+        return;
+    }
+    
+    if (!recipientCert) {
+        resultBox.className = 'result-box error';
+        resultBox.style.visibility = 'visible';
+        resultBox.textContent = '请粘贴目标设备证书';
+        return;
+    }
+    
+    // 合并多个配置文件为一个对象
     let content;
     try {
-        content = JSON.parse(contentStr);
+        if (okFiles.length === 1) {
+            // 单文件：直接使用
+            content = JSON.parse(okFiles[0][1].content);
+        } else {
+            // 多文件：合并到一个对象中，使用文件名作为 key
+            content = { _batch: true, _files: {} };
+            for (const [path, info] of okFiles) {
+                const key = info.name.replace(/\.json$/i, '');
+                content._files[key] = JSON.parse(info.content);
+            }
+        }
     } catch (e) {
         resultBox.className = 'result-box error';
-        resultBox.textContent = '配置内容不是有效的 JSON: ' + e.message;
-        resultBox.classList.remove('hidden');
+        resultBox.style.visibility = 'visible';
+        resultBox.textContent = '配置文件不是有效的 JSON: ' + e.message;
         return;
     }
     
     resultBox.className = 'result-box';
-    resultBox.textContent = '🔄 生成配置包中...';
-    resultBox.classList.remove('hidden');
-    outputBox.classList.add('hidden');
+    resultBox.style.visibility = 'visible';
+    resultBox.textContent = `🔄 生成配置包中 (${okFiles.length} 个文件)...`;
+    document.getElementById('pack-export-tscfg').value = '';
     
     try {
-        const result = await api.configPackExport(name, content, recipientCert, desc || null);
+        // 同时保存到 SD 卡
+        const savePath = '/sdcard/output_config/' + name + '.tscfg';
+        const result = await api.configPackExport(name, content, recipientCert, desc || null, savePath);
+        console.log('[ConfigPack] Export result:', result);
         if (result.code !== 0) throw new Error(result.message || result.error);
         
-        const data = result.data;
+        const data = result.data || {};
+        const tscfgContent = data.tscfg || '';
+        const fileSize = data.size || tscfgContent.length;
+        const fileName = data.filename || (name + '.tscfg');
+        const savedPath = data.saved_path || '';
+        
         resultBox.className = 'result-box success';
-        resultBox.innerHTML = `✅ 配置包已生成 (${data.size || 0} 字节)`;
+        let resultHtml = `✅ 配置包已生成<br>📁 文件名: <b>${fileName}</b><br>📊 大小: ${fileSize} 字节 (${okFiles.length} 个配置文件)`;
+        if (savedPath) {
+            resultHtml += `<br>💾 已保存到: <code>${savedPath}</code>`;
+        }
+        resultBox.innerHTML = resultHtml;
         
         // 显示输出
-        document.getElementById('pack-export-tscfg').value = data.tscfg || '';
-        window._packExportFilename = data.filename || (name + '.tscfg');
-        outputBox.classList.remove('hidden');
+        const tscfgTextarea = document.getElementById('pack-export-tscfg');
+        tscfgTextarea.value = tscfgContent;
+        window._packExportFilename = fileName;
+        
+        // 显示按钮
+        if (tscfgContent) {
+            copyBtn.style.display = 'inline-block';
+            downloadBtn.style.display = 'inline-block';
+        }
+        
+        // 显示保存路径
+        const savedPathSpan = document.getElementById('pack-export-saved-path');
+        if (savedPath && savedPathSpan) {
+            savedPathSpan.textContent = `✅ 已保存到设备`;
+            savedPathSpan.style.display = 'inline';
+        }
+        
+        // 确保输出区域可见
+        outputBox.style.display = 'block';
+        
+        if (!tscfgContent) {
+            console.warn('[ConfigPack] tscfg content is empty!');
+            resultBox.innerHTML += '<br>⚠️ 警告: 配置包内容为空';
+        }
         
     } catch (e) {
+        console.error('[ConfigPack] Export error:', e);
         resultBox.className = 'result-box error';
         resultBox.textContent = '❌ 生成失败: ' + e.message;
     }

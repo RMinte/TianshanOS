@@ -70,6 +70,21 @@ esp_err_t ts_config_file_save_all(void);
 const ts_config_backend_ops_t *ts_config_file_get_ops(void);
 
 /**
+ * @brief 加载加密配置文件 (.tscfg)
+ * 
+ * 在证书系统初始化后调用，加载 SD 卡上的加密配置包。
+ * 此函数应在 ts_cert_init() 之后、security 服务启动后调用。
+ * 
+ * 加载逻辑：
+ * - 遍历配置目录中的 .tscfg 文件
+ * - 验证签名并解密
+ * - 解密后的 JSON 内容会覆盖之前从 .json 加载的同名配置
+ * 
+ * @return ESP_OK 成功（即使部分文件加载失败）
+ */
+esp_err_t ts_config_file_load_encrypted(void);
+
+/**
  * @brief 注册存储事件监听器
  * 
  * 在事件系统初始化后调用，监听 SD 卡挂载事件以自动加载配置。
