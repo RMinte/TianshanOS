@@ -9,16 +9,20 @@
 #include "ts_log.h"
 #include "esp_netif.h"
 #include "esp_event.h"
+#ifdef CONFIG_TS_NET_MDNS_ENABLE
 #include "mdns.h"
+#endif
 #include <string.h>
 #include <lwip/ip4_addr.h>
 
 #define TAG "ts_net"
 
 static bool s_initialized = false;
-static bool s_mdns_initialized = false;
 static char s_hostname[32] = "tianshanOS";
 static char s_ip_str[16];
+
+#ifdef CONFIG_TS_NET_MDNS_ENABLE
+static bool s_mdns_initialized = false;
 
 /**
  * @brief 初始化 mDNS 服务（获取 IP 后调用）
@@ -63,6 +67,13 @@ esp_err_t ts_net_mdns_start(void)
     
     return ESP_OK;
 }
+#else
+esp_err_t ts_net_mdns_start(void)
+{
+    TS_LOGI(TAG, "mDNS disabled by config");
+    return ESP_OK;
+}
+#endif
 
 esp_err_t ts_net_init(void)
 {

@@ -43,6 +43,13 @@ menu "TianShanOS Network Configuration"
         bool "Enable DHCP Server"
         default y
 
+    config TS_NET_MDNS_ENABLE
+        bool "Enable mDNS"
+        default y
+        help
+            Enable mDNS for hostname.local discovery.
+            Disabling saves ~4KB DRAM (task stack + data structures).
+
     config TS_NET_HTTP_SERVER_ENABLE
         bool "Enable HTTP Server"
         default y

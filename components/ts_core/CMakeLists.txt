@@ -12,6 +12,7 @@ idf_component_register(
         ts_log
         ts_event
         ts_service
+        ts_mempool
 )
 
 # 将子组件目录添加到构建

@@ -12,6 +12,7 @@
 #include "ts_config_nvs.h"
 #include "ts_config_file.h"
 #include "ts_config_schemas.h"
+#include "ts_mempool.h"
 #include "esp_log.h"
 #include "esp_heap_caps.h"
 #include "cJSON.h"
@@ -67,7 +68,16 @@ esp_err_t ts_core_init(void)
 
     ESP_LOGI(TAG, "TianShanOS Core v%s initializing...", TIANSHAN_OS_VERSION_STRING);
 
-    // 0. 配置 cJSON 使用 PSRAM（必须在任何 JSON 操作之前）
+    // 0a. 初始化内存池（必须最先，减少 DRAM 碎片）
+    ret = ts_mempool_init();
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Memory pool init failed: %s (continuing without pools)", esp_err_to_name(ret));
+        // 不是致命错误，继续初始化
+    } else {
+        ESP_LOGI(TAG, "Memory pools initialized in PSRAM");
+    }
+
+    // 0b. 配置 cJSON 使用 PSRAM（必须在任何 JSON 操作之前）
     cJSON_Hooks hooks = {
         .malloc_fn = cjson_psram_malloc,
         .free_fn = cjson_psram_free

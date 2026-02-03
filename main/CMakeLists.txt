@@ -28,5 +28,6 @@ idf_component_register(
         ts_https
         ts_webui
         ts_automation
+        ts_mempool
         json  # cJSON for PSRAM hooks
 )
