@@ -45,11 +45,11 @@
 
 ### 静态内存占用
 
-| 组件 | 大小 | 类型 | 可优化 |
+| 组件 | 大小 | 类型 | 状态 |
 |------|------|------|--------|
-| .data + .bss | 61 KB | 编译时固定 | ❌ |
-| sparkle_states[1024] | 8 KB | 静态数组 | ✅ 可动态化 |
-| heat[1024] | 1 KB | 静态数组 | ✅ 可动态化 |
+| .data + .bss | 61 KB | 编译时固定 | ❌ 无法优化 |
+| sparkle_states | 4 KB | 动态分配 | ✅ 已迁移 PSRAM |
+| anim_state_t | ~1.5 KB | 动态分配 | ✅ 已迁移 PSRAM |
 | 小型静态缓冲 | ~2 KB | 静态数组 | ❌ 不值得 |
 
 ---
@@ -133,10 +133,10 @@ static uint8_t *heat = NULL;
 - ssh_exec (8 KB × 2) - SSH 执行访问 keystore (NVS)
 - action_exec (16 KB) - 执行动作时访问 NVS
 
-### 第二批（可选，需测试验证）
+### 第二批（已完成）
 
-3. ⚠️ LED 效果静态数组动态化（9 KB）
-4. ⚠️ 其他短期任务迁移
+5. ✅ sparkle_states (4 KB) - 动态分配到 PSRAM
+6. ✅ anim_state_t (~1.5 KB) - fire_heat, rain, coderain 状态动态分配到 PSRAM
 
 ---
 
