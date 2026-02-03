@@ -235,7 +235,7 @@ static esp_err_t api_config_pack_import(const cJSON *params, ts_api_result_t *re
             return ESP_ERR_INVALID_SIZE;
         }
         
-        file_buf = malloc(file_size + 1);
+        file_buf = PACK_MALLOC(file_size + 1);
         if (!file_buf) {
             fclose(f);
             ts_api_result_error(result, TS_API_ERR_NO_MEM, "Memory allocation failed");
