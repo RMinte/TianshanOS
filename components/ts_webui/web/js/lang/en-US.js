@@ -90,7 +90,6 @@ i18n.registerLanguage('en-US', {
         required: 'Required',
         saveChanges: 'Save Changes',
         // Status texts
-        notConfigured: 'Not Configured',
         notStarted: 'Not Started',
         detecting: 'Detecting',
         reading: 'Reading...',
@@ -783,7 +782,6 @@ i18n.registerLanguage('en-US', {
         ledOnFailed: 'Failed to turn on',
         // PKI/Certificates
         configPackImported: 'Config pack imported successfully',
-        importFailed: 'Import failed',
         keypairGenerated: 'Key pair generated successfully',
         csrGenerated: 'CSR generated successfully',
         csrCopied: 'CSR copied to clipboard',
@@ -796,8 +794,6 @@ i18n.registerLanguage('en-US', {
         pkiDeleted: 'PKI credentials deleted',
         enterKeyId: 'Please enter key ID',
         generatingKey: 'Generating key...',
-        keyGenerated: 'Key "{name}" generated successfully',
-        generateFailed: 'Generation failed',
         terminalDisconnected: 'Terminal disconnected',
         // OTA
         enterFirmwareUrl: 'Please enter firmware URL',
@@ -854,7 +850,6 @@ i18n.registerLanguage('en-US', {
         fillCommand: 'Please fill in command',
         selectSshCommand: 'Please select SSH command',
         selectLedDevice: 'Please select LED device',
-        selectAnimation: 'Please select animation',
         enterText: 'Please enter text content',
         selectFilter: 'Please select filter',
         fillLogMessage: 'Please fill in log message',
@@ -922,7 +917,6 @@ i18n.registerLanguage('en-US', {
         testingConnection: 'Testing connection to {host}...',
         cannotGetHostInfo: 'Cannot get host information',
         connectionSuccess: '✅ Connection to {host} successful!',
-        connectionFailed: '❌ Connection failed',
         testConnectionFailed: '❌ Test failed',
         hostConfigExported: 'Host config exported: {filename}',
         sshHostRemoved: 'SSH host {id} removed from list',
@@ -932,7 +926,6 @@ i18n.registerLanguage('en-US', {
         localHostRemoved: 'Local host record removed',
         keyDeleted: 'Key deleted',
         cannotGetPublicKey: 'Cannot get public key',
-        exportFailed: 'Export failed',
         cannotGetPrivateKey: 'Cannot get private key',
         downloadedPublicKey: 'Downloaded {id}.pub',
         downloadedPrivateKey: 'Downloaded {id}',
@@ -1264,7 +1257,6 @@ i18n.registerLanguage('en-US', {
         patternMatchConfig: 'Pattern Match Config',
         connecting: 'Connecting',
         commandLabel: 'Command',
-        logFile: 'Log File',
         storeVar: 'Store Variable',
         // Config pack related
         generatingConfigPack: '🔄 Generating config pack...',
@@ -1294,7 +1286,6 @@ i18n.registerLanguage('en-US', {
         exportedWithHost: 'Exported command config (with host {hostId}): {filename}',
         exportedWithoutHost: 'Exported command config: {filename}',
         importCommand: 'Import Command',
-        selectHost: 'Select Host',
         // Deploy/Revoke
         deployingKey: '🔄 Deploying key...',
         deploySuccess: '✅ Deploy successful! Now you can use key "{keyId}" for passwordless login to {target}',
@@ -1555,7 +1546,6 @@ i18n.registerLanguage('en-US', {
         organization: 'Organization (O)',
         department: 'Department (OU)',
         csrContentLabel: 'CSR Content (copy to CA server for signing)',
-        generateCsr: '📋 Generate CSR',
         installCertTitle: '📥 Install Device Certificate',
         installCertDesc: 'Paste CA-signed PEM format certificate',
         certPem: 'Certificate PEM',
@@ -1689,7 +1679,10 @@ i18n.registerLanguage('en-US', {
         deviceRecovered: 'Device recovered!',
         waitTimeout: 'Wait timeout',
         checkDeviceManually: 'Please manually check device status and refresh page',
-        refreshPage: 'Refresh Page'
+        refreshPage: 'Refresh Page',
+        currentVersionUnknown: 'Unknown',
+        step1: '[1/2] Upgrading Firmware',
+        step2: '[2/2] Upgrading WebUI'
     },
     
     // Automation Page
@@ -1819,7 +1812,6 @@ i18n.registerLanguage('en-US', {
         agxReset: 'AGX Reset',
         fanShort: 'Fan',
         // Action type selection
-        selectActionType: 'Select Action Type',
         configParams: 'Configure Parameters',
         basicInfo: 'Basic Information',
         cliCommand: 'CLI Command',
@@ -1853,8 +1845,6 @@ i18n.registerLanguage('en-US', {
         interval: 'Interval',
         realTimeUpdating: '● Real-time updating',
         trackingStopped: 'Tracking stopped',
-        logFileNotExist: '[Log file does not exist or is empty]',
-        logEmpty: '[Empty]',
         // Action editor labels
         displayName: 'Display Name',
         displayNameHint: 'Leave empty to use ID',
@@ -1902,7 +1892,6 @@ i18n.registerLanguage('en-US', {
         repeatWhileTrue: 'Repeat while true',
         repeatCount: 'Fixed count',
         repeatTimes: 'Times',
-        interval: 'Interval',
         execCondition: 'Exec Condition',
         value: 'Value',
         // Rule editor content
@@ -1937,7 +1926,6 @@ i18n.registerLanguage('en-US', {
         selectHostAndCmd: 'Please select SSH host and command first',
         pollInterval: 'Poll Interval (seconds)',
         // Data source placeholders
-        sourceIdPlaceholder: 'e.g. agx_temp',
         sourceLabelPlaceholder: 'e.g. AGX Temperature',
         restPathPlaceholder: 'e.g. data.temperature (leave empty for entire response)',
         wsPathPlaceholder: 'e.g. data.temperature (leave empty for entire message)',
@@ -1978,7 +1966,6 @@ i18n.registerLanguage('en-US', {
         filterInvert: '🔄 Invert',
         filterGrayscale: '⬜ Grayscale',
         // Variable action placeholders
-        varNamePlaceholder: 'e.g. system.flag',
         varValuePlaceholder: 'Supports expressions and variable references',
         varValueHint: 'Example: true, 123, ${other_var}',
         // Search
@@ -2428,7 +2415,6 @@ i18n.registerLanguage('en-US', {
         connectSuccess: 'Connected',
         requestFailed: 'Request failed',
         error: 'Error',
-        connecting: 'Connecting...',
         dataReceived: 'Connected, data received',
         connectFailed: 'Connection failed',
         noSelectableFields: 'No selectable fields',
@@ -2486,7 +2472,6 @@ i18n.registerLanguage('en-US', {
         timePending: 'Not synced',
         readingData: 'Reading...',
         stopped: 'Stopped',
-        lightOff: 'Off',
         sdNotMounted: 'Not mounted',
         avgUsage: 'Average',
         currentDuty: 'Current',
@@ -2569,13 +2554,6 @@ i18n.registerLanguage('en-US', {
         taskStackTotal: 'Total Stack Allocated',
         totalTaskCount: 'Total Tasks',
         stackHint: 'Remaining stack <256B is danger zone, <512B is warning zone'
-    },
-
-    // OTA Page
-    otaPage: {
-        currentVersionUnknown: 'Unknown',
-        step1: '[1/2] Upgrading Firmware',
-        step2: '[2/2] Upgrading WebUI'
     },
 
     // Data Source

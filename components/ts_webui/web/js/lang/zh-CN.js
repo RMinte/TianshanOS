@@ -90,7 +90,6 @@ i18n.registerLanguage('zh-CN', {
         required: '必填',
         saveChanges: '保存修改',
         // 状态文本
-        notConfigured: '未配置',
         notStarted: '未启动',
         detecting: '检测中',
         reading: '读取中...',
@@ -818,7 +817,6 @@ i18n.registerLanguage('zh-CN', {
         fillCommand: '请填写命令行',
         selectSshCommand: '请选择 SSH 命令',
         selectLedDevice: '请选择 LED 设备',
-        selectAnimation: '请选择动画',
         enterText: '请输入文本内容',
         selectFilter: '请选择滤镜',
         fillLogMessage: '请填写日志消息',
@@ -829,11 +827,9 @@ i18n.registerLanguage('zh-CN', {
         downloadFailed: '下载失败',
         renameFailed: '重命名失败',
         createFailed: '创建失败',
-        generateFailed: '生成失败',
         executeFailed: '执行失败',
         testFailed: '测试失败',
         deployFailed: '部署失败',
-        importFailed: '导入失败',
         verifyFailed: '验证失败',
         installFailed: '安装失败',
         getCertFailed: '获取证书失败',
@@ -844,7 +840,6 @@ i18n.registerLanguage('zh-CN', {
         configRestartRequired: '重启系统后生效',
         verifySuccess: '验证通过',
         importSuccess: '导入成功',
-        keyGenerated: '密钥已生成',
         keyDeployed: '密钥已部署',
         confirmTrigger: '确定要触发吗？',
         triggerSuccess: '触发成功',
@@ -922,7 +917,6 @@ i18n.registerLanguage('zh-CN', {
         testingConnection: '正在测试连接 {host}...',
         cannotGetHostInfo: '无法获取主机信息',
         connectionSuccess: '✅ 连接 {host} 成功！',
-        connectionFailed: '❌ 连接失败',
         testConnectionFailed: '❌ 测试失败',
         hostConfigExported: '已导出主机配置: {filename}',
         sshHostRemoved: 'SSH 主机 {id} 已从列表移除',
@@ -932,7 +926,6 @@ i18n.registerLanguage('zh-CN', {
         localHostRemoved: '已移除本地主机记录',
         keyDeleted: '密钥已删除',
         cannotGetPublicKey: '无法获取公钥',
-        exportFailed: '导出失败',
         cannotGetPrivateKey: '无法获取私钥',
         downloadedPublicKey: '已下载 {id}.pub',
         downloadedPrivateKey: '已下载 {id}',
@@ -1265,7 +1258,6 @@ i18n.registerLanguage('zh-CN', {
         patternMatchConfig: '模式匹配配置',
         connecting: '正在连接',
         commandLabel: '命令',
-        logFile: '日志文件',
         storeVar: '存储变量',
         // 配置包相关
         generatingConfigPack: '🔄 正在生成配置包...',
@@ -1295,7 +1287,6 @@ i18n.registerLanguage('zh-CN', {
         exportedWithHost: '已导出指令配置（包含主机 {hostId}）: {filename}',
         exportedWithoutHost: '已导出指令配置: {filename}',
         importCommand: '导入指令',
-        selectHost: '选择主机',
         // 部署/撤销
         deployingKey: '🔄 正在部署密钥...',
         deploySuccess: '✅ 部署成功！现在可以使用密钥 "{keyId}" 免密登录 {target}',
@@ -1556,7 +1547,6 @@ i18n.registerLanguage('zh-CN', {
         organization: '组织 (O)',
         department: '部门 (OU)',
         csrContentLabel: 'CSR 内容（复制到 CA 服务器签发）',
-        generateCsr: '📋 生成 CSR',
         installCertTitle: '📥 安装设备证书',
         installCertDesc: '粘贴 CA 签发的 PEM 格式证书',
         certPem: '证书 PEM',
@@ -1690,7 +1680,10 @@ i18n.registerLanguage('zh-CN', {
         deviceRecovered: '设备已恢复！',
         waitTimeout: '等待超时',
         checkDeviceManually: '请手动检查设备状态并刷新页面',
-        refreshPage: '刷新页面'
+        refreshPage: '刷新页面',
+        currentVersionUnknown: '未知',
+        step1: '[1/2] 升级固件',
+        step2: '[2/2] 升级 WebUI'
     },
     
     // 自动化页面
@@ -1820,7 +1813,6 @@ i18n.registerLanguage('zh-CN', {
         agxReset: 'AGX重启',
         fanShort: '风扇',
         // 动作类型选择
-        selectActionType: '选择动作类型',
         configParams: '配置参数',
         basicInfo: '基本信息',
         cliCommand: 'CLI 命令',
@@ -1854,8 +1846,6 @@ i18n.registerLanguage('zh-CN', {
         interval: '间隔',
         realTimeUpdating: '● 实时更新中',
         trackingStopped: '已停止更新',
-        logFileNotExist: '[日志文件不存在或为空]',
-        logEmpty: '[空]',
         // 动作编辑器标签
         displayName: '显示名称',
         displayNameHint: '留空则使用 ID',
@@ -1903,7 +1893,6 @@ i18n.registerLanguage('zh-CN', {
         repeatWhileTrue: '条件持续时重复',
         repeatCount: '指定次数',
         repeatTimes: '次数',
-        interval: '间隔',
         execCondition: '执行条件',
         value: '值',
         // 规则编辑器内容
@@ -1938,7 +1927,6 @@ i18n.registerLanguage('zh-CN', {
         selectHostAndCmd: '请先选择 SSH 主机和指令',
         pollInterval: '检测间隔 (秒)',
         // 数据源 placeholder
-        sourceIdPlaceholder: '如: agx_temp',
         sourceLabelPlaceholder: '如: AGX 温度',
         restPathPlaceholder: '如: data.temperature（留空取整个响应）',
         wsPathPlaceholder: '如: data.temperature（留空取整个消息）',
@@ -1979,7 +1967,6 @@ i18n.registerLanguage('zh-CN', {
         filterInvert: '🔄 反色',
         filterGrayscale: '⬜ 灰度',
         // 变量动作 placeholder
-        varNamePlaceholder: '如: system.flag',
         varValuePlaceholder: '支持表达式和变量引用',
         varValueHint: '示例: true, 123, ${other_var}',
         // 搜索
@@ -2429,7 +2416,6 @@ i18n.registerLanguage('zh-CN', {
         connectSuccess: '连接成功',
         requestFailed: '请求失败',
         error: '错误',
-        connecting: '正在连接...',
         dataReceived: '连接成功，已收到数据',
         connectFailed: '连接失败',
         noSelectableFields: '无可选字段',
@@ -2487,7 +2473,6 @@ i18n.registerLanguage('zh-CN', {
         timePending: '未同步',
         readingData: '读取中...',
         stopped: '已停止',
-        lightOff: '已关闭',
         sdNotMounted: '未挂载',
         avgUsage: '平均',
         currentDuty: '当前',
@@ -2570,13 +2555,6 @@ i18n.registerLanguage('zh-CN', {
         taskStackTotal: '任务栈总分配',
         totalTaskCount: '任务总数',
         stackHint: '剩余栈 <256B 为危险区域，<512B 为警告区域'
-    },
-
-    // OTA 页面
-    otaPage: {
-        currentVersionUnknown: '未知',
-        step1: '[1/2] 升级固件',
-        step2: '[2/2] 升级 WebUI'
     },
 
     // 数据源
