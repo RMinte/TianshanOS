@@ -328,7 +328,7 @@ function updateAuthUI() {
         router.updateNavVisibility();
     } else {
         loginBtn.textContent = t('security.login');
-        userName.textContent = t('login.notLoggedIn');
+        userName.textContent = t('ui.notLoggedIn');
         userName.title = '';
         loginBtn.onclick = showLoginModal;
         
