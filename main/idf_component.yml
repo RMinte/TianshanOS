@@ -2,7 +2,7 @@
 dependencies:
   ## Required IDF version
   idf:
-    version: '>=4.1.0'
+    version: '>=5.0'
   # # Put list of dependencies here
   # # For components maintained by Espressif:
   # component: "~1.0.0"
@@ -15,5 +15,6 @@ dependencies:
   #   # All dependencies of `main` are public by default.
   #   public: true
   espressif/led_strip: ^3.0.0
-  espressif/esp_websocket_client: ^1.2.0
+  # 锁定到 1.3.x 版本，1.6.x 有 API 兼容性问题 (esp_transport_ws_get_redir_uri)
+  espressif/esp_websocket_client: ">=1.2.0,<1.6.0"
   espressif/mdns: ^1.4.0
