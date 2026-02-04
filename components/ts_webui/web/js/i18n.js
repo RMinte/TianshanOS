@@ -18,13 +18,7 @@ const i18n = (function() {
     // 支持的语言列表
     const supportedLanguages = {
         'zh-CN': { name: '简体中文', flag: '🇨🇳' },
-        'en-US': { name: 'English', flag: '🇺🇸' },
-        'ja-JP': { name: '日本語', flag: '🇯🇵' },
-        'ko-KR': { name: '한국어', flag: '🇰🇷' },
-        'uk-UA': { name: 'Українська', flag: '🇺🇦' },
-        'es-ES': { name: 'Español', flag: '🇪🇸' },
-        'fr-FR': { name: 'Français', flag: '🇫🇷' },
-        'de-DE': { name: 'Deutsch', flag: '🇩🇪' }
+        'en-US': { name: 'English', flag: '🇺🇸' }
     };
     
     /**
@@ -103,19 +97,7 @@ const i18n = (function() {
             const browserLang = navigator.language || navigator.userLanguage;
             if (browserLang.startsWith('zh')) {
                 currentLang = 'zh-CN';
-            } else if (browserLang.startsWith('ja')) {
-                currentLang = 'ja-JP';
-            } else if (browserLang.startsWith('ko')) {
-                currentLang = 'ko-KR';
-            } else if (browserLang.startsWith('uk')) {
-                currentLang = 'uk-UA';
-            } else if (browserLang.startsWith('es')) {
-                currentLang = 'es-ES';
-            } else if (browserLang.startsWith('fr')) {
-                currentLang = 'fr-FR';
-            } else if (browserLang.startsWith('de')) {
-                currentLang = 'de-DE';
-            } else if (browserLang.startsWith('en')) {
+            } else {
                 currentLang = 'en-US';
             }
         }
