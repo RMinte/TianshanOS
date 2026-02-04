@@ -258,4 +258,4 @@ WebUI 支持 8 种语言，根据浏览器设置自动检测：
 
 ## 📄 许可证
 
-本项目采用 MIT 许可证，详见 [LICENSE](LICENSE) 文件。
+本项目采用 GPL-3.0 许可证，详见 [LICENSE](LICENSE) 文件。
