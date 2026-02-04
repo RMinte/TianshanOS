@@ -192,11 +192,6 @@ static esp_err_t api_power_protection_set(const cJSON *params, ts_api_result_t *
     }
     
     /* Persist to SD card and NVS if requested */
-    if (cJSON_IsTrue(persist)) {
-        TS_LOGI(TAG, "Persisting power protection config to SD card and NVS");
-        ts_power_policy_save_config();
-    }
-    
     /* Enable/disable if specified */
     if (cJSON_IsBool(enable)) {
         if (cJSON_IsTrue(enable)) {
@@ -208,6 +203,13 @@ static esp_err_t api_power_protection_set(const cJSON *params, ts_api_result_t *
             ts_api_result_error(result, TS_API_ERR_INTERNAL, "Failed to enable/disable protection");
             return ret;
         }
+        /* 启用/禁用状态变化时，总是保存配置（持久化 enabled 状态）*/
+        TS_LOGI(TAG, "Protection %s, saving config", cJSON_IsTrue(enable) ? "enabled" : "disabled");
+        ts_power_policy_save_config();
+    } else if (cJSON_IsTrue(persist)) {
+        /* 只有参数变化时才需要显式 persist */
+        TS_LOGI(TAG, "Persisting power protection config to SD card and NVS");
+        ts_power_policy_save_config();
     }
     
     /* Return current status */

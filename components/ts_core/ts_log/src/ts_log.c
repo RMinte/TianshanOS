@@ -39,8 +39,16 @@ static const char *TAG = "ts_log";
 
 #define LOG_COLOR(COLOR)  "\033[0;" COLOR "m"
 #define LOG_BOLD(COLOR)   "\033[1;" COLOR "m"
-#define LOG_RESET_COLOR   "\033[0m"
 
+/* 取消 esp_log_color.h 中的空定义，使用我们的彩色定义 */
+#undef LOG_RESET_COLOR
+#undef LOG_COLOR_E
+#undef LOG_COLOR_W
+#undef LOG_COLOR_I
+#undef LOG_COLOR_D
+#undef LOG_COLOR_V
+
+#define LOG_RESET_COLOR   "\033[0m"
 #define LOG_COLOR_E       LOG_BOLD(LOG_COLOR_RED)
 #define LOG_COLOR_W       LOG_BOLD(LOG_COLOR_BROWN)
 #define LOG_COLOR_I       LOG_COLOR(LOG_COLOR_GREEN)

@@ -11,6 +11,7 @@
 #include "ts_log.h"
 #include "esp_console.h"
 #include "esp_vfs_dev.h"
+#include "driver/uart_vfs.h"
 #include "esp_heap_caps.h"
 #include "linenoise.h"
 #include "freertos/FreeRTOS.h"
@@ -300,11 +301,11 @@ esp_err_t ts_console_init(const ts_console_config_t *config)
         ESP_ERROR_CHECK(uart_param_config(uart_num, &uart_config));
         
         /* Tell VFS to use UART driver - this makes stdin blocking */
-        esp_vfs_dev_uart_use_driver(uart_num);
+        uart_vfs_dev_use_driver(uart_num);
         
         /* Configure line endings */
-        esp_vfs_dev_uart_port_set_rx_line_endings(uart_num, ESP_LINE_ENDINGS_CR);
-        esp_vfs_dev_uart_port_set_tx_line_endings(uart_num, ESP_LINE_ENDINGS_CRLF);
+        uart_vfs_dev_port_set_rx_line_endings(uart_num, ESP_LINE_ENDINGS_CR);
+        uart_vfs_dev_port_set_tx_line_endings(uart_num, ESP_LINE_ENDINGS_CRLF);
         
         /* Disable buffering on stdin */
         setvbuf(stdin, NULL, _IONBF, 0);
@@ -335,7 +336,7 @@ esp_err_t ts_console_deinit(void)
     
     /* Restore UART to non-driver mode and uninstall driver */
     if (s_console.config.output == TS_CONSOLE_OUTPUT_UART) {
-        esp_vfs_dev_uart_use_nonblocking(CONFIG_ESP_CONSOLE_UART_NUM);
+        uart_vfs_dev_use_nonblocking(CONFIG_ESP_CONSOLE_UART_NUM);
         uart_driver_delete(CONFIG_ESP_CONSOLE_UART_NUM);
     }
     

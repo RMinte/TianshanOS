@@ -20,18 +20,28 @@
                 <span class="logo-text">TianshanOS</span>
             </div>
             <nav class="nav">
-                <a href="#/" class="nav-link active">系统</a>
-                <a href="#/network" class="nav-link">网络</a>
-                <a href="#/files" class="nav-link">文件</a>
-                <a href="#/terminal" class="nav-link" data-requires-root>终端</a>
-                <a href="#/automation" class="nav-link" data-requires-root>自动化</a>
-                <a href="#/commands" class="nav-link" data-requires-root>指令</a>
-                <a href="#/security" class="nav-link">安全</a>
+                <a href="#/" class="nav-link active" data-i18n="nav.system">系统</a>
+                <a href="#/network" class="nav-link" data-i18n="nav.network">网络</a>
+                <a href="#/files" class="nav-link" data-i18n="nav.files">文件</a>
+                <a href="#/terminal" class="nav-link" data-requires-root data-i18n="common.logs">日志</a>
+                <a href="#/automation" class="nav-link" data-requires-root data-i18n="nav.automation">自动化</a>
+                <a href="#/commands" class="nav-link" data-requires-root data-i18n="ssh.commands">指令</a>
+                <a href="#/security" class="nav-link" data-i18n="nav.security">安全</a>
             </nav>
-            <div class="ws-status" id="ws-status" title="WebSocket 连接状态"></div>
+            <div class="ws-status" id="ws-status" data-i18n-title="network.connected"></div>
+            <div class="lang-switch" id="lang-switch" title="切换语言 / Switch Language">
+                <button class="btn btn-sm lang-btn" onclick="toggleLanguageMenu()">
+                    <span id="lang-icon">🌐</span>
+                    <span id="lang-name">中文</span>
+                    <span class="lang-arrow">▼</span>
+                </button>
+                <div id="lang-menu" class="lang-menu hidden">
+                    <!-- 动态填充语言列表 -->
+                </div>
+            </div>
             <div class="user-menu">
-                <span id="user-name">未登录</span>
-                <button id="login-btn" class="btn btn-primary">登录</button>
+                <span id="user-name" data-i18n="ui.notLoggedIn">未登录</span>
+                <button id="login-btn" class="btn btn-primary" data-i18n="security.login">登录</button>
             </div>
         </header>
         
@@ -40,7 +50,7 @@
                 <!-- 动态页面内容由 SPA 路由器加载 -->
                 <div class="loading">
                     <div class="spinner"></div>
-                    <p>加载中...</p>
+                    <p data-i18n="common.loading">加载中...</p>
                 </div>
             </div>
         </main>
@@ -54,25 +64,25 @@
     <div id="login-modal" class="modal hidden">
         <div class="modal-content" style="max-width:350px;">
             <div class="modal-header">
-                <h2><i class="ri-door-open-line"></i> 登录 TianshanOS</h2>
+                <h2><i class="ri-door-open-line"></i> <span data-i18n="login.welcome">登录 TianshanOS</span></h2>
             </div>
             <form id="login-form">
                 <div class="modal-body">
                     <div class="form-group">
-                        <label for="username">用户名</label>
+                        <label for="username" data-i18n="login.username">用户名</label>
                         <input type="text" id="username" name="username" class="input" required 
                                value="admin" autocomplete="username">
                     </div>
                     <div class="form-group">
-                        <label for="password">密码</label>
+                        <label for="password" data-i18n="login.password">密码</label>
                         <input type="password" id="password" name="password" class="input" required 
-                               placeholder="请输入密码" autocomplete="current-password">
+                               data-i18n-placeholder="login.password" placeholder="请输入密码" autocomplete="current-password">
                     </div>
                     <div id="login-error" class="form-error hidden"></div>
                 </div>
                 <div class="modal-footer">
-                    <button type="button" class="btn" onclick="closeLoginModal()">取消</button>
-                    <button type="submit" class="btn btn-primary">登录</button>
+                    <button type="button" class="btn" onclick="closeLoginModal()" data-i18n="common.cancel">取消</button>
+                    <button type="submit" class="btn btn-primary" data-i18n="login.loginButton">登录</button>
                 </div>
             </form>
         </div>
@@ -82,7 +92,7 @@
     <div id="led-modal" class="modal hidden">
         <div class="modal-content led-modal">
             <div class="modal-header">
-                <h2 id="led-modal-title">LED 设置</h2>
+                <h2 id="led-modal-title" data-i18n="led.title">LED 设置</h2>
                 <button class="modal-close" onclick="closeLedModal()">&times;</button>
             </div>
             <div id="led-modal-body" class="modal-body">
@@ -95,22 +105,22 @@
     <div id="file-picker-modal" class="modal hidden">
         <div class="modal-content file-picker-modal">
             <div class="modal-header">
-                <h2>📁 选择文件</h2>
+                <h2>📁 <span data-i18n="files.selectFiles">选择文件</span></h2>
                 <button class="modal-close" onclick="closeFilePicker()">&times;</button>
             </div>
             <div class="file-picker-path">
-                <button class="btn btn-sm" onclick="filePickerGoUp()">⬆️ 上级</button>
+                <button class="btn btn-sm" onclick="filePickerGoUp()">⬆️ <span data-i18n="files.parentFolder">上级</span></button>
                 <span id="file-picker-current-path">/sdcard/images</span>
             </div>
             <div class="file-picker-list" id="file-picker-list">
-                <div class="loading">加载中...</div>
+                <div class="loading" data-i18n="common.loading">加载中...</div>
             </div>
             <div class="file-picker-selected">
-                <span>已选择: </span><span id="file-picker-selected-name">-</span>
+                <span data-i18n="files.fileName">已选择</span>: <span id="file-picker-selected-name">-</span>
             </div>
             <div class="form-actions">
-                <button class="btn" onclick="closeFilePicker()">取消</button>
-                <button class="btn btn-primary" id="file-picker-confirm" onclick="confirmFilePicker()" disabled>确定</button>
+                <button class="btn" onclick="closeFilePicker()" data-i18n="common.cancel">取消</button>
+                <button class="btn btn-primary" id="file-picker-confirm" onclick="confirmFilePicker()" disabled data-i18n="common.confirm">确定</button>
             </div>
         </div>
     </div>
@@ -119,15 +129,15 @@
     <div id="memory-detail-modal" class="modal hidden">
         <div class="modal-content memory-detail-modal">
             <div class="modal-header">
-                <h2>内存详细分析</h2>
+                <h2><span data-i18n="system.memoryDetail">内存详细分析</span></h2>
                 <button class="modal-close" onclick="hideMemoryDetailModal()">&times;</button>
             </div>
             <div class="modal-body" id="memory-detail-body">
-                <div class="loading">加载中...</div>
+                <div class="loading" data-i18n="common.loading">加载中...</div>
             </div>
             <div class="modal-footer" style="margin-top:16px;padding-top:12px;border-top:1px solid var(--border-color);display:flex;justify-content:space-between;align-items:center">
                 <span id="memory-detail-timestamp" style="font-size:0.8em;color:#888">-</span>
-                <button class="btn btn-primary" onclick="refreshMemoryDetail()"><i class="ri-refresh-line"></i> 刷新</button>
+                <button class="btn btn-primary" onclick="refreshMemoryDetail()"><i class="ri-refresh-line"></i> <span data-i18n="common.refresh">刷新</span></button>
             </div>
         </div>
     </div>
@@ -136,14 +146,14 @@
     <div id="source-variables-modal" class="modal hidden">
         <div class="modal-content" style="max-width:700px">
             <div class="modal-header">
-                <h2>📊 数据源变量</h2>
+                <h2>📊 <span data-i18n="automation.viewVariables">数据源变量</span></h2>
                 <button class="modal-close" onclick="closeSourceVariablesModal()">&times;</button>
             </div>
             <div class="modal-body" id="source-variables-body">
-                <div class="loading">加载中...</div>
+                <div class="loading" data-i18n="common.loading">加载中...</div>
             </div>
             <div class="modal-footer" style="margin-top:16px;padding-top:12px;border-top:1px solid var(--border-color);display:flex;justify-content:flex-end">
-                <button class="btn" onclick="closeSourceVariablesModal()">关闭</button>
+                <button class="btn" onclick="closeSourceVariablesModal()" data-i18n="common.close">关闭</button>
             </div>
         </div>
     </div>
@@ -152,46 +162,57 @@
     <div id="shutdown-settings-modal" class="modal hidden">
         <div class="modal-content" style="max-width:500px">
             <div class="modal-header">
-                <h2>⚡ 电压保护设置</h2>
+                <h2>⚡ <span data-i18n="system.shutdownSettings">电压保护设置</span></h2>
                 <button class="modal-close" onclick="closeShutdownSettingsModal()">&times;</button>
             </div>
             <div class="modal-body" id="shutdown-settings-body">
                 <div class="form-group">
-                    <label>低电压阈值 (V)</label>
+                    <label data-i18n="system.lowVoltageThreshold">低电压阈值 (V)</label>
                     <input type="number" id="ss-low-voltage" class="input" step="0.1" min="10" max="24" placeholder="12.6">
-                    <small class="form-hint">电压低于此值开始关机倒计时（默认 12.6V）</small>
+                    <small class="form-hint" data-i18n="system.lowVoltageThresholdHint">电压低于此值开始关机倒计时（默认 12.6V）</small>
                 </div>
                 <div class="form-group">
-                    <label>恢复电压阈值 (V)</label>
+                    <label data-i18n="system.recoveryVoltageThreshold">恢复电压阈值 (V)</label>
                     <input type="number" id="ss-recovery-voltage" class="input" step="0.1" min="10" max="30" placeholder="18.0">
-                    <small class="form-hint">电压高于此值开始恢复流程（默认 18.0V）</small>
+                    <small class="form-hint" data-i18n="system.recoveryVoltageThresholdHint">电压高于此值开始恢复流程（默认 18.0V）</small>
                 </div>
                 <div class="form-group">
-                    <label>关机倒计时 (秒)</label>
+                    <label data-i18n="system.shutdownDelay">关机倒计时 (秒)</label>
                     <input type="number" id="ss-shutdown-delay" class="input" step="1" min="10" max="600" placeholder="60">
-                    <small class="form-hint">低电压后等待多久执行关机（默认 60秒）</small>
+                    <small class="form-hint" data-i18n="system.shutdownDelayHint">低电压后等待多久执行关机（默认 60秒）</small>
                 </div>
                 <div class="form-group">
-                    <label>恢复稳定等待 (秒)</label>
+                    <label data-i18n="system.recoveryHold">恢复稳定等待 (秒)</label>
                     <input type="number" id="ss-recovery-hold" class="input" step="1" min="1" max="300" placeholder="5">
-                    <small class="form-hint">电压恢复后等待确认稳定（默认 5秒）</small>
+                    <small class="form-hint" data-i18n="system.recoveryHoldHint">电压恢复后等待确认稳定（默认 5秒）</small>
                 </div>
                 <div class="form-group">
-                    <label>风扇关闭延迟 (秒)</label>
+                    <label data-i18n="system.fanStopDelay">风扇关闭延迟 (秒)</label>
                     <input type="number" id="ss-fan-stop-delay" class="input" step="1" min="10" max="600" placeholder="60">
-                    <small class="form-hint">关机后多久关闭风扇（默认 60秒）</small>
+                    <small class="form-hint" data-i18n="system.fanStopDelayHint">关机后多久关闭风扇（默认 60秒）</small>
                 </div>
                 <div id="shutdown-settings-error" class="form-error hidden"></div>
             </div>
             <div class="modal-footer" style="margin-top:16px;padding-top:12px;border-top:1px solid var(--border-color);display:flex;justify-content:space-between">
-                <button class="btn" onclick="resetShutdownSettings()">恢复默认</button>
+                <button class="btn" onclick="resetShutdownSettings()" data-i18n="common.reset">恢复默认</button>
                 <div style="display:flex;gap:8px">
-                    <button class="btn" onclick="closeShutdownSettingsModal()">取消</button>
-                    <button class="btn btn-primary" onclick="saveShutdownSettings()">保存</button>
+                    <button class="btn" onclick="closeShutdownSettingsModal()" data-i18n="common.cancel">取消</button>
+                    <button class="btn btn-primary" onclick="saveShutdownSettings()" data-i18n="common.save">保存</button>
                 </div>
             </div>
         </div>
     </div>
+    
+    <!-- i18n 国际化 -->
+    <script src="/js/i18n.js"></script>
+    <script src="/js/lang/zh-CN.js"></script>
+    <script src="/js/lang/en-US.js"></script>
+    <script src="/js/lang/ja-JP.js"></script>
+    <script src="/js/lang/ko-KR.js"></script>
+    <script src="/js/lang/uk-UA.js"></script>
+    <script src="/js/lang/es-ES.js"></script>
+    <script src="/js/lang/fr-FR.js"></script>
+    <script src="/js/lang/de-DE.js"></script>
     
     <script src="/js/api.js"></script>
     <script src="/js/router.js"></script>

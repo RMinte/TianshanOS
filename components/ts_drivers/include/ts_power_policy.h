@@ -192,6 +192,12 @@ bool ts_power_policy_is_initialized(void);
 bool ts_power_policy_is_running(void);
 
 /**
+ * @brief 获取保存的启用状态（用于服务启动时决定是否自动启动保护）
+ * @return true 应该启用保护
+ */
+bool ts_power_policy_should_auto_start(void);
+
+/**
  * @brief 获取当前状态枚举
  * @return 当前状态
  */

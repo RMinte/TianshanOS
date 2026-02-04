@@ -670,6 +670,97 @@ body {
     background: #2ecc71;
 }
 
+/* 语言切换按钮 */
+.lang-switch {
+    margin-left: 12px;
+    margin-right: 8px;
+    position: relative;
+}
+
+.lang-btn {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 10px;
+    font-size: 0.85rem;
+    background: var(--bg-color);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.lang-btn:hover {
+    background: var(--primary-color);
+    color: white;
+    border-color: var(--primary-color);
+}
+
+#lang-icon {
+    font-size: 1rem;
+}
+
+#lang-name {
+    font-weight: 500;
+}
+
+.lang-arrow {
+    font-size: 0.65rem;
+    margin-left: 2px;
+    opacity: 0.7;
+}
+
+/* 语言下拉菜单 */
+.lang-menu {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    margin-top: 4px;
+    min-width: 160px;
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    z-index: 1000;
+    overflow: hidden;
+}
+
+.lang-menu.hidden {
+    display: none;
+}
+
+.lang-menu-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+
+.lang-menu-item:hover {
+    background: var(--hover-bg, rgba(0, 0, 0, 0.05));
+}
+
+.lang-menu-item.active {
+    background: var(--primary-color-light, rgba(52, 152, 219, 0.1));
+    color: var(--primary-color);
+}
+
+.lang-menu-flag {
+    font-size: 1.2rem;
+}
+
+.lang-menu-name {
+    flex: 1;
+    font-size: 0.9rem;
+}
+
+.lang-menu-check {
+    color: var(--primary-color);
+    font-weight: bold;
+}
+
 /* 加载动画 */
 .loading {
     display: flex;

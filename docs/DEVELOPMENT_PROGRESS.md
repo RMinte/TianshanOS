@@ -49,6 +49,91 @@
 | Phase 35: 数据源重启修复 | ✅ 完成 | 100% | 2026-02-04 |
 | Phase 36: 启动日志优化 & Config Pack 完善 | ✅ 完成 | 100% | 2026-02-04 |
 | Phase 37: 自动化配置导入导出 | ✅ 完成 | 100% | 2026-02-04 |
+| Phase 38: WebUI 多语言支持 | ✅ 完成 | 100% | 2026-02-04 |
+
+---
+
+## 📋 Phase 38: WebUI 多语言支持 ✅
+
+**时间**：2026年2月4日  
+**目标**：扩展 WebUI 国际化系统，从双语支持扩展到 8 种语言
+
+### 功能概述
+
+在原有中文、英文基础上，新增 6 种语言支持：
+- 🇯🇵 日语 (ja-JP)
+- 🇰🇷 韩语 (ko-KR)
+- 🇺🇦 乌克兰语 (uk-UA)
+- 🇪🇸 西班牙语 (es-ES)
+- 🇫🇷 法语 (fr-FR)
+- 🇩🇪 德语 (de-DE)
+
+### 新增语言包文件
+
+| 文件 | 语言 | 行数 |
+|------|------|------|
+| `js/lang/ja-JP.js` | 日本語 🇯🇵 | ~2600 |
+| `js/lang/ko-KR.js` | 한국어 🇰🇷 | ~2600 |
+| `js/lang/uk-UA.js` | Українська 🇺🇦 | ~2600 |
+| `js/lang/es-ES.js` | Español 🇪🇸 | ~2600 |
+| `js/lang/fr-FR.js` | Français 🇫🇷 | ~2600 |
+| `js/lang/de-DE.js` | Deutsch 🇩🇪 | ~2600 |
+
+### 系统文件修改
+
+| 文件 | 变更说明 |
+|------|----------|
+| `js/i18n.js` | 扩展 `supportedLanguages` 到 8 种语言；更新浏览器语言自动检测 |
+| `js/app.js` | 新增语言下拉菜单函数：`toggleLanguageMenu()`、`renderLanguageMenu()`、`selectLanguage()`；更新 `updateLanguageUI()` 支持动态语言 |
+| `css/style.css` | 新增 `.lang-menu`、`.lang-menu-item` 等下拉菜单样式 |
+| `index.html` | 添加 6 个新语言包脚本引用；语言按钮改为下拉菜单结构 |
+
+### UI 改进
+
+**语言切换器从按钮改为下拉菜单**：
+- 点击显示所有可用语言
+- 国旗 + 语言名称
+- 当前语言标记 ✓
+- 点击外部自动关闭
+
+### 浏览器语言自动检测
+
+系统会根据浏览器语言设置自动选择：
+```javascript
+const browserLang = navigator.language;
+// zh* → zh-CN, ja* → ja-JP, ko* → ko-KR
+// uk* → uk-UA, es* → es-ES, fr* → fr-FR
+// de* → de-DE, en* → en-US
+```
+
+### 翻译覆盖范围
+
+每个语言包包含完整的 UI 翻译：
+- `common` - 通用文本（确认、取消、保存等）
+- `nav` - 导航菜单
+- `login` - 登录界面
+- `toast` - 提示消息
+- `systemPage` - 系统页面
+- `networkPage` - 网络页面
+- `filesPage` - 文件管理
+- `sshPage` - SSH 管理
+- `securityPage` - 安全设置
+- `led` / `ledPage` - LED 控制
+- `fanPage` - 风扇控制
+- `dataWidget` - 数据监控组件
+- `pkiPage` - PKI 证书管理
+- `terminal` - Web 终端
+- `memoryPage` - 内存详情
+- `otaPage` - OTA 升级
+- `automationPage` - 自动化引擎
+- `dataSource` / `varPreview` / `ruleConfig` / `actionConfig` - 自动化相关
+
+### 验证
+
+- ✅ 6 个语言包文件创建完成
+- ✅ i18n.js 支持 8 种语言
+- ✅ 语言切换下拉菜单正常工作
+- ✅ 浏览器语言自动检测正常
 
 ---
 

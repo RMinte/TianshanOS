@@ -2299,8 +2299,9 @@ static esp_err_t export_template_to_file(const ts_action_template_t *tpl)
 
 /**
  * @brief 删除单个动作模板的独立文件
+ * @note 备用函数，当前删除操作在 API 层直接实现
  */
-static esp_err_t delete_template_file(const char *id)
+static esp_err_t __attribute__((unused)) delete_template_file(const char *id)
 {
     if (!id || !id[0]) return ESP_ERR_INVALID_ARG;
     

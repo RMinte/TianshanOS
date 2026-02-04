@@ -336,10 +336,16 @@ static esp_err_t power_service_start(ts_service_handle_t handle, void *user_data
         /* 不是致命错误 */
     }
     
-    /* 启动电压保护策略 */
-    ret = ts_power_policy_start();
-    if (ret != ESP_OK) {
-        ESP_LOGW(TAG, "Failed to start power policy: %s", esp_err_to_name(ret));
+    /* 根据保存的配置决定是否启动电压保护策略 */
+    if (ts_power_policy_should_auto_start()) {
+        ret = ts_power_policy_start();
+        if (ret != ESP_OK) {
+            ESP_LOGW(TAG, "Failed to start power policy: %s", esp_err_to_name(ret));
+        } else {
+            ESP_LOGI(TAG, "Power protection started (auto-start enabled)");
+        }
+    } else {
+        ESP_LOGI(TAG, "Power protection skipped (auto-start disabled in config)");
     }
     
     return ESP_OK;

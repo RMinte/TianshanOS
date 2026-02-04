@@ -49,6 +49,7 @@
 #define CONFIG_KEY_SHUTDOWN_DELAY   "power.prot.shutdown_delay"
 #define CONFIG_KEY_RECOVERY_HOLD    "power.prot.recovery_hold"
 #define CONFIG_KEY_FAN_STOP_DELAY   "power.prot.fan_delay"
+#define CONFIG_KEY_ENABLED          "power.prot.enabled"
 
 /* SD 卡配置文件路径 */
 #define CONFIG_SD_DIR               "/sdcard/config"
@@ -64,6 +65,7 @@
 typedef struct {
     bool initialized;
     bool running;
+    bool enabled_on_boot;   /* 保存的启用状态，用于重启后恢复 */
     ts_power_policy_config_t config;
     ts_power_policy_state_t state;
     
@@ -216,6 +218,14 @@ static esp_err_t load_config_from_sdcard(void)
         loaded_any = true;
     }
     
+    /* enabled 字段单独处理，用于控制服务启动时是否自动启动保护 */
+    item = cJSON_GetObjectItem(root, "enabled");
+    if (cJSON_IsBool(item)) {
+        s_pp.enabled_on_boot = cJSON_IsTrue(item);
+        TS_LOGI(TAG, "SD: enabled_on_boot = %s", s_pp.enabled_on_boot ? "true" : "false");
+        loaded_any = true;
+    }
+    
     cJSON_Delete(root);
     
     if (loaded_any) {
@@ -247,6 +257,7 @@ static esp_err_t save_config_to_sdcard(void)
     cJSON_AddNumberToObject(root, "shutdown_delay_sec", s_pp.config.shutdown_delay_sec);
     cJSON_AddNumberToObject(root, "recovery_hold_sec", s_pp.config.recovery_hold_sec);
     cJSON_AddNumberToObject(root, "fan_stop_delay_sec", s_pp.config.fan_stop_delay_sec);
+    cJSON_AddBoolToObject(root, "enabled", s_pp.running || s_pp.enabled_on_boot);
     
     /* 转换为字符串 */
     char *json_str = cJSON_Print(root);
@@ -495,6 +506,12 @@ esp_err_t ts_power_policy_init(const ts_power_policy_config_t *config)
             loaded_from_nvs = true;
         }
         
+        /* 加载 enabled 状态（默认为 true，即启用）*/
+        uint32_t stored_enabled = 1;
+        ts_config_get_uint32(CONFIG_KEY_ENABLED, &stored_enabled, 1);
+        s_pp.enabled_on_boot = (stored_enabled != 0);
+        TS_LOGI(TAG, "NVS: enabled_on_boot = %s", s_pp.enabled_on_boot ? "true" : "false");
+        
         /* 第三步：如果 SD 卡已挂载但没有配置文件，从 NVS 同步到 SD 卡 */
         if (sdcard_mounted) {
             TS_LOGI(TAG, "Syncing config from NVS to SD card");
@@ -508,6 +525,7 @@ esp_err_t ts_power_policy_init(const ts_power_policy_config_t *config)
         ts_config_set_uint32(CONFIG_KEY_SHUTDOWN_DELAY, s_pp.config.shutdown_delay_sec);
         ts_config_set_uint32(CONFIG_KEY_RECOVERY_HOLD, s_pp.config.recovery_hold_sec);
         ts_config_set_uint32(CONFIG_KEY_FAN_STOP_DELAY, s_pp.config.fan_stop_delay_sec);
+        ts_config_set_uint32(CONFIG_KEY_ENABLED, s_pp.enabled_on_boot ? 1 : 0);
         ts_config_save();
     }
     
@@ -673,6 +691,15 @@ bool ts_power_policy_is_initialized(void)
 bool ts_power_policy_is_running(void)
 {
     return s_pp.running;
+}
+
+bool ts_power_policy_should_auto_start(void)
+{
+    /* 如果未初始化，默认应该启动 */
+    if (!s_pp.initialized) {
+        return true;
+    }
+    return s_pp.enabled_on_boot;
 }
 
 ts_power_policy_state_t ts_power_policy_get_state(void)
@@ -1310,9 +1337,10 @@ esp_err_t ts_power_policy_save_config(void)
     ts_config_set_uint32(CONFIG_KEY_SHUTDOWN_DELAY, s_pp.config.shutdown_delay_sec);
     ts_config_set_uint32(CONFIG_KEY_RECOVERY_HOLD, s_pp.config.recovery_hold_sec);
     ts_config_set_uint32(CONFIG_KEY_FAN_STOP_DELAY, s_pp.config.fan_stop_delay_sec);
+    ts_config_set_uint32(CONFIG_KEY_ENABLED, s_pp.running ? 1 : 0);
     ts_config_save();
     
-    TS_LOGI(TAG, "Power policy config saved to SD card and NVS");
+    TS_LOGI(TAG, "Power policy config saved to SD card and NVS (enabled=%s)", s_pp.running ? "true" : "false");
     return ESP_OK;
 }
 
