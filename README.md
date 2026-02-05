@@ -2,6 +2,10 @@
 
 [English](README_EN.md) | [中文](README.md)
 
+[![Build Status](https://github.com/thomas-hiddenpeak/TianshanOS/actions/workflows/build.yml/badge.svg)](https://github.com/thomas-hiddenpeak/TianshanOS/actions/workflows/build.yml)
+[![Release](https://img.shields.io/github/v/release/thomas-hiddenpeak/TianshanOS)](https://github.com/thomas-hiddenpeak/TianshanOS/releases/latest)
+[![License](https://img.shields.io/github/license/thomas-hiddenpeak/TianshanOS)](LICENSE)
+
 > 天山操作系统 - ESP32 机架管理操作系统
 > 
 > 天山控制南北两大盆地——北向 AGX 提供 AI 算力，南向 LPMU 提供通用计算和存储服务
@@ -16,7 +20,7 @@
 ║      ██║   ██║██║  ██║██║ ╚████║███████║██║  ██║██║  ██║██║ ╚████║   ║
 ║      ╚═╝   ╚═╝╚═╝  ╚═╝╚═╝  ╚═══╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═══╝   ║
 ║                                                                      ║
-║                         TianShanOS v0.3.1                            ║
+║                         TianShanOS v0.4.0                            ║
 ║                ESP32 Rack Management Operating System                ║
 ║                                                                      ║
 ╚══════════════════════════════════════════════════════════════════════╝
@@ -30,15 +34,17 @@ TianShanOS 是一个**面向配置而非面向代码**的嵌入式操作系统�
 
 ### 核心特性
 
-- **完全模块化** - 220+ 个 C 源文件，110+ 个头文件，18 个独立组件
+- **完全模块化** - 236 个 C 源文件，119 个头文件，20 个独立组件
 - **面向配置** - 通过 JSON 配置文件定义硬件引脚和系统行为
 - **统一配置系统** - SD 卡优先 + NVS 备份双写，支持热插拔同步、Schema 版本迁移
+- **配置包加密** - ECDH + AES-256-GCM 混合加密，ECDSA 签名，PKI 证书集成
 - **自动化引擎** - 数据源采集、规则引擎、动作执行、变量系统
 - **OTA 升级** - HTTPS/SD 卡双通道固件升级，自动回滚保护
 - **跨平台设计** - 支持 ESP32-S3 和 ESP32-P4
 - **安全优先** - HTTPS/mTLS、SSH 公钥认证、PKI 证书管理、分级权限
 - **统一接口** - CLI 和 WebUI 共享 Core API，行为一致
-- **多语言支持** - 中英日韩多语言界面
+- **多语言支持** - 中/英/日/韩/德/法/西/乌克兰 8 种语言界面
+- **CI/CD** - GitHub Actions 自动编译、Release 发布
 
 ### 系统架构
 
@@ -69,12 +75,16 @@ TianShanOS 是一个**面向配置而非面向代码**的嵌入式操作系统�
 
 ```
 TianShanOS/
-├── components/              # ESP-IDF 组件 (18个)
+├── .github/                # GitHub 配置
+│   └── workflows/          # CI/CD 工作流
+│       └── build.yml       # 自动编译 & Release
+├── components/             # ESP-IDF 组件 (20个)
 │   ├── ts_core/            # 核心框架 (配置/事件/服务/日志)
 │   ├── ts_hal/             # 硬件抽象层 (GPIO/PWM/I2C/SPI/UART/ADC)
 │   ├── ts_console/         # 控制台 (命令/多语言/脚本引擎)
 │   ├── ts_api/             # Core API (统一接口层)
 │   ├── ts_automation/      # 自动化引擎 (数据源/规则/动作/变量)
+│   ├── ts_config_pack/     # 配置包加密 (ECDH/AES-GCM/ECDSA)
 │   ├── ts_led/             # LED 系统 (WS2812/图层/特效/滤镜)
 │   ├── ts_net/             # 网络 (WiFi/以太网/DHCP/NAT/HTTP)
 │   ├── ts_security/        # 安全 (SSH客户端/认证/加密/SFTP)
@@ -85,10 +95,12 @@ TianShanOS/
 │   ├── ts_storage/         # 存储 (SPIFFS/SD卡/文件操作)
 │   ├── ts_ota/             # OTA升级 (HTTPS/SD卡/回滚)
 │   ├── ts_drivers/         # 设备驱动 (风扇/电源/AGX/温度)
+│   ├── ts_mempool/         # 内存池管理
 │   └── ts_jsonpath/        # JSONPath 解析器
 ├── boards/                 # 板级配置 (pins.json/services.json)
 ├── main/                   # 主程序入口
 ├── docs/                   # 文档
+├── tools/                  # 构建工具 & OTA 服务器
 ├── sdcard/                 # SD 卡内容模板
 ├── partitions.csv          # 分区表 (factory 3MB + storage)
 └── sdkconfig.defaults      # 默认配置
@@ -119,11 +131,22 @@ idf.py set-target esp32s3
 # 配置项目 (TianShanOS 选项在顶层菜单)
 idf.py menuconfig
 
-# 编译
-idf.py build
+# 编译（带版本号更新）
+./tools/build.sh --fresh
 
 # 烧录并监控
 idf.py -p /dev/ttyACM0 flash monitor
+```
+
+### 预编译固件
+
+从 [Releases](https://github.com/thomas-hiddenpeak/TianshanOS/releases/latest) 下载预编译固件，使用 esptool 烧录：
+
+```bash
+esptool.py --chip esp32s3 -p /dev/ttyACM0 write_flash \
+    0x0 bootloader.bin \
+    0x8000 partition-table.bin \
+    0x10000 TianShanOS.bin
 ```
 
 ### VS Code 开发
@@ -157,8 +180,8 @@ idf.py -p /dev/ttyACM0 flash monitor
 
 ## 🎯 当前状态
 
-**版本**: 0.3.1  
-**阶段**: Phase 36 完成 - 启动日志优化 & Config Pack 完善
+**版本**: 0.4.0  
+**阶段**: Phase 38 完成 - WebUI 多语言支持 (8种语言)
 
 ### 已完成功能
 
@@ -173,9 +196,10 @@ idf.py -p /dev/ttyACM0 flash monitor
 | 网络 | WiFi、以太网 W5500、HTTP/HTTPS 服务器 |
 | 安全 | 会话管理、Token 认证、AES-GCM、RSA/EC、SSH 客户端、PKI 证书管理 |
 | 驱动 | 风扇控制、电源监控 (ADC/INA3221/PZEM)、AGX/LPMU 电源控制、USB MUX |
-| WebUI | REST API 网关、WebSocket 广播、前端仪表盘、认证系统 |
+| WebUI | REST API 网关、WebSocket 广播、前端仪表盘、认证系统、8语言国际化 |
 | OTA | 双分区升级、版本检测、完整性校验、自动回滚 |
 | 自动化引擎 | 触发器-条件-动作系统、SSH 远程执行、正则解析、变量系统、电压保护集成 |
+| CI/CD | GitHub Actions 自动编译、Tag 触发 Release 发布 |
 
 ### 配置包加密系统 (Config Pack)
 
@@ -210,7 +234,30 @@ idf.py -p /dev/ttyACM0 flash monitor
 
 ---
 
+## 🌐 多语言支持
+
+WebUI 支持 8 种语言，根据浏览器设置自动检测：
+
+| 语言 | 代码 |
+|------|------|
+| 🇨🇳 简体中文 | zh-CN |
+| 🇺🇸 English | en-US |
+| 🇯🇵 日本語 | ja-JP |
+| 🇰🇷 한국어 | ko-KR |
+| 🇩🇪 Deutsch | de-DE |
+| 🇫🇷 Français | fr-FR |
+| 🇪🇸 Español | es-ES |
+| 🇺🇦 Українська | uk-UA |
+
+---
+
 ## 👥 贡献者
 
 - Thomas (项目负责人)
 - massif-01
+
+---
+
+## 📄 许可证
+
+本项目采用 GPL-3.0 许可证，详见 [LICENSE](LICENSE) 文件。

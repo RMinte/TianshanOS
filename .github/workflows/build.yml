@@ -1,0 +1,143 @@
+name: TianShanOS Build
+
+on:
+  push:
+    branches: [main, develop]
+    tags:
+      - 'v*'  # 版本标签触发
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - '.github/copilot-instructions.md'
+  pull_request:
+    branches: [main, develop]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+  workflow_dispatch:  # 允许手动触发
+
+env:
+  IDF_VERSION: v5.5
+  TARGET: esp32s3
+
+jobs:
+  build:
+    name: Build ESP32-S3 Firmware
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # 完整历史用于版本号生成
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Cache ESP-IDF
+        uses: actions/cache@v4
+        id: cache-idf
+        with:
+          path: |
+            ~/esp/esp-idf
+            ~/.espressif
+          key: esp-idf-${{ env.IDF_VERSION }}-${{ runner.os }}
+          restore-keys: |
+            esp-idf-${{ env.IDF_VERSION }}-
+
+      - name: Install ESP-IDF
+        if: steps.cache-idf.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ~/esp
+          cd ~/esp
+          git clone -b ${{ env.IDF_VERSION }} --depth 1 --recursive https://github.com/espressif/esp-idf.git
+          cd esp-idf
+          ./install.sh ${{ env.TARGET }}
+
+      - name: Setup ESP-IDF environment
+        run: |
+          source ~/esp/esp-idf/export.sh
+          echo "IDF_PATH=$IDF_PATH" >> $GITHUB_ENV
+          echo "$IDF_PATH/tools" >> $GITHUB_PATH
+
+      - name: Cache build directory
+        uses: actions/cache@v4
+        with:
+          path: build
+          key: build-${{ env.TARGET }}-${{ hashFiles('**/CMakeLists.txt', '**/Kconfig*', 'sdkconfig.defaults') }}
+          restore-keys: |
+            build-${{ env.TARGET }}-
+
+      - name: Set target
+        run: |
+          source ~/esp/esp-idf/export.sh
+          idf.py set-target ${{ env.TARGET }}
+
+      - name: Build firmware
+        run: |
+          source ~/esp/esp-idf/export.sh
+          # 使用 --fresh 确保版本号更新
+          rm -f build/CMakeCache.txt
+          idf.py build
+
+      - name: Get version info
+        id: version
+        run: |
+          if [ -f build/project_description.json ]; then
+            VERSION=$(grep -o '"project_version":[^,]*' build/project_description.json | cut -d'"' -f4)
+            echo "version=$VERSION" >> $GITHUB_OUTPUT
+            echo "📦 Build version: $VERSION"
+          fi
+
+      - name: Print build size
+        run: |
+          source ~/esp/esp-idf/export.sh
+          idf.py size
+
+      - name: Upload firmware artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: tianshanos-firmware-${{ steps.version.outputs.version || github.sha }}
+          path: |
+            build/*.bin
+            build/bootloader/bootloader.bin
+            build/partition_table/partition-table.bin
+            build/flasher_args.json
+          retention-days: 30
+
+      - name: Upload full build (for debugging)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-debug-${{ github.sha }}
+          path: |
+            build/compile_commands.json
+            build/project_description.json
+            build/config/sdkconfig.h
+          retention-days: 7
+
+  # 可选：发布版本时创建 Release
+  release:
+    name: Create Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # 创建 Release 需要写权限
+    
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: tianshanos-firmware-*
+          path: firmware
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: firmware/**/*.bin
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
