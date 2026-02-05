@@ -17,8 +17,8 @@ const i18n = (function() {
     
     // 支持的语言列表
     const supportedLanguages = {
-        'zh-CN': { name: '简体中文', flag: '🇨🇳' },
-        'en-US': { name: 'English', flag: '🇺🇸' }
+        'zh-CN': { name: '简体中文', flag: '' },
+        'en-US': { name: 'English', flag: '' }
     };
     
     /**
@@ -168,7 +168,6 @@ function toggleLanguageMenu() {
         const currentLang = i18n.getLanguage();
         menu.innerHTML = Object.entries(langs).map(([code, info]) => `
             <div class="lang-menu-item${code === currentLang ? ' active' : ''}" onclick="selectLanguage('${code}')">
-                <span class="lang-menu-flag">${info.flag}</span>
                 <span class="lang-menu-name">${info.name}</span>
                 ${code === currentLang ? '<span class="lang-menu-check">✓</span>' : ''}
             </div>

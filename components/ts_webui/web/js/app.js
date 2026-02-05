@@ -566,13 +566,14 @@ async function loadSystemPage() {
                     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
                         <h3 style="margin:0">系统总览</h3>
                         <div style="display:flex;gap:8px">
-                            <button class="btn btn-small" onclick="showShutdownSettingsModal()" style="font-size:0.85em" title="电压保护设置"><i class="ri-flashlight-line"></i> 关机设置</button>
-                            <button id="usb-mux-btn" class="btn btn-small" onclick="toggleUsbMux()" style="font-size:0.85em"><i class="ri-usb-line"></i> USB: <span id="usb-mux-target">-</span></button>
+                            <button class="btn btn-small" onclick="showShutdownSettingsModal()" style="font-size:0.85em;color:#666" title="电压保护设置"><i class="ri-flashlight-line"></i> 关机设置</button>
+                            <button id="usb-mux-btn" class="btn btn-small" onclick="toggleUsbMux()" style="font-size:0.85em;color:#666"><i class="ri-usb-line"></i> USB: <span id="usb-mux-target">-</span></button>
                             <button class="btn btn-small btn-service-style" onclick="confirmReboot()" style="font-size:0.85em"><i class="ri-restart-line"></i> 重启</button>
                         </div>
                     </div>
                     <div class="card-content" style="display:flex;gap:20px">
                         <div style="flex:1">
+                            <p style="font-size:0.9em;color:#888;margin-bottom:5px">系统信息</p>
                             <p><strong>芯片:</strong> <span id="sys-chip">-</span></p>
                             <p><strong>固件:</strong> <span id="sys-version">-</span> / <span id="sys-idf" style="font-size:0.85em;color:#888">-</span></p>
                             <p><strong>运行:</strong> <span id="sys-uptime">-</span></p>
@@ -607,8 +608,8 @@ async function loadSystemPage() {
                             <p><strong>状态:</strong> <span id="sys-time-status">-</span> <span style="font-size:0.85em;color:#888">(<span id="sys-time-source">-</span>)</span></p>
                             <p><strong>时区:</strong> <span id="sys-timezone">-</span></p>
                             <div style="margin-top:8px;display:flex;gap:5px">
-                                <button class="btn btn-small" onclick="syncTimeFromBrowser()" style="font-size:0.85em;padding:4px 8px"><i class="ri-refresh-line"></i> 同步</button>
-                                <button class="btn btn-small" onclick="showTimezoneModal()" style="font-size:0.85em;padding:4px 8px"><i class="ri-time-line"></i> 时区</button>
+                                <button class="btn btn-small" onclick="syncTimeFromBrowser()" style="font-size:0.85em;padding:4px 8px;color:#666"><i class="ri-refresh-line"></i> 同步</button>
+                                <button class="btn btn-small" onclick="showTimezoneModal()" style="font-size:0.85em;padding:4px 8px;color:#666"><i class="ri-time-line"></i> 时区</button>
                             </div>
                         </div>
                     </div>
@@ -624,7 +625,7 @@ async function loadSystemPage() {
                         <div class="section-actions">
                             <button id="agx-power-btn" class="btn btn-sm btn-danger" onclick="toggleAgxPower()">🔴 AGX 已关闭</button>
                             <button id="lpmu-power-btn" class="btn btn-sm btn-warning" onclick="toggleLpmuPower()">⚠️ LPMU 检测中</button>
-                            <button class="btn btn-sm" onclick="showWidgetManager()" style="background:#f0f8ff;color:#666;border-color:#d0e8ff"><i class="ri-apps-line"></i> 组件管理</button>
+                            <button class="btn btn-sm btn-service-style" onclick="showWidgetManager()"><i class="ri-apps-line"></i> 组件管理</button>
                         </div>
                     </div>
                     <!-- 快捷操作区域 -->
@@ -640,7 +641,7 @@ async function loadSystemPage() {
                     <div id="data-widgets-empty" class="data-widgets-empty" style="display:none;">
                         <div class="empty-icon"><i class="ri-box-3-line"></i></div>
                         <p>还没有添加数据组件</p>
-                        <button class="btn btn-primary" onclick="showWidgetManager()">打开管理面板</button>
+                        <button class="btn btn-service-style" onclick="showWidgetManager()">打开管理面板</button>
                     </div>
                 </div>
                 
@@ -649,8 +650,8 @@ async function loadSystemPage() {
                     <div class="section-header">
                         <h2>风扇控制</h2>
                         <div class="section-actions">
-                            <button class="btn btn-sm" onclick="refreshFans()"><i class="ri-refresh-line"></i></button>
-                            <button class="btn btn-sm" onclick="showFanCurveModal()"><i class="ri-line-chart-line"></i> 曲线</button>
+                            <button class="btn btn-sm" onclick="refreshFans()" style="color:#666"><i class="ri-refresh-line"></i></button>
+                            <button class="btn btn-sm" onclick="showFanCurveModal()" style="color:#666"><i class="ri-line-chart-line"></i> 曲线</button>
                         </div>
                     </div>
                     <!-- 温度状态栏 -->
@@ -1748,7 +1749,7 @@ function renderCurvePoints() {
                     <span class="field-unit">%</span>
                 </div>
             </div>
-            <button class="btn btn-sm btn-danger curve-point-delete" 
+            <button class="btn btn-sm btn-secondary curve-point-delete" 
                     onclick="removeCurvePoint(${index})" 
                     ${fanCurveConfig.curve.length <= 2 ? 'disabled' : ''}>
                 <i class="ri-delete-bin-line"></i>
@@ -1826,11 +1827,11 @@ function drawCurvePreview() {
     const plotHeight = height - padding.top - padding.bottom;
     
     // 清空画布
-    ctx.fillStyle = getComputedStyle(document.body).getPropertyValue('--bg-card').trim() || '#1a1a2e';
+    ctx.fillStyle = getComputedStyle(document.body).getPropertyValue('--bg-color').trim() || '#f5f6fa';
     ctx.fillRect(0, 0, width, height);
     
     // 绘制网格
-    ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+    ctx.strokeStyle = 'rgba(0,0,0,0.1)';
     ctx.lineWidth = 1;
     
     // 垂直网格线 (温度轴)
@@ -1852,7 +1853,7 @@ function drawCurvePreview() {
     }
     
     // 绘制坐标轴
-    ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+    ctx.strokeStyle = 'rgba(0,0,0,0.5)';
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.moveTo(padding.left, padding.top);
@@ -1861,7 +1862,7 @@ function drawCurvePreview() {
     ctx.stroke();
     
     // 坐标轴标签
-    ctx.fillStyle = 'rgba(255,255,255,0.7)';
+    ctx.fillStyle = 'rgba(0,0,0,0.7)';
     ctx.font = '11px system-ui';
     ctx.textAlign = 'center';
     

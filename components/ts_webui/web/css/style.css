@@ -2231,7 +2231,10 @@ body {
 }
 
 .fan-mode-tab.active.manual {
-    background: #f59e0b;
+    background: #fff8e1;
+    color: #f57c00;
+    border: 1px solid #ffd54f;
+    border-radius: 4px;
 }
 
 .fan-mode-tab.active.auto {
@@ -2391,7 +2394,7 @@ body {
 }
 
 .curve-arrow {
-    color: var(--primary-color);
+    color: #333;
     font-weight: bold;
 }
 
@@ -4486,13 +4489,15 @@ body {
 }
 
 .status-badge.status-running {
-    background: #d1fae5;
-    color: #059669;
+    background: #e8f5e9;
+    color: #2e7d32;
+    border: 1px solid #a5d6a7;
 }
 
 .status-badge.status-stopped {
-    background: #fee2e2;
-    color: #dc2626;
+    background: #ffebee;
+    color: #c62828;
+    border: 1px solid #ef9a9a;
 }
 
 /* 类型标签 */
@@ -6039,7 +6044,7 @@ body {
     display: flex;
     align-items: center;
     gap: 16px;
-    padding: 12px 16px 12px 0;
+    padding: 12px 0;
     background: var(--bg-elevated);
     border-radius: 10px;
     margin-bottom: 16px;
