@@ -49,3 +49,8 @@
 .ri-temp-hot-line:before { content: "\f1f4"; }
 .ri-dashboard-3-line:before { content: "\ec12"; }
 .ri-scan-line:before { content: "\f0bd"; }
+.ri-box-3-line:before { content: "\f2f5"; }
+.ri-delete-bin-line:before { content: "\ec2a"; }
+.ri-add-line:before { content: "\ea13"; }
+.ri-arrow-right-line:before { content: "\ea6c"; }
+.ri-link-unlink:before { content: "\eeb1"; }

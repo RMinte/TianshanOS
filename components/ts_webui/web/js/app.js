@@ -638,9 +638,9 @@ async function loadSystemPage() {
                         <!-- 动态生成的组件 -->
                     </div>
                     <div id="data-widgets-empty" class="data-widgets-empty" style="display:none;">
-                        <div class="empty-icon">📊</div>
+                        <div class="empty-icon"><i class="ri-box-3-line"></i></div>
                         <p>还没有添加数据组件</p>
-                        <button class="btn btn-primary" onclick="showWidgetManager()">⚙️ 打开管理面板</button>
+                        <button class="btn btn-primary" onclick="showWidgetManager()">打开管理面板</button>
                     </div>
                 </div>
                 
@@ -682,7 +682,7 @@ async function loadSystemPage() {
             <!-- LED 控制 -->
             <div class="section">
                 <div class="led-page-header">
-                    <h2>💡 LED 控制</h2>
+                    <h2>LED 控制</h2>
                     <div class="led-quick-actions">
                         <button class="btn btn-sm" onclick="refreshSystemLeds()">🔄 刷新</button>
                         <button class="btn btn-sm" onclick="allLedsOff()">⏹ 全部关闭</button>
@@ -1604,7 +1604,7 @@ async function showFanCurveModal(fanId = 0) {
     modal.innerHTML = `
         <div class="modal-content" style="max-width:650px;">
             <div class="modal-header">
-                <h3>📈 风扇曲线管理</h3>
+                <h3>风扇曲线管理</h3>
                 <button class="modal-close" onclick="closeFanCurveModal()">&times;</button>
             </div>
             <div class="modal-body">
@@ -1620,11 +1620,11 @@ async function showFanCurveModal(fanId = 0) {
                 </div>
                 
                 <!-- 温度变量绑定 -->
-                <div class="form-group" style="background:var(--bg-tertiary); border-radius:8px; padding:12px;">
+                <div class="form-group" style="background:var(--bg-tertiary); border-radius:8px; padding:12px 0;">
                     <label style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-                        <span>🌡️ 绑定温度变量</span>
+                        <span>绑定温度变量</span>
                         <div style="display:flex; gap:8px; align-items:center;">
-                            <span id="variable-bind-status" class="badge badge-secondary">未绑定</span>
+                            <span id="variable-bind-status" class="badge" style="background:#f0f8ff;color:#007bff;border:1px solid #d0e8ff;">未绑定</span>
                             <div id="fan-curve-temp-current" style="
                                 padding:4px 12px; background:var(--bg-secondary); border-radius:6px;
                                 font-size:16px; font-weight:bold; color:var(--primary);">
@@ -1636,8 +1636,8 @@ async function showFanCurveModal(fanId = 0) {
                         <select id="temp-variable-select" class="input" style="flex:1;">
                             <option value="">-- 选择变量 --</option>
                         </select>
-                        <button class="btn btn-sm btn-primary" onclick="bindTempVariable()">💾 绑定</button>
-                        <button class="btn btn-sm btn-secondary" onclick="unbindTempVariable()">🗑️</button>
+                        <button class="btn btn-sm btn-service-style" onclick="bindTempVariable()">绑定</button>
+                        <button class="btn btn-sm btn-secondary" onclick="unbindTempVariable()"><i class="ri-delete-bin-line"></i></button>
                     </div>
                     <small class="form-hint" id="temp-source-hint" style="margin-top:4px;">
                         选择一个浮点类型变量作为温度源（如 agx.cpu_temp）
@@ -1647,8 +1647,8 @@ async function showFanCurveModal(fanId = 0) {
                 <!-- 曲线点编辑 -->
                 <div class="form-group">
                     <label style="display:flex;justify-content:space-between;align-items:center;">
-                        <span>📊 温度-转速曲线</span>
-                        <button class="btn btn-sm btn-success" onclick="addCurvePoint()">➕ 添加点</button>
+                        <span>温度-转速曲线</span>
+                        <button class="btn btn-sm btn-success" onclick="addCurvePoint()"><i class="ri-add-line"></i> 添加点</button>
                     </label>
                     <div id="fan-curve-points" class="fan-curve-points">
                         ${renderCurvePoints()}
@@ -1658,7 +1658,7 @@ async function showFanCurveModal(fanId = 0) {
                 
                 <!-- 曲线预览 -->
                 <div class="form-group">
-                    <label>📈 曲线预览</label>
+                    <label>曲线预览</label>
                     <div class="fan-curve-preview">
                         <canvas id="fan-curve-canvas" width="560" height="200"></canvas>
                     </div>
@@ -1698,7 +1698,7 @@ async function showFanCurveModal(fanId = 0) {
             </div>
             <div class="modal-footer">
                 <button class="btn" onclick="closeFanCurveModal()">取消</button>
-                <button class="btn btn-primary" onclick="applyFanCurve()">✅ 应用曲线</button>
+                <button class="btn btn-service-style" onclick="applyFanCurve()">应用曲线</button>
             </div>
         </div>
     `;
@@ -1731,16 +1731,16 @@ function renderCurvePoints() {
         <div class="curve-point-row" data-index="${index}">
             <div class="curve-point-inputs">
                 <div class="curve-point-field">
-                    <span class="field-icon">🌡️</span>
+                    <span class="field-icon"><i class="ri-temp-hot-line"></i></span>
                     <input type="number" class="input curve-temp-input" 
                            value="${point.temp}" min="-20" max="120" step="1"
                            onchange="updateCurvePoint(${index}, 'temp', this.value)"
                            placeholder="温度">
                     <span class="field-unit">°C</span>
                 </div>
-                <span class="curve-arrow">→</span>
+                <span class="curve-arrow"><i class="ri-arrow-right-line"></i></span>
                 <div class="curve-point-field">
-                    <span class="field-icon">🌀</span>
+                    <span class="field-icon"><i class="ri-dashboard-3-line"></i></span>
                     <input type="number" class="input curve-duty-input" 
                            value="${point.duty}" min="0" max="100" step="1"
                            onchange="updateCurvePoint(${index}, 'duty', this.value)"
@@ -1751,7 +1751,7 @@ function renderCurvePoints() {
             <button class="btn btn-sm btn-danger curve-point-delete" 
                     onclick="removeCurvePoint(${index})" 
                     ${fanCurveConfig.curve.length <= 2 ? 'disabled' : ''}>
-                🗑️
+                <i class="ri-delete-bin-line"></i>
             </button>
         </div>
     `).join('');
@@ -3273,13 +3273,13 @@ function showWidgetManager(editWidgetId = null) {
     modal.innerHTML = `
         <div class="modal-content dw-manager-modal">
             <div class="modal-header">
-                <h3>📊 数据监控管理</h3>
+                <h3>数据监控管理</h3>
                 <button class="modal-close" onclick="closeModal('widget-manager-modal')">&times;</button>
             </div>
             <div class="modal-body dw-manager-body">
                 <div class="dw-manager-sidebar">
                     <div class="dw-manager-section">
-                        <h4>⚙️ 面板设置</h4>
+                        <h4>面板设置</h4>
                         <div class="form-group" style="margin-bottom:15px;">
                             <label style="font-size:0.9em;">自动刷新间隔</label>
                             <div style="display:flex;gap:8px;align-items:center;">
@@ -3296,9 +3296,9 @@ function showWidgetManager(editWidgetId = null) {
                         </div>
                     </div>
                     <div class="dw-manager-section">
-                        <h4>📦 已添加组件</h4>
+                        <h4>已添加组件</h4>
                         <div id="dw-manager-list" class="dw-manager-list"></div>
-                        <button class="btn btn-primary btn-block" onclick="showAddWidgetPanel()" style="margin-top:12px;">
+                        <button class="btn btn-service-style btn-block" onclick="showAddWidgetPanel()" style="margin-top:12px;">
                             <i class="ri-add-line"></i> 添加新组件
                         </button>
                     </div>
