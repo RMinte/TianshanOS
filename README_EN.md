@@ -1,26 +1,18 @@
-# TianshanOS
+![TianshanOS](assets/tsintro.png)
 
 [English](README_EN.md) | [中文](README.md)
+
+[![Build Status](https://github.com/thomas-hiddenpeak/TianshanOS/actions/workflows/build.yml/badge.svg)](https://github.com/thomas-hiddenpeak/TianshanOS/actions/workflows/build.yml)
+[![Release](https://img.shields.io/github/v/release/thomas-hiddenpeak/TianshanOS)](https://github.com/thomas-hiddenpeak/TianshanOS/releases/latest)
+[![License](https://img.shields.io/github/license/thomas-hiddenpeak/TianshanOS)](LICENSE)
+![ESP-IDF](https://img.shields.io/badge/ESP--IDF-v5.5+-green?logo=espressif)
+![C](https://img.shields.io/badge/C-99-blue?logo=c)
+![ESP32-S3](https://img.shields.io/badge/ESP32--S3-supported-blue?logo=espressif)
+![Configuration Oriented](https://img.shields.io/badge/Configuration-Oriented-orange)
 
 > Tianshan Operating System - ESP32 Rack Management Operating System
 > 
 > Tianshan controls both the northern and southern basins — northward to AGX for AI computing power, southward to LPMU for general computing and storage services
-
-```
-╔══════════════════════════════════════════════════════════════════════╗
-║                                                                      ║
-║   ████████╗██╗ █████╗ ███╗   ██╗███████╗██╗  ██╗ █████╗ ███╗   ██╗   ║
-║   ╚══██╔══╝██║██╔══██╗████╗  ██║██╔════╝██║  ██║██╔══██╗████╗  ██║   ║
-║      ██║   ██║███████║██╔██╗ ██║███████╗███████║███████║██╔██╗ ██║   ║
-║      ██║   ██║██╔══██║██║╚██╗██║╚════██║██╔══██║██╔══██║██║╚██╗██║   ║
-║      ██║   ██║██║  ██║██║ ╚████║███████║██║  ██║██║  ██║██║ ╚████║   ║
-║      ╚═╝   ╚═╝╚═╝  ╚═╝╚═╝  ╚═══╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═══╝   ║
-║                                                                      ║
-║                           TianshanOS                                 ║
-║                ESP32 Rack Management Operating System                ║
-║                                                                      ║
-╚══════════════════════════════════════════════════════════════════════╝
-```
 
 ---
 
@@ -42,26 +34,33 @@ TianshanOS is a **configuration-oriented rather than code-oriented** embedded op
 
 ### System Architecture
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│       User Interaction Layer (CLI / WebUI / HTTPS API)          │
-├─────────────────────────────────────────────────────────────────┤
-│                    Core API Layer (ts_api)                       │
-├─────────────────────────────────────────────────────────────────┤
-│  ┌──────────────┐ ┌──────────────┐ ┌──────────────────────────┐ │
-│  │   Service    │ │  Automation  │ │    Security Module       │ │
-│  │  Management  │ │    Engine    │ │ (SSH/PKI/mTLS)           │ │
-│  │  (8-stage)   │ │ (Data/Rules) │ │                          │ │
-│  └──────────────┘ └──────────────┘ └──────────────────────────┘ │
-├─────────────────────────────────────────────────────────────────┤
-│                Event/Message Bus (ts_event)                      │
-├─────────────────────────────────────────────────────────────────┤
-│   Config Management (NVS/SD/Defaults, Priority: Mem>SD>NVS>Def) │
-├─────────────────────────────────────────────────────────────────┤
-│      Hardware Abstraction Layer (GPIO/PWM/I2C/SPI/UART/ADC)     │
-├─────────────────────────────────────────────────────────────────┤
-│          Platform Adaptation Layer (ESP32-S3 / ESP32-P4)        │
-└─────────────────────────────────────────────────────────────────┘
+```mermaid
+block-beta
+    columns 1
+    
+    block:user["User Interaction Layer"]
+        CLI WebUI["WebUI"] API["HTTPS API"]
+    end
+    
+    CoreAPI["Core API Layer (ts_api)"]
+    
+    block:services["Service Layer"]
+        SvcMgr["Service Management\n(8-stage startup)"]
+        Automation["Automation Engine\n(Data/Rules)"]
+        Security["Security Module\n(SSH/PKI/mTLS)"]
+    end
+    
+    EventBus["Event/Message Bus (ts_event)"]
+    Config["Config Management (NVS/SD/Defaults)"]
+    HAL["Hardware Abstraction Layer (GPIO/PWM/I2C/SPI/UART/ADC)"]
+    Platform["Platform Adaptation Layer (ESP32-S3 / ESP32-P4)"]
+    
+    user --> CoreAPI
+    CoreAPI --> services
+    services --> EventBus
+    EventBus --> Config
+    Config --> HAL
+    HAL --> Platform
 ```
 
 ---
