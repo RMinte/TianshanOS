@@ -54,3 +54,12 @@
 .ri-add-line:before { content: "\ea13"; }
 .ri-arrow-right-line:before { content: "\ea6c"; }
 .ri-link-unlink:before { content: "\eeb1"; }
+.ri-network-line:before { content: "\f65e"; }
+.ri-signal-wifi-3-line:before { content: "\f130"; }
+.ri-broadcast-line:before { content: "\eaf9"; }
+.ri-edit-line:before { content: "\ec86"; }
+.ri-download-line:before { content: "\ec5a"; }
+.ri-upload-line:before { content: "\f250"; }
+.ri-folder-add-line:before { content: "\ed5a"; }
+.ri-folder-line:before { content: "\ed6a"; }
+.ri-home-line:before { content: "\ee2b"; }

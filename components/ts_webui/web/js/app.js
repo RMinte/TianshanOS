@@ -6159,7 +6159,7 @@ async function loadNetworkPage() {
             <div class="net-overview">
                 <div class="net-status-row">
                     <div class="net-iface" id="net-iface-eth">
-                        <div class="iface-icon">🔌</div>
+                        <div class="iface-icon"><i class="ri-network-line"></i></div>
                         <div class="iface-info">
                             <div class="iface-name">以太网</div>
                             <div class="iface-status" id="eth-quick-status">-</div>
@@ -6167,7 +6167,7 @@ async function loadNetworkPage() {
                         <div class="iface-ip" id="eth-quick-ip">-</div>
                     </div>
                     <div class="net-iface" id="net-iface-wifi">
-                        <div class="iface-icon">📶</div>
+                        <div class="iface-icon"><i class="ri-signal-wifi-3-line"></i></div>
                         <div class="iface-info">
                             <div class="iface-name">WiFi STA</div>
                             <div class="iface-status" id="wifi-quick-status">-</div>
@@ -6175,7 +6175,7 @@ async function loadNetworkPage() {
                         <div class="iface-ip" id="wifi-quick-ip">-</div>
                     </div>
                     <div class="net-iface" id="net-iface-ap">
-                        <div class="iface-icon">📻</div>
+                        <div class="iface-icon"><i class="ri-broadcast-line"></i></div>
                         <div class="iface-info">
                             <div class="iface-name">WiFi AP</div>
                             <div class="iface-status" id="ap-quick-status">-</div>
@@ -6190,10 +6190,10 @@ async function loadNetworkPage() {
                 <!-- 左侧：接口配置 -->
                 <div class="net-panel">
                     <div class="panel-header">
-                        <h3>🔧 接口配置</h3>
+                        <h3>接口配置</h3>
                         <div class="panel-tabs">
-                            <button class="panel-tab active" onclick="switchNetTab('eth')">以太网</button>
-                            <button class="panel-tab" onclick="switchNetTab('wifi')">WiFi</button>
+                            <button class="panel-tab active btn-service-style" onclick="switchNetTab('eth')">以太网</button>
+                            <button class="panel-tab btn-service-style" onclick="switchNetTab('wifi')">WiFi</button>
                         </div>
                     </div>
                     
@@ -6294,13 +6294,12 @@ async function loadNetworkPage() {
                 <!-- 右侧：服务配置 -->
                 <div class="net-panel">
                     <div class="panel-header">
-                        <h3>🔀 网络服务</h3>
+                        <h3>网络服务</h3>
                     </div>
                     <div class="panel-content">
                         <!-- 主机名 -->
                         <div class="service-block">
                             <div class="service-header">
-                                <span class="service-icon">🏷️</span>
                                 <span class="service-name">主机名</span>
                                 <span class="service-value" id="net-hostname">-</span>
                             </div>
@@ -6313,7 +6312,6 @@ async function loadNetworkPage() {
                         <!-- DHCP 服务 -->
                         <div class="service-block">
                             <div class="service-header">
-                                <span class="service-icon">🔄</span>
                                 <span class="service-name">DHCP 服务器</span>
                                 <span class="service-badge" id="dhcp-badge">-</span>
                             </div>
@@ -6326,7 +6324,6 @@ async function loadNetworkPage() {
                         <!-- NAT 网关 -->
                         <div class="service-block">
                             <div class="service-header">
-                                <span class="service-icon">🌍</span>
                                 <span class="service-name">NAT 网关</span>
                                 <span class="service-badge" id="nat-badge">-</span>
                             </div>
@@ -6340,7 +6337,7 @@ async function loadNetworkPage() {
                             </div>
                             <div class="service-actions">
                                 <button class="btn btn-sm" id="nat-toggle-btn" onclick="toggleNat()">启用</button>
-                                <button class="btn btn-sm" onclick="saveNatConfig()">💾 保存</button>
+                                <button class="btn btn-sm" onclick="saveNatConfig()">保存</button>
                             </div>
                         </div>
                     </div>
@@ -6878,37 +6875,39 @@ async function loadFilesPage() {
     const content = document.getElementById('page-content');
     content.innerHTML = `
         <div class="page-files">
-            <div class="file-toolbar">
-                <div class="breadcrumb" id="breadcrumb"></div>
-                <div class="file-actions">
-                    <button class="btn btn-primary" onclick="showUploadDialog()">📤 上传文件</button>
-                    <button class="btn" onclick="showNewFolderDialog()">📁 新建文件夹</button>
-                    <button class="btn" onclick="refreshFilesPage()">🔄 刷新</button>
+            <div class="card file-card">
+                <div class="file-toolbar">
+                    <div class="breadcrumb" id="breadcrumb"></div>
+                    <div class="file-actions">
+                        <button class="btn btn-service-style btn-file-action" onclick="showUploadDialog()"><i class="ri-upload-line"></i> 上传文件</button>
+                        <button class="btn btn-service-style btn-file-action" onclick="showNewFolderDialog()"><i class="ri-folder-add-line"></i> 新建文件夹</button>
+                        <button class="btn btn-service-style btn-file-action" onclick="refreshFilesPage()"><i class="ri-refresh-line"></i></button>
+                    </div>
                 </div>
-            </div>
-            
-            <!-- 批量操作工具栏 -->
-            <div class="batch-toolbar hidden" id="batch-toolbar">
-                <span id="selected-count">已选择 0 项</span>
-                <button class="btn btn-sm" onclick="batchDownload()">📥 批量下载</button>
-                <button class="btn btn-sm btn-danger" onclick="batchDelete()">🗑️ 批量删除</button>
-                <button class="btn btn-sm" onclick="clearSelection()">✖️ 取消选择</button>
-            </div>
-            
-            <div class="storage-tabs">
-                <button class="tab-btn active" onclick="navigateToPath('/sdcard')">💾 SD 卡</button>
-                <button class="tab-btn" onclick="navigateToPath('/spiffs')">💿 SPIFFS</button>
-                <div class="storage-controls" id="storage-controls">
-                    <!-- 动态显示挂载/卸载按钮 -->
+                
+                <div class="storage-tabs">
+                    <button class="tab-btn btn-service-style active" onclick="navigateToPath('/sdcard')">SD 卡</button>
+                    <button class="tab-btn btn-service-style" onclick="navigateToPath('/spiffs')">SPIFFS</button>
+                    <div class="storage-controls" id="storage-controls">
+                        <!-- 动态显示挂载/卸载按钮 -->
+                    </div>
                 </div>
+                
+                <!-- 批量操作工具栏 -->
+                <div class="batch-toolbar hidden" id="batch-toolbar">
+                    <span id="selected-count">已选择 0 项</span>
+                    <button class="btn btn-sm" onclick="batchDownload()"><i class="ri-download-line"></i> 批量下载</button>
+                    <button class="btn btn-sm btn-danger" onclick="batchDelete()"><i class="ri-delete-bin-line"></i> 批量删除</button>
+                    <button class="btn btn-sm" onclick="clearSelection()">取消选择</button>
+                </div>
+                
+                <div class="file-list" id="file-list">
+                    <div class="loading">加载中...</div>
+                </div>
+                
+                <!-- 存储状态 -->
+                <div class="storage-status" id="storage-status"></div>
             </div>
-            
-            <div class="file-list" id="file-list">
-                <div class="loading">加载中...</div>
-            </div>
-            
-            <!-- 存储状态 -->
-            <div class="storage-status" id="storage-status"></div>
         </div>
         
         <!-- 上传对话框 -->
@@ -7149,7 +7148,6 @@ async function loadDirectory(path) {
                 console.log('SD card not mounted, showing mount prompt');
                 listContainer.innerHTML = `
                     <div class="unmounted-notice">
-                        <div class="unmounted-icon">💾</div>
                         <div class="unmounted-text">SD 卡未挂载</div>
                         <button class="btn btn-success" onclick="mountSdCard()">挂载 SD 卡</button>
                     </div>
@@ -7199,16 +7197,16 @@ async function loadDirectory(path) {
             <table class="file-table">
                 <thead>
                     <tr>
-                        <th style="width:30px"><input type="checkbox" id="select-all-cb" onchange="toggleSelectAll(this)" title="全选"></th>
-                        <th>名称</th>
-                        <th>大小</th>
-                        <th>操作</th>
+                        <th style="width:3%"><input type="checkbox" id="select-all-cb" onchange="toggleSelectAll(this)" title="全选"></th>
+                        <th style="width:57%">名称</th>
+                        <th style="width:15%;text-align:center">大小</th>
+                        <th style="width:25%;text-align:center">操作</th>
                     </tr>
                 </thead>
                 <tbody>
                     ${entries.map(entry => {
                         const fullPath = path + '/' + entry.name;
-                        const icon = entry.type === 'dir' ? '📁' : getFileIcon(entry.name);
+                        const icon = '';
                         const size = entry.type === 'dir' ? '-' : formatFileSize(entry.size);
                         const escapedPath = fullPath.replace(/'/g, "\\'").replace(/"/g, '&quot;');
                         const escapedName = entry.name.replace(/'/g, "\\'").replace(/"/g, '&quot;');
@@ -7220,17 +7218,9 @@ async function loadDirectory(path) {
                                            ${isSelected ? 'checked' : ''} 
                                            onchange="toggleFileSelection('${escapedPath}', this)">
                                 </td>
-                                <td class="file-name ${entry.type === 'dir' ? 'clickable' : ''}">
-                                    <span class="file-icon">${icon}</span>
-                                    <span>${entry.name}</span>
-                                </td>
+                                <td class="file-name ${entry.type === 'dir' ? 'clickable' : ''}">${entry.name}</td>
                                 <td class="file-size">${size}</td>
-                                <td class="file-actions-cell">
-                                    ${entry.type !== 'dir' ? 
-                                        `<button class="btn btn-sm btn-download" title="下载">📥</button>` : ''}
-                                    <button class="btn btn-sm btn-rename" title="重命名">✏️</button>
-                                    <button class="btn btn-sm btn-danger btn-delete" title="删除">🗑️</button>
-                                </td>
+                                <td class="file-actions-cell">${entry.type !== 'dir' ? `<button class="btn btn-sm btn-download" title="下载"><i class="ri-download-line"></i></button>` : ''}<button class="btn btn-sm btn-rename" title="重命名"><i class="ri-edit-line"></i></button><button class="btn btn-sm btn-danger btn-delete" title="删除"><i class="ri-delete-bin-line"></i></button></td>
                             </tr>
                         `;
                     }).join('')}
@@ -7250,7 +7240,6 @@ async function loadDirectory(path) {
         if (isUnmounted) {
             listContainer.innerHTML = `
                 <div class="unmounted-notice">
-                    <div class="unmounted-icon">💾</div>
                     <div class="unmounted-text">SD 卡未挂载</div>
                     <button class="btn btn-success" onclick="mountSdCard()">挂载 SD 卡</button>
                 </div>
@@ -7311,8 +7300,8 @@ async function loadStorageStatus() {
         
         container.innerHTML = `
             <div class="storage-info">
-                <span>💾 SD: ${formatStorage('sd', status.data?.sd)}</span>
-                <span>💿 SPIFFS: ${formatStorage('spiffs', status.data?.spiffs)}</span>
+                <span>SD: ${formatStorage('sd', status.data?.sd)}</span>
+                <span>SPIFFS: ${formatStorage('spiffs', status.data?.spiffs)}</span>
             </div>
         `;
         
@@ -7320,14 +7309,14 @@ async function loadStorageStatus() {
         if (controlsContainer) {
             if (sdMounted) {
                 controlsContainer.innerHTML = `
-                    <button class="btn btn-sm btn-warning" onclick="unmountSdCard()" title="卸载 SD 卡">
-                        ⏏️ 卸载 SD
+                    <button class="btn btn-sm btn-service-style" onclick="unmountSdCard()" title="卸载 SD 卡">
+                        卸载 SD
                     </button>
                 `;
             } else {
                 controlsContainer.innerHTML = `
                     <button class="btn btn-sm btn-success" onclick="mountSdCard()" title="挂载 SD 卡">
-                        💾 挂载 SD
+                        挂载 SD
                     </button>
                 `;
             }
@@ -7341,7 +7330,7 @@ function updateBreadcrumb(path) {
     const container = document.getElementById('breadcrumb');
     const parts = path.split('/').filter(p => p);
     
-    let html = '<span class="breadcrumb-item" onclick="navigateToPath(\'/\')">🏠</span>';
+    let html = '<span class="breadcrumb-item" onclick="navigateToPath(\'/\')"><i class="ri-home-line"></i></span>';
     let currentPath = '';
     
     parts.forEach((part, i) => {
@@ -7359,18 +7348,7 @@ function navigateToPath(path) {
 }
 
 function getFileIcon(name) {
-    const ext = name.split('.').pop().toLowerCase();
-    const icons = {
-        'txt': '📄', 'json': '📋', 'xml': '📋', 'csv': '📊',
-        'jpg': '🖼️', 'jpeg': '🖼️', 'png': '🖼️', 'gif': '🖼️', 'bmp': '🖼️',
-        'mp3': '🎵', 'wav': '🎵', 'ogg': '🎵',
-        'mp4': '🎬', 'avi': '🎬', 'mkv': '🎬',
-        'zip': '📦', 'rar': '📦', 'tar': '📦', 'gz': '📦',
-        'bin': '💾', 'hex': '💾', 'elf': '💾',
-        'c': '📝', 'h': '📝', 'cpp': '📝', 'py': '📝', 'js': '📝',
-        'fnt': '🔤', 'ttf': '🔤'
-    };
-    return icons[ext] || '📄';
+    return '';
 }
 
 function formatFileSize(bytes) {

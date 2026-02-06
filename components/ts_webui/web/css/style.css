@@ -2743,6 +2743,20 @@ body {
     gap: 8px;
 }
 
+/* 文件页面白色卡片容器 */
+.file-card {
+    background: var(--card-bg);
+    border-radius: 8px;
+    padding: 20px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+/* 文件操作按钮与登出按钮大小一致 */
+.btn-file-action {
+    padding: 4px 12px !important;
+    font-size: 0.85rem !important;
+}
+
 .storage-tabs {
     display: flex;
     gap: 5px;
@@ -2776,8 +2790,28 @@ body {
     border-color: #ffb74d;
 }
 
+.tab-btn.btn-service-style {
+    padding: 4px 12px;
+    font-size: 0.85rem;
+    background: #f0f8ff;
+    color: #007bff;
+    border: 1px solid #d0e8ff;
+}
+
+.tab-btn.btn-service-style:hover {
+    background: #e0f0ff;
+    border-color: #b0d8ff;
+}
+
+.tab-btn.btn-service-style.active {
+    background: #007bff;
+    color: white;
+    border-color: #007bff;
+}
+
 .tab-btn {
-    padding: 8px 16px;
+    padding: 4px 12px;
+    font-size: 0.85rem;
     border: 1px solid var(--border-color);
     background: var(--card-bg);
     cursor: pointer;
@@ -2818,16 +2852,15 @@ body {
 .file-table td {
     padding: 10px 15px;
     border-bottom: 1px solid var(--border-color);
+    vertical-align: middle;
+}
+
+.file-table tbody tr:last-child td {
+    border-bottom: none;
 }
 
 .file-row:hover {
     background: rgba(52, 152, 219, 0.05);
-}
-
-.file-name {
-    display: flex;
-    align-items: center;
-    gap: 10px;
 }
 
 .file-name.clickable {
@@ -2839,23 +2872,22 @@ body {
     text-decoration: underline;
 }
 
-.file-icon {
-    font-size: 1.2rem;
-}
-
 .file-size {
     color: var(--text-light);
     font-size: 0.9rem;
+    text-align: center;
 }
 
 .file-actions-cell {
-    display: flex;
-    gap: 5px;
+    white-space: nowrap;
+    text-align: center;
 }
 
 .file-actions-cell .btn-sm {
     padding: 4px 8px;
     font-size: 0.8rem;
+    display: inline-block;
+    margin: 0 2px;
 }
 
 .empty-folder {
@@ -2901,7 +2933,11 @@ body {
 }
 
 .storage-info .mounted {
-    color: var(--secondary-color);
+    color: #2e7d32;
+    background: #e8f5e9;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 0.85em;
 }
 
 .storage-info .unmounted {
@@ -3296,8 +3332,10 @@ body {
     align-items: center;
     justify-content: space-between;
     padding: 12px 16px;
+    height: 48px;
+    box-sizing: border-box;
     border-bottom: 1px solid var(--border-color);
-    background: var(--bg-color);
+    background: #fff;
 }
 
 .panel-header h3 {
@@ -3328,6 +3366,27 @@ body {
 .panel-tab.active {
     background: var(--primary-color);
     color: white;
+}
+
+/* 网络页面 Tab 按钮使用登录按钮样式 */
+.panel-tab.btn-service-style {
+    padding: 4px 12px;
+    font-size: 0.85rem;
+    background: #f0f8ff !important;
+    color: #007bff !important;
+    border: 1px solid #d0e8ff;
+    border-radius: 4px;
+}
+
+.panel-tab.btn-service-style:hover {
+    background: #e0f0ff !important;
+    border-color: #b0d8ff;
+}
+
+.panel-tab.btn-service-style.active {
+    background: #007bff !important;
+    color: white !important;
+    border-color: #007bff;
 }
 
 .panel-content {
