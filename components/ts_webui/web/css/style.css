@@ -56,7 +56,10 @@ body {
 }
 
 .logo-icon {
-    font-size: 1.8rem;
+    width: 32px;
+    height: 32px;
+    object-fit: contain;
+    display: block;
 }
 
 .nav {
@@ -66,7 +69,7 @@ body {
 }
 
 .nav-link {
-    color: var(--text-light);
+    color: #666;
     text-decoration: none;
     padding: 8px 12px;
     border-radius: 4px;
@@ -74,8 +77,8 @@ body {
 }
 
 .nav-link:hover, .nav-link.active {
-    color: var(--primary-color);
-    background: rgba(52, 152, 219, 0.1);
+    color: #007bff;
+    background: #f0f8ff;
 }
 
 .user-menu {
@@ -89,24 +92,19 @@ body {
 .main {
     flex: 1;
     margin-top: var(--header-height);
-    margin-bottom: var(--footer-height);
     padding: 20px;
 }
 
 /* Footer */
 .footer {
     height: var(--footer-height);
-    background: var(--card-bg);
-    border-top: 1px solid var(--border-color);
+    background: transparent;
+    border-top: none;
     display: flex;
     align-items: center;
     justify-content: center;
     color: var(--text-light);
     font-size: 0.9rem;
-    position: fixed;
-    bottom: 0;
-    left: 0;
-    right: 0;
 }
 
 /* Cards */
@@ -114,7 +112,7 @@ body {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
     gap: 20px;
-    margin-top: 20px;
+    margin-top: 0;
 }
 
 .card {
@@ -150,6 +148,11 @@ body {
     transition: width 0.3s;
 }
 
+/* DRAM/PSRAM 进度条使用 btn-service-style 蓝色 */
+#heap-progress, #psram-progress {
+    background: #007bff;
+}
+
 /* Buttons */
 .btn {
     padding: 8px 16px;
@@ -172,8 +175,9 @@ body {
 }
 
 .btn-danger {
-    background: var(--danger-color);
-    color: white;
+    background: #ffebee;
+    border-color: #ef9a9a;
+    color: #c62828;
 }
 
 /* Modal */
@@ -874,15 +878,27 @@ body {
 }
 
 .toast-success {
-    background: var(--secondary-color);
+    background: #e8f5e9;
+    color: #2e7d32;
+    border: 1px solid #a5d6a7;
 }
 
 .toast-error {
-    background: var(--danger-color);
+    background: #ffebee;
+    color: #c62828;
+    border: 1px solid #ef9a9a;
+}
+
+.toast-warning {
+    background: #fff8e1;
+    color: #f57c00;
+    border: 1px solid #ffd54f;
 }
 
 .toast-info {
-    background: var(--primary-color);
+    background: #f0f8ff;
+    color: #007bff;
+    border: 1px solid #d0e8ff;
 }
 
 /* 数据表格 */
@@ -2300,8 +2316,15 @@ body {
     background: #6b7280;
 }
 
+.fan-mode-tab.manual {
+    border-radius: 4px;
+    border: 1px solid var(--border-color);
+}
+
 .fan-mode-tab.active.manual {
-    background: #f59e0b;
+    background: #fff8e1;
+    color: #f57c00;
+    border: 1px solid #ffd54f;
 }
 
 .fan-mode-tab.active.auto {
@@ -2461,7 +2484,7 @@ body {
 }
 
 .curve-arrow {
-    color: var(--primary-color);
+    color: #333;
     font-weight: bold;
 }
 
@@ -2647,7 +2670,7 @@ body {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 10px 0;
+    padding-bottom: 10px;
     border-bottom: 1px solid var(--border-color);
     margin-bottom: 10px;
 }
@@ -2801,6 +2824,20 @@ body {
     gap: 8px;
 }
 
+/* 文件页面白色卡片容器 */
+.file-card {
+    background: var(--card-bg);
+    border-radius: 8px;
+    padding: 20px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+/* 文件操作按钮与登出按钮大小一致 */
+.btn-file-action {
+    padding: 4px 12px !important;
+    font-size: 0.85rem !important;
+}
+
 .storage-tabs {
     display: flex;
     gap: 5px;
@@ -2813,29 +2850,69 @@ body {
 }
 
 .btn-success {
-    background-color: #22c55e;
-    border-color: #22c55e;
-    color: white;
+    background-color: #e8f5e9;
+    border-color: #a5d6a7;
+    color: #2e7d32;
 }
 
 .btn-success:hover {
-    background-color: #16a34a;
-    border-color: #16a34a;
+    background-color: #c8e6c9;
+    border-color: #81c784;
 }
 
 .btn-warning {
-    background-color: #f59e0b;
-    border-color: #f59e0b;
-    color: white;
+    background-color: #fff8e1;
+    border-color: #ffd54f;
+    color: #f57c00;
 }
 
 .btn-warning:hover {
-    background-color: #d97706;
-    border-color: #d97706;
+    background-color: #ffecb3;
+    border-color: #ffb74d;
+}
+
+.tab-btn.btn-service-style {
+    padding: 4px 12px;
+    font-size: 0.85rem;
+    background: #f0f8ff;
+    color: #007bff;
+    border: 1px solid #d0e8ff;
+}
+
+.tab-btn.btn-service-style:hover {
+    background: #e0f0ff;
+    border-color: #b0d8ff;
+}
+
+.tab-btn.btn-service-style.active {
+    background: #007bff;
+    color: white;
+    border-color: #007bff;
+}
+
+/* 灰色 Tab 按钮样式（SD卡、SPIFFS） */
+.tab-btn.btn-gray {
+    padding: 4px 12px;
+    font-size: 0.85rem;
+    background: #f5f6fa;
+    color: #666;
+    border: 1px solid #dcdfe6;
+}
+
+.tab-btn.btn-gray:hover {
+    background: #ebeef5;
+    border-color: #c0c4cc;
+}
+
+.tab-btn.btn-gray.active {
+    background: #666;
+    color: white;
+    border-color: #666;
 }
 
 .tab-btn {
-    padding: 8px 16px;
+    padding: 4px 12px;
+    font-size: 0.85rem;
     border: 1px solid var(--border-color);
     background: var(--card-bg);
     cursor: pointer;
@@ -2876,16 +2953,15 @@ body {
 .file-table td {
     padding: 10px 15px;
     border-bottom: 1px solid var(--border-color);
+    vertical-align: middle;
+}
+
+.file-table tbody tr:last-child td {
+    border-bottom: none;
 }
 
 .file-row:hover {
     background: rgba(52, 152, 219, 0.05);
-}
-
-.file-name {
-    display: flex;
-    align-items: center;
-    gap: 10px;
 }
 
 .file-name.clickable {
@@ -2897,23 +2973,22 @@ body {
     text-decoration: underline;
 }
 
-.file-icon {
-    font-size: 1.2rem;
-}
-
 .file-size {
     color: var(--text-light);
     font-size: 0.9rem;
+    text-align: center;
 }
 
 .file-actions-cell {
-    display: flex;
-    gap: 5px;
+    white-space: nowrap;
+    text-align: center;
 }
 
 .file-actions-cell .btn-sm {
     padding: 4px 8px;
     font-size: 0.8rem;
+    display: inline-block;
+    margin: 0 2px;
 }
 
 .empty-folder {
@@ -2959,7 +3034,11 @@ body {
 }
 
 .storage-info .mounted {
-    color: var(--secondary-color);
+    color: #2e7d32;
+    background: #e8f5e9;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 0.85em;
 }
 
 .storage-info .unmounted {
@@ -3354,8 +3433,10 @@ body {
     align-items: center;
     justify-content: space-between;
     padding: 12px 16px;
+    height: 48px;
+    box-sizing: border-box;
     border-bottom: 1px solid var(--border-color);
-    background: var(--bg-color);
+    background: #fff;
 }
 
 .panel-header h3 {
@@ -3386,6 +3467,27 @@ body {
 .panel-tab.active {
     background: var(--primary-color);
     color: white;
+}
+
+/* 网络页面 Tab 按钮使用登录按钮样式 */
+.panel-tab.btn-service-style {
+    padding: 4px 12px;
+    font-size: 0.85rem;
+    background: #f0f8ff !important;
+    color: #007bff !important;
+    border: 1px solid #d0e8ff;
+    border-radius: 4px;
+}
+
+.panel-tab.btn-service-style:hover {
+    background: #e0f0ff !important;
+    border-color: #b0d8ff;
+}
+
+.panel-tab.btn-service-style.active {
+    background: #007bff !important;
+    color: white !important;
+    border-color: #007bff;
 }
 
 .panel-content {
@@ -3442,7 +3544,7 @@ body {
     margin-right: 6px;
 }
 
-.status-dot.green { background: var(--secondary-color); }
+.status-dot.green { background: #2e7d32; }
 .status-dot.red { background: var(--danger-color); }
 .status-dot.gray { background: #999; }
 .status-dot.yellow { background: var(--warning-color); }
@@ -3951,6 +4053,7 @@ body {
     width: 100%;
     border-collapse: collapse;
     font-size: 0.85rem;
+    color: #666;
 }
 
 .memory-table th,
@@ -3963,7 +4066,7 @@ body {
 .memory-table th {
     background: var(--bg-color);
     font-weight: 600;
-    color: var(--text-light);
+    color: #666;
     font-size: 0.8rem;
     text-transform: uppercase;
 }
@@ -4030,9 +4133,9 @@ body {
 .memory-static-sections {
     margin-top: 16px;
     padding: 12px 16px;
-    background: linear-gradient(135deg, #e8f4f8 0%, #f0f7fa 100%);
+    background: #f0f8ff;
     border-radius: 8px;
-    border: 1px solid #d0e8f0;
+    border: 1px solid #d0e8ff;
 }
 
 .static-grid {
@@ -4081,9 +4184,9 @@ body {
 .memory-iram {
     margin-top: 16px;
     padding: 12px 16px;
-    background: linear-gradient(135deg, #fff3e0 0%, #fff8e1 100%);
+    background: #fff8e1;
     border-radius: 8px;
-    border: 1px solid #ffe0b2;
+    border: 1px solid #ffd54f;
 }
 
 .iram-grid {
@@ -4111,16 +4214,16 @@ body {
 .iram-value {
     font-size: 1rem;
     font-weight: 600;
-    color: #e65100;
+    color: #f57c00;
 }
 
 /* RTC 内存 */
 .memory-rtc {
     margin-top: 16px;
     padding: 12px 16px;
-    background: linear-gradient(135deg, #f3e5f5 0%, #fce4ec 100%);
+    background: #fff8e1;
     border-radius: 8px;
-    border: 1px solid #e1bee7;
+    border: 1px solid #ffd54f;
 }
 
 .rtc-labels {
@@ -4556,13 +4659,15 @@ body {
 }
 
 .status-badge.status-running {
-    background: #d1fae5;
-    color: #059669;
+    background: #e8f5e9;
+    color: #2e7d32;
+    border: 1px solid #a5d6a7;
 }
 
 .status-badge.status-stopped {
-    background: #fee2e2;
-    color: #dc2626;
+    background: #ffebee;
+    color: #c62828;
+    border: 1px solid #ef9a9a;
 }
 
 /* 类型标签 */
@@ -6109,7 +6214,7 @@ body {
     display: flex;
     align-items: center;
     gap: 16px;
-    padding: 12px 16px;
+    padding: 12px 0;
     background: var(--bg-elevated);
     border-radius: 10px;
     margin-bottom: 16px;
@@ -7251,6 +7356,48 @@ body {
 }
 
 /* =========================================================================
+   TianshanOS UI/UX Updates - RemixIcon & Unified Styles
+   ========================================================================= */
+
+/* RemixIcon 图标样式 */
+.ri-question-line,
+.ri-service-line,
+.ri-restart-line,
+.ri-download-cloud-line,
+.ri-refresh-line,
+.ri-time-line,
+.ri-usb-line {
+  font-style: normal;
+  line-height: 1;
+  display: inline-block;
+  vertical-align: middle;
+}
+
+/* 服务徽章统一样式 */
+.service-badge,
+.btn-service-style {
+  background: #f0f8ff !important;
+  color: #007bff !important;
+  border-radius: 4px;
+  padding: 4px 12px;
+  border: 1px solid #d0e8ff;
+}
+
+.btn-service-style:hover {
+  background: #e0f0ff !important;
+  border-color: #b0d8ff;
+}
+
+/* 深灰色文本（用于服务状态） */
+.text-gray {
+  color: #666 !important;
+}
+
+/* 健康状态图标颜色 */
+.health-ok { color: #27ae60; }
+.health-fail { color: #e74c3c; }
+
+/* =========================================================================
  *  SSH 指令 - 服务模式样式
  * ========================================================================= */
 
@@ -7426,4 +7573,3 @@ body {
 .quick-action-card.has-service.is-running {
     /* 统一高度，不再额外增加 padding */
 }
-

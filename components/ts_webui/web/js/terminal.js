@@ -1,5 +1,5 @@
 /**
- * TianShanOS Web Terminal
+ * TianshanOS Web Terminal
  * 基于 xterm.js 的 Web 终端实现
  */
 
@@ -84,7 +84,7 @@ class WebTerminal {
 
         // 显示欢迎信息
         this.writeln('\x1b[1;36m╔══════════════════════════════════════════╗\x1b[0m');
-        this.writeln('\x1b[1;36m║\x1b[0m     \x1b[1;33m⛰️  TianShanOS Web Terminal\x1b[0m          \x1b[1;36m║\x1b[0m');
+        this.writeln('\x1b[1;36m║\x1b[0m     \x1b[1;33m⛰️  TianshanOS Web Terminal\x1b[0m          \x1b[1;36m║\x1b[0m');
         this.writeln('\x1b[1;36m╚══════════════════════════════════════════╝\x1b[0m');
         this.writeln('');
         this.writeln('正在连接到设备...');

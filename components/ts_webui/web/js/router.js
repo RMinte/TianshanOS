@@ -1,5 +1,5 @@
 /**
- * TianShanOS SPA Router
+ * TianshanOS SPA Router
  * 简单的 Hash 路由器，带认证保护
  */
 

@@ -1,5 +1,7 @@
 # TianShanOS
 
+[English](README_EN.md) | [中文](README.md)
+
 [![Build Status](https://github.com/thomas-hiddenpeak/TianshanOS/actions/workflows/build.yml/badge.svg)](https://github.com/thomas-hiddenpeak/TianshanOS/actions/workflows/build.yml)
 [![Release](https://img.shields.io/github/v/release/thomas-hiddenpeak/TianshanOS)](https://github.com/thomas-hiddenpeak/TianshanOS/releases/latest)
 [![License](https://img.shields.io/github/license/thomas-hiddenpeak/TianshanOS)](LICENSE)

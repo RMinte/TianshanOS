@@ -18,7 +18,7 @@
 #define TAG "ts_net"
 
 static bool s_initialized = false;
-static char s_hostname[32] = "tianshanOS";
+static char s_hostname[32] = "TianshanOS";
 static char s_ip_str[16];
 
 #ifdef CONFIG_TS_NET_MDNS_ENABLE

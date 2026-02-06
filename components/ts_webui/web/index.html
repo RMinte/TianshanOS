@@ -3,8 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>TianShanOS</title>
+    <title>TianshanOS</title>
     <link rel="stylesheet" href="/css/style.css">
+    <link rel="stylesheet" href="/fonts/remixicon.css">
     <link rel="icon" href="/favicon.ico" type="image/x-icon">
     <!-- xterm.js -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css">
@@ -15,8 +16,8 @@
     <div id="app">
         <header class="header">
             <div class="logo">
-                <span class="logo-icon">⛰️</span>
-                <span class="logo-text">TianShanOS</span>
+                <img src="/images/tslogo-48.png" alt="TianshanOS Logo" class="logo-icon">
+                <span class="logo-text">TianshanOS</span>
             </div>
             <nav class="nav">
                 <a href="#/" class="nav-link active" data-i18n="nav.system">系统</a>
@@ -30,7 +31,6 @@
             <div class="ws-status" id="ws-status" data-i18n-title="network.connected"></div>
             <div class="lang-switch" id="lang-switch" title="切换语言 / Switch Language">
                 <button class="btn btn-sm lang-btn" onclick="toggleLanguageMenu()">
-                    <span id="lang-icon">🌐</span>
                     <span id="lang-name">中文</span>
                     <span class="lang-arrow">▼</span>
                 </button>
@@ -55,7 +55,7 @@
         </main>
         
         <footer class="footer">
-            <p>TianShanOS <span id="footer-version">v0.1.0</span> | &copy; 2026</p>
+            <p>&copy; 2026 TianshanOS, RMinte AI Technology Co., Ltd.</p>
         </footer>
     </div>
     
@@ -63,7 +63,7 @@
     <div id="login-modal" class="modal hidden">
         <div class="modal-content" style="max-width:350px;">
             <div class="modal-header">
-                <h2>🔐 <span data-i18n="login.welcome">登录 TianShanOS</span></h2>
+                <h2><i class="ri-door-open-line"></i> <span data-i18n="login.welcome">登录 TianshanOS</span></h2>
             </div>
             <form id="login-form">
                 <div class="modal-body">
@@ -128,7 +128,7 @@
     <div id="memory-detail-modal" class="modal hidden">
         <div class="modal-content memory-detail-modal">
             <div class="modal-header">
-                <h2>🧠 <span data-i18n="system.memoryDetail">内存详细分析</span></h2>
+                <h2><span data-i18n="system.memoryDetail">内存详细分析</span></h2>
                 <button class="modal-close" onclick="hideMemoryDetailModal()">&times;</button>
             </div>
             <div class="modal-body" id="memory-detail-body">
@@ -136,7 +136,7 @@
             </div>
             <div class="modal-footer" style="margin-top:16px;padding-top:12px;border-top:1px solid var(--border-color);display:flex;justify-content:space-between;align-items:center">
                 <span id="memory-detail-timestamp" style="font-size:0.8em;color:#888">-</span>
-                <button class="btn btn-primary" onclick="refreshMemoryDetail()">🔄 <span data-i18n="common.refresh">刷新</span></button>
+                <button class="btn btn-primary" onclick="refreshMemoryDetail()"><i class="ri-refresh-line"></i> <span data-i18n="common.refresh">刷新</span></button>
             </div>
         </div>
     </div>

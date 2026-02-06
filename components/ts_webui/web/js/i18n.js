@@ -17,8 +17,8 @@ const i18n = (function() {
     
     // 支持的语言列表
     const supportedLanguages = {
-        'zh-CN': { name: '简体中文', flag: '🇨🇳' },
-        'en-US': { name: 'English', flag: '🇺🇸' }
+        'zh-CN': { name: '简体中文', flag: '' },
+        'en-US': { name: 'English', flag: '' }
     };
     
     /**
@@ -156,3 +156,65 @@ const t = i18n.translate;
 const setLanguage = i18n.setLanguage;
 const getLanguage = i18n.getLanguage;
 const translateDOM = i18n.translateDOM;
+
+// 语言切换菜单
+function toggleLanguageMenu() {
+    const menu = document.getElementById('lang-menu');
+    if (!menu) return;
+    
+    if (menu.classList.contains('hidden')) {
+        // 填充语言列表
+        const langs = i18n.getSupportedLanguages();
+        const currentLang = i18n.getLanguage();
+        menu.innerHTML = Object.entries(langs).map(([code, info]) => `
+            <div class="lang-menu-item${code === currentLang ? ' active' : ''}" onclick="selectLanguage('${code}')">
+                <span class="lang-menu-name">${info.name}</span>
+                ${code === currentLang ? '<span class="lang-menu-check">✓</span>' : ''}
+            </div>
+        `).join('');
+        menu.classList.remove('hidden');
+        
+        // 点击外部关闭
+        setTimeout(() => {
+            document.addEventListener('click', closeLangMenuOnClickOutside);
+        }, 10);
+    } else {
+        menu.classList.add('hidden');
+    }
+}
+
+function closeLangMenuOnClickOutside(e) {
+    const langSwitch = document.getElementById('lang-switch');
+    if (langSwitch && !langSwitch.contains(e.target)) {
+        const menu = document.getElementById('lang-menu');
+        if (menu) menu.classList.add('hidden');
+        document.removeEventListener('click', closeLangMenuOnClickOutside);
+    }
+}
+
+function selectLanguage(lang) {
+    if (i18n.setLanguage(lang)) {
+        // 更新按钮显示
+        const langs = i18n.getSupportedLanguages();
+        const nameEl = document.getElementById('lang-name');
+        if (nameEl && langs[lang]) {
+            nameEl.textContent = langs[lang].name.split(' ')[0]; // 简短名称
+        }
+        // 翻译整个页面
+        i18n.translateDOM();
+        // 关闭菜单
+        const menu = document.getElementById('lang-menu');
+        if (menu) menu.classList.add('hidden');
+    }
+}
+
+// 页面加载时初始化语言按钮
+document.addEventListener('DOMContentLoaded', function() {
+    i18n.init();
+    const langs = i18n.getSupportedLanguages();
+    const currentLang = i18n.getLanguage();
+    const nameEl = document.getElementById('lang-name');
+    if (nameEl && langs[currentLang]) {
+        nameEl.textContent = currentLang === 'zh-CN' ? '中文' : 'EN';
+    }
+});

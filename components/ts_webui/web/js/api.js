@@ -1,5 +1,5 @@
 /**
- * TianShanOS API Client
+ * TianshanOS API Client
  * 
  * 统一的 Core API 调用客户端，支持所有已注册的 API 端点
  */
