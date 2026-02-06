@@ -36,32 +36,13 @@ TianshanOS 是一个**面向配置而非面向代码**的嵌入式操作系统�
 ### 系统架构
 
 ```mermaid
-block-beta
-    columns 1
-    
-    block:user["用户交互层"]
-        CLI WebUI["WebUI"] API["HTTPS API"]
-    end
-    
-    CoreAPI["Core API 层 (ts_api)"]
-    
-    block:services["服务层"]
-        SvcMgr["服务管理层\n(8阶段启动)"]
-        Automation["自动化引擎\n(数据源/规则)"]
-        Security["安全模块\n(SSH/PKI/mTLS)"]
-    end
-    
-    EventBus["事件/消息总线 (ts_event)"]
-    Config["配置管理层 (NVS/SD卡/默认值)"]
-    HAL["硬件抽象层 (GPIO/PWM/I2C/SPI/UART/ADC)"]
-    Platform["平台适配层 (ESP32-S3 / ESP32-P4)"]
-    
-    user --> CoreAPI
-    CoreAPI --> services
-    services --> EventBus
-    EventBus --> Config
-    Config --> HAL
-    HAL --> Platform
+flowchart TB
+    UI["CLI / WebUI / HTTPS API"] --> API["Core API (ts_api)"]
+    API --> S1["服务管理"] & S2["自动化引擎"] & S3["安全模块"]
+    S1 & S2 & S3 --> Event["事件总线 (ts_event)"]
+    Event --> Config["配置管理 (NVS/SD卡)"]
+    Config --> HAL["硬件抽象层 (GPIO/PWM/I2C/SPI/UART/ADC)"]
+    HAL --> Platform["平台适配层 (ESP32-S3 / ESP32-P4)"]
 ```
 
 ---

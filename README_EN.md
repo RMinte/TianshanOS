@@ -35,32 +35,13 @@ TianshanOS is a **configuration-oriented rather than code-oriented** embedded op
 ### System Architecture
 
 ```mermaid
-block-beta
-    columns 1
-    
-    block:user["User Interaction Layer"]
-        CLI WebUI["WebUI"] API["HTTPS API"]
-    end
-    
-    CoreAPI["Core API Layer (ts_api)"]
-    
-    block:services["Service Layer"]
-        SvcMgr["Service Management\n(8-stage startup)"]
-        Automation["Automation Engine\n(Data/Rules)"]
-        Security["Security Module\n(SSH/PKI/mTLS)"]
-    end
-    
-    EventBus["Event/Message Bus (ts_event)"]
-    Config["Config Management (NVS/SD/Defaults)"]
-    HAL["Hardware Abstraction Layer (GPIO/PWM/I2C/SPI/UART/ADC)"]
-    Platform["Platform Adaptation Layer (ESP32-S3 / ESP32-P4)"]
-    
-    user --> CoreAPI
-    CoreAPI --> services
-    services --> EventBus
-    EventBus --> Config
-    Config --> HAL
-    HAL --> Platform
+flowchart TB
+    UI["CLI / WebUI / HTTPS API"] --> API["Core API (ts_api)"]
+    API --> S1["Service Mgmt"] & S2["Automation"] & S3["Security"]
+    S1 & S2 & S3 --> Event["Event Bus (ts_event)"]
+    Event --> Config["Config Management (NVS/SD)"]
+    Config --> HAL["HAL (GPIO/PWM/I2C/SPI/UART/ADC)"]
+    HAL --> Platform["Platform Layer (ESP32-S3 / ESP32-P4)"]
 ```
 
 ---
