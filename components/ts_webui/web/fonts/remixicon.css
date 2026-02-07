@@ -119,3 +119,10 @@
 .ri-terminal-box-line:before { content: "\f1f6"; }
 .ri-folder-open-line:before { content: "\ed70"; }
 .ri-image-line:before { content: "\ee4b"; }
+
+/* Security page */
+.ri-lock-unlock-line:before { content: "\eed2"; }
+.ri-eye-line:before { content: "\ecb5"; }
+.ri-error-warning-line:before { content: "\eca1"; }
+.ri-arrow-up-s-line:before { content: "\ea78"; }
+.ri-checkbox-blank-circle-line:before { content: "\eb7d"; }

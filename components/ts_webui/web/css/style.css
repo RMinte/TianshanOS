@@ -2940,6 +2940,11 @@ body {
 .page-network h1,
 .page-device h1,
 .page-config h1,
+/* 安全页面：第一个 section 与顶栏间距与指令等页面一致 */
+.page-security .section:first-child {
+    margin-top: 0;
+}
+
 .page-security h1,
 .dashboard h1 {
     font-size: 1.8rem;
@@ -7781,7 +7786,18 @@ body {
 .ri-download-cloud-line,
 .ri-refresh-line,
 .ri-time-line,
-.ri-usb-line {
+.ri-usb-line,
+.ri-information-line,
+.ri-add-line,
+.ri-upload-line,
+.ri-download-line,
+.ri-rocket-line,
+.ri-alert-line,
+.ri-error-warning-line,
+.ri-lock-unlock-line,
+.ri-close-line,
+.ri-eye-line,
+.ri-delete-bin-line {
   font-style: normal;
   line-height: 1;
   display: inline-block;

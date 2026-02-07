@@ -10,6 +10,7 @@ keywords:
   - known host fingerprints
   - HTTPS certificates
   - mTLS
+  - config pack
   - admin user
   - operation guide
 ---
@@ -35,16 +36,18 @@ The **Security** page is TianshanOS’s security hub. It centralizes the followi
 
 As an **admin user**, you can access **every feature** on the security page, including:
 
-- ✅ Generate, delete, and export SSH keys
-- ✅ Deploy public keys to remote servers
-- ✅ Revoke deployed public keys
-- ✅ Manage known host fingerprints
-- ✅ Generate and manage HTTPS certificates
+- Generate, delete, and export SSH keys
+- Deploy public keys to remote servers
+- Revoke deployed public keys
+- Manage known host fingerprints
+- Generate and manage HTTPS certificates
+- Manage config packs (import, export, view)
 
 **Note**: The following pages require **root permissions** and are not accessible to admin users:
-- ❌ Terminal page
-- ❌ Automation page
-- ❌ Command page
+
+- Terminal page
+- Automation page
+- Command page
 
 ### How to Access the Security Page
 
@@ -55,14 +58,15 @@ As an **admin user**, you can access **every feature** on the security page, inc
 
 ### Page Layout Overview
 
-The security page is divided into four blocks from top to bottom:
+The security page is divided into five blocks from top to bottom:
 
 | Block | Description |
 |------|-------------|
-| **🔑 Key Management** | Generate, view, export, deploy, revoke, and delete SSH keys |
-| **🖥️ Deployed Hosts** | Manage the list of remote servers with deployed public keys; test connections, revoke keys, remove records |
-| **🔐 Known Host Fingerprints** | View and delete SSH server fingerprints to block man-in-the-middle attacks |
-| **🔒 HTTPS Certificates** | Generate device certificates/CSR, install CA-signed certificates, configure mTLS |
+| **Key Management** | Generate, view, export, deploy, revoke, and delete SSH keys |
+| **Deployed Hosts** | Manage the list of remote servers with deployed public keys; import host config; test connections, revoke keys, remove records |
+| **Known Host Fingerprints** | View and delete SSH server fingerprints to block man-in-the-middle attacks |
+| **HTTPS Certificates** | Generate device certificates/CSR, install CA-signed certificates, configure mTLS |
+| **Config Pack** | Export device certificate, import/export encrypted config packs, view config pack list for secure config distribution between devices |
 
 ---
 
@@ -74,29 +78,29 @@ This task covers generating SSH keys from scratch, deploying the public key to a
 
 #### Steps
 
-1. **Enter the key management area**: Locate the “🔑 Key Management” block near the top of the security page.
+1. **Enter the key management area**: Locate the “Key Management” block near the top of the security page.
 2. **Click the generate button**: Press **“➕ Generate New Key”**.
-3. **Fill out the creation form** in the “🔑 Generate New Key” modal:
+3. **Fill out the creation form** in the “Generate New Key” modal:
 
 #### Form Field Details
 
 | Field | Required | Description | Example |
 |------|----------|-------------|---------|
-| **Key ID** | ✅ Yes | A unique identifier for the key, used for future reference. Allowed characters: letters, digits, underscores. Must be unique. | `default`, `agx_key`, `lpmu_prod` |
-| **Key Type** | ✅ Yes | Select the algorithm and key length. | See “Key Type Selection” below |
-| **Notes** | ❌ No | Describe the key’s purpose for easier recognition later. | `For AGX Orin connection`, `Test environment key` |
-| **Alias** | ❌ No | A friendly name displayed instead of the Key ID, useful when “hide key” is enabled. | `AGX Production`, `Main Server Key` |
-| **Allow Private Key Export** | ❌ No | When checked, the private key can be exported for backup/migration. **Security risk**: leaked private keys allow unauthorized access. | Check only when backup is needed |
-| **Hide Key ID** | ❌ No | When enabled, low-privilege users only see the alias or masked string instead of the real Key ID—useful in multi-user environments. | Enable for shared devices |
+| **Key ID** | Yes | A unique identifier for the key, used for future reference. Allowed characters: letters, digits, underscores. Must be unique. | `default`, `agx_key`, `lpmu_prod` |
+| **Key Type** | Yes | Select the algorithm and key length. | See “Key Type Selection” below |
+| **Notes** | No | Describe the key’s purpose for easier recognition later. | `For AGX Orin connection`, `Test environment key` |
+| **Alias** | No | A friendly name displayed instead of the Key ID, useful when “hide key” is enabled. | `AGX Production`, `Main Server Key` |
+| **Allow Private Key Export** | No | When checked, the private key can be exported for backup/migration. **Security risk**: leaked private keys allow unauthorized access. | Check only when backup is needed |
+| **Hide Key ID** | No | When enabled, low-privilege users only see the alias or masked string instead of the real Key ID—useful in multi-user environments. | Enable for shared devices |
 
 #### Key Type Selection
 
 | Type | Key Length | Generation Time | Compatibility | Recommended Use |
 |------|------------|-----------------|---------------|------------------|
-| **RSA 2048-bit** | 2048 bits | 5-10 seconds | ⭐⭐⭐⭐⭐ | **Recommended** for daily use due to wide compatibility |
-| **RSA 4096-bit** | 4096 bits | 30-60 seconds | ⭐⭐⭐⭐⭐ | High-security scenarios; generation is slower |
-| **ECDSA P-256** | 256 bits | 3-5 seconds | ⭐⭐⭐ | ⚠️ **SSH public key auth not supported yet** |
-| **ECDSA P-384** | 384 bits | 3-5 seconds | ⭐⭐⭐ | ⚠️ **SSH public key auth not supported yet** |
+| **RSA 2048-bit** | 2048 bits | 5-10 seconds | High | **Recommended** for daily use due to wide compatibility |
+| **RSA 4096-bit** | 4096 bits | 30-60 seconds | High | High-security scenarios; generation is slower |
+| **ECDSA P-256** | 256 bits | 3-5 seconds | Medium | **Note**: SSH public key auth not supported yet |
+| **ECDSA P-384** | 384 bits | 3-5 seconds | Medium | **Note**: SSH public key auth not supported yet |
 
 **Important**: ECDSA keys cannot currently be used for SSH public key authentication. Please choose **RSA 2048-bit** or **RSA 4096-bit**.
 
@@ -127,36 +131,36 @@ After generating a key, deploy its **public portion** to a remote Linux server s
 
 #### Prerequisites
 
-- ✅ At least one key exists in the Key Management table.
-- ✅ You know the remote server’s IP address or hostname.
-- ✅ You know the remote username and password (required for first deployment).
-- ✅ Network connectivity exists between the device and the target server.
+- At least one key exists in the Key Management table.
+- You know the remote server’s IP address or hostname.
+- You know the remote username and password (required for first deployment).
+- Network connectivity exists between the device and the target server.
 
 #### Steps
 
 1. **Choose a key**: Pick the key row you want to deploy within the Key Management table.
-2. **Click Deploy**: Press the **“🚀 Deploy”** button (blue) on the right side of the row.
-3. **Fill the deployment form** in the “🚀 Deploy Public Key to Remote Server” modal:
+2. **Click Deploy**: Press the **“Deploy”** button (blue) on the right side of the row.
+3. **Fill the deployment form** in the “Deploy Public Key to Remote Server” modal:
 
 #### Deployment Form Fields
 
 | Field | Required | Description | Example |
 |------|----------|-------------|---------|
-| **Target Host** | ✅ Yes | IP or hostname of the remote server. | `192.168.55.100`, `agx.local`, `10.10.99.98` |
-| **Username** | ✅ Yes | Remote login user. | `root`, `nvidia`, `ubuntu` |
-| **Port** | ❌ No | SSH port; default is 22. Change if using non-standard ports. | `22`, `2222`, `22022` |
-| **Authentication Password** | ✅ Yes | Password for the first deployment. Future logins will skip the password. | Your server’s login password |
+| **Target Host** | Yes | IP or hostname of the remote server. | `192.168.55.100`, `agx.local`, `10.10.99.98` |
+| **Username** | Yes | Remote login user. | `root`, `nvidia`, `ubuntu` |
+| **Port** | No | SSH port; default is 22. Change if using non-standard ports. | `22`, `2222`, `22022` |
+| **Authentication Password** | Yes | Password for the first deployment. Future logins will skip the password. | Your server’s login password |
 
-4. **Start the deployment** by clicking **“🚀 Start Deploy”**.
+4. **Start the deployment** by clicking **“Start Deploy”**.
 5. **Watch the progress**: The modal shows logs including:
    - Connecting to the server
    - Verifying the host fingerprint (first-time connections prompt trust; see Task Three)
    - Uploading the public key to `~/.ssh/authorized_keys`
    - Validating deployment success
 6. **Confirm success**:
-   - “✅ Public key deployment succeeded”
-   - “✅ Connection verification succeeded”
-   - The host is automatically added to the “🖥️ Deployed Hosts” list.
+   - “Public key deployment succeeded”
+   - “Connection verification succeeded”
+   - The host is automatically added to the “Deployed Hosts” list.
 
 #### Deployment Mechanism
 
@@ -184,6 +188,36 @@ The deployment performs these steps:
 
 The Deployed Hosts block tracks remote servers where the device’s public keys are installed, making it easy to test and manage access.
 
+### 3.0 Import Host Config (Optional)
+
+If you deployed public keys via the terminal CLI (e.g. `ssh --copyid`) or manually, those hosts do not appear automatically in the Deployed Hosts list. You can **import host config** by uploading a .tscfg config package (e.g. exported from another device or backup). After import, the list reflects the same entries so you can test, revoke, or remove them from the WebUI.
+
+**Steps**:
+
+1. **Open the Deployed Hosts block**: On the security page, find the “Deployed Hosts” block; the **“Import Host”** button is on the right.
+2. **Click Import Host**: Click **“Import Host”** to open the “Import SSH Host Config” modal.
+3. **Select file**: Choose a local `.tscfg` config package (usually produced by “Export host config” on another device or by the config pack system).
+4. **Preview and confirm**: The system validates the package signature and shows config ID, signer, and notes; if that config already exists, you are prompted whether to overwrite.
+5. **Optional**: Check “Overwrite existing config” to replace an existing config with the same ID.
+6. **Confirm import**: Click **“Confirm Import”**; after success, refresh the page to see the new entries in the Deployed Hosts list.
+
+**Note**: The package must be a valid, signed SSH host config. Import only updates the local Deployed Hosts list; it does not change `authorized_keys` on remote servers.
+
+### 3.0.1 Export Host Config (Single Host)
+
+In the Deployed Hosts table, each host row has an **“Export”** button that exports that host’s config as an encrypted `.tscfg` file for backup or for importing on another device.
+
+**Steps**:
+
+1. **Select a host**: Find the host in the Deployed Hosts table.
+2. **Click Export**: Click the **“Export”** button (blue) on that row to open the “Export SSH Host Config” modal.
+3. **Target device certificate (optional)**:
+   - **Leave empty**: The config is encrypted with this device’s certificate (self-encrypt). The resulting .tscfg can only be decrypted on this device or one that has this device’s certificate—suitable for backup.
+   - **Paste target device certificate PEM**: To send this host config to another device, paste the certificate that the other device exported from the Config Pack block. The exported .tscfg can then be decrypted and imported only on that device.
+4. **Confirm export**: Click **“Export”**; the system generates the .tscfg and prompts for download or save path.
+
+**Typical use**: Back up a single host config, sync the same host across multiple TianshanOS devices, or use with “Import Host” when migrating between devices.
+
 ### 3.1 View the Deployed Hosts List
 
 #### Column Definitions
@@ -194,14 +228,15 @@ The Deployed Hosts block tracks remote servers where the device’s public keys 
 | **Address** | Server IP or hostname | `192.168.55.100`, `10.10.99.98` |
 | **Port** | SSH port | `22`, `2222` |
 | **Username** | Remote login user | `nvidia`, `root`, `ubuntu` |
-| **Deployed Key** | Key ID used (displayed as a badge) | 🔑 `agx_key`, 🔑 `default` |
+| **Deployed Key** | Key ID used (displayed as a badge) | `agx_key`, `default` |
+| **Actions** | Buttons per row | Test, Export, Revoke, Remove (see subsections below) |
 
 #### When the List Updates
 
-- ✅ Automatically adds hosts after successful WebUI deployment.
-- ✅ Removes hosts after WebUI revocation.
-- ✅ Deletes records when you click “Remove.”
-- ❌ Hosts added via CLI or manual `authorized_keys` edits do not appear.
+- Automatically adds hosts after successful WebUI deployment.
+- Removes hosts after WebUI revocation.
+- Deletes records when you click “Remove.”
+- Hosts added via CLI or manual `authorized_keys` edits do not appear; use “Import Host” to add them from a .tscfg config package.
 
 #### Empty List Behavior
 
@@ -211,7 +246,10 @@ If the list shows “No deployed hosts”:
 - Follow the Task 1, Section 2.2 steps to deploy a key.
 - After a successful deployment, the host will automatically appear.
 
----
+#### Relation to the Commands Page
+
+The **Commands** page (root only) uses the same host list as “Deployed Hosts” here for its “Select host” dropdown. When exporting a command config from the Commands page, you can choose to **include the dependent host config** in the export, so that importing the command on another device also provides the host config without having to import hosts separately from the Security page.
+
 ---
 ### 2.3 Use the Key for Passwordless Login
 
@@ -220,14 +258,14 @@ After deployment, you can connect to the remote server without entering a passwo
 #### Test the Connection via WebUI
 
 1. **Go to the Deployed Hosts section** and find the host you just added.
-2. **Click “🔍 Test”** on that host row.
+2. **Click “Test”** on that host row.
 3. **Wait for the test**: the system will
    - Use the deployed key to connect
    - Execute a simple command (e.g., `whoami`) to validate
    - Review the output
 4. **Check results**:
-   - ✅ Success: displays “Connection successful” and the remote username
-   - ❌ Failure: shows an error message (network issues, key mismatch, server configuration, etc.)
+   - Success: displays “Connection successful” and the remote username
+   - Failure: shows an error message (network issues, key mismatch, server configuration, etc.)
 
 #### Use the Key from the Terminal
 
@@ -275,36 +313,36 @@ Revoke a key when you no longer need server access or suspect the key has been c
 #### When to Revoke
 
 - 🚫 Access is no longer required
-- 🔒 Suspected key compromise
-- 🔄 Server user changes necessitate key cleanup
-- 🧹 Routine security audits call for removing stale access
+- Suspected key compromise
+- Server user changes necessitate key cleanup
+- Routine security audits call for removing stale access
 
 #### Method One: Revoke from Key Management
 
 **Ideal for when you know which key and server need revocation**
 
 1. **Pick the key** from the Key Management table.
-2. **Click “⚠️ Revoke”** (orange button).
+2. **Click “Revoke”** (orange button).
 3. **Fill out the revocation form**:
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| **Target Host** | ✅ Yes | Server address to remove the key from |
-| **Username** | ✅ Yes | Login user on that server |
-| **Port** | ❌ No | SSH port (default 22) |
-| **Authentication Password** | ✅ Yes | Required because the key might no longer work |
+| **Target Host** | Yes | Server address to remove the key from |
+| **Username** | Yes | Login user on that server |
+| **Port** | No | SSH port (default 22) |
+| **Authentication Password** | Yes | Required because the key might no longer work |
 
-4. **Confirm revocation** by clicking **“⚠️ Revoke Public Key”**.
+4. **Confirm revocation** by clicking **“Revoke Public Key”**.
 5. **Review results**:
-   - ✅ Shows the number of key lines removed from `authorized_keys`
-   - ✅ Deletes the host record from the Deployed Hosts list
+   - Shows the number of key lines removed from `authorized_keys`
+   - Deletes the host record from the Deployed Hosts list
 
 #### Method Two: Revoke from Deployed Hosts
 
 **Best for quick revocation of a specific host**
 
-1. Go to the “🖥️ Deployed Hosts” table.
-2. Click **“🔓 Revoke”** (red button) on the target host row.
+1. Go to the “Deployed Hosts” table.
+2. Click **“Revoke”** (red button) on the target host row.
 3. Enter the server password when prompted.
 4. Confirm by clicking **“Revoke and Remove”**.
 5. Wait as the system:
@@ -317,7 +355,7 @@ Revoke a key when you no longer need server access or suspect the key has been c
 Use this when the server is offline, the key already deleted on the server, or you simply want a cleaner UI.
 
 1. Find the host in the Deployed Hosts table.
-2. Click **“🗑️ Remove”** (gray button).
+2. Click **“Remove”** (gray button).
 3. Confirm removal.
 4. The host record is deleted locally; the remote `authorized_keys` is untouched.
 
@@ -325,8 +363,8 @@ Use this when the server is offline, the key already deleted on the server, or y
 
 | Action | Remote Public Key | Local Record | Password Required | Usage |
 |--------|-------------------|--------------|------------------|-------|
-| **Revoke** | ✅ Deleted | ✅ Deleted | ✅ Required | Fully remove access |
-| **Remove** | ❌ Retained | ✅ Deleted | ❌ Not required | Clean local record only |
+| **Revoke** | Deleted | Deleted | Required | Fully remove access |
+| **Remove** | Retained | Deleted | Not required | Clean local record only |
 
 ---
 
@@ -341,27 +379,27 @@ Use this when the server is offline, the key already deleted on the server, or y
 
 **Steps**:
 1. Locate the key in the Key Management table.
-2. Click **“📤 Public Key”**.
+2. Click **“Public Key”**.
 3. In the modal:
    - View the OpenSSH-formatted public key (`ssh-rsa AAAAB3NzaC1yc2E...`)
-   - Click **“📋 Copy to Clipboard”**
+   - Click **“Copy to Clipboard”**
    - Or **“💾 Download File”** to save as `.pub`
 4. **Use the key** by pasting into `~/.ssh/authorized_keys` on another server or sharing it securely.
 
 #### Export the Private Key
 
 **Security Warning**: Private keys are extremely sensitive. Only export when necessary:
-- 🔒 Backups stored on encrypted offline media
-- 🔄 Migration to another device
+- Backups stored on encrypted offline media
+- Migration to another device
 - 🛠️ Use in other SSH clients (desktop machines)
 
 **Prerequisites**:
 - The key must have been generated with **“Allow Private Key Export”** enabled.
-- Without that flag, the **“🔐 Private Key”** button is disabled.
+- Without that flag, the **“Private Key”** button is disabled.
 
 **Steps**:
 1. Select an exportable key.
-2. Click **“🔐 Private Key”**.
+2. Click **“Private Key”**.
 3. Read the warning about exposure risks.
 4. Confirm to continue.
 5. In the export modal:
@@ -371,10 +409,10 @@ Use this when the server is offline, the key already deleted on the server, or y
 #### Private Key Handling Recommendations
 
 1. **Secure Transfer**:
-   - ❌ Do not send private keys via email
-   - ❌ Avoid pasting them into chat apps
-   - ❌ Don’t upload them to unencrypted cloud storage
-   - ✅ Use encrypted USB drives or encrypted archives
+   - Do not send private keys via email
+   - Avoid pasting them into chat apps
+   - Don’t upload them to unencrypted cloud storage
+   - Use encrypted USB drives or encrypted archives
 2. **Secure Storage**:
    - Store on encrypted disks or safes
    - Restrict permissions to 600
@@ -404,9 +442,9 @@ The Known Host Fingerprints block stores SSH server keys to guard against connec
 
 #### Why Fingerprints Matter
 
-- 🛡️ **Prevent MITM attacks**: Verify you’re talking to the legitimate server.
-- 🔒 **Server authentication**: Ensure the key hasn’t been tampered with.
-- 📋 **Connection record**: Keep track of which servers you’ve connected to.
+- **Prevent MITM attacks**: Verify you’re talking to the legitimate server.
+- **Server authentication**: Ensure the key hasn’t been tampered with.
+- **Connection record**: Keep track of which servers you’ve connected to.
 
 #### Fingerprint Format
 
@@ -424,7 +462,7 @@ Quickly verify the connectivity of a deployed host.
 #### Steps
 
 1. Select the host from the Deployed Hosts table.
-2. Click **“🔍 Test”**.
+2. Click **“Test”**.
 3. Wait as the system:
    - Uses the deployed key to connect
    - Runs a simple command (e.g., `whoami`)
@@ -435,7 +473,7 @@ Quickly verify the connectivity of a deployed host.
 
 **Successful Example**:
 ```
-✅ SSH connection test succeeded
+SSH connection test succeeded
 Host: 192.168.55.100:22
 User: nvidia
 Command: whoami
@@ -444,7 +482,7 @@ Output: nvidia
 
 **Failure Example**:
 ```
-❌ SSH connection test failed
+SSH connection test failed
 Error: Connection timeout
 Suggestion: Check network connectivity and firewall settings
 ```
@@ -472,8 +510,8 @@ Please refer to Task One, Section 2.4: “Revoking from Deployed Hosts” for gu
 
 | Action | Local Record | Remote Public Key | Use Case |
 |--------|--------------|-------------------|----------|
-| **Revoke** | ✅ Deleted | ✅ Deleted | Fully remove access |
-| **Remove** | ✅ Deleted | ❌ Retained | The server is decommissioned or key already removed |
+| **Revoke** | Deleted | ✅ Deleted | Fully remove access |
+| **Remove** | Deleted | Retained | The server is decommissioned or key already removed |
 
 #### When to Remove
 
@@ -485,7 +523,7 @@ Please refer to Task One, Section 2.4: “Revoking from Deployed Hosts” for gu
 #### Steps
 
 1. Select the host.
-2. Click **“🗑️ Remove”** (gray button).
+2. Click **“Remove”** (gray button).
 3. Confirm in the dialog.
 4. The host disappears from the list.
 
@@ -506,17 +544,17 @@ Before deleting a key, ensure:
 #### Steps
 
 1. Choose the key from the Key Management table.
-2. Click **“🗑️ Delete”** (red button).
+2. Click **“Delete”** (red button).
 3. Confirm in the warning dialog noting the action is permanent.
 4. Click **“Confirm”** to proceed.
 5. Verify the key disappears from the list.
 
 #### Consequences
 
-- ✅ Key removed permanently from NVS, freeing storage.
-- ⚠️ Deployed host records remain and must be cleaned separately.
-- ❌ The key can no longer authenticate with servers unless re-created and redeployed.
-- ❌ Recovery is impossible without a prior private key backup.
+- Key removed permanently from NVS, freeing storage.
+- Deployed host records remain and must be cleaned separately.
+- The key can no longer authenticate with servers unless re-created and redeployed.
+- Recovery is impossible without a prior private key backup.
 
 #### Post-deletion Cleanup
 
@@ -543,9 +581,9 @@ The “HTTPS Certificates” block configures the device’s mTLS credentials so
 - **mTLS**: both the server and the client authenticate each other (two-way).
 
 **Benefits**:
-- 🔒 Prevents unauthorized clients from accessing the device.
-- 🛡️ Protects against man-in-the-middle attacks.
-- 🎯 Enables certificate-based access control (no password needed).
+- Prevents unauthorized clients from accessing the device.
+- Protects against man-in-the-middle attacks.
+- Enables certificate-based access control (no password needed).
 
 #### Certificate Hierarchy
 
@@ -573,10 +611,10 @@ The “HTTPS Certificates” block configures the device’s mTLS credentials so
 #### Private Key Never Leaves the Device
 
 **Security design**:
-- ✅ Key pairs are generated locally and never exported.
-- ✅ Only CSR (Certificate Signing Request) can be exported.
-- ✅ CA signs the CSR without ever seeing the private key.
-- ✅ Private keys stay in NVS even across firmware updates.
+- Key pairs are generated locally and never exported.
+- Only CSR (Certificate Signing Request) can be exported.
+- CA signs the CSR without ever seeing the private key.
+- Private keys stay in NVS even across firmware updates.
 
 **SSH key comparison**:
 - SSH private keys may be exported if “Allow Private Key Export” is enabled.
@@ -608,23 +646,23 @@ If the Known Host Fingerprints section always shows “No known hosts”:
 
 #### When to Use
 
-- 🗑️ The server is permanently offline or destroyed.
-- 🔄 The server was rebuilt and the old fingerprint must be cleared.
-- 🔀 The IP was reassigned to another host.
-- 🧹 Routine cleanup of unused entries.
+- The server is permanently offline or destroyed.
+- The server was rebuilt and the old fingerprint must be cleared.
+- The IP was reassigned to another host.
+- Routine cleanup of unused entries.
 
 #### Steps
 
-1. Select the host in the “🔐 Known Host Fingerprints” table.
-2. Click **“🗑️ Delete”**.
+1. Select the host in the “Known Host Fingerprints” table.
+2. Click **“Delete”**.
 3. Confirm in the dialog.
 4. The host is removed from the list.
 
 #### Aftermath
 
-- ✅ The fingerprint is permanently removed from NVS.
-- ⚠️ You will be prompted to trust the server again on the next connection.
-- ❌ If the server was rebuilt, deleting the fingerprint is required to remove recurring mismatch warnings.
+- The fingerprint is permanently removed from NVS.
+- You will be prompted to trust the server again on the next connection.
+- If the server was rebuilt, deleting the fingerprint is required to remove recurring mismatch warnings.
 
 #### Bulk Deletion
 
@@ -647,17 +685,17 @@ If a saved host’s fingerprint changes, TianshanOS shows a security warning bef
 
 | Cause | Risk Level | Description |
 |-------|------------|-------------|
-| **Man-in-the-middle attack (MITM)** | 🔴 High | An attacker is spoofing the server. |
-| **Server reinstallation** | 🟡 Legitimate | The server was rebuilt, generating a new host key. |
-| **Key rotation** | 🟡 Legitimate | Admin regenerated the SSH host key. |
-| **IP reallocation** | 🟡 Legitimate | The IP now maps to a different server. |
+| **Man-in-the-middle attack (MITM)** | High | An attacker is spoofing the server. |
+| **Server reinstallation** | Legitimate | The server was rebuilt, generating a new host key. |
+| **Key rotation** | Legitimate | Admin regenerated the SSH host key. |
+| **IP reallocation** | Legitimate | The IP now maps to a different server. |
 
 #### Warning Modal
 
 The red warning dialog shows:
 
 ```
-⚠️ Security Warning: Host fingerprint mismatch!
+Security Warning: Host fingerprint mismatch!
 
 The host key has changed! This could mean:
 • Man-in-the-Middle Attack
@@ -694,7 +732,7 @@ Options to verify:
 **Step 3: Act based on your findings**
 
 **Scenario A: Legitimate change**
-1. Click **“🔄 Update Host Key”** in the warning.
+1. Click **“Update Host Key”** in the warning.
 2. The old fingerprint is removed.
 3. Retry connecting.
 4. Trust the new fingerprint following the first-time connection procedure (Section 4.3).
@@ -709,8 +747,8 @@ Options to verify:
 
 #### Consequences of Mistakes
 
-- ❌ Blindly trusting the new fingerprint may expose your password and data to attackers.
-- ❌ Ignoring the warning habitually weakens the security posture.
+- Blindly trusting the new fingerprint may expose your password and data to attackers.
+- Ignoring the warning habitually weakens the security posture.
 
 **Security principle**: When in doubt, stop the connection and investigate rather than blindly trusting a new fingerprint.
 
@@ -781,9 +819,9 @@ Before trusting in critical environments:
 
 If the fingerprint is truncated:
 
-1. Click **“👁️ View”** on the target row.
-2. The modal shows the complete fingerprint and host metadata.
-3. Optionally compare it with the server’s official fingerprint.
+1. Click **“View”** on the target row.
+2. The modal shows the **full SHA256 fingerprint** plus host, port, and key type so you can compare it character-by-character with the output of `ssh-keygen -lf` on the server.
+3. Optionally compare with the server’s official fingerprint before trusting.
 
 **Retrieve the server fingerprint** by running on the host:
 
@@ -822,9 +860,9 @@ The Known Host Fingerprints block stores SSH server keys to guard against connec
 
 #### Why Fingerprints Matter
 
-- 🛡️ **Prevent MITM attacks**: Verify you’re talking to the legitimate server.
-- 🔒 **Server authentication**: Ensure the key hasn’t been tampered with.
-- 📋 **Connection record**: Keep track of which servers you’ve connected to.
+- **Prevent MITM attacks**: Verify you’re talking to the legitimate server.
+- **Server authentication**: Ensure the key hasn’t been tampered with.
+- **Connection record**: Keep track of which servers you’ve connected to.
 
 #### Fingerprint Format
 
@@ -842,7 +880,7 @@ Quickly verify the connectivity of a deployed host.
 #### Steps
 
 1. Select the host from the Deployed Hosts table.
-2. Click **“🔍 Test”**.
+2. Click **“Test”**.
 3. Wait as the system:
    - Uses the deployed key to connect
    - Runs a simple command (e.g., `whoami`)
@@ -853,7 +891,7 @@ Quickly verify the connectivity of a deployed host.
 
 **Successful Example**:
 ```
-✅ SSH connection test succeeded
+SSH connection test succeeded
 Host: 192.168.55.100:22
 User: nvidia
 Command: whoami
@@ -862,7 +900,7 @@ Output: nvidia
 
 **Failure Example**:
 ```
-❌ SSH connection test failed
+SSH connection test failed
 Error: Connection timeout
 Suggestion: Check network connectivity and firewall settings
 ```
@@ -890,8 +928,8 @@ Please refer to Task One, Section 2.4: “Revoking from Deployed Hosts” for gu
 
 | Action | Local Record | Remote Public Key | Use Case |
 |--------|--------------|-------------------|----------|
-| **Revoke** | ✅ Deleted | ✅ Deleted | Fully remove access |
-| **Remove** | ✅ Deleted | ❌ Retained | The server is decommissioned or key already removed |
+| **Revoke** | Deleted | ✅ Deleted | Fully remove access |
+| **Remove** | Deleted | Retained | The server is decommissioned or key already removed |
 
 #### When to Remove
 
@@ -903,7 +941,7 @@ Please refer to Task One, Section 2.4: “Revoking from Deployed Hosts” for gu
 #### Steps
 
 1. Select the host.
-2. Click **“🗑️ Remove”** (gray button).
+2. Click **“Remove”** (gray button).
 3. Confirm in the dialog.
 4. The host disappears from the list.
 
@@ -924,17 +962,17 @@ Before deleting a key, ensure:
 #### Steps
 
 1. Choose the key from the Key Management table.
-2. Click **“🗑️ Delete”** (red button).
+2. Click **“Delete”** (red button).
 3. Confirm in the warning dialog noting the action is permanent.
 4. Click **“Confirm”** to proceed.
 5. Verify the key disappears from the list.
 
 #### Consequences
 
-- ✅ Key removed permanently from NVS, freeing storage.
-- ⚠️ Deployed host records remain and must be cleaned separately.
-- ❌ The key can no longer authenticate with servers unless re-created and redeployed.
-- ❌ Recovery is impossible without a prior private key backup.
+- Key removed permanently from NVS, freeing storage.
+- Deployed host records remain and must be cleaned separately.
+- The key can no longer authenticate with servers unless re-created and redeployed.
+- Recovery is impossible without a prior private key backup.
 
 #### Post-deletion Cleanup
 
@@ -961,9 +999,9 @@ The “HTTPS Certificates” block configures the device’s mTLS credentials so
 - **mTLS**: both the server and the client authenticate each other (two-way).
 
 **Benefits**:
-- 🔒 Prevents unauthorized clients from accessing the device.
-- 🛡️ Protects against man-in-the-middle attacks.
-- 🎯 Enables certificate-based access control (no password needed).
+- Prevents unauthorized clients from accessing the device.
+- Protects against man-in-the-middle attacks.
+- Enables certificate-based access control (no password needed).
 
 #### Certificate Hierarchy
 
@@ -991,10 +1029,10 @@ The “HTTPS Certificates” block configures the device’s mTLS credentials so
 #### Private Key Never Leaves the Device
 
 **Security design**:
-- ✅ Key pairs are generated locally and never exported.
-- ✅ Only CSR (Certificate Signing Request) can be exported.
-- ✅ CA signs the CSR without ever seeing the private key.
-- ✅ Private keys stay in NVS even across firmware updates.
+- Key pairs are generated locally and never exported.
+- Only CSR (Certificate Signing Request) can be exported.
+- CA signs the CSR without ever seeing the private key.
+- Private keys stay in NVS even across firmware updates.
 
 **SSH key comparison**:
 - SSH private keys may be exported if “Allow Private Key Export” is enabled.
@@ -1026,23 +1064,23 @@ If the Known Host Fingerprints section always shows “No known hosts”:
 
 #### When to Use
 
-- 🗑️ The server is permanently offline or destroyed.
-- 🔄 The server was rebuilt and the old fingerprint must be cleared.
-- 🔀 The IP was reassigned to another host.
-- 🧹 Routine cleanup of unused entries.
+- The server is permanently offline or destroyed.
+- The server was rebuilt and the old fingerprint must be cleared.
+- The IP was reassigned to another host.
+- Routine cleanup of unused entries.
 
 #### Steps
 
-1. Select the host in the “🔐 Known Host Fingerprints” table.
-2. Click **“🗑️ Delete”**.
+1. Select the host in the “Known Host Fingerprints” table.
+2. Click **“Delete”**.
 3. Confirm in the dialog.
 4. The host is removed from the list.
 
 #### Aftermath
 
-- ✅ The fingerprint is permanently removed from NVS.
-- ⚠️ You will be prompted to trust the server again on the next connection.
-- ❌ If the server was rebuilt, deleting the fingerprint is required to remove recurring mismatch warnings.
+- The fingerprint is permanently removed from NVS.
+- You will be prompted to trust the server again on the next connection.
+- If the server was rebuilt, deleting the fingerprint is required to remove recurring mismatch warnings.
 
 #### Bulk Deletion
 
@@ -1065,17 +1103,17 @@ If a saved host’s fingerprint changes, TianshanOS shows a security warning bef
 
 | Cause | Risk Level | Description |
 |-------|------------|-------------|
-| **Man-in-the-middle attack (MITM)** | 🔴 High | An attacker is spoofing the server. |
-| **Server reinstallation** | 🟡 Legitimate | The server was rebuilt, generating a new host key. |
-| **Key rotation** | 🟡 Legitimate | Admin regenerated the SSH host key. |
-| **IP reallocation** | 🟡 Legitimate | The IP now maps to a different server. |
+| **Man-in-the-middle attack (MITM)** | High | An attacker is spoofing the server. |
+| **Server reinstallation** | Legitimate | The server was rebuilt, generating a new host key. |
+| **Key rotation** | Legitimate | Admin regenerated the SSH host key. |
+| **IP reallocation** | Legitimate | The IP now maps to a different server. |
 
 #### Warning Modal
 
 The red warning dialog shows:
 
 ```
-⚠️ Security Warning: Host fingerprint mismatch!
+Security Warning: Host fingerprint mismatch!
 
 The host key has changed! This could mean:
 • Man-in-the-Middle Attack
@@ -1112,7 +1150,7 @@ Options to verify:
 **Step 3: Act based on your findings**
 
 **Scenario A: Legitimate change**
-1. Click **“🔄 Update Host Key”** in the warning.
+1. Click **“Update Host Key”** in the warning.
 2. The old fingerprint is removed.
 3. Retry connecting.
 4. Trust the new fingerprint following the first-time connection procedure (Section 4.3).
@@ -1127,8 +1165,8 @@ Options to verify:
 
 #### Consequences of Mistakes
 
-- ❌ Blindly trusting the new fingerprint may expose your password and data to attackers.
-- ❌ Ignoring the warning habitually weakens the security posture.
+- Blindly trusting the new fingerprint may expose your password and data to attackers.
+- Ignoring the warning habitually weakens the security posture.
 
 **Security principle**: When in doubt, stop the connection and investigate rather than blindly trusting a new fingerprint.
 
@@ -1199,9 +1237,9 @@ Before trusting in critical environments:
 
 If the fingerprint is truncated:
 
-1. Click **“👁️ View”** on the target row.
-2. The modal shows the complete fingerprint and host metadata.
-3. Optionally compare it with the server’s official fingerprint.
+1. Click **“View”** on the target row.
+2. The modal shows the **full SHA256 fingerprint** plus host, port, and key type so you can compare it character-by-character with the output of `ssh-keygen -lf` on the server.
+3. Optionally compare with the server’s official fingerprint before trusting.
 
 **Retrieve the server fingerprint** by running on the host:
 
@@ -1222,6 +1260,52 @@ Example output:
 ```
 
 ---
+## Task Five: Config Pack
+
+The **Config Pack** block is used to distribute configuration securely between devices: config files are encrypted and signed into a `.tscfg` package; only the target device that holds the corresponding certificate can decrypt and use it. Suitable for bulk deployment and remote config delivery.
+
+### 5.5.1 Config Pack Overview
+
+| Feature | Description | Access |
+|---------|-------------|--------|
+| **Export device certificate** | Export this device’s HTTPS certificate (PEM) and fingerprint so others can send encrypted config packs to this device | admin |
+| **Import config pack** | Upload or paste a .tscfg file; after signature verification it is decrypted and stored on the device (encrypted storage) | admin |
+| **Export config pack** | Choose local files and target device certificate to produce an encrypted .tscfg for the target device | Developer devices only |
+| **View config pack list** | List existing config pack files by directory with signer, official flag, and status | admin |
+
+**Status card**: The block header shows device type, certificate CN, fingerprint, format version, etc. If mTLS is not configured, some features may be unavailable.
+
+### 5.5.2 Export Device Certificate
+
+**Purpose**: Share this device’s certificate with developers or systems that need to send you encrypted config packs, so they can paste your certificate when exporting a config pack.
+
+**Steps**: Click **“Export device certificate”**, then in the modal view the certificate fingerprint (SHA256), CN, and PEM; click **“Copy to clipboard”** or copy the PEM and share it through a secure channel.
+
+### 5.5.3 Import Config Pack
+
+**Purpose**: Receive a .tscfg pack from another party or system; verify signature and decrypt, then save on the device.
+
+**Steps**: Click **“Import config pack”**, select a .tscfg file or paste JSON; you can click **“Verify only”** first to check signature and content, then **“Import”** to write to the device. **Note:** “Verify only” checks the pack’s signature and format but **does not** write any config to the device—use it to confirm the source and content before importing. After import, the pack is stored encrypted; use APIs such as `config.pack.content` to decrypt when needed.
+
+### 5.5.4 Export Config Pack (Developer Devices Only)
+
+**Purpose**: Select config files on this device, encrypt and sign with the target device’s certificate, and generate a .tscfg for the target to import.
+
+**Steps**: If the device is not Developer type, the button will indicate “Only Developer devices can export config packs.” Click **“Export config pack”**, browse and select files to include, fill name and description, paste the **target device’s** exported certificate PEM, then click **“Generate config pack”** and copy or download the .tscfg to send to the target.
+
+### 5.5.5 View Config Pack List
+
+**Purpose**: List config pack files under a given path (e.g. `/sdcard/config`) with filename, size, signer, official flag, and status.
+
+**Steps**: Click **“View config pack list”**, enter or keep the default path, then click **“Refresh”**.
+
+**Column notes**:
+- **Signer**: Certificate CN that signed the pack, used to verify origin.
+- **Official**: When the signature is from a system-trusted official certificate, the row is marked “official,” so you can tell vendor-delivered config from self-signed config.
+- **Status**: Whether the pack has been applied, is valid, etc.
+
+---
+
 ## Secure Storage vs. File-Based Keys
 
 This section explains why TianshanOS uses secure storage (NVS) over filesystem-based keys by default.
@@ -1230,15 +1314,15 @@ This section explains why TianshanOS uses secure storage (NVS) over filesystem-b
 
 | Feature | Secure Storage (NVS) | File Keys (SD Card) |
 |---------|----------------------|--------------------|
-| **Private Key Protection** | ✅ Encrypted NVS partition; extraction is difficult | ⚠️ Plaintext PEM files that can be copied or leaked |
-| **Usability** | ✅ Only remember the Key ID; no file paths | ❌ Requires remembering file paths, which can be confusing |
-| **Key Backup** | ⚠️ Requires enabling “Allow Export” | ✅ Copy the file directly |
-| **Cross-Device Use** | ❌ Bound to a single device | ✅ Copy to multiple devices |
-| **Protection Against Accidental Deletion** | ✅ Must explicitly delete | ⚠️ Filesystem issues can result in loss |
-| **Storage Capacity** | ⚠️ NVS has a limited capacity (8-32 keys) | ✅ SD cards have large capacity |
-| **Access Speed** | ✅ Fast NVS access | ⚠️ Slower SD card I/O |
-| **Security Rating** | ⭐⭐⭐⭐⭐ (5 stars) | ⭐⭐ (2 stars) |
-| **Recommended Use** | 🎯 Production, long-term, security-sensitive | Temporary use, key migration, multi-device sharing |
+| **Private Key Protection** | Encrypted NVS partition; extraction is difficult | Plaintext PEM files that can be copied or leaked |
+| **Usability** | Only remember the Key ID; no file paths | Requires remembering file paths, which can be confusing |
+| **Key Backup** | Requires enabling “Allow Export” | Copy the file directly |
+| **Cross-Device Use** | Bound to a single device | Copy to multiple devices |
+| **Protection Against Accidental Deletion** | Must explicitly delete | Filesystem issues can result in loss |
+| **Storage Capacity** | NVS has a limited capacity (8-32 keys) | SD cards have large capacity |
+| **Access Speed** | Fast NVS access | Slower SD card I/O |
+| **Security Rating** | High (5 stars) | Lower (2 stars) |
+| **Recommended Use** | Production, long-term, security-sensitive | Temporary use, key migration, multi-device sharing |
 
 ### Advantages of Secure Storage
 
@@ -1259,10 +1343,10 @@ This section explains why TianshanOS uses secure storage (NVS) over filesystem-b
 
 Although secure storage is preferred, file keys may be appropriate when:
 
-- 🔄 **Migration**: Import an existing key from another device.
+- **Migration**: Import an existing key from another device.
 - 🧪 **Temporary testing**: Use a key for a short-lived test.
-- 🔀 **Multi-device sharing**: The same key must run on several devices.
-- 📤 **External tooling**: Desktop SSH clients (PuTTY, Terminal) require file keys.
+- **Multi-device sharing**: The same key must run on several devices.
+- **External tooling**: Desktop SSH clients (PuTTY, Terminal) require file keys.
 
 **CLI Example for File Keys**:
 ```bash
@@ -1276,21 +1360,21 @@ ssh --host 192.168.1.100 --user nvidia --key /sdcard/id_rsa --shell
 #### When to Renew
 
 - ⏰ The certificate is expiring soon (start renewal 30 days before expiry).
-- ⚠️ The status card shows “Expiring soon” or remaining days < 30.
-- 📅 Company PKI policy dictates issued certificates renew annually or by schedule.
+- The status card shows “Expiring soon” or remaining days < 30.
+- Company PKI policy dictates issued certificates renew annually or by schedule.
 
 #### Renewal Steps
 
 **Option 1: Keep the same key pair (recommended)**
 
 1. **Generate a fresh CSR**:
-   - Click **“📋 Generate CSR”** (you can reuse the same CN).
+   - Click **“Generate CSR”** (you can reuse the same CN).
    - Copy the new CSR.
 2. **Submit it to the CA**:
    - Send the CSR to your CA for renewal.
    - Receive a new certificate.
 3. **Install the new certificate**:
-   - Click **“📥 Install Certificate.”**
+   - Click **“Install Certificate.”**
    - Paste the renewed certificate.
 4. **Check the status**:
    - The expiration date should update to the new certificate’s validity.
@@ -1298,16 +1382,16 @@ ssh --host 192.168.1.100 --user nvidia --key /sdcard/id_rsa --shell
 
 **Option 2: Full refresh (if the private key may be compromised)**
 
-1. Delete all credentials via **“🗑️ Delete Credentials.”**
+1. Delete all credentials via **“Delete Credentials.”**
 2. Start again from Step 5.3.1 (generate a new key pair).
 3. Go through the full 5.3 flow (CSR, CA signing, install certificate, install CA chain).
 
 #### Renewal Notes
 
-- ✅ The old certificate remains valid until its expiry.
-- ✅ The new certificate takes effect immediately once installed.
-- ✅ CA chains rarely need updates unless the CA infrastructure changes.
-- ⚠️ If the CA chain itself is expiring, renew it alongside the device certificate.
+- The old certificate remains valid until its expiry.
+- The new certificate takes effect immediately once installed.
+- CA chains rarely need updates unless the CA infrastructure changes.
+- If the CA chain itself is expiring, renew it alongside the device certificate.
 
 #### Automated Renewal (Future Feature)
 
@@ -1323,10 +1407,10 @@ Currently, renewal is manual. Future versions may:
 
 #### What Gets Deleted
 
-Clicking **“🗑️ Delete Credentials”** removes:
-- 🔑 The device private key (ECDSA P-256)
+Clicking **“Delete Credentials”** removes:
+- The device private key (ECDSA P-256)
 - 📄 The device certificate
-- 🏛️ The CA certificate chain
+- The CA certificate chain
 
 #### When to Use
 
@@ -1339,10 +1423,10 @@ Clicking **“🗑️ Delete Credentials”** removes:
 
 #### Steps
 
-1. Click **“🗑️ Delete Credentials”** (red button).
+1. Click **“Delete Credentials”** (red button).
 2. Read the warning dialog:
    ```
-   ⚠️ Warning: This deletes all PKI credentials
+   Warning: This deletes all PKI credentials
 
    This action will remove:
    • Device private key
@@ -1358,7 +1442,7 @@ Clicking **“🗑️ Delete Credentials”** removes:
    ```
 3. Confirm if you understand the impact.
 4. After completion:
-   - The status card reverts to “🔒 Key pair not generated.”
+   - The status card reverts to “Key pair not generated.”
    - All buttons return to their initial states.
    - The HTTPS key row disappears from the Key Management table.
 
@@ -1383,11 +1467,11 @@ Clicking **“🗑️ Delete Credentials”** removes:
 - Copy the certificate for client configuration or backups.
 
 **Steps**:
-1. Ensure the device certificate is installed (the “👁️ View Certificate” button is enabled).
-2. Click **“👁️ View Certificate.”**
-3. Wait as “🔄 Loading...” appears for 1-2 seconds.
+1. Ensure the device certificate is installed (the “View Certificate” button is enabled).
+2. Click **“View Certificate.”**
+3. Wait as “Loading...” appears for 1-2 seconds.
 4. The modal displays the entire PEM content (scrollable).
-5. Optional: click **“📋 Copy to Clipboard”** for reuse.
+5. Optional: click **“Copy to Clipboard”** for reuse.
 6. Close the modal when finished.
 
 #### Certificate Inspection
@@ -1422,8 +1506,8 @@ Certificate:
 **Purpose**: Install the CA chain (root + intermediate) so clients can validate the device certificate.
 
 **Prerequisites**:
-- ✅ Device certificate installed (Section 5.3.4).
-- ✅ CA chain file in PEM format.
+- Device certificate installed (Section 5.3.4).
+- CA chain file in PEM format.
 
 **Why you need it**:
 - Clients need a complete trust path: `Device Cert ← Intermediate CA ← Root CA`.
@@ -1440,13 +1524,13 @@ Certificate:
    (Intermediate CA content)
    -----END CERTIFICATE-----
    ```
-3. Click **“🏛️ Install CA.”**
+3. Click **“Install CA.”**
 4. Paste the chain into the modal’s text box (all `BEGIN/END` sections).
-5. Click **“🏛️ Install.”**
+5. Click **“Install.”**
 6. Wait for validation and storage in NVS.
 7. Confirmation steps:
-   - “✅ CA chain installed successfully.”
-   - Status card shows “✅ Activated” (if the certificate is valid).
+   - “CA chain installed successfully.”
+   - Status card shows “Activated” (if the certificate is valid).
    - mTLS configuration is now complete.
 
 #### CA Chain Examples
@@ -1475,8 +1559,8 @@ Certificate:
 #### Post-installation Validation
 
 1. Check the status card:
-   - Should read “✅ Activated”
-   - Validity shows “✅ Valid”
+   - Should read “Activated”
+   - Validity shows “Valid”
    - Days remaining should be accurate
 2. Test an mTLS client (configured to trust the same CA):
    - Connect to the device using an mTLS-aware client.
@@ -1488,9 +1572,9 @@ Certificate:
 **Goal**: Install the CA-signed device certificate so mTLS works.
 
 **Prerequisites**:
-- ✅ Key pair must exist.
-- ✅ You have the signed certificate in PEM format.
-- ✅ The certificate was signed from the CSR you generated.
+- Key pair must exist.
+- You have the signed certificate in PEM format.
+- The certificate was signed from the CSR you generated.
 
 **Steps**:
 1. Open the certificate file (`device.crt`) on your computer.
@@ -1502,16 +1586,16 @@ Certificate:
    xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxQ=
    -----END CERTIFICATE-----
    ```
-3. Click **“📥 Install Certificate.”**
+3. Click **“Install Certificate.”**
 4. Paste the certificate into the “Certificate PEM” field, ensuring the `BEGIN/END` lines are present.
-5. Click **“📥 Install.”**
+5. Click **“Install.”**
 6. Wait while the system validates:
-   - ✅ Correct PEM format
-   - ✅ Certificate matches the private key
-   - ✅ Certificate is currently valid (within its validity window)
-   - ✅ Subject fields look as expected
+   - Correct PEM format
+   - Certificate matches the private key
+   - Certificate is currently valid (within its validity window)
+   - Subject fields look as expected
 7. Confirm when the modal shows:
-   - “✅ Certificate installed successfully”
+   - “Certificate installed successfully”
    - Displayed certificate details (CN, issuer, validity)
    - Status card updates to “Activated” or “Certificate installed, CA chain missing”
 
@@ -1584,15 +1668,15 @@ If the device has a public domain, use Let’s Encrypt:
 
 #### Timing
 
-- 🚀 Automated CAs: minutes to seconds
+- Automated CAs: minutes to seconds
 - ⏳ Manual CAs: hours to days, depending on the approval chain
 
 #### Files You Should Receive
 
 | File | Required | Description | Format |
 |------|----------|-------------|--------|
-| **Device Certificate** | ✅ Yes | CA-signed certificate for the device | `device.crt`, PEM format |
-| **CA Chain** | ✅ Yes | Root CA plus intermediate CA certificates | `ca-chain.pem`, PEM format |
+| **Device Certificate** | Yes | CA-signed certificate for the device | `device.crt`, PEM format |
+| **CA Chain** | Yes | Root CA plus intermediate CA certificates | `ca-chain.pem`, PEM format |
 
 Once you have both files, proceed to Section 5.3.4: Install the device certificate.
 
@@ -1602,25 +1686,25 @@ Once you have both files, proceed to Section 5.3.4: Install the device certifica
 **Purpose**: Produce a CSR to submit to a CA for certificate signing.
 
 **Prerequisites**:
-- ✅ Step 5.3.1 (key pair generated)
-- ✅ The **“📋 Generate CSR”** button is enabled
+- Step 5.3.1 (key pair generated)
+- The **“Generate CSR”** button is enabled
 
 **Steps**:
-1. Click **“📋 Generate CSR.”**
+1. Click **“Generate CSR.”**
 2. Fill out the CSR details in the modal:
 
 | Field | Required | Description | Example |
 |-------|----------|-------------|---------|
-| **Device ID (CN)** | ❌ No | Common Name identifying the device. Leave blank to use defaults. | `TIANSHAN-RM01-0001`, `DEVICE-AGX-001` |
-| **Organization (O)** | ❌ No | Company or organization name | `HiddenPeak Labs`, `My Company` |
-| **Organizational Unit (OU)** | ❌ No | Department or unit | `Device`, `Production`, `IoT` |
+| **Device ID (CN)** | No | Common Name identifying the device. Leave blank to use defaults. | `TIANSHAN-RM01-0001`, `DEVICE-AGX-001` |
+| **Organization (O)** | No | Company or organization name | `HiddenPeak Labs`, `My Company` |
+| **Organizational Unit (OU)** | No | Department or unit | `Device`, `Production`, `IoT` |
 
 **Notes**:
 - CN should follow a structured naming pattern (`prefix-model-serial`).
 - O and OU are optional fields for metadata.
 - Leaving everything blank lets the system apply defaults (e.g., MAC address-based CN).
 
-3. Click **“📋 Generate CSR.”**
+3. Click **“Generate CSR.”**
 4. Wait ~2-3 seconds as the device:
    - Uses the private key and input data to craft a CSR.
    - Produces an X.509-compliant CSR (RFC 2986).
@@ -1635,15 +1719,15 @@ Once you have both files, proceed to Section 5.3.4: Install the device certifica
    │ -----END CERTIFICATE REQUEST-----         │
    └───────────────────────────────────────────┘
    ```
-6. Click **“📋 Copy to Clipboard.”**
+6. Click **“Copy to Clipboard.”**
 7. Optionally save the CSR as a file (`device.csr`) for CA submission.
 
 #### CSR Contents
 
-- ✅ The device’s public key (from the generated key pair).
-- ✅ Subject information (CN, O, OU).
-- ✅ Device signature proving possession of the private key.
-- ❌ **No private key data** is included.
+- The device’s public key (from the generated key pair).
+- Subject information (CN, O, OU).
+- Device signature proving possession of the private key.
+- **No private key data** is included.
 
 #### Next Step
 
@@ -1652,7 +1736,7 @@ Submit the CSR to your CA for signing as described in Section 5.3.3.
 ---
 ### 5.3 Full Certificate Request Flow
 
-Configuring mTLS from scratch involves five steps.
+Configuring mTLS from scratch involves five steps. Button and modal names below (e.g. “Generate Key Pair,” “Certificate Signing Request (CSR),” “Install Device Certificate,” “Install CA Certificate Chain,” “View Device Certificate”) match the Security page WebUI so you can follow along in the interface.
 
 #### Process Overview
 
@@ -1677,7 +1761,7 @@ Step 5: Install CA certificate chain (on-device)
 **Steps**:
 1. **Check status**:
    - Look at the certificate status card. If it already shows “Key pair generated,” skip unless you need to regenerate.
-2. **Click “🔑 Generate Key Pair.”**
+2. **Click “Generate Key Pair.”**
 3. **Review the prompt**:
    ```
    Generate an ECDSA P-256 key pair for mTLS authentication.
@@ -1685,16 +1769,16 @@ Step 5: Install CA certificate chain (on-device)
 4. **Handle the overwrite warning**:
    - If keys already exist, a yellow warning appears:
      ```
-     ⚠️ A key pair already exists. Continue will overwrite the current keys!
+     Note: A key pair already exists. Continue will overwrite the current keys!
      ```
    - Overwriting will invalidate any CSR/certificate issued by the old key.
    - Only proceed if you understand the impact.
-5. **Start generation** by clicking **“🔑 Generate.”**
+5. **Start generation** by clicking **“Generate.”**
 6. **Wait for completion**:
    - ECDSA P-256 generation takes ~3-5 seconds.
    - The modal displays progress or status.
 7. **Confirm success**:
-   - It shows “✅ Key pair generated successfully.”
+   - It shows “Key pair generated successfully.”
    - Close the modal.
    - The status card now shows “Key pair generated, certificate not installed.”
    - The buttons for generating CSR, installing certificates, and installing the CA become active.
@@ -1715,18 +1799,18 @@ Step 5: Install CA certificate chain (on-device)
 
 #### Status Card Details
 
-At the top of the “🔒 HTTPS Certificates” block, a status card shows the certificate state in real time.
+At the top of the “HTTPS Certificates” block, a status card shows the certificate state in real time.
 
 #### Status Icons and Meaning
 
 | Icon | Status Text | Meaning |
 |------|-------------|---------|
-| 🔄 | Loading... | Retrieving certificate status |
-| 🔒 | Key pair not generated | No key pair exists yet |
-| 📝 | Key pair generated, certificate not installed | Keys exist but CA certificate is missing |
-| ✅ | Activated | Certificate installed and valid |
-| ⚠️ | Expiring soon | Certificate expires within 30 days—renew promptly |
-| ❌ | Expired | Certificate is invalid; mTLS cannot run |
+| Loading... | Retrieving certificate status |
+| Key pair not generated | No key pair exists yet |
+| Key pair generated, certificate not installed | Keys exist but CA certificate is missing |
+| Activated | Certificate installed and valid |
+| Expiring soon | Certificate expires within 30 days—renew promptly |
+| Expired | Certificate is invalid; mTLS cannot run |
 
 #### Certificate Details (Installed)
 
@@ -1739,8 +1823,13 @@ When the certificate shows “Activated” or “Expiring soon,” the card expa
 | **Valid From** | Certificate start time | `2026-01-27 00:00:00` |
 | **Expires On** | Certificate end time | `2027-01-27 00:00:00` |
 | **Serial Number** | Hexadecimal identifier | `01:23:45:67:89:AB` |
-| **Validity** | Is the certificate currently valid? | ✅ Valid / ❌ Expired |
+| **Validity** | Is the certificate currently valid? | Valid / Expired |
 | **Days Remaining** | Days until expiration | `365 days`, `28 days` (warning appears if < 30) |
+
+**Status card display rules**:
+- **Days remaining** is shown only when a certificate is installed and within its validity period; it is not shown when no certificate is installed or when the certificate has expired.
+- **“Expiring soon”** state/badge appears when the certificate is still valid but has fewer than 30 days until expiry; renew as soon as possible.
+- The expanded details (Subject CN, Issuer, Valid From/Expires On, Serial Number, Validity, Days Remaining) are only visible when the status is “Activated” or “Expiring soon.”
 
 #### Button States
 
@@ -1748,12 +1837,12 @@ Six action buttons are located beneath the HTTPS certificate block. Their enable
 
 | Button | No Key Pair | Key Pair Generated | Certificate Installed | Notes |
 |--------|-------------|--------------------|------------------------|-------|
-| 🔑 Generate Key Pair | ✅ Enabled | ✅ Enabled | ✅ Enabled | Always available (will overwrite existing keys). |
-| 📋 Generate CSR | ❌ Disabled | ✅ Enabled | ✅ Enabled | Requires an existing key pair. |
-| 📥 Install Certificate | ❌ Disabled | ✅ Enabled | ✅ Enabled | Requires key pair. |
-| 🏛️ Install CA | ❌ Disabled | ✅ Enabled | ✅ Enabled | Requires key pair. |
-| 👁️ View Certificate | ❌ Disabled | ❌ Disabled | ✅ Enabled | Needs an installed certificate. |
-| 🗑️ Delete Credentials | ❌ Disabled | ✅ Enabled | ✅ Enabled | Available when keys or certificates exist. |
+| Generate Key Pair | Enabled | Enabled | Enabled | Always available (will overwrite existing keys). |
+| Generate CSR | Disabled | Enabled | Enabled | Requires an existing key pair. |
+| Install Certificate | Disabled | Enabled | Enabled | Requires key pair. |
+| Install CA | Disabled | Enabled | Enabled | Requires key pair. |
+| View Certificate | Disabled | Disabled | Enabled | Needs an installed certificate. |
+| Delete Credentials | Disabled | Enabled | Enabled | Available when keys or certificates exist. |
 
 ---
 ## FAQs & Troubleshooting
@@ -1793,16 +1882,16 @@ Six action buttons are located beneath the HTTPS certificate block. Their enable
 - `<project>_<seq>`: `project_a_01`, `iot_device_001`
 
 **Avoid**:
-- ❌ `key1`, `test`, `temp`
-- ❌ Non-ASCII or special characters
-- ❌ Excessively long names
+- `key1`, `test`, `temp`
+- Non-ASCII or special characters
+- Excessively long names
 
 #### 2. Selecting key types
 
 **Suggested approach**:
-- 🎯 Daily work: RSA 2048-bit (speed plus compatibility)
-- 🎯 High-security: RSA 4096-bit (stronger but slower)
-- ⚠️ ECDSA: Use only for HTTPS certificates, not SSH
+- Daily work: RSA 2048-bit (speed plus compatibility)
+- High-security: RSA 4096-bit (stronger but slower)
+- ECDSA: Use only for HTTPS certificates, not SSH
 
 **Capacity planning**:
 - RSA 2048: ~12 keys
@@ -1812,7 +1901,7 @@ Six action buttons are located beneath the HTTPS certificate block. Their enable
 #### 3. Controlling private key export
 
 Best practices:
-- 🔒 Production keys: leave “Allow Private Key Export” unchecked.
+- Production keys: leave “Allow Private Key Export” unchecked.
 - 🔓 Backup keys: enable export and store in offline media.
 - 🧪 Test keys: keep non-exportable and regenerate if needed.
 
@@ -1841,20 +1930,20 @@ Recommended cadence:
 
 #### Q16: Can admin users use all security page functions?
 
-**Answer**: ✅ Yes.
+**Answer**: Yes.
 
 **admin privileges**:
-- ✅ Access to every security page feature.
-- ✅ Access to System, Network, and Files pages.
-- ❌ Cannot access Terminal, Automation, or Command pages (root only).
+- Access to every security page feature.
+- Access to System, Network, and Files pages.
+- Cannot access Terminal, Automation, or Command pages (root only).
 
 **Security page capabilities**:
-- ✅ Generate, delete, and export SSH keys.
-- ✅ Deploy and revoke public keys on remote servers.
-- ✅ Manage deployed host records.
-- ✅ View/delete known host fingerprints.
-- ✅ Generate, install, and delete HTTPS certificates.
-- ✅ Generate CSRs and install CA chains.
+- Generate, delete, and export SSH keys.
+- Deploy and revoke public keys on remote servers.
+- Manage deployed host records.
+- View/delete known host fingerprints.
+- Generate, install, and delete HTTPS certificates.
+- Generate CSRs and install CA chains.
 
 **Need root functionality?**
 - Contact your administrator to log in as root.
@@ -1864,7 +1953,7 @@ Recommended cadence:
 
 #### Q17: “Insufficient permissions” when exporting private keys?
 
-**Symptom**: The **“🔐 Private Key”** button is greyed out or shows “Export not allowed.”
+**Symptom**: The **“Private Key”** button is greyed out or shows “Export not allowed.”
 
 **Reason**: The key was created without “Allow Private Key Export.”
 
@@ -1889,31 +1978,31 @@ Recommended cadence:
 - Use the WebUI deploy feature instead of exporting the private key.
 
 **Design principle**:
-- 🔒 Private keys are the most sensitive assets—minimize export.
-- 🔒 Only export when necessary (backup/migration).
-- 🔒 Defaults prevent accidental leaks.
+- Private keys are the most sensitive assets—minimize export.
+- Only export when necessary (backup/migration).
+- Defaults prevent accidental leaks.
 
 ---
 #### Q14: Certificate state shows “Expiring soon”?
 
-**Symptom**: The status card shows ⚠️ “Expiring soon” with remaining days < 30.
+**Symptom**: The status card shows “Expiring soon” with remaining days < 30.
 
 **Recommendations**:
-- 🟢 **30-15 days**: Prepare to renew, but not urgent yet.
-- 🟡 **15-7 days**: Renew as soon as possible to avoid service impact.
-- 🔴 **<7 days**: Handle immediately.
+- **30-15 days**: Prepare to renew, but not urgent yet.
+- **15-7 days**: Renew as soon as possible to avoid service impact.
+- **<7 days**: Handle immediately.
 
 **Renewal steps (keep the same key)**:
-1. Click **“📋 Generate CSR”** (you can reuse the same CN).
+1. Click **“Generate CSR”** (you can reuse the same CN).
 2. Submit the CSR to your CA and request renewal.
-3. Install the new certificate via **“📥 Install Certificate.”** Paste the renewed certificate; the old one is overwritten.
+3. Install the new certificate via **“Install Certificate.”** Paste the renewed certificate; the old one is overwritten.
 4. Check the status card reflects the new expiration and days remaining.
 
 **Notes**:
-- ✅ Old certificate remains usable until it expires.
-- ✅ The new certificate becomes active immediately.
-- ✅ The CA chain usually does not timeout at the same time; update only if necessary.
-- ⚠️ If the CA chain itself is expired, renew it along with the device certificate.
+- Old certificate remains usable until it expires.
+- The new certificate becomes active immediately.
+- The CA chain usually does not timeout at the same time; update only if necessary.
+- If the CA chain itself is expired, renew it along with the device certificate.
 
 ---
 
@@ -1953,32 +2042,32 @@ Recommended cadence:
 **Fix**:
 
 **Option 1: Regenerate the CSR**
-1. Click **“📋 Generate CSR”** again on the device.
+1. Click **“Generate CSR”** again on the device.
 2. Copy the new CSR.
 3. Submit it to the CA.
 4. Install the newly signed certificate.
 
 **Option 2: Delete credentials and restart**
-1. Click **“🗑️ Delete Credentials.”**
+1. Click **“Delete Credentials.”**
 2. Begin from Section 5.3.1 (generate key pair).
 3. Follow the full flow to ensure CSR, signing, and installation all use the same key.
 
 **Prevention**:
-- ✅ Do not regenerate the key pair after creating a CSR.
-- ✅ Confirm the CSR filename (e.g., `device-001.csr`) and certificate file correspond.
-- ✅ Label files clearly to avoid confusion.
+- Do not regenerate the key pair after creating a CSR.
+- Confirm the CSR filename (e.g., `device-001.csr`) and certificate file correspond.
+- Label files clearly to avoid confusion.
 
 ---
 ### 7.4 HTTPS Certificate Issues
 
 #### Q12: “Generate CSR” button is greyed out?
 
-**Symptom**: The **“📋 Generate CSR”** button is disabled (greyed).
+**Symptom**: The **“Generate CSR”** button is disabled (greyed).
 
 **Reason**: A key pair has not been generated. CSR signing requires a private key.
 
 **Fix**:
-1. Click **“🔑 Generate Key Pair.”**
+1. Click **“Generate Key Pair.”**
 2. Wait for the key pair to finish.
 3. The CSR button (and Install Certificate/Install CA buttons) will enable automatically.
 
@@ -1989,24 +2078,24 @@ Recommended cadence:
 ---
 #### Q10: How to handle Host Fingerprint mismatch warnings?
 
-**Symptom**: A red warning pops up: “⚠️ Security Warning: Host fingerprint mismatch.”
+**Symptom**: A red warning pops up: “Security Warning: Host fingerprint mismatch.”
 
 **Correct handling** (see Section 4.4):
 
 1. **🛑 Stop immediately**: Do not click “Update Host Key” without confirmation.
 2. **📞 Contact the administrator**: Ask if the server was rebuilt or the host key changed.
-3. **✅ If legitimate**: Click “Update Host Key,” then reconnect and trust the new fingerprint.
-4. **❌ If uncertain**: Click “Cancel” and investigate the network/security environment.
+3. **If legitimate**: Click “Update Host Key,” then reconnect and trust the new fingerprint.
+4. **If uncertain**: Click “Cancel” and investigate the network/security environment.
 
 **Mistakes to avoid**:
-- ❌ Clicking “Update Host Key” automatically (could signal an MITM attack).
-- ❌ Ignoring the warning and forcing the connection.
-- ❌ Assuming it’s a bug—this is a critical security feature.
+- Clicking “Update Host Key” automatically (could signal an MITM attack).
+- Ignoring the warning and forcing the connection.
+- Assuming it’s a bug—this is a critical security feature.
 
 **Security reminder**:
-- 🔴 A fingerprint mismatch is a serious warning.
-- 🔴 Always verify before trusting.
-- 🔴 Frequent warnings may indicate an insecure network.
+- A fingerprint mismatch is a serious warning.
+- Always verify before trusting.
+- Frequent warnings may indicate an insecure network.
 
 ---
 
@@ -2082,17 +2171,35 @@ hosts --list --json
 **Cause**: Only hosts deployed via the WebUI appear in the list.
 
 **Not recorded scenarios**:
-- ❌ Deployments via CLI (`ssh --copyid`).
-- ❌ Manually appending the public key to `authorized_keys`.
-- ❌ Keys deployed on other devices or via different tools.
+- Deployments via CLI (`ssh --copyid`).
+- Manually appending the public key to `authorized_keys`.
+- Keys deployed on other devices or via different tools.
 
 **Resolution**:
 - If you want WebUI management, redeploy the key through the UI.
 - Alternatively, use CLI commands like `hosts --deployed` to view/manage hosts.
+- Or use “Import Host” to add hosts from a .tscfg config package so the list matches your actual setup.
 
 **Design note**:
 - Records are stored locally in `ts_ssh_hosts_config`.
 - Only WebUI or specific API deployments are tracked to provide a unified management interface.
+
+---
+#### Q8b: “Signature verification failed” when importing host or config pack?
+
+**Symptom**: After choosing or pasting a .tscfg in “Import Host” or “Import config pack,” you see a signature verification or decryption error.
+
+**Possible causes**:
+- The .tscfg file is corrupted or incomplete (missing headers/footers or truncated).
+- The pack was not signed with a certificate trusted by this (or the target) device.
+- Device system time is wrong, so certificate validity checks fail.
+- Pasted JSON is malformed (extra spaces, missing quotes, etc.).
+
+**What to do**:
+1. **Check file integrity**: Re-obtain the .tscfg and ensure it includes full `-----BEGIN ...-----` / `-----END ...-----` blocks, or re-export.
+2. **Confirm signer**: Ensure the pack was signed by this device’s certificate or a trusted official/target certificate; for “self-encrypt” host export, import on the same device or one that has the same certificate.
+3. **Fix device time**: In System/Network, verify date and time (and NTP sync if needed).
+4. **Use “Verify only”**: In the config pack import modal, click “Verify only” first and use the reported error (e.g. signer, certificate CN) to narrow down the issue.
 
 ---
 #### Q7: Deployment succeeded but password is still requested?
@@ -2232,7 +2339,7 @@ hosts --list --json
 
 **Method 1: Export the private key (requires prior permission)**:
 1. Enable **“Allow Private Key Export”** when generating the key.
-2. After creation, click **“🔐 Private Key.”**
+2. After creation, click **“Private Key.”**
 3. Download the `.pem` file.
 4. Store it on encrypted offline media (USB drive, password manager).
 
@@ -2428,7 +2535,7 @@ The following docs provide additional technical depth and troubleshooting guidan
 #### 2. Test immediately after deployment
 
 **Workflow**:
-1. After deployment, click **“🔍 Test.”**
+1. After deployment, click **“Test.”**
 2. Ensure the connection succeeds.
 3. If it fails, fix issues immediately.
 
@@ -2517,10 +2624,10 @@ This section explains why TianshanOS uses secure storage (NVS) over filesystem-b
 
 Although secure storage is preferred, file keys may be appropriate when:
 
-- 🔄 **Migration**: Import an existing key from another device.
+- **Migration**: Import an existing key from another device.
 - 🧪 **Temporary testing**: Use a key for a short-lived test.
-- 🔀 **Multi-device sharing**: The same key must run on several devices.
-- 📤 **External tooling**: Desktop SSH clients (PuTTY, Terminal) require file keys.
+- **Multi-device sharing**: The same key must run on several devices.
+- **External tooling**: Desktop SSH clients (PuTTY, Terminal) require file keys.
 
 **CLI Example for File Keys**:
 ```bash
@@ -2534,21 +2641,21 @@ ssh --host 192.168.1.100 --user nvidia --key /sdcard/id_rsa --shell
 #### When to Renew
 
 - ⏰ The certificate is expiring soon (start renewal 30 days before expiry).
-- ⚠️ The status card shows “Expiring soon” or remaining days < 30.
-- 📅 Company PKI policy dictates issued certificates renew annually or by schedule.
+- The status card shows “Expiring soon” or remaining days < 30.
+- Company PKI policy dictates issued certificates renew annually or by schedule.
 
 #### Renewal Steps
 
 **Option 1: Keep the same key pair (recommended)**
 
 1. **Generate a fresh CSR**:
-   - Click **“📋 Generate CSR”** (you can reuse the same CN).
+   - Click **“Generate CSR”** (you can reuse the same CN).
    - Copy the new CSR.
 2. **Submit it to the CA**:
    - Send the CSR to your CA for renewal.
    - Receive a new certificate.
 3. **Install the new certificate**:
-   - Click **“📥 Install Certificate.”**
+   - Click **“Install Certificate.”**
    - Paste the renewed certificate.
 4. **Check the status**:
    - The expiration date should update to the new certificate’s validity.
@@ -2556,16 +2663,16 @@ ssh --host 192.168.1.100 --user nvidia --key /sdcard/id_rsa --shell
 
 **Option 2: Full refresh (if the private key may be compromised)**
 
-1. Delete all credentials via **“🗑️ Delete Credentials.”**
+1. Delete all credentials via **“Delete Credentials.”**
 2. Start again from Step 5.3.1 (generate a new key pair).
 3. Go through the full 5.3 flow (CSR, CA signing, install certificate, install CA chain).
 
 #### Renewal Notes
 
-- ✅ The old certificate remains valid until its expiry.
-- ✅ The new certificate takes effect immediately once installed.
-- ✅ CA chains rarely need updates unless the CA infrastructure changes.
-- ⚠️ If the CA chain itself is expiring, renew it alongside the device certificate.
+- The old certificate remains valid until its expiry.
+- The new certificate takes effect immediately once installed.
+- CA chains rarely need updates unless the CA infrastructure changes.
+- If the CA chain itself is expiring, renew it alongside the device certificate.
 
 #### Automated Renewal (Future Feature)
 
@@ -2581,10 +2688,10 @@ Currently, renewal is manual. Future versions may:
 
 #### What Gets Deleted
 
-Clicking **“🗑️ Delete Credentials”** removes:
-- 🔑 The device private key (ECDSA P-256)
+Clicking **“Delete Credentials”** removes:
+- The device private key (ECDSA P-256)
 - 📄 The device certificate
-- 🏛️ The CA certificate chain
+- The CA certificate chain
 
 #### When to Use
 
@@ -2597,10 +2704,10 @@ Clicking **“🗑️ Delete Credentials”** removes:
 
 #### Steps
 
-1. Click **“🗑️ Delete Credentials”** (red button).
+1. Click **“Delete Credentials”** (red button).
 2. Read the warning dialog:
    ```
-   ⚠️ Warning: This deletes all PKI credentials
+   Warning: This deletes all PKI credentials
 
    This action will remove:
    • Device private key
@@ -2616,7 +2723,7 @@ Clicking **“🗑️ Delete Credentials”** removes:
    ```
 3. Confirm if you understand the impact.
 4. After completion:
-   - The status card reverts to “🔒 Key pair not generated.”
+   - The status card reverts to “Key pair not generated.”
    - All buttons return to their initial states.
    - The HTTPS key row disappears from the Key Management table.
 
@@ -2641,11 +2748,11 @@ Clicking **“🗑️ Delete Credentials”** removes:
 - Copy the certificate for client configuration or backups.
 
 **Steps**:
-1. Ensure the device certificate is installed (the “👁️ View Certificate” button is enabled).
-2. Click **“👁️ View Certificate.”**
-3. Wait as “🔄 Loading...” appears for 1-2 seconds.
+1. Ensure the device certificate is installed (the “View Certificate” button is enabled).
+2. Click **“View Certificate.”**
+3. Wait as “Loading...” appears for 1-2 seconds.
 4. The modal displays the entire PEM content (scrollable).
-5. Optional: click **“📋 Copy to Clipboard”** for reuse.
+5. Optional: click **“Copy to Clipboard”** for reuse.
 6. Close the modal when finished.
 
 #### Certificate Inspection
@@ -2680,8 +2787,8 @@ Certificate:
 **Purpose**: Install the CA chain (root + intermediate) so clients can validate the device certificate.
 
 **Prerequisites**:
-- ✅ Device certificate installed (Section 5.3.4).
-- ✅ CA chain file in PEM format.
+- Device certificate installed (Section 5.3.4).
+- CA chain file in PEM format.
 
 **Why you need it**:
 - Clients need a complete trust path: `Device Cert ← Intermediate CA ← Root CA`.
@@ -2698,13 +2805,13 @@ Certificate:
    (Intermediate CA content)
    -----END CERTIFICATE-----
    ```
-3. Click **“🏛️ Install CA.”**
+3. Click **“Install CA.”**
 4. Paste the chain into the modal’s text box (all `BEGIN/END` sections).
-5. Click **“🏛️ Install.”**
+5. Click **“Install.”**
 6. Wait for validation and storage in NVS.
 7. Confirmation steps:
-   - “✅ CA chain installed successfully.”
-   - Status card shows “✅ Activated” (if the certificate is valid).
+   - “CA chain installed successfully.”
+   - Status card shows “Activated” (if the certificate is valid).
    - mTLS configuration is now complete.
 
 #### CA Chain Examples
@@ -2733,8 +2840,8 @@ Certificate:
 #### Post-installation Validation
 
 1. Check the status card:
-   - Should read “✅ Activated”
-   - Validity shows “✅ Valid”
+   - Should read “Activated”
+   - Validity shows “Valid”
    - Days remaining should be accurate
 2. Test an mTLS client (configured to trust the same CA):
    - Connect to the device using an mTLS-aware client.
@@ -2746,9 +2853,9 @@ Certificate:
 **Goal**: Install the CA-signed device certificate so mTLS works.
 
 **Prerequisites**:
-- ✅ Key pair must exist.
-- ✅ You have the signed certificate in PEM format.
-- ✅ The certificate was signed from the CSR you generated.
+- Key pair must exist.
+- You have the signed certificate in PEM format.
+- The certificate was signed from the CSR you generated.
 
 **Steps**:
 1. Open the certificate file (`device.crt`) on your computer.
@@ -2760,16 +2867,16 @@ Certificate:
    xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxQ=
    -----END CERTIFICATE-----
    ```
-3. Click **“📥 Install Certificate.”**
+3. Click **“Install Certificate.”**
 4. Paste the certificate into the “Certificate PEM” field, ensuring the `BEGIN/END` lines are present.
-5. Click **“📥 Install.”**
+5. Click **“Install.”**
 6. Wait while the system validates:
-   - ✅ Correct PEM format
-   - ✅ Certificate matches the private key
-   - ✅ Certificate is currently valid (within its validity window)
-   - ✅ Subject fields look as expected
+   - Correct PEM format
+   - Certificate matches the private key
+   - Certificate is currently valid (within its validity window)
+   - Subject fields look as expected
 7. Confirm when the modal shows:
-   - “✅ Certificate installed successfully”
+   - “Certificate installed successfully”
    - Displayed certificate details (CN, issuer, validity)
    - Status card updates to “Activated” or “Certificate installed, CA chain missing”
 
@@ -2842,15 +2949,15 @@ If the device has a public domain, use Let’s Encrypt:
 
 #### Timing
 
-- 🚀 Automated CAs: minutes to seconds
+- Automated CAs: minutes to seconds
 - ⏳ Manual CAs: hours to days, depending on the approval chain
 
 #### Files You Should Receive
 
 | File | Required | Description | Format |
 |------|----------|-------------|--------|
-| **Device Certificate** | ✅ Yes | CA-signed certificate for the device | `device.crt`, PEM format |
-| **CA Chain** | ✅ Yes | Root CA plus intermediate CA certificates | `ca-chain.pem`, PEM format |
+| **Device Certificate** | Yes | CA-signed certificate for the device | `device.crt`, PEM format |
+| **CA Chain** | Yes | Root CA plus intermediate CA certificates | `ca-chain.pem`, PEM format |
 
 Once you have both files, proceed to Section 5.3.4: Install the device certificate.
 
@@ -2860,25 +2967,25 @@ Once you have both files, proceed to Section 5.3.4: Install the device certifica
 **Purpose**: Produce a CSR to submit to a CA for certificate signing.
 
 **Prerequisites**:
-- ✅ Step 5.3.1 (key pair generated)
-- ✅ The **“📋 Generate CSR”** button is enabled
+- Step 5.3.1 (key pair generated)
+- The **“Generate CSR”** button is enabled
 
 **Steps**:
-1. Click **“📋 Generate CSR.”**
+1. Click **“Generate CSR.”**
 2. Fill out the CSR details in the modal:
 
 | Field | Required | Description | Example |
 |-------|----------|-------------|---------|
-| **Device ID (CN)** | ❌ No | Common Name identifying the device. Leave blank to use defaults. | `TIANSHAN-RM01-0001`, `DEVICE-AGX-001` |
-| **Organization (O)** | ❌ No | Company or organization name | `HiddenPeak Labs`, `My Company` |
-| **Organizational Unit (OU)** | ❌ No | Department or unit | `Device`, `Production`, `IoT` |
+| **Device ID (CN)** | No | Common Name identifying the device. Leave blank to use defaults. | `TIANSHAN-RM01-0001`, `DEVICE-AGX-001` |
+| **Organization (O)** | No | Company or organization name | `HiddenPeak Labs`, `My Company` |
+| **Organizational Unit (OU)** | No | Department or unit | `Device`, `Production`, `IoT` |
 
 **Notes**:
 - CN should follow a structured naming pattern (`prefix-model-serial`).
 - O and OU are optional fields for metadata.
 - Leaving everything blank lets the system apply defaults (e.g., MAC address-based CN).
 
-3. Click **“📋 Generate CSR.”**
+3. Click **“Generate CSR.”**
 4. Wait ~2-3 seconds as the device:
    - Uses the private key and input data to craft a CSR.
    - Produces an X.509-compliant CSR (RFC 2986).
@@ -2893,15 +3000,15 @@ Once you have both files, proceed to Section 5.3.4: Install the device certifica
    │ -----END CERTIFICATE REQUEST-----         │
    └───────────────────────────────────────────┘
    ```
-6. Click **“📋 Copy to Clipboard.”**
+6. Click **“Copy to Clipboard.”**
 7. Optionally save the CSR as a file (`device.csr`) for CA submission.
 
 #### CSR Contents
 
-- ✅ The device’s public key (from the generated key pair).
-- ✅ Subject information (CN, O, OU).
-- ✅ Device signature proving possession of the private key.
-- ❌ **No private key data** is included.
+- The device’s public key (from the generated key pair).
+- Subject information (CN, O, OU).
+- Device signature proving possession of the private key.
+- **No private key data** is included.
 
 #### Next Step
 
@@ -2910,7 +3017,7 @@ Submit the CSR to your CA for signing as described in Section 5.3.3.
 ---
 ### 5.3 Full Certificate Request Flow
 
-Configuring mTLS from scratch involves five steps.
+Configuring mTLS from scratch involves five steps. Button and modal names below (e.g. “Generate Key Pair,” “Certificate Signing Request (CSR),” “Install Device Certificate,” “Install CA Certificate Chain,” “View Device Certificate”) match the Security page WebUI so you can follow along in the interface.
 
 #### Process Overview
 
@@ -2935,7 +3042,7 @@ Step 5: Install CA certificate chain (on-device)
 **Steps**:
 1. **Check status**:
    - Look at the certificate status card. If it already shows “Key pair generated,” skip unless you need to regenerate.
-2. **Click “🔑 Generate Key Pair.”**
+2. **Click “Generate Key Pair.”**
 3. **Review the prompt**:
    ```
    Generate an ECDSA P-256 key pair for mTLS authentication.
@@ -2943,16 +3050,16 @@ Step 5: Install CA certificate chain (on-device)
 4. **Handle the overwrite warning**:
    - If keys already exist, a yellow warning appears:
      ```
-     ⚠️ A key pair already exists. Continue will overwrite the current keys!
+     Note: A key pair already exists. Continue will overwrite the current keys!
      ```
    - Overwriting will invalidate any CSR/certificate issued by the old key.
    - Only proceed if you understand the impact.
-5. **Start generation** by clicking **“🔑 Generate.”**
+5. **Start generation** by clicking **“Generate.”**
 6. **Wait for completion**:
    - ECDSA P-256 generation takes ~3-5 seconds.
    - The modal displays progress or status.
 7. **Confirm success**:
-   - It shows “✅ Key pair generated successfully.”
+   - It shows “Key pair generated successfully.”
    - Close the modal.
    - The status card now shows “Key pair generated, certificate not installed.”
    - The buttons for generating CSR, installing certificates, and installing the CA become active.
@@ -2973,18 +3080,18 @@ Step 5: Install CA certificate chain (on-device)
 
 #### Status Card Details
 
-At the top of the “🔒 HTTPS Certificates” block, a status card shows the certificate state in real time.
+At the top of the “HTTPS Certificates” block, a status card shows the certificate state in real time.
 
 #### Status Icons and Meaning
 
 | Icon | Status Text | Meaning |
 |------|-------------|---------|
-| 🔄 | Loading... | Retrieving certificate status |
-| 🔒 | Key pair not generated | No key pair exists yet |
-| 📝 | Key pair generated, certificate not installed | Keys exist but CA certificate is missing |
-| ✅ | Activated | Certificate installed and valid |
-| ⚠️ | Expiring soon | Certificate expires within 30 days—renew promptly |
-| ❌ | Expired | Certificate is invalid; mTLS cannot run |
+| Loading... | Retrieving certificate status |
+| Key pair not generated | No key pair exists yet |
+| Key pair generated, certificate not installed | Keys exist but CA certificate is missing |
+| Activated | Certificate installed and valid |
+| Expiring soon | Certificate expires within 30 days—renew promptly |
+| Expired | Certificate is invalid; mTLS cannot run |
 
 #### Certificate Details (Installed)
 
@@ -2997,8 +3104,13 @@ When the certificate shows “Activated” or “Expiring soon,” the card expa
 | **Valid From** | Certificate start time | `2026-01-27 00:00:00` |
 | **Expires On** | Certificate end time | `2027-01-27 00:00:00` |
 | **Serial Number** | Hexadecimal identifier | `01:23:45:67:89:AB` |
-| **Validity** | Is the certificate currently valid? | ✅ Valid / ❌ Expired |
+| **Validity** | Is the certificate currently valid? | Valid / Expired |
 | **Days Remaining** | Days until expiration | `365 days`, `28 days` (warning appears if < 30) |
+
+**Status card display rules**:
+- **Days remaining** is shown only when a certificate is installed and within its validity period; it is not shown when no certificate is installed or when the certificate has expired.
+- **“Expiring soon”** state/badge appears when the certificate is still valid but has fewer than 30 days until expiry; renew as soon as possible.
+- The expanded details (Subject CN, Issuer, Valid From/Expires On, Serial Number, Validity, Days Remaining) are only visible when the status is “Activated” or “Expiring soon.”
 
 #### Button States
 
@@ -3006,12 +3118,12 @@ Six action buttons are located beneath the HTTPS certificate block. Their enable
 
 | Button | No Key Pair | Key Pair Generated | Certificate Installed | Notes |
 |--------|-------------|--------------------|------------------------|-------|
-| 🔑 Generate Key Pair | ✅ Enabled | ✅ Enabled | ✅ Enabled | Always available (will overwrite existing keys). |
-| 📋 Generate CSR | ❌ Disabled | ✅ Enabled | ✅ Enabled | Requires an existing key pair. |
-| 📥 Install Certificate | ❌ Disabled | ✅ Enabled | ✅ Enabled | Requires key pair. |
-| 🏛️ Install CA | ❌ Disabled | ✅ Enabled | ✅ Enabled | Requires key pair. |
-| 👁️ View Certificate | ❌ Disabled | ❌ Disabled | ✅ Enabled | Needs an installed certificate. |
-| 🗑️ Delete Credentials | ❌ Disabled | ✅ Enabled | ✅ Enabled | Available when keys or certificates exist. |
+| Generate Key Pair | Enabled | Enabled | Enabled | Always available (will overwrite existing keys). |
+| Generate CSR | Disabled | Enabled | Enabled | Requires an existing key pair. |
+| Install Certificate | Disabled | Enabled | Enabled | Requires key pair. |
+| Install CA | Disabled | Enabled | Enabled | Requires key pair. |
+| View Certificate | Disabled | Disabled | Enabled | Needs an installed certificate. |
+| Delete Credentials | Disabled | Enabled | Enabled | Available when keys or certificates exist. |
 
 ---
 ## FAQs & Troubleshooting
@@ -3051,16 +3163,16 @@ Six action buttons are located beneath the HTTPS certificate block. Their enable
 - `<project>_<seq>`: `project_a_01`, `iot_device_001`
 
 **Avoid**:
-- ❌ `key1`, `test`, `temp`
-- ❌ Non-ASCII or special characters
-- ❌ Excessively long names
+- `key1`, `test`, `temp`
+- Non-ASCII or special characters
+- Excessively long names
 
 #### 2. Selecting key types
 
 **Suggested approach**:
-- 🎯 Daily work: RSA 2048-bit (speed plus compatibility)
-- 🎯 High-security: RSA 4096-bit (stronger but slower)
-- ⚠️ ECDSA: Use only for HTTPS certificates, not SSH
+- Daily work: RSA 2048-bit (speed plus compatibility)
+- High-security: RSA 4096-bit (stronger but slower)
+- ECDSA: Use only for HTTPS certificates, not SSH
 
 **Capacity planning**:
 - RSA 2048: ~12 keys
@@ -3070,7 +3182,7 @@ Six action buttons are located beneath the HTTPS certificate block. Their enable
 #### 3. Controlling private key export
 
 Best practices:
-- 🔒 Production keys: leave “Allow Private Key Export” unchecked.
+- Production keys: leave “Allow Private Key Export” unchecked.
 - 🔓 Backup keys: enable export and store in offline media.
 - 🧪 Test keys: keep non-exportable and regenerate if needed.
 
@@ -3099,20 +3211,20 @@ Recommended cadence:
 
 #### Q16: Can admin users use all security page functions?
 
-**Answer**: ✅ Yes.
+**Answer**: Yes.
 
 **admin privileges**:
-- ✅ Access to every security page feature.
-- ✅ Access to System, Network, and Files pages.
-- ❌ Cannot access Terminal, Automation, or Command pages (root only).
+- Access to every security page feature.
+- Access to System, Network, and Files pages.
+- Cannot access Terminal, Automation, or Command pages (root only).
 
 **Security page capabilities**:
-- ✅ Generate, delete, and export SSH keys.
-- ✅ Deploy and revoke public keys on remote servers.
-- ✅ Manage deployed host records.
-- ✅ View/delete known host fingerprints.
-- ✅ Generate, install, and delete HTTPS certificates.
-- ✅ Generate CSRs and install CA chains.
+- Generate, delete, and export SSH keys.
+- Deploy and revoke public keys on remote servers.
+- Manage deployed host records.
+- View/delete known host fingerprints.
+- Generate, install, and delete HTTPS certificates.
+- Generate CSRs and install CA chains.
 
 **Need root functionality?**
 - Contact your administrator to log in as root.
@@ -3122,7 +3234,7 @@ Recommended cadence:
 
 #### Q17: “Insufficient permissions” when exporting private keys?
 
-**Symptom**: The **“🔐 Private Key”** button is greyed out or shows “Export not allowed.”
+**Symptom**: The **“Private Key”** button is greyed out or shows “Export not allowed.”
 
 **Reason**: The key was created without “Allow Private Key Export.”
 
@@ -3147,31 +3259,31 @@ Recommended cadence:
 - Use the WebUI deploy feature instead of exporting the private key.
 
 **Design principle**:
-- 🔒 Private keys are the most sensitive assets—minimize export.
-- 🔒 Only export when necessary (backup/migration).
-- 🔒 Defaults prevent accidental leaks.
+- Private keys are the most sensitive assets—minimize export.
+- Only export when necessary (backup/migration).
+- Defaults prevent accidental leaks.
 
 ---
 #### Q14: Certificate state shows “Expiring soon”?
 
-**Symptom**: The status card shows ⚠️ “Expiring soon” with remaining days < 30.
+**Symptom**: The status card shows “Expiring soon” with remaining days < 30.
 
 **Recommendations**:
-- 🟢 **30-15 days**: Prepare to renew, but not urgent yet.
-- 🟡 **15-7 days**: Renew as soon as possible to avoid service impact.
-- 🔴 **<7 days**: Handle immediately.
+- **30-15 days**: Prepare to renew, but not urgent yet.
+- **15-7 days**: Renew as soon as possible to avoid service impact.
+- **<7 days**: Handle immediately.
 
 **Renewal steps (keep the same key)**:
-1. Click **“📋 Generate CSR”** (you can reuse the same CN).
+1. Click **“Generate CSR”** (you can reuse the same CN).
 2. Submit the CSR to your CA and request renewal.
-3. Install the new certificate via **“📥 Install Certificate.”** Paste the renewed certificate; the old one is overwritten.
+3. Install the new certificate via **“Install Certificate.”** Paste the renewed certificate; the old one is overwritten.
 4. Check the status card reflects the new expiration and days remaining.
 
 **Notes**:
-- ✅ Old certificate remains usable until it expires.
-- ✅ The new certificate becomes active immediately.
-- ✅ The CA chain usually does not timeout at the same time; update only if necessary.
-- ⚠️ If the CA chain itself is expired, renew it along with the device certificate.
+- Old certificate remains usable until it expires.
+- The new certificate becomes active immediately.
+- The CA chain usually does not timeout at the same time; update only if necessary.
+- If the CA chain itself is expired, renew it along with the device certificate.
 
 ---
 
@@ -3211,32 +3323,32 @@ Recommended cadence:
 **Fix**:
 
 **Option 1: Regenerate the CSR**
-1. Click **“📋 Generate CSR”** again on the device.
+1. Click **“Generate CSR”** again on the device.
 2. Copy the new CSR.
 3. Submit it to the CA.
 4. Install the newly signed certificate.
 
 **Option 2: Delete credentials and restart**
-1. Click **“🗑️ Delete Credentials.”**
+1. Click **“Delete Credentials.”**
 2. Begin from Section 5.3.1 (generate key pair).
 3. Follow the full flow to ensure CSR, signing, and installation all use the same key.
 
 **Prevention**:
-- ✅ Do not regenerate the key pair after creating a CSR.
-- ✅ Confirm the CSR filename (e.g., `device-001.csr`) and certificate file correspond.
-- ✅ Label files clearly to avoid confusion.
+- Do not regenerate the key pair after creating a CSR.
+- Confirm the CSR filename (e.g., `device-001.csr`) and certificate file correspond.
+- Label files clearly to avoid confusion.
 
 ---
 ### 7.4 HTTPS Certificate Issues
 
 #### Q12: “Generate CSR” button is greyed out?
 
-**Symptom**: The **“📋 Generate CSR”** button is disabled (greyed).
+**Symptom**: The **“Generate CSR”** button is disabled (greyed).
 
 **Reason**: A key pair has not been generated. CSR signing requires a private key.
 
 **Fix**:
-1. Click **“🔑 Generate Key Pair.”**
+1. Click **“Generate Key Pair.”**
 2. Wait for the key pair to finish.
 3. The CSR button (and Install Certificate/Install CA buttons) will enable automatically.
 
@@ -3247,24 +3359,24 @@ Recommended cadence:
 ---
 #### Q10: How to handle Host Fingerprint mismatch warnings?
 
-**Symptom**: A red warning pops up: “⚠️ Security Warning: Host fingerprint mismatch.”
+**Symptom**: A red warning pops up: “Security Warning: Host fingerprint mismatch.”
 
 **Correct handling** (see Section 4.4):
 
 1. **🛑 Stop immediately**: Do not click “Update Host Key” without confirmation.
 2. **📞 Contact the administrator**: Ask if the server was rebuilt or the host key changed.
-3. **✅ If legitimate**: Click “Update Host Key,” then reconnect and trust the new fingerprint.
-4. **❌ If uncertain**: Click “Cancel” and investigate the network/security environment.
+3. **If legitimate**: Click “Update Host Key,” then reconnect and trust the new fingerprint.
+4. **If uncertain**: Click “Cancel” and investigate the network/security environment.
 
 **Mistakes to avoid**:
-- ❌ Clicking “Update Host Key” automatically (could signal an MITM attack).
-- ❌ Ignoring the warning and forcing the connection.
-- ❌ Assuming it’s a bug—this is a critical security feature.
+- Clicking “Update Host Key” automatically (could signal an MITM attack).
+- Ignoring the warning and forcing the connection.
+- Assuming it’s a bug—this is a critical security feature.
 
 **Security reminder**:
-- 🔴 A fingerprint mismatch is a serious warning.
-- 🔴 Always verify before trusting.
-- 🔴 Frequent warnings may indicate an insecure network.
+- A fingerprint mismatch is a serious warning.
+- Always verify before trusting.
+- Frequent warnings may indicate an insecure network.
 
 ---
 
@@ -3340,17 +3452,35 @@ hosts --list --json
 **Cause**: Only hosts deployed via the WebUI appear in the list.
 
 **Not recorded scenarios**:
-- ❌ Deployments via CLI (`ssh --copyid`).
-- ❌ Manually appending the public key to `authorized_keys`.
-- ❌ Keys deployed on other devices or via different tools.
+- Deployments via CLI (`ssh --copyid`).
+- Manually appending the public key to `authorized_keys`.
+- Keys deployed on other devices or via different tools.
 
 **Resolution**:
 - If you want WebUI management, redeploy the key through the UI.
 - Alternatively, use CLI commands like `hosts --deployed` to view/manage hosts.
+- Or use “Import Host” to add hosts from a .tscfg config package so the list matches your actual setup.
 
 **Design note**:
 - Records are stored locally in `ts_ssh_hosts_config`.
 - Only WebUI or specific API deployments are tracked to provide a unified management interface.
+
+---
+#### Q8b: “Signature verification failed” when importing host or config pack?
+
+**Symptom**: After choosing or pasting a .tscfg in “Import Host” or “Import config pack,” you see a signature verification or decryption error.
+
+**Possible causes**:
+- The .tscfg file is corrupted or incomplete (missing headers/footers or truncated).
+- The pack was not signed with a certificate trusted by this (or the target) device.
+- Device system time is wrong, so certificate validity checks fail.
+- Pasted JSON is malformed (extra spaces, missing quotes, etc.).
+
+**What to do**:
+1. **Check file integrity**: Re-obtain the .tscfg and ensure it includes full `-----BEGIN ...-----` / `-----END ...-----` blocks, or re-export.
+2. **Confirm signer**: Ensure the pack was signed by this device’s certificate or a trusted official/target certificate; for “self-encrypt” host export, import on the same device or one that has the same certificate.
+3. **Fix device time**: In System/Network, verify date and time (and NTP sync if needed).
+4. **Use “Verify only”**: In the config pack import modal, click “Verify only” first and use the reported error (e.g. signer, certificate CN) to narrow down the issue.
 
 ---
 #### Q7: Deployment succeeded but password is still requested?
@@ -3490,7 +3620,7 @@ hosts --list --json
 
 **Method 1: Export the private key (requires prior permission)**:
 1. Enable **“Allow Private Key Export”** when generating the key.
-2. After creation, click **“🔐 Private Key.”**
+2. After creation, click **“Private Key.”**
 3. Download the `.pem` file.
 4. Store it on encrypted offline media (USB drive, password manager).
 
@@ -3686,7 +3816,7 @@ The following docs provide additional technical depth and troubleshooting guidan
 #### 2. Test immediately after deployment
 
 **Workflow**:
-1. After deployment, click **“🔍 Test.”**
+1. After deployment, click **“Test.”**
 2. Ensure the connection succeeds.
 3. If it fails, fix issues immediately.
 

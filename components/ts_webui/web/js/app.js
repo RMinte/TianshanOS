@@ -10770,9 +10770,9 @@ async function loadSecurityPage() {
     content.innerHTML = `
         <div class="page-security">
             <div class="section">
-                <h2>� 密钥管理</h2>
+                <h2>密钥管理</h2>
                 <div class="button-group" style="margin-bottom:15px">
-                    <button class="btn btn-primary" onclick="showGenerateKeyModal()">➕ 生成新密钥</button>
+                    <button class="btn btn-primary" onclick="showGenerateKeyModal()"><i class="ri-add-line"></i> 生成新密钥</button>
                 </div>
                 <table class="data-table">
                     <thead>
@@ -10783,10 +10783,10 @@ async function loadSecurityPage() {
             </div>
             
             <div class="section">
-                <h2>🖥️ 已部署主机</h2>
+                <h2>已部署主机</h2>
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px">
-                    <p style="color:#666;font-size:0.9em;margin:0">💡 通过上方密钥的「部署」按钮将公钥部署到远程服务器后，主机将自动出现在此列表</p>
-                    <button class="btn btn-sm" onclick="showImportSshHostModal()" style="background:#17a2b8;color:white">📥 导入主机</button>
+                    <p style="color:#666;font-size:0.9em;margin:0"><i class="ri-information-line"></i> 通过上方密钥的「部署」按钮将公钥部署到远程服务器后，主机将自动出现在此列表</p>
+                    <button class="btn btn-sm btn-service-style" onclick="showImportSshHostModal()"><i class="ri-upload-line"></i> 导入主机</button>
                 </div>
                 <table class="data-table">
                     <thead>
@@ -10797,8 +10797,8 @@ async function loadSecurityPage() {
             </div>
             
             <div class="section">
-                <h2>� 已知主机指纹</h2>
-                <p style="color:#666;margin-bottom:15px;font-size:0.9em">💡 SSH 连接时自动记录的服务器指纹，用于防止中间人攻击。如果服务器重装需要更新指纹。</p>
+                <h2>已知主机指纹</h2>
+                <p style="color:#666;margin-bottom:15px;font-size:0.9em"><i class="ri-information-line"></i> SSH 连接时自动记录的服务器指纹，用于防止中间人攻击。如果服务器重装需要更新指纹。</p>
                 <table class="data-table">
                     <thead>
                         <tr><th>主机</th><th>端口</th><th>密钥类型</th><th>指纹 (SHA256)</th><th>添加时间</th><th>操作</th></tr>
@@ -10808,11 +10808,11 @@ async function loadSecurityPage() {
             </div>
             
             <div class="section">
-                <h2>�🔒 HTTPS 证书</h2>
+                <h2>HTTPS 证书</h2>
                 <div id="cert-status-card" class="info-card" style="margin-bottom:15px">
                     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
                         <span style="font-size:1.1em;font-weight:bold">
-                            <span id="cert-status-icon">🔄</span>
+                            <span id="cert-status-icon"><i class="ri-refresh-line"></i></span>
                             <span id="cert-status-text">加载中...</span>
                         </span>
                         <span id="cert-expiry-badge" class="badge" style="display:none"></span>
@@ -10832,21 +10832,21 @@ async function loadSecurityPage() {
                     </div>
                 </div>
                 <div class="button-group" style="display:flex;flex-wrap:wrap;gap:8px">
-                    <button class="btn" id="btn-cert-gen-key" onclick="showCertGenKeyModal()">🔑 生成密钥对</button>
-                    <button class="btn" id="btn-cert-gen-csr" onclick="showCertCSRModal()" disabled>📋 生成 CSR</button>
-                    <button class="btn" id="btn-cert-install" onclick="showCertInstallModal()" disabled>📥 安装证书</button>
-                    <button class="btn" id="btn-cert-install-ca" onclick="showCertInstallCAModal()" disabled>🏛️ 安装 CA</button>
-                    <button class="btn" id="btn-cert-view" onclick="showCertViewModal()" disabled>👁️ 查看证书</button>
-                    <button class="btn btn-danger" id="btn-cert-delete" onclick="deleteCertCredentials()" disabled>🗑️ 删除凭证</button>
+                    <button class="btn btn-primary" id="btn-cert-gen-key" onclick="showCertGenKeyModal()"><i class="ri-key-line"></i> 生成密钥对</button>
+                    <button class="btn btn-service-style" id="btn-cert-gen-csr" onclick="showCertCSRModal()" disabled><i class="ri-file-text-line"></i> 生成 CSR</button>
+                    <button class="btn btn-service-style" id="btn-cert-install" onclick="showCertInstallModal()" disabled><i class="ri-upload-line"></i> 安装证书</button>
+                    <button class="btn btn-service-style" id="btn-cert-install-ca" onclick="showCertInstallCAModal()" disabled><i class="ri-shield-keyhole-line"></i> 安装 CA</button>
+                    <button class="btn" id="btn-cert-view" onclick="showCertViewModal()" disabled style="color:#666"><i class="ri-eye-line"></i> 查看证书</button>
+                    <button class="btn btn-danger" id="btn-cert-delete" onclick="deleteCertCredentials()" disabled><i class="ri-delete-bin-line"></i> 删除凭证</button>
                 </div>
             </div>
             
             <div class="section">
-                <h2>📦 配置包 (Config Pack)</h2>
+                <h2>配置包 (Config Pack)</h2>
                 <div id="config-pack-status-card" class="info-card" style="margin-bottom:15px">
                     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
                         <span style="font-size:1.1em;font-weight:bold">
-                            <span id="pack-status-icon">🔄</span>
+                            <span id="pack-status-icon"><i class="ri-refresh-line"></i></span>
                             <span id="pack-status-text">加载中...</span>
                         </span>
                         <span id="pack-device-type-badge" class="badge" style="display:none"></span>
@@ -10860,23 +10860,23 @@ async function loadSecurityPage() {
                         </div>
                     </div>
                     <p style="color:#666;margin-top:10px;font-size:0.9em">
-                        💡 配置包系统允许安全地加密和签名配置文件，用于设备间配置分发
+                        <i class="ri-information-line"></i> 配置包系统允许安全地加密和签名配置文件，用于设备间配置分发
                     </p>
                 </div>
                 <div class="button-group" style="display:flex;flex-wrap:wrap;gap:8px">
-                    <button class="btn" onclick="showConfigPackExportCertModal()">📤 导出设备证书</button>
-                    <button class="btn" onclick="showConfigPackImportModal()">📥 导入配置包</button>
-                    <button class="btn" id="btn-pack-export" onclick="showConfigPackExportModal()" disabled>📦 导出配置包</button>
-                    <button class="btn" onclick="showConfigPackListModal()">📋 查看配置包列表</button>
+                    <button class="btn btn-service-style" onclick="showConfigPackExportCertModal()"><i class="ri-download-line"></i> 导出设备证书</button>
+                    <button class="btn btn-service-style" onclick="showConfigPackImportModal()"><i class="ri-upload-line"></i> 导入配置包</button>
+                    <button class="btn btn-service-style" id="btn-pack-export" onclick="showConfigPackExportModal()" disabled><i class="ri-download-line"></i> 导出配置包</button>
+                    <button class="btn" onclick="showConfigPackListModal()" style="color:#666"><i class="ri-file-text-line"></i> 查看配置包列表</button>
                 </div>
             </div>
             
             <!-- 配置包：导出设备证书弹窗 -->
             <div class="modal hidden" id="pack-export-cert-modal">
                 <div class="modal-content" style="max-width:600px">
-                    <h2>📤 导出设备证书</h2>
+                    <h2>导出设备证书</h2>
                     <p style="color:#666;margin-bottom:15px">将此证书发送给需要向您发送加密配置的开发者</p>
-                    <div id="pack-export-cert-loading" style="text-align:center;padding:20px">🔄 加载中...</div>
+                    <div id="pack-export-cert-loading" style="text-align:center;padding:20px"><i class="ri-refresh-line"></i> 加载中...</div>
                     <div id="pack-export-cert-content" class="hidden">
                         <div class="form-group">
                             <label>证书指纹 (SHA256)</label>
@@ -10890,7 +10890,7 @@ async function loadSecurityPage() {
                             <label>证书 PEM</label>
                             <textarea id="pack-cert-pem" readonly style="width:100%;height:200px;font-family:monospace;font-size:11px"></textarea>
                         </div>
-                        <button class="btn btn-small" onclick="copyPackCertToClipboard()" style="margin-top:8px">📋 复制到剪贴板</button>
+                        <button class="btn btn-small btn-service-style" onclick="copyPackCertToClipboard()" style="margin-top:8px"><i class="ri-file-text-line"></i> 复制到剪贴板</button>
                     </div>
                     <div class="form-actions" style="margin-top:15px">
                         <button class="btn" onclick="hideConfigPackExportCertModal()">关闭</button>
@@ -10901,7 +10901,7 @@ async function loadSecurityPage() {
             <!-- 配置包：导入弹窗 -->
             <div class="modal hidden" id="pack-import-modal">
                 <div class="modal-content" style="max-width:700px">
-                    <h2>📥 导入配置包</h2>
+                    <h2>导入配置包</h2>
                     <p style="color:#666;margin-bottom:15px">上传或粘贴 .tscfg 配置包，验证后保存到设备（加密存储）</p>
                     <div class="form-group">
                         <label>选择文件</label>
@@ -10913,13 +10913,13 @@ async function loadSecurityPage() {
                     </div>
                     <div id="pack-import-result" class="result-box hidden" style="margin-top:10px"></div>
                     <div id="pack-import-preview" class="hidden" style="margin-top:15px;padding:10px;background:#f8f9fa;border-radius:4px">
-                        <h4 style="margin:0 0 10px">📋 配置包信息</h4>
+                        <h4 style="margin:0 0 10px">配置包信息</h4>
                         <div id="pack-preview-content"></div>
                     </div>
                     <div class="form-actions" style="margin-top:15px">
                         <button class="btn" onclick="hideConfigPackImportModal()">取消</button>
-                        <button class="btn" onclick="verifyConfigPack()">🔍 仅验证</button>
-                        <button class="btn btn-primary" onclick="importConfigPack()">📥 导入</button>
+                        <button class="btn" onclick="verifyConfigPack()" style="color:#666"><i class="ri-search-line"></i> 仅验证</button>
+                        <button class="btn btn-primary" onclick="importConfigPack()"><i class="ri-upload-line"></i> 导入</button>
                     </div>
                 </div>
             </div>
@@ -10927,7 +10927,7 @@ async function loadSecurityPage() {
             <!-- 配置包：导出弹窗（仅 Developer 可用） -->
             <div class="modal hidden" id="pack-export-modal">
                 <div class="modal-content" style="width:800px;max-width:90vw;height:auto;min-height:600px;max-height:90vh;overflow-y:auto">
-                    <h2>📦 导出加密配置包</h2>
+                    <h2>导出加密配置包</h2>
                     <p style="color:#666;margin-bottom:15px">选择配置文件并加密发送给目标设备（支持多选）</p>
                     
                     <!-- 文件浏览器 -->
@@ -10935,16 +10935,16 @@ async function loadSecurityPage() {
                         <label>选择配置文件 <span style="color:#999;font-size:0.9em">(可多选)</span></label>
                         <div style="display:flex;gap:8px;margin-bottom:8px">
                             <input type="text" id="pack-export-browse-path" value="/sdcard/config" style="flex:1" readonly>
-                            <button class="btn btn-small" onclick="packExportBrowseUp()">⬆️ 上级</button>
-                            <button class="btn btn-small" onclick="packExportBrowseRefresh()">🔄 刷新</button>
+                            <button class="btn btn-small" onclick="packExportBrowseUp()" style="color:#666"><i class="ri-arrow-up-s-line"></i> 上级</button>
+                            <button class="btn btn-small" onclick="packExportBrowseRefresh()" style="color:#666"><i class="ri-refresh-line"></i> 刷新</button>
                         </div>
                         <div style="display:flex;gap:8px;margin-bottom:8px">
-                            <button class="btn btn-small" onclick="packExportSelectAll()">☑️ 全选</button>
-                            <button class="btn btn-small" onclick="packExportDeselectAll()">☐ 取消全选</button>
-                            <button class="btn btn-small" onclick="packExportSelectDir()">📁 选择整个目录</button>
+                            <button class="btn btn-small" onclick="packExportSelectAll()" style="color:#666">全选</button>
+                            <button class="btn btn-small" onclick="packExportDeselectAll()" style="color:#666">取消全选</button>
+                            <button class="btn btn-small" onclick="packExportSelectDir()" style="color:#666"><i class="ri-folder-open-line"></i> 选择整个目录</button>
                         </div>
                         <div id="pack-export-file-list" style="border:1px solid #ddd;border-radius:4px;height:180px;overflow-y:auto;background:#f9f9f9">
-                            <div style="padding:20px;text-align:center;color:#666">🔄 加载中...</div>
+                            <div style="padding:20px;text-align:center;color:#666"><i class="ri-refresh-line"></i> 加载中...</div>
                         </div>
                         <div id="pack-export-selected" style="margin-top:8px;padding:8px;background:#e8f5e9;border-radius:4px;min-height:36px;display:none">
                             <strong>已选择:</strong> <span id="pack-export-selected-file"></span>
@@ -10962,21 +10962,21 @@ async function loadSecurityPage() {
                     <div class="form-group">
                         <label>目标设备证书 (PEM)</label>
                         <textarea id="pack-export-recipient-cert" placeholder="-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----" style="width:100%;height:100px;font-family:monospace;font-size:11px" required></textarea>
-                        <div style="font-size:0.85em;color:#666;margin-top:4px">💡 粘贴目标设备导出的证书</div>
+                        <div style="font-size:0.85em;color:#666;margin-top:4px"><i class="ri-information-line"></i> 粘贴目标设备导出的证书</div>
                     </div>
                     <div id="pack-export-result" class="result-box" style="margin-top:10px;min-height:24px;visibility:hidden"></div>
                     <div id="pack-export-output" style="margin-top:15px">
                         <label>生成的配置包 (.tscfg)</label>
                         <textarea id="pack-export-tscfg" readonly style="width:100%;height:100px;font-family:monospace;font-size:10px" placeholder="配置包将在此显示..."></textarea>
                         <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-                            <button class="btn btn-small" onclick="copyPackTscfgToClipboard()" id="btn-pack-copy" style="display:none">📋 复制到剪贴板</button>
-                            <button class="btn btn-small btn-primary" onclick="downloadPackTscfg()" id="btn-pack-download" style="display:none">💾 下载到本地</button>
+                            <button class="btn btn-small btn-service-style" onclick="copyPackTscfgToClipboard()" id="btn-pack-copy" style="display:none"><i class="ri-file-text-line"></i> 复制到剪贴板</button>
+                            <button class="btn btn-small btn-primary" onclick="downloadPackTscfg()" id="btn-pack-download" style="display:none"><i class="ri-download-line"></i> 下载到本地</button>
                             <span id="pack-export-saved-path" style="color:#4caf50;font-size:0.9em;display:none"></span>
                         </div>
                     </div>
                     <div class="form-actions" style="margin-top:15px">
                         <button class="btn" onclick="hideConfigPackExportModal()">取消</button>
-                        <button class="btn btn-primary" id="btn-pack-export-generate" onclick="exportConfigPack()" disabled>📦 生成配置包</button>
+                        <button class="btn btn-primary" id="btn-pack-export-generate" onclick="exportConfigPack()" disabled><i class="ri-download-line"></i> 生成配置包</button>
                     </div>
                 </div>
             </div>
@@ -10984,15 +10984,15 @@ async function loadSecurityPage() {
             <!-- 配置包：列表弹窗 -->
             <div class="modal hidden" id="pack-list-modal">
                 <div class="modal-content" style="max-width:800px">
-                    <h2>📋 配置包列表</h2>
+                    <h2>配置包列表</h2>
                     <div class="form-group">
                         <label>目录路径</label>
                         <div style="display:flex;gap:8px">
                             <input type="text" id="pack-list-path" value="/sdcard/config" style="flex:1">
-                            <button class="btn" onclick="refreshConfigPackList()">🔄 刷新</button>
+                            <button class="btn" onclick="refreshConfigPackList()" style="color:#666"><i class="ri-refresh-line"></i> 刷新</button>
                         </div>
                     </div>
-                    <div id="pack-list-loading" style="text-align:center;padding:20px">🔄 加载中...</div>
+                    <div id="pack-list-loading" style="text-align:center;padding:20px"><i class="ri-refresh-line"></i> 加载中...</div>
                     <table class="data-table hidden" id="pack-list-table">
                         <thead>
                             <tr><th>文件名</th><th>大小</th><th>签名者</th><th>官方</th><th>状态</th><th>操作</th></tr>
@@ -11008,7 +11008,7 @@ async function loadSecurityPage() {
             <!-- 生成密钥弹窗 -->
             <div class="modal hidden" id="keygen-modal">
                 <div class="modal-content">
-                    <h2>🔑 生成新密钥</h2>
+                    <h2>生成新密钥</h2>
                     <div class="form-group">
                         <label>密钥 ID</label>
                         <input type="text" id="keygen-id" placeholder="如: default, mykey" required>
@@ -11018,10 +11018,10 @@ async function loadSecurityPage() {
                         <select id="keygen-type">
                             <option value="rsa2048" selected>RSA 2048-bit (推荐)</option>
                             <option value="rsa4096">RSA 4096-bit</option>
-                            <option value="ec256">ECDSA P-256 ⚠️</option>
-                            <option value="ec384">ECDSA P-384 ⚠️</option>
+                            <option value="ec256">ECDSA P-256</option>
+                            <option value="ec384">ECDSA P-384</option>
                         </select>
-                        <div style="font-size:0.85em;color:#e67e22;margin-top:4px">⚠️ ECDSA 密钥暂不支持 SSH 公钥认证，请使用 RSA</div>
+                        <div style="font-size:0.85em;color:#e67e22;margin-top:4px"><i class="ri-alert-line"></i> ECDSA 密钥暂不支持 SSH 公钥认证，请使用 RSA</div>
                     </div>
                     <div class="form-group">
                         <label>备注 (可选)</label>
@@ -11030,14 +11030,14 @@ async function loadSecurityPage() {
                     <div class="form-group">
                         <label>别名 (可选)</label>
                         <input type="text" id="keygen-alias" placeholder="用于替代密钥 ID 显示">
-                        <div style="font-size:0.85em;color:#666;margin-top:4px">💡 启用「隐藏密钥」时建议填写，用于显示</div>
+                        <div style="font-size:0.85em;color:#666;margin-top:4px"><i class="ri-information-line"></i> 启用「隐藏密钥」时建议填写，用于显示</div>
                     </div>
                     <div class="form-group">
                         <label><input type="checkbox" id="keygen-exportable"> 允许导出私钥</label>
                     </div>
                     <div class="form-group">
                         <label><input type="checkbox" id="keygen-hidden"> 隐藏密钥 ID</label>
-                        <div style="font-size:0.85em;color:#666;margin-top:4px">🔒 启用后，低权限用户无法看到真实的密钥 ID</div>
+                        <div style="font-size:0.85em;color:#666;margin-top:4px"><i class="ri-information-line"></i> 启用后，低权限用户无法看到真实的密钥 ID</div>
                     </div>
                     <div class="form-actions">
                         <button class="btn" onclick="hideGenerateKeyModal()">取消</button>
@@ -11048,68 +11048,78 @@ async function loadSecurityPage() {
             
             <!-- 部署密钥弹窗 -->
             <div class="modal hidden" id="deploy-key-modal">
-                <div class="modal-content">
-                    <h2>🚀 部署公钥到远程服务器</h2>
-                    <p style="margin-bottom:15px;color:#666">将公钥 <code id="deploy-key-id"></code> 部署到远程服务器的 authorized_keys</p>
-                    <div class="form-group">
-                        <label>目标主机</label>
-                        <input type="text" id="deploy-host" placeholder="192.168.55.100 或 hostname" required>
+                <div class="modal-content cc-compact" style="max-width:500px">
+                    <div class="modal-header">
+                        <h2>部署公钥到远程服务器</h2>
+                        <button class="modal-close" onclick="hideDeployKeyModal()"><i class="ri-close-line"></i></button>
                     </div>
-                    <div class="form-row">
-                        <div class="form-group" style="flex:1">
-                            <label>用户名</label>
-                            <input type="text" id="deploy-user" placeholder="root" required>
+                    <div class="modal-body">
+                        <p style="margin-bottom:15px;color:#666">将公钥 <code id="deploy-key-id"></code> 部署到远程服务器的 authorized_keys</p>
+                        <div class="form-group">
+                            <label>目标主机</label>
+                            <input type="text" id="deploy-host" placeholder="192.168.55.100 或 hostname" required>
                         </div>
-                        <div class="form-group" style="width:100px">
-                            <label>端口</label>
-                            <input type="number" id="deploy-port" value="22" min="1" max="65535">
+                        <div class="form-row">
+                            <div class="form-group" style="flex:1">
+                                <label>用户名</label>
+                                <input type="text" id="deploy-user" placeholder="root" required>
+                            </div>
+                            <div class="form-group" style="width:100px">
+                                <label>端口</label>
+                                <input type="number" id="deploy-port" value="22" min="1" max="65535">
+                            </div>
                         </div>
-                    </div>
-                    <div class="form-group">
-                        <label>认证密码 (首次部署需要)</label>
-                        <input type="password" id="deploy-password" placeholder="输入 SSH 登录密码" required>
-                    </div>
-                    <div style="background:#e3f2fd;border:1px solid #2196f3;border-radius:4px;padding:10px;margin:15px 0;font-size:0.9rem">
-                        💡 部署成功后，该主机将自动添加到「已部署主机」列表，之后可使用此密钥免密登录
-                    </div>
-                    <div id="deploy-result" class="result-box hidden" style="margin-bottom:15px"></div>
-                    <div class="form-actions">
-                        <button class="btn" onclick="hideDeployKeyModal()">取消</button>
-                        <button class="btn btn-primary" id="deploy-btn" onclick="deployKey()">🚀 开始部署</button>
+                        <div class="form-group">
+                            <label>认证密码 (首次部署需要)</label>
+                            <input type="password" id="deploy-password" placeholder="输入 SSH 登录密码" required>
+                        </div>
+                        <div style="background:#e3f2fd;border:1px solid #2196f3;border-radius:4px;padding:10px;margin:15px 0;font-size:0.9rem">
+                            <i class="ri-information-line"></i> 部署成功后，该主机将自动添加到「已部署主机」列表，之后可使用此密钥免密登录
+                        </div>
+                        <div id="deploy-result" class="result-box hidden" style="margin-bottom:15px"></div>
+                        <div class="form-actions">
+                            <button class="btn" onclick="hideDeployKeyModal()" style="color:#666">取消</button>
+                            <button class="btn btn-primary" id="deploy-btn" onclick="deployKey()"><i class="ri-rocket-line"></i> 开始部署</button>
+                        </div>
                     </div>
                 </div>
             </div>
             
             <!-- 撤销密钥弹窗 -->
             <div class="modal hidden" id="revoke-key-modal">
-                <div class="modal-content">
-                    <h2>⚠️ 撤销公钥</h2>
-                    <p style="margin-bottom:15px;color:#666">从远程服务器移除公钥 <code id="revoke-key-id"></code></p>
-                    <div style="background:#fff3cd;border:1px solid #ffc107;border-radius:4px;padding:10px;margin-bottom:15px">
-                        <strong>⚠️ 警告</strong>：撤销后将无法使用此密钥免密登录该服务器
+                <div class="modal-content cc-compact" style="max-width:500px">
+                    <div class="modal-header">
+                        <h2>撤销公钥</h2>
+                        <button class="modal-close" onclick="hideRevokeKeyModal()"><i class="ri-close-line"></i></button>
                     </div>
-                    <div class="form-group">
-                        <label>目标主机</label>
-                        <input type="text" id="revoke-host" placeholder="192.168.55.100 或 hostname" required>
-                    </div>
-                    <div class="form-row">
-                        <div class="form-group" style="flex:1">
-                            <label>用户名</label>
-                            <input type="text" id="revoke-user" placeholder="root" required>
+                    <div class="modal-body">
+                        <p style="margin-bottom:15px;color:#666">从远程服务器移除公钥 <code id="revoke-key-id"></code></p>
+                        <div style="background:#fff3cd;border:1px solid #ffc107;border-radius:4px;padding:10px;margin-bottom:15px">
+                            <strong><i class="ri-alert-line"></i> 警告</strong>：撤销后将无法使用此密钥免密登录该服务器
                         </div>
-                        <div class="form-group" style="width:100px">
-                            <label>端口</label>
-                            <input type="number" id="revoke-port" value="22" min="1" max="65535">
+                        <div class="form-group">
+                            <label>目标主机</label>
+                            <input type="text" id="revoke-host" placeholder="192.168.55.100 或 hostname" required>
                         </div>
-                    </div>
-                    <div class="form-group">
-                        <label>认证密码</label>
-                        <input type="password" id="revoke-password" placeholder="输入 SSH 登录密码" required>
-                    </div>
-                    <div id="revoke-result" class="result-box hidden" style="margin-bottom:15px"></div>
-                    <div class="form-actions">
-                        <button class="btn" onclick="hideRevokeKeyModal()">取消</button>
-                        <button class="btn btn-danger" id="revoke-btn" onclick="revokeKey()">⚠️ 撤销公钥</button>
+                        <div class="form-row">
+                            <div class="form-group" style="flex:1">
+                                <label>用户名</label>
+                                <input type="text" id="revoke-user" placeholder="root" required>
+                            </div>
+                            <div class="form-group" style="width:100px">
+                                <label>端口</label>
+                                <input type="number" id="revoke-port" value="22" min="1" max="65535">
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label>认证密码</label>
+                            <input type="password" id="revoke-password" placeholder="输入 SSH 登录密码" required>
+                        </div>
+                        <div id="revoke-result" class="result-box hidden" style="margin-bottom:15px"></div>
+                        <div class="form-actions">
+                            <button class="btn" onclick="hideRevokeKeyModal()" style="color:#666">取消</button>
+                            <button class="btn btn-danger" id="revoke-btn" onclick="revokeKey()"><i class="ri-alert-line"></i> 撤销公钥</button>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -11117,7 +11127,7 @@ async function loadSecurityPage() {
             <!-- 主机指纹不匹配警告弹窗 -->
             <div class="modal hidden" id="host-mismatch-modal">
                 <div class="modal-content">
-                    <h2 style="color:#dc3545">⚠️ 安全警告：主机指纹不匹配!</h2>
+                    <h2 style="color:#dc3545"><i class="ri-alert-line"></i> 安全警告：主机指纹不匹配!</h2>
                     <div style="background:#f8d7da;border:1px solid #f5c6cb;border-radius:4px;padding:15px;margin:15px 0">
                         <p style="margin:0 0 10px;font-weight:bold">主机密钥已更改！这可能表明：</p>
                         <ul style="margin:0;padding-left:20px">
@@ -11142,8 +11152,8 @@ async function loadSecurityPage() {
                         <strong>建议</strong>：如果您确认服务器已重装或密钥已更新，可以点击"更新主机密钥"移除旧记录，然后重新连接以信任新密钥。
                     </p>
                     <div class="form-actions">
-                        <button class="btn" onclick="hideHostMismatchModal()">取消</button>
-                        <button class="btn btn-warning" onclick="removeAndRetry()">🔄 更新主机密钥</button>
+                        <button class="btn" onclick="hideHostMismatchModal()" style="color:#666">取消</button>
+                        <button class="btn btn-warning" onclick="removeAndRetry()"><i class="ri-refresh-line"></i> 更新主机密钥</button>
                     </div>
                 </div>
             </div>
@@ -11151,15 +11161,15 @@ async function loadSecurityPage() {
             <!-- HTTPS 证书：生成密钥对弹窗 -->
             <div class="modal hidden" id="cert-genkey-modal">
                 <div class="modal-content" style="max-width:450px">
-                    <h2>🔑 生成 HTTPS 密钥对</h2>
+                    <h2>生成 HTTPS 密钥对</h2>
                     <p style="color:#666;margin-bottom:15px">为设备生成 ECDSA P-256 密钥对，用于 mTLS 身份验证</p>
                     <div id="cert-genkey-existing-warning" class="hidden" style="background:#fff3cd;border:1px solid #ffc107;border-radius:4px;padding:10px;margin-bottom:15px">
-                        ⚠️ 已存在密钥对，继续将覆盖现有密钥！
+                        <i class="ri-alert-line"></i> 已存在密钥对，继续将覆盖现有密钥！
                     </div>
                     <div id="cert-genkey-result" class="result-box hidden" style="margin-bottom:15px"></div>
                     <div class="form-actions">
-                        <button class="btn" onclick="hideCertGenKeyModal()">取消</button>
-                        <button class="btn btn-primary" id="cert-genkey-btn" onclick="generateCertKeypair()">🔑 生成</button>
+                        <button class="btn" onclick="hideCertGenKeyModal()" style="color:#666">取消</button>
+                        <button class="btn btn-primary" id="cert-genkey-btn" onclick="generateCertKeypair()"><i class="ri-key-line"></i> 生成</button>
                     </div>
                 </div>
             </div>
@@ -11232,7 +11242,7 @@ async function loadSecurityPage() {
             <div class="modal hidden" id="cert-view-modal">
                 <div class="modal-content" style="max-width:600px">
                     <h2>👁️ 查看设备证书</h2>
-                    <div id="cert-view-loading" style="text-align:center;padding:20px">🔄 加载中...</div>
+                    <div id="cert-view-loading" style="text-align:center;padding:20px"><i class="ri-refresh-line"></i> 加载中...</div>
                     <div id="cert-view-content" class="hidden">
                         <textarea id="cert-view-pem" readonly style="width:100%;height:250px;font-family:monospace;font-size:11px"></textarea>
                         <button class="btn btn-small" onclick="copyCertToClipboard()" style="margin-top:8px">📋 复制到剪贴板</button>
@@ -11268,7 +11278,7 @@ async function refreshSecurityPage() {
                     option.value = key.id;
                     // 隐藏密钥显示别名或掩码 ID，否则显示真实 ID
                     const displayName = (key.hidden && key.alias) ? key.alias : key.id;
-                    option.textContent = `${key.hidden ? '🔒 ' : ''}${displayName} (${key.type_desc || key.type})`;
+                    option.textContent = `${key.hidden ? '[隐藏] ' : ''}${displayName} (${key.type_desc || key.type})`;
                     sshKeySelect.appendChild(option);
                 });
             }
@@ -11279,7 +11289,7 @@ async function refreshSecurityPage() {
             allKeysHtml += keys.data.keys.map(key => {
                 // 隐藏密钥显示别名，否则显示真实 ID
                 const displayId = (key.hidden && key.alias) ? key.alias : key.id;
-                const hiddenIcon = key.hidden ? '🔒 ' : '';
+                const hiddenIcon = key.hidden ? '<i class="ri-lock-line"></i> ' : '';
                 
                 return `
                 <tr>
@@ -11290,13 +11300,13 @@ async function refreshSecurityPage() {
                     <td>${escapeHtml(key.type_desc || key.type)}</td>
                     <td><span class="badge badge-info">SSH</span> ${escapeHtml(key.comment) || '-'}</td>
                     <td>${formatTimestamp(key.created)}</td>
-                    <td>${key.exportable ? '✅ 是' : '❌ 否'}</td>
+                    <td>${key.exportable ? '是' : '否'}</td>
                     <td>
-                        <button class="btn btn-small" onclick="exportKey('${escapeHtml(key.id)}')" ${key.has_pubkey ? '' : 'disabled'}>📤 公钥</button>
-                        <button class="btn btn-small" onclick="exportPrivateKey('${escapeHtml(key.id)}')" ${key.exportable ? '' : 'disabled'} title="${key.exportable ? '导出私钥' : '此密钥不可导出私钥'}">🔐 私钥</button>
-                        <button class="btn btn-small btn-primary" onclick="showDeployKeyModal('${escapeHtml(key.id)}')" ${key.has_pubkey ? '' : 'disabled'} title="部署公钥到远程服务器">🚀 部署</button>
-                        <button class="btn btn-small" onclick="showRevokeKeyModal('${escapeHtml(key.id)}')" ${key.has_pubkey ? '' : 'disabled'} title="从远程服务器撤销公钥" style="background:#ff9800;color:white">⚠️ 撤销</button>
-                        <button class="btn btn-small btn-danger" onclick="deleteKey('${escapeHtml(key.id)}')">🗑️ 删除</button>
+                        <button class="btn btn-small btn-service-style" onclick="exportKey('${escapeHtml(key.id)}')" ${key.has_pubkey ? '' : 'disabled'}><i class="ri-download-line"></i> 公钥</button>
+                        <button class="btn btn-small" onclick="exportPrivateKey('${escapeHtml(key.id)}')" ${key.exportable ? '' : 'disabled'} title="${key.exportable ? '导出私钥' : '此密钥不可导出私钥'}" style="color:#666"><i class="ri-key-line"></i> 私钥</button>
+                        <button class="btn btn-small btn-primary" onclick="showDeployKeyModal('${escapeHtml(key.id)}')" ${key.has_pubkey ? '' : 'disabled'} title="部署公钥到远程服务器"><i class="ri-rocket-line"></i> 部署</button>
+                        <button class="btn btn-small btn-warning" onclick="showRevokeKeyModal('${escapeHtml(key.id)}')" ${key.has_pubkey ? '' : 'disabled'} title="从远程服务器撤销公钥"><i class="ri-alert-line"></i> 撤销</button>
+                        <button class="btn btn-small btn-danger" onclick="deleteKey('${escapeHtml(key.id)}')"><i class="ri-delete-bin-line"></i> 删除</button>
                     </td>
                 </tr>
                 `;
@@ -11324,17 +11334,17 @@ async function refreshSecurityPage() {
                 allKeysHtml += `
                 <tr style="background:#f0f7ff">
                     <td>
-                        <code>🔐 https</code>
+                        <code><i class="ri-key-line"></i> https</code>
                         <div style="font-size:0.85em;color:#666;margin-top:2px">HTTPS 服务器密钥</div>
                     </td>
                     <td>ECDSA P-256</td>
                     <td><span class="badge" style="background:#2196f3;color:white">HTTPS</span> ${escapeHtml(comment)}</td>
                     <td>-</td>
-                    <td>❌ 否</td>
+                    <td>否</td>
                     <td>
-                        <button class="btn btn-small" onclick="showCertCSRModal()" title="生成证书签名请求">📋 CSR</button>
-                        <button class="btn btn-small" onclick="showCertViewModal()" ${hasCert ? '' : 'disabled'} title="查看证书">👁️ 证书</button>
-                        <button class="btn btn-small btn-danger" onclick="deleteCertCredentials()" title="删除 HTTPS 密钥和证书">🗑️ 删除</button>
+                        <button class="btn btn-small btn-service-style" onclick="showCertCSRModal()" title="生成证书签名请求"><i class="ri-file-text-line"></i> CSR</button>
+                        <button class="btn btn-small" onclick="showCertViewModal()" ${hasCert ? '' : 'disabled'} title="查看证书" style="color:#666"><i class="ri-eye-line"></i> 证书</button>
+                        <button class="btn btn-small btn-danger" onclick="deleteCertCredentials()" title="删除 HTTPS 密钥和证书"><i class="ri-delete-bin-line"></i> 删除</button>
                     </td>
                 </tr>
                 `;
@@ -11343,7 +11353,7 @@ async function refreshSecurityPage() {
                 allKeysHtml += `
                 <tr style="background:#fff8e1">
                     <td>
-                        <code style="color:#888">🔒 https</code>
+                        <code style="color:#888"><i class="ri-lock-line"></i> https</code>
                         <div style="font-size:0.85em;color:#999;margin-top:2px">HTTPS 服务器密钥</div>
                     </td>
                     <td style="color:#888">-</td>
@@ -11351,7 +11361,7 @@ async function refreshSecurityPage() {
                     <td>-</td>
                     <td>-</td>
                     <td>
-                        <button class="btn btn-small btn-primary" onclick="showCertGenKeyModal()" title="生成 HTTPS 密钥对">🔑 生成密钥</button>
+                        <button class="btn btn-small btn-primary" onclick="showCertGenKeyModal()" title="生成 HTTPS 密钥对"><i class="ri-key-line"></i> 生成密钥</button>
                     </td>
                 </tr>
                 `;
@@ -11421,12 +11431,12 @@ async function refreshSshHostsList() {
                 <td>${escapeHtml(h.host)}</td>
                 <td>${h.port}</td>
                 <td>${escapeHtml(h.username)}</td>
-                <td><span class="badge badge-info">🔑 ${escapeHtml(h.keyid || 'default')}</span></td>
+                <td><span class="badge badge-info"><i class="ri-key-line"></i> ${escapeHtml(h.keyid || 'default')}</span></td>
                 <td>
-                    <button class="btn btn-sm" onclick="testSshHostByIndex(${idx})" title="测试连接">🔍 测试</button>
-                    <button class="btn btn-sm" onclick="exportSshHost('${escapeHtml(h.id)}')" title="导出配置为 .tscfg" style="background:#17a2b8;color:white">📤 导出</button>
-                    <button class="btn btn-sm btn-danger" onclick="revokeKeyFromHost(${idx})" title="撤销公钥">🔓 撤销</button>
-                    <button class="btn btn-sm" onclick="removeHostByIndex(${idx})" title="仅移除本地记录" style="background:#6c757d;color:white">🗑️ 移除</button>
+                    <button class="btn btn-sm" onclick="testSshHostByIndex(${idx})" title="测试连接" style="color:#666"><i class="ri-search-line"></i> 测试</button>
+                    <button class="btn btn-sm btn-service-style" onclick="exportSshHost('${escapeHtml(h.id)}')" title="导出配置为 .tscfg"><i class="ri-download-line"></i> 导出</button>
+                    <button class="btn btn-sm btn-danger" onclick="revokeKeyFromHost(${idx})" title="撤销公钥"><i class="ri-lock-unlock-line"></i> 撤销</button>
+                    <button class="btn btn-sm" onclick="removeHostByIndex(${idx})" title="仅移除本地记录" style="color:#666"><i class="ri-delete-bin-line"></i> 移除</button>
                 </td>
             </tr>
         `).join('');
@@ -11466,8 +11476,8 @@ async function refreshKnownHostsList() {
                 <td><code style="font-size:0.8em;word-break:break-all">${escapeHtml(h.fingerprint.substring(0, 32))}...</code></td>
                 <td>${formatTimestamp(h.added)}</td>
                 <td>
-                    <button class="btn btn-sm" onclick="showFullFingerprint(${idx})" title="查看完整指纹">👁️ 查看</button>
-                    <button class="btn btn-sm" onclick="removeKnownHost(${idx})" title="删除指纹记录" style="background:#dc3545;color:white">🗑️ 删除</button>
+                    <button class="btn btn-sm" onclick="showFullFingerprint(${idx})" title="查看完整指纹" style="color:#666"><i class="ri-eye-line"></i> 查看</button>
+                    <button class="btn btn-sm btn-danger" onclick="removeKnownHost(${idx})" title="删除指纹记录"><i class="ri-delete-bin-line"></i> 删除</button>
                 </td>
             </tr>
         `).join('');
@@ -11626,21 +11636,23 @@ function showExportSshHostModal(hostId) {
     }
     
     modal.innerHTML = `
-        <div class="modal-content" style="max-width:600px">
-            <h2>📤 导出 SSH 主机配置</h2>
-            <p style="color:#666;font-size:0.9rem">导出主机 <strong>${escapeHtml(hostId)}</strong> 的配置为加密配置包</p>
-            
-            <div class="form-group" style="margin-top:15px">
-                <label>目标设备证书 (PEM)</label>
-                <textarea id="export-ssh-host-cert" placeholder="-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----" style="width:100%;height:120px;font-family:monospace;font-size:11px"></textarea>
-                <div style="font-size:0.85em;color:#666;margin-top:4px">💡 粘贴目标设备的证书。留空则使用本机证书（自加密）</div>
+        <div class="modal-content cc-compact" style="max-width:600px">
+            <div class="modal-header">
+                <h2>导出 SSH 主机配置</h2>
+                <button class="modal-close" onclick="hideExportSshHostModal()"><i class="ri-close-line"></i></button>
             </div>
-            
-            <div id="export-ssh-host-result" class="result-box hidden" style="margin-top:10px"></div>
-            
-            <div class="form-actions" style="margin-top:15px">
-                <button class="btn" onclick="hideExportSshHostModal()">取消</button>
-                <button class="btn btn-primary" id="export-ssh-host-btn" onclick="doExportSshHostFromModal('${escapeHtml(hostId)}')">📤 导出</button>
+            <div class="modal-body">
+                <p style="color:#666;font-size:0.9rem">导出主机 <strong>${escapeHtml(hostId)}</strong> 的配置为加密配置包</p>
+                <div class="form-group" style="margin-top:15px">
+                    <label>目标设备证书 (PEM)</label>
+                    <textarea id="export-ssh-host-cert" placeholder="-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----" style="width:100%;height:120px;font-family:monospace;font-size:11px"></textarea>
+                    <div style="font-size:0.85em;color:#666;margin-top:4px"><i class="ri-information-line"></i> 粘贴目标设备的证书。留空则使用本机证书（自加密）</div>
+                </div>
+                <div id="export-ssh-host-result" class="result-box hidden" style="margin-top:10px"></div>
+                <div class="modal-footer cc-compact-footer" style="margin-top:15px;padding-top:15px;border-top:1px solid #eee">
+                    <button class="btn" onclick="hideExportSshHostModal()" style="color:#666">取消</button>
+                    <button class="btn btn-service-style" id="export-ssh-host-btn" onclick="doExportSshHostFromModal('${escapeHtml(hostId)}')"><i class="ri-download-line"></i> 导出</button>
+                </div>
             </div>
         </div>
     `;
@@ -11659,17 +11671,17 @@ async function doExportSshHostFromModal(hostId) {
     const exportBtn = document.getElementById('export-ssh-host-btn');
     
     resultBox.classList.remove('hidden', 'success', 'error');
-    resultBox.textContent = '🔄 正在生成配置包...';
+    resultBox.textContent = '正在生成配置包...';
     exportBtn.disabled = true;
     
     try {
         await doExportSshHost(hostId, certText || null);
         resultBox.className = 'result-box success';
-        resultBox.textContent = '✅ 导出成功！';
+        resultBox.textContent = '导出成功！';
         setTimeout(() => hideExportSshHostModal(), 1000);
     } catch (e) {
         resultBox.className = 'result-box error';
-        resultBox.textContent = '❌ ' + e.message;
+        resultBox.textContent = e.message;
     } finally {
         exportBtn.disabled = false;
     }
@@ -11725,7 +11737,7 @@ function showImportSshHostModal() {
     
     modal.innerHTML = `
         <div class="modal-content" style="max-width:550px">
-            <h2>📥 导入 SSH 主机配置</h2>
+            <h2>导入 SSH 主机配置</h2>
             <p style="color:#666;font-size:0.9rem">选择 .tscfg 配置包文件以导入 SSH 主机配置</p>
             
             <!-- 步骤 1: 选择文件 -->
@@ -11739,7 +11751,7 @@ function showImportSshHostModal() {
             <!-- 步骤 2: 预览 (默认隐藏) -->
             <div id="import-ssh-host-step2" style="display:none">
                 <div class="info-card" style="background:#f8f9fa;padding:15px;border-radius:8px;margin-top:15px">
-                    <h4 style="margin:0 0 10px 0">📋 配置包内容</h4>
+                    <h4 style="margin:0 0 10px 0">配置包内容</h4>
                     <div id="import-ssh-host-preview"></div>
                 </div>
                 <div class="form-group" style="margin-top:15px">
@@ -11753,7 +11765,7 @@ function showImportSshHostModal() {
             
             <div class="form-actions" style="margin-top:15px">
                 <button class="btn" onclick="hideImportSshHostModal()">取消</button>
-                <button class="btn btn-primary" id="import-ssh-host-btn" onclick="confirmSshHostImport()" disabled>📥 确认导入</button>
+                <button class="btn btn-primary" id="import-ssh-host-btn" onclick="confirmSshHostImport()" disabled><i class="ri-upload-line"></i> 确认导入</button>
             </div>
         </div>
     `;
@@ -11808,27 +11820,27 @@ async function previewSshHostImport() {
             let html = `
                 <table style="width:100%;font-size:0.9em">
                     <tr><td style="width:80px;color:#666">配置 ID:</td><td><code>${escapeHtml(data.id)}</code></td></tr>
-                    <tr><td style="color:#666">签名者:</td><td>${escapeHtml(data.signer)} ${data.official ? '✅ 官方' : ''}</td></tr>
+                    <tr><td style="color:#666">签名者:</td><td>${escapeHtml(data.signer)} ${data.official ? '（官方）' : ''}</td></tr>
                     <tr><td style="color:#666">备注:</td><td style="color:#888;font-size:0.85em">${escapeHtml(data.note || '重启后自动加载')}</td></tr>
                 </table>
             `;
             
             if (data.exists) {
-                html += `<div style="margin-top:10px;padding:8px;background:#fff3cd;border-radius:4px;color:#856404">⚠️ 该配置已存在，导入将覆盖现有文件</div>`;
+                html += `<div style="margin-top:10px;padding:8px;background:#fff3cd;border-radius:4px;color:#856404"><i class="ri-alert-line"></i> 该配置已存在，导入将覆盖现有文件</div>`;
             }
             
             previewDiv.innerHTML = html;
             step2.style.display = 'block';
             resultBox.className = 'result-box success';
-            resultBox.textContent = '✅ 签名验证通过';
+            resultBox.textContent = '签名验证通过';
             importBtn.disabled = false;
         } else {
             resultBox.className = 'result-box error';
-            resultBox.textContent = '❌ ' + (result.message || '无法验证配置包');
+            resultBox.textContent = (result.message || '无法验证配置包');
         }
     } catch (e) {
         resultBox.className = 'result-box error';
-        resultBox.textContent = '❌ ' + e.message;
+        resultBox.textContent = e.message;
     }
 }
 
@@ -11846,7 +11858,7 @@ async function confirmSshHostImport() {
     }
     
     resultBox.classList.remove('hidden', 'success', 'error', 'warning');
-    resultBox.textContent = '🔄 正在保存配置...';
+    resultBox.textContent = '正在保存配置...';
     importBtn.disabled = true;
     
     try {
@@ -11860,23 +11872,23 @@ async function confirmSshHostImport() {
             const data = result.data;
             if (data?.exists && !data?.imported) {
                 resultBox.className = 'result-box warning';
-                resultBox.textContent = `⚠️ 配置 ${data.id} 已存在，请勾选「覆盖」选项`;
+                resultBox.textContent = `配置 ${data.id} 已存在，请勾选「覆盖」选项`;
                 importBtn.disabled = false;
             } else {
                 resultBox.className = 'result-box success';
-                resultBox.innerHTML = `✅ 已保存配置: <code>${escapeHtml(data?.id)}</code><br><small style="color:#666">重启系统后生效</small>`;
+                resultBox.innerHTML = `已保存配置: <code>${escapeHtml(data?.id)}</code><br><small style="color:#666">重启系统后生效</small>`;
                 showToast(`已导入配置，重启后生效`, 'success');
                 // 不刷新列表，因为还没加载
                 setTimeout(() => hideImportSshHostModal(), 2000);
             }
         } else {
             resultBox.className = 'result-box error';
-            resultBox.textContent = '❌ ' + (result.message || '导入失败');
+            resultBox.textContent = (result.message || '导入失败');
             importBtn.disabled = false;
         }
     } catch (e) {
         resultBox.className = 'result-box error';
-        resultBox.textContent = '❌ ' + e.message;
+        resultBox.textContent = e.message;
         importBtn.disabled = false;
     }
 }
@@ -11926,18 +11938,23 @@ function revokeKeyFromHost(index) {
     }
     
     modal.innerHTML = `
-        <div class="modal-content" style="max-width:500px">
-            <h2>🔓 撤销并移除主机</h2>
-            <p>将从服务器 <strong>${escapeHtml(host.username)}@${escapeHtml(host.host)}:${host.port}</strong> 撤销密钥 <code>${escapeHtml(host.keyid || 'default')}</code></p>
-            <p style="color:#666;font-size:0.9rem;margin-top:10px">撤销成功后将自动从列表中移除该主机</p>
-            <div class="form-group" style="margin-top:15px">
-                <label>服务器密码</label>
-                <input type="password" id="revoke-host-password" class="form-control" placeholder="输入 SSH 密码">
+        <div class="modal-content cc-compact" style="max-width:500px">
+            <div class="modal-header">
+                <h2>撤销并移除主机</h2>
+                <button class="modal-close" onclick="hideRevokeHostModal()"><i class="ri-close-line"></i></button>
             </div>
-            <div id="revoke-host-result" class="result-box hidden" style="margin-top:10px"></div>
-            <div class="form-actions" style="margin-top:15px">
-                <button class="btn" onclick="hideRevokeHostModal()">取消</button>
-                <button class="btn btn-danger" id="revoke-host-btn" onclick="doRevokeFromHost(${index})">🔓 撤销并移除</button>
+            <div class="modal-body">
+                <p>将从服务器 <strong>${escapeHtml(host.username)}@${escapeHtml(host.host)}:${host.port}</strong> 撤销密钥 <code>${escapeHtml(host.keyid || 'default')}</code></p>
+                <p style="color:#666;font-size:0.9rem;margin-top:10px">撤销成功后将自动从列表中移除该主机</p>
+                <div class="form-group" style="margin-top:15px">
+                    <label>服务器密码</label>
+                    <input type="password" id="revoke-host-password" class="form-control" placeholder="输入 SSH 密码">
+                </div>
+                <div id="revoke-host-result" class="result-box hidden" style="margin-top:10px"></div>
+                <div class="modal-footer cc-compact-footer" style="margin-top:15px;padding-top:15px;border-top:1px solid #eee">
+                    <button class="btn" onclick="hideRevokeHostModal()" style="color:#666">取消</button>
+                    <button class="btn btn-danger" id="revoke-host-btn" onclick="doRevokeFromHost(${index})"><i class="ri-lock-unlock-line"></i> 撤销并移除</button>
+                </div>
             </div>
         </div>
     `;
@@ -11965,14 +11982,14 @@ async function doRevokeFromHost(index) {
     const revokeBtn = document.getElementById('revoke-host-btn');
     
     resultBox.classList.remove('hidden', 'success', 'error');
-    resultBox.textContent = '🔄 正在撤销公钥...';
+    resultBox.textContent = '正在撤销公钥...';
     revokeBtn.disabled = true;
     
     try {
         const result = await api.sshRevoke(host.host, host.username, password, host.keyid || 'default', host.port);
         
         if (result.data?.revoked) {
-            resultBox.textContent = `✅ 撤销成功！已从服务器移除 ${result.data.removed_count || 1} 个匹配的公钥`;
+            resultBox.textContent = `撤销成功！已从服务器移除 ${result.data.removed_count || 1} 个匹配的公钥`;
             resultBox.classList.add('success');
             
             // 自动移除本地记录
@@ -11984,11 +12001,11 @@ async function doRevokeFromHost(index) {
                 refreshSshHostsList();
             }, 1000);
         } else if (result.data?.found === false) {
-            resultBox.textContent = '⚠️ 未在服务器上找到匹配的公钥（可能已被移除）\n是否仍要移除本地记录？';
+            resultBox.textContent = '未在服务器上找到匹配的公钥（可能已被移除）\n是否仍要移除本地记录？';
             resultBox.classList.add('error');
             
             // 提供移除本地记录的选项
-            revokeBtn.textContent = '🗑️ 仅移除本地记录';
+            revokeBtn.innerHTML = '<i class="ri-delete-bin-line"></i> 仅移除本地记录';
             revokeBtn.onclick = async () => {
                 await api.call('ssh.hosts.remove', { id: host.id });
                 showToast('已移除本地主机记录', 'success');
@@ -12001,7 +12018,7 @@ async function doRevokeFromHost(index) {
             throw new Error(result.message || '撤销失败');
         }
     } catch (e) {
-        resultBox.textContent = '❌ 撤销失败: ' + e.message;
+        resultBox.textContent = '撤销失败: ' + e.message;
         resultBox.classList.add('error');
     } finally {
         revokeBtn.disabled = false;
@@ -12082,17 +12099,22 @@ function showPubkeyModal(id, pubkey, type, comment) {
     }
     
     modal.innerHTML = `
-        <div class="modal-content" style="max-width:700px">
-            <h2>📤 公钥导出 - ${escapeHtml(id)}</h2>
-            <p style="margin-bottom:10px;color:#666">类型: ${escapeHtml(type)}${comment ? ' | 备注: ' + escapeHtml(comment) : ''}</p>
-            <textarea id="pubkey-content" readonly style="width:100%;height:150px;font-family:monospace;font-size:12px;resize:vertical">${escapeHtml(pubkey)}</textarea>
-            <p style="margin-top:10px;font-size:0.85rem;color:#888">
-                💡 将此公钥添加到远程服务器的 <code>~/.ssh/authorized_keys</code> 文件中即可实现免密登录
-            </p>
-            <div class="form-actions" style="margin-top:15px">
-                <button class="btn" onclick="closePubkeyModal()">关闭</button>
-                <button class="btn btn-primary" onclick="copyPubkey()">📋 复制到剪贴板</button>
-                <button class="btn" onclick="downloadPubkey('${escapeHtml(id)}')">💾 下载文件</button>
+        <div class="modal-content cc-compact" style="max-width:700px">
+            <div class="modal-header">
+                <h2>公钥导出 - ${escapeHtml(id)}</h2>
+                <button class="modal-close" onclick="closePubkeyModal()"><i class="ri-close-line"></i></button>
+            </div>
+            <div class="modal-body">
+                <p style="margin-bottom:10px;color:#666">类型: ${escapeHtml(type)}${comment ? ' | 备注: ' + escapeHtml(comment) : ''}</p>
+                <textarea id="pubkey-content" readonly style="width:100%;height:150px;font-family:monospace;font-size:12px;resize:vertical">${escapeHtml(pubkey)}</textarea>
+                <p style="margin-top:10px;font-size:0.85rem;color:#888">
+                    <i class="ri-information-line"></i> 将此公钥添加到远程服务器的 <code>~/.ssh/authorized_keys</code> 文件中即可实现免密登录
+                </p>
+                <div class="modal-footer cc-compact-footer" style="margin-top:15px;padding-top:15px;border-top:1px solid #eee">
+                    <button class="btn" onclick="closePubkeyModal()" style="color:#666">关闭</button>
+                    <button class="btn btn-service-style" onclick="copyPubkey()"><i class="ri-file-text-line"></i> 复制到剪贴板</button>
+                    <button class="btn btn-primary" onclick="downloadPubkey('${escapeHtml(id)}')"><i class="ri-download-line"></i> 下载文件</button>
+                </div>
             </div>
         </div>
     `;
@@ -12117,19 +12139,19 @@ function showPrivkeyModal(id, privkey, type, comment) {
     
     modal.innerHTML = `
         <div class="modal-content" style="max-width:700px">
-            <h2>🔐 私钥导出 - ${escapeHtml(id)}</h2>
+            <h2>私钥导出 - ${escapeHtml(id)}</h2>
             <div style="background:#fff3cd;border:1px solid #ffc107;border-radius:4px;padding:10px;margin-bottom:15px">
-                <strong>⚠️ 安全警告</strong>：私钥是敏感信息，请妥善保管！
+                <strong><i class="ri-alert-line"></i> 安全警告</strong>：私钥是敏感信息，请妥善保管！
             </div>
             <p style="margin-bottom:10px;color:#666">类型: ${escapeHtml(type)}${comment ? ' | 备注: ' + escapeHtml(comment) : ''}</p>
             <textarea id="privkey-content" readonly style="width:100%;height:200px;font-family:monospace;font-size:11px;resize:vertical;background:#2d2d2d;color:#00ff00">${escapeHtml(privkey)}</textarea>
             <p style="margin-top:10px;font-size:0.85rem;color:#888">
-                💡 保存为 <code>~/.ssh/${escapeHtml(id)}</code> 并设置权限 <code>chmod 600</code>
+                <i class="ri-information-line"></i> 保存为 <code>~/.ssh/${escapeHtml(id)}</code> 并设置权限 <code>chmod 600</code>
             </p>
             <div class="form-actions" style="margin-top:15px">
-                <button class="btn" onclick="closePrivkeyModal()">关闭</button>
-                <button class="btn btn-primary" onclick="copyPrivkey()">📋 复制到剪贴板</button>
-                <button class="btn" onclick="downloadPrivkey('${escapeHtml(id)}')">💾 下载文件</button>
+                <button class="btn" onclick="closePrivkeyModal()" style="color:#666">关闭</button>
+                <button class="btn btn-service-style" onclick="copyPrivkey()"><i class="ri-file-text-line"></i> 复制到剪贴板</button>
+                <button class="btn btn-primary" onclick="downloadPrivkey('${escapeHtml(id)}')"><i class="ri-download-line"></i> 下载文件</button>
             </div>
         </div>
     `;
@@ -12241,7 +12263,7 @@ async function deployKey() {
     const deployBtn = document.getElementById('deploy-btn');
     
     resultBox.classList.remove('hidden', 'success', 'error');
-    resultBox.textContent = '🔄 正在部署密钥...';
+    resultBox.textContent = '正在部署密钥...';
     deployBtn.disabled = true;
     
     try {
@@ -12249,11 +12271,11 @@ async function deployKey() {
         const result = await api.sshCopyid(host, user, password, currentDeployKeyId, port, true);
         
         if (result.data?.deployed) {
-            let msg = `✅ 部署成功！现在可以使用密钥 "${currentDeployKeyId}" 免密登录 ${user}@${host}`;
+            let msg = `部署成功！现在可以使用密钥 "${currentDeployKeyId}" 免密登录 ${user}@${host}`;
             if (result.data.verified) {
-                msg += '\n✓ 公钥认证已验证';
+                msg += '\n公钥认证已验证';
             } else {
-                msg += '\n⚠ 公钥认证验证跳过';
+                msg += '\n公钥认证验证跳过';
             }
             resultBox.textContent = msg;
             resultBox.classList.add('success');
@@ -12264,7 +12286,7 @@ async function deployKey() {
             throw new Error('部署失败');
         }
     } catch (e) {
-        resultBox.textContent = '❌ 部署失败: ' + e.message;
+        resultBox.textContent = '部署失败: ' + e.message;
         resultBox.classList.add('error');
     } finally {
         deployBtn.disabled = false;
@@ -12311,7 +12333,7 @@ async function revokeKey() {
     const revokeBtn = document.getElementById('revoke-btn');
     
     resultBox.classList.remove('hidden', 'success', 'error');
-    resultBox.textContent = '🔄 正在撤销密钥...';
+    resultBox.textContent = '正在撤销密钥...';
     revokeBtn.disabled = true;
     
     try {
@@ -12319,18 +12341,18 @@ async function revokeKey() {
         const result = await api.sshRevoke(host, user, password, currentRevokeKeyId, port);
         
         if (result.data?.revoked) {
-            resultBox.textContent = `✅ 撤销成功！已从 ${user}@${host} 移除 ${result.data.removed_count || 1} 个匹配的公钥`;
+            resultBox.textContent = `撤销成功！已从 ${user}@${host} 移除 ${result.data.removed_count || 1} 个匹配的公钥`;
             resultBox.classList.add('success');
             showToast('密钥撤销成功', 'success');
         } else if (result.data?.found === false) {
-            resultBox.textContent = `⚠️ 该公钥未在 ${user}@${host} 上找到`;
+            resultBox.textContent = `该公钥未在 ${user}@${host} 上找到`;
             resultBox.classList.add('warning');
             showToast('公钥未找到', 'warning');
         } else {
             throw new Error('撤销失败');
         }
     } catch (e) {
-        resultBox.textContent = '❌ 撤销失败: ' + e.message;
+        resultBox.textContent = '撤销失败: ' + e.message;
         resultBox.classList.add('error');
     } finally {
         revokeBtn.disabled = false;
@@ -12421,7 +12443,7 @@ async function refreshConfigPackStatus() {
         const canExport = data.can_export;
         const deviceType = data.device_type;
         
-        statusIcon.textContent = canExport ? '🛠️' : '📱';
+        statusIcon.innerHTML = canExport ? '<i class="ri-tools-line"></i>' : '<i class="ri-smartphone-line"></i>';
         statusText.textContent = canExport ? 'Developer 设备' : 'Device 设备';
         
         // 设备类型徽章
@@ -12446,7 +12468,7 @@ async function refreshConfigPackStatus() {
         
     } catch (e) {
         console.error('Refresh config pack status error:', e);
-        statusIcon.textContent = '❌';
+        statusIcon.innerHTML = '<i class="ri-close-line"></i>';
         statusText.textContent = '加载失败';
         if (deviceTypeBadge) deviceTypeBadge.style.display = 'none';
         if (infoDetails) infoDetails.style.display = 'none';
@@ -13217,55 +13239,55 @@ async function refreshCertStatus() {
         // 状态显示
         switch (data.status) {
             case 'not_initialized':
-                statusIcon.textContent = '⚪';
+                statusIcon.innerHTML = '<i class="ri-checkbox-blank-circle-line"></i>';
                 statusText.textContent = '未初始化';
                 noKeyHint.style.display = 'block';
                 infoDetails.style.display = 'none';
                 expiryBadge.style.display = 'none';
                 break;
             case 'key_generated':
-                statusIcon.textContent = '🔑';
+                statusIcon.innerHTML = '<i class="ri-key-line"></i>';
                 statusText.textContent = '密钥已生成，等待 CSR';
                 noKeyHint.style.display = 'none';
                 infoDetails.style.display = 'none';
                 expiryBadge.style.display = 'none';
                 break;
             case 'csr_pending':
-                statusIcon.textContent = '📋';
+                statusIcon.innerHTML = '<i class="ri-file-text-line"></i>';
                 statusText.textContent = 'CSR 已生成，等待签发';
                 noKeyHint.style.display = 'none';
                 infoDetails.style.display = 'none';
                 expiryBadge.style.display = 'none';
                 break;
             case 'activated':
-                statusIcon.textContent = '✅';
+                statusIcon.innerHTML = '<i class="ri-check-line"></i>';
                 statusText.textContent = '已激活';
                 noKeyHint.style.display = 'none';
                 infoDetails.style.display = 'block';
                 updateCertInfoDetails(data.cert_info);
                 break;
             case 'expired':
-                statusIcon.textContent = '❌';
+                statusIcon.innerHTML = '<i class="ri-close-line"></i>';
                 statusText.textContent = '已过期';
                 noKeyHint.style.display = 'none';
                 infoDetails.style.display = 'block';
                 updateCertInfoDetails(data.cert_info);
                 break;
             case 'error':
-                statusIcon.textContent = '⚠️';
+                statusIcon.innerHTML = '<i class="ri-alert-line"></i>';
                 statusText.textContent = '错误';
                 noKeyHint.style.display = 'none';
                 infoDetails.style.display = 'none';
                 expiryBadge.style.display = 'none';
                 break;
             default:
-                statusIcon.textContent = '❓';
+                statusIcon.innerHTML = '<i class="ri-question-line"></i>';
                 statusText.textContent = data.status_display || data.status;
         }
         
     } catch (e) {
         console.error('Refresh cert status error:', e);
-        statusIcon.textContent = '❌';
+        statusIcon.innerHTML = '<i class="ri-close-line"></i>';
         statusText.textContent = '加载失败';
         if (noKeyHint) noKeyHint.style.display = 'none';
         if (infoDetails) infoDetails.style.display = 'none';
@@ -13281,7 +13303,7 @@ function updateCertInfoDetails(certInfo) {
     document.getElementById('cert-not-before').textContent = certInfo.not_before ? formatTimestamp(certInfo.not_before) : '-';
     document.getElementById('cert-not-after').textContent = certInfo.not_after ? formatTimestamp(certInfo.not_after) : '-';
     document.getElementById('cert-serial').textContent = certInfo.serial || '-';
-    document.getElementById('cert-valid-status').textContent = certInfo.is_valid ? '✅ 有效' : '❌ 无效';
+    document.getElementById('cert-valid-status').textContent = certInfo.is_valid ? '有效' : '无效';
     
     // 更新过期徽章
     const expiryBadge = document.getElementById('cert-expiry-badge');
