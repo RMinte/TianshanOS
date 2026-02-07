@@ -1166,6 +1166,15 @@ body {
     font-size: 0.85rem;
 }
 
+.time-sync-btn {
+    border: 1px solid transparent;
+}
+.time-sync-btn:active {
+    background: #f0f8ff;
+    color: #007bff;
+    border-color: #d0e8ff;
+}
+
 .btn-success {
     background: #e8f5e9;
     color: #2e7d32;
@@ -1297,6 +1306,22 @@ body {
 .led-quick-actions {
     display: flex;
     gap: 8px;
+    position: relative;
+    z-index: 1;
+}
+.led-refresh-btn {
+    min-width: 32px;
+    min-height: 32px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid transparent;
+}
+.led-refresh-btn:active {
+    background: #f0f8ff;
+    color: #007bff;
+    border-color: #d0e8ff;
 }
 
 /* LED 设备网格 */
@@ -3088,6 +3113,23 @@ body {
 .file-actions {
     display: flex;
     gap: 8px;
+    position: relative;
+    z-index: 1;
+}
+
+.page-files .files-refresh-btn {
+    min-width: 32px;
+    min-height: 32px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid transparent;
+}
+.page-files .files-refresh-btn:active {
+    background: #f0f8ff;
+    color: #007bff;
+    border-color: #d0e8ff;
 }
 
 /* 文件页面白色卡片容器 */
@@ -4742,6 +4784,22 @@ body {
 .page-automation .section-actions {
     display: flex;
     gap: 6px;
+    position: relative;
+    z-index: 1;
+}
+.page-automation .automation-refresh-btn {
+    min-width: 32px;
+    min-height: 32px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid transparent;
+}
+.page-automation .automation-refresh-btn:active {
+    background: #f0f8ff;
+    color: #007bff;
+    border-color: #d0e8ff;
 }
 
 /* 紧凑卡片 */
@@ -6544,6 +6602,26 @@ body {
 
 .fan-control-section {
     min-width: 0;
+}
+
+/* 风扇控制标题栏按钮：确保可点击、点击时蓝色底色（遵循文档 btn-service-style） */
+.fan-control-section .fan-section-actions {
+    position: relative;
+    z-index: 1;
+}
+.fan-refresh-btn {
+    min-width: 32px;
+    min-height: 32px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid transparent;
+}
+.fan-refresh-btn:active {
+    background: #f0f8ff;
+    color: #007bff;
+    border-color: #d0e8ff;
 }
 
 /* 风扇温度状态栏 */

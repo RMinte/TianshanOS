@@ -611,7 +611,7 @@ async function loadSystemPage() {
                             <p><strong>状态:</strong> <span id="sys-time-status">-</span> <span style="font-size:0.85em;color:#888">(<span id="sys-time-source">-</span>)</span></p>
                             <p><strong>时区:</strong> <span id="sys-timezone">-</span></p>
                             <div style="margin-top:8px;display:flex;gap:5px">
-                                <button class="btn btn-small" onclick="syncTimeFromBrowser()" style="font-size:0.85em;padding:4px 8px;color:#666"><i class="ri-refresh-line"></i> 同步</button>
+                                <button type="button" class="btn btn-small time-sync-btn" onclick="syncTimeFromBrowser()" style="font-size:0.85em;padding:4px 8px;color:#666"><i class="ri-refresh-line"></i> 同步</button>
                                 <button class="btn btn-small" onclick="showTimezoneModal()" style="font-size:0.85em;padding:4px 8px;color:#666"><i class="ri-time-line"></i> 时区</button>
                             </div>
                         </div>
@@ -652,9 +652,9 @@ async function loadSystemPage() {
                 <div class="section fan-control-section">
                     <div class="section-header">
                         <h2>风扇控制</h2>
-                        <div class="section-actions">
-                            <button class="btn btn-sm" onclick="refreshFans()" style="color:#666"><i class="ri-refresh-line"></i></button>
-                            <button class="btn btn-sm" onclick="showFanCurveModal()" style="color:#666"><i class="ri-line-chart-line"></i> 曲线</button>
+                        <div class="section-actions fan-section-actions">
+                            <button type="button" class="btn btn-sm fan-refresh-btn" onclick="refreshFans()" title="刷新" style="color:#666"><i class="ri-refresh-line"></i></button>
+                            <button type="button" class="btn btn-sm" onclick="showFanCurveModal()" style="color:#666"><i class="ri-line-chart-line"></i> 曲线</button>
                         </div>
                     </div>
                     <!-- 温度状态栏 -->
@@ -688,7 +688,7 @@ async function loadSystemPage() {
                 <div class="led-page-header">
                     <h2>LED 控制</h2>
                     <div class="led-quick-actions">
-                        <button class="btn btn-sm" onclick="refreshSystemLeds()" style="color:#666"><i class="ri-refresh-line"></i></button>
+                        <button type="button" class="btn btn-sm led-refresh-btn" onclick="refreshSystemLeds()" title="刷新" style="color:#666"><i class="ri-refresh-line"></i></button>
                         <button class="btn btn-sm system-led-cc-btn" id="system-led-cc-btn" onclick="openLedModal('matrix', 'colorcorrection')" style="display:none;color:#666"><i class="ri-contrast-line"></i> 色彩校正</button>
                         <button class="btn btn-sm" onclick="allLedsOff()" style="color:#666">全部关闭</button>
                     </div>
@@ -4538,7 +4538,7 @@ async function loadLedPage() {
             <div class="led-page-header">
                 <h1>💡 LED 控制</h1>
                 <div class="led-quick-actions">
-                    <button class="btn btn-sm" onclick="refreshLedPage()" style="color:#666"><i class="ri-refresh-line"></i></button>
+                    <button type="button" class="btn btn-sm led-refresh-btn" onclick="refreshLedPage()" title="刷新" style="color:#666"><i class="ri-refresh-line"></i></button>
                     <button class="btn btn-sm led-color-correction-btn" id="led-page-cc-btn" onclick="openLedModal('matrix', 'colorcorrection')" style="display:none;color:#666"><i class="ri-contrast-line"></i> 色彩校正</button>
                     <button class="btn btn-sm" onclick="allLedsOff()" style="color:#666">全部关闭</button>
                 </div>
@@ -4973,7 +4973,7 @@ function generateLedModalContent(device, type) {
 
                 <div class="config-actions cc-actions">
                     <button class="btn btn-sm" onclick="resetEffectFromModal('${device}')" style="color:#666">${t('ledPage.ccReset')}</button>
-                    <button class="btn btn-service-style btn-sm" onclick="applyEffectFromModal('${device}')">${t('ledPage.ccApply')}</button>
+                    <button class="btn btn-service-style btn-sm" onclick="applyEffectFromModal('${device}')"><i class="ri-save-line"></i> ${t('ledPage.ccApply')}</button>
                 </div>
             </div>
         `;
@@ -5226,8 +5226,8 @@ function openLedModal(device, type) {
         if (headerActions) {
             if (type === 'colorcorrection') {
                 headerActions.innerHTML = `
-                    <button class="btn btn-sm btn-service-style" onclick="ccExport()" title="${t('ledPage.ccExportTip')}">${t('ledPage.ccExport')}</button>
-                    <button class="btn btn-sm btn-service-style" onclick="ccImport()" title="${t('ledPage.ccImportTip')}">${t('ledPage.ccImport')}</button>
+                    <button class="btn btn-sm btn-service-style" onclick="ccExport()" title="${t('ledPage.ccExportTip')}"><i class="ri-download-line"></i> ${t('ledPage.ccExport')}</button>
+                    <button class="btn btn-sm btn-service-style" onclick="ccImport()" title="${t('ledPage.ccImportTip')}"><i class="ri-upload-line"></i> ${t('ledPage.ccImport')}</button>
                 `;
             } else if (type === 'effect') {
                 headerActions.innerHTML = `
@@ -7380,7 +7380,7 @@ async function loadFilesPage() {
                     <div class="file-actions">
                         <button class="btn btn-service-style btn-file-action" onclick="showUploadDialog()"><i class="ri-upload-line"></i> 上传文件</button>
                         <button class="btn btn-service-style btn-file-action" onclick="showNewFolderDialog()"><i class="ri-folder-add-line"></i> 新建文件夹</button>
-                        <button class="btn btn-service-style btn-file-action" onclick="refreshFilesPage()"><i class="ri-refresh-line"></i></button>
+                        <button type="button" class="btn btn-file-action files-refresh-btn" onclick="refreshFilesPage()" title="刷新" style="color:#666"><i class="ri-refresh-line"></i></button>
                     </div>
                 </div>
                 
@@ -16513,7 +16513,7 @@ async function loadAutomationPage() {
                     <div class="section-actions">
                         <button class="btn btn-success btn-sm" onclick="showAddSourceModal()"><i class="ri-add-line"></i> 添加</button>
                         <button class="btn btn-sm" onclick="showImportSourceModal()" title="导入配置包" style="color:#666"><i class="ri-download-line"></i> 导入</button>
-                        <button class="btn btn-sm" onclick="refreshSources()" style="color:#666"><i class="ri-refresh-line"></i></button>
+                        <button type="button" class="btn btn-sm automation-refresh-btn" onclick="refreshSources()" title="刷新" style="color:#666"><i class="ri-refresh-line"></i></button>
                     </div>
                 </div>
                 <div class="card compact">
@@ -16530,7 +16530,7 @@ async function loadAutomationPage() {
                     <div class="section-actions">
                         <button class="btn btn-success btn-sm" onclick="showAddRuleModal()"><i class="ri-add-line"></i> 添加</button>
                         <button class="btn btn-sm" onclick="showImportRuleModal()" title="导入配置包" style="color:#666"><i class="ri-download-line"></i> 导入</button>
-                        <button class="btn btn-sm" onclick="refreshRules()" style="color:#666"><i class="ri-refresh-line"></i></button>
+                        <button type="button" class="btn btn-sm automation-refresh-btn" onclick="refreshRules()" title="刷新" style="color:#666"><i class="ri-refresh-line"></i></button>
                     </div>
                 </div>
                 <div class="card compact">
@@ -16547,7 +16547,7 @@ async function loadAutomationPage() {
                     <div class="section-actions">
                         <button class="btn btn-success btn-sm" onclick="showAddActionModal()"><i class="ri-add-line"></i> 添加</button>
                         <button class="btn btn-sm" onclick="showImportActionModal()" title="导入配置包" style="color:#666"><i class="ri-download-line"></i> 导入</button>
-                        <button class="btn btn-sm" onclick="refreshActions()" style="color:#666"><i class="ri-refresh-line"></i></button>
+                        <button type="button" class="btn btn-sm automation-refresh-btn" onclick="refreshActions()" title="刷新" style="color:#666"><i class="ri-refresh-line"></i></button>
                     </div>
                 </div>
                 <div class="card compact">
