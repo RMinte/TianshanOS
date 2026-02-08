@@ -181,8 +181,21 @@ body {
 
 .btn-danger {
     background: #ffebee;
-    border-color: #ef9a9a;
+    border: 1px solid #ef9a9a;
     color: #c62828;
+}
+
+/* 灰色小按钮规范：背景 #f5f6fa、文字 #666、边框 #dcdfe6（服务、USB、同步、取消、刷新等） */
+button.btn-gray,
+.btn-gray {
+    background: #f5f6fa !important;
+    color: #666 !important;
+    border: 1px solid #dcdfe6 !important;
+}
+button.btn-gray:hover,
+.btn-gray:hover {
+    background: #ebeef5 !important;
+    border-color: #c0c4cc !important;
 }
 
 /* MD 规范：运行中、添加 */
@@ -1083,6 +1096,17 @@ body {
     align-items: center;
     justify-content: center;
     padding: 60px;
+    gap: 20px;
+}
+
+.loading .loading-icon {
+    font-size: 48px;
+    color: var(--primary-color);
+    animation: spin 1s linear infinite;
+}
+
+.loading p {
+    margin: 0;
 }
 
 .spinner {
@@ -3037,6 +3061,25 @@ body {
     padding: 5px 12px;
     font-size: 0.85rem;
 }
+/* HTTPS 证书一行：CSR / 证书 / 删除 等按钮统一宽度，视觉一致（含表格行内按钮） */
+.page-security .button-group .btn {
+    min-width: 6rem;
+    box-sizing: border-box;
+}
+.page-security .data-table td .btn {
+    width: 6rem;
+    min-width: 6rem;
+    height: 2rem;
+    min-height: 2rem;
+    line-height: 2rem;
+    padding-top: 0;
+    padding-bottom: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+    text-align: center;
+}
 
 .page-security .form-actions .btn,
 .page-security .form-actions .btn-sm {
@@ -3048,6 +3091,37 @@ body {
 .dashboard h1 {
     font-size: 1.8rem;
     margin-bottom: 20px;
+}
+
+/* 安全页正文/表格/信息卡/弹窗字体与大小统一为与「TianShanOS Intermediate CA」一致 */
+.page-security .section,
+.page-security .info-card,
+.page-security .data-table,
+.page-security .data-table th,
+.page-security .data-table td,
+.page-security .modal .modal-content {
+    font-size: 0.9rem;
+    font-family: inherit;
+}
+.page-security .section h2 {
+    font-size: 1.15rem;
+    font-weight: 600;
+}
+.page-security .modal .modal-content h2 {
+    font-size: 1.1rem;
+}
+/* 表格内 code、只读 input、CN/设备名等与「TianShanOS Intermediate CA」统一字号 */
+.page-security .data-table code {
+    font-size: 1em;
+}
+.page-security input[readonly],
+.page-security .modal .modal-content input[type="text"],
+.page-security .modal .modal-content label,
+.page-security .modal .modal-content .form-group div {
+    font-size: inherit;
+}
+.page-security .modal .modal-content textarea {
+    font-size: inherit;
 }
 
 /* =========================================================================
@@ -3274,7 +3348,7 @@ body {
 
 .btn-warning {
     background-color: #fff8e1;
-    border-color: #ffd54f;
+    border: 1px solid #ffd54f;
     color: #f57c00;
 }
 
@@ -3302,7 +3376,21 @@ body {
     border-color: #007bff;
 }
 
-/* 灰色 Tab 按钮样式（SD卡、SPIFFS） */
+/* 灰色 Tab 按钮样式（SD卡、SPIFFS），统一宽高 */
+.storage-tabs .tab-btn.btn-gray {
+    width: 6rem;
+    min-width: 6rem;
+    height: 2rem;
+    min-height: 2rem;
+    line-height: 2rem;
+    padding-top: 0;
+    padding-bottom: 0;
+    text-align: center;
+    box-sizing: border-box;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
 .tab-btn.btn-gray {
     padding: 4px 12px;
     font-size: 0.85rem;
@@ -6884,6 +6972,12 @@ body {
     opacity: 0.7;
 }
 
+.quick-actions-empty .empty-icon {
+    font-size: 48px;
+    margin-bottom: 12px;
+    opacity: 0.35;
+}
+
 /* LPMu 监控面板 */
 /* ==================== 数据监控面板组件 ==================== */
 
@@ -6920,7 +7014,7 @@ body {
 .data-widgets-empty .empty-icon {
     font-size: 48px;
     margin-bottom: 12px;
-    opacity: 0.5;
+    opacity: 0.35;
 }
 
 .data-widgets-empty p {
