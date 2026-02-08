@@ -869,7 +869,7 @@ body {
     font-weight: 500;
 }
 
-.form-group input,
+.form-group input:not([type="checkbox"]):not([type="radio"]),
 .form-group select,
 .form-group textarea {
     width: 100%;
@@ -877,6 +877,46 @@ body {
     border: 1px solid var(--border-color);
     border-radius: 4px;
     font-size: 1rem;
+}
+
+.form-group input[type="checkbox"] {
+    width: auto;
+    min-width: 18px;
+    height: 18px;
+    margin: 0 8px 0 0;
+    vertical-align: middle;
+    accent-color: #007bff;
+}
+
+.form-group-checkbox-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-weight: 500;
+    cursor: pointer;
+}
+.form-group-checkbox-label input[type="checkbox"] {
+    flex-shrink: 0;
+}
+
+.form-group-hint {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    margin-top: 4px;
+    font-size: 0.85em;
+    color: #666;
+}
+.form-group-hint i {
+    flex-shrink: 0;
+    margin-top: 2px;
+}
+.form-group-hint span {
+    flex: 1;
+    min-width: 0;
+}
+.form-group-hint-warning {
+    color: #e67e22;
 }
 
 .form-group input:focus,
@@ -2929,6 +2969,52 @@ body {
     color: #c0392b;
 }
 
+/* 导出加密配置包：文件列表排版（网格固定列，避免错位） */
+.pack-export-file-list-inner {
+    padding: 4px;
+}
+.pack-export-file-row {
+    display: grid;
+    grid-template-columns: 20px 22px 1fr auto;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    border-bottom: 1px solid #eee;
+}
+.pack-export-dir-row {
+    grid-template-columns: 22px 1fr;
+    cursor: pointer;
+}
+.pack-export-row-cb {
+    margin: 0;
+    justify-self: start;
+}
+.pack-export-row-icon {
+    color: #666;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.pack-export-row-icon i {
+    font-size: 1rem;
+}
+.pack-export-row-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.pack-export-row-label {
+    cursor: pointer;
+    margin: 0;
+    min-width: 0;
+}
+.pack-export-row-size {
+    color: #999;
+    font-size: 0.9em;
+    justify-self: end;
+}
+
 /* Hidden */
 .hidden {
     display: none !important;
@@ -2943,6 +3029,19 @@ body {
 /* 安全页面：第一个 section 与顶栏间距与指令等页面一致 */
 .page-security .section:first-child {
     margin-top: 0;
+}
+
+/* 安全页按钮统一为 btn-sm 尺寸 */
+.page-security .btn,
+.page-security .btn-sm {
+    padding: 5px 12px;
+    font-size: 0.85rem;
+}
+
+.page-security .form-actions .btn,
+.page-security .form-actions .btn-sm {
+    padding: 5px 12px;
+    font-size: 0.85rem;
 }
 
 .page-security h1,
@@ -6322,6 +6421,15 @@ body {
     margin-left: 8px;
 }
 
+/* 浅蓝标签（与 btn-service-style 配色一致：安全页密钥类型/SSH/HTTPS/部署密钥、配置包类型等） */
+.badge-service-style,
+.badge-info {
+    background: #f0f8ff !important;
+    color: #007bff !important;
+    border: 1px solid #d0e8ff;
+    margin-left: 0;
+}
+
 /* ===== SSH Command Icon Picker ===== */
 
 /* Icon type tabs */
@@ -6805,7 +6913,7 @@ body {
 
 .data-widgets-empty {
     text-align: center;
-    padding: 40px 20px;
+    padding: 30px 20px;
     color: var(--text-light);
 }
 
@@ -6816,7 +6924,7 @@ body {
 }
 
 .data-widgets-empty p {
-    margin-bottom: 16px;
+    margin-bottom: 0;
 }
 
 /* 组件卡片 */
@@ -7271,6 +7379,7 @@ body {
 .dw-manager-item {
     display: flex;
     align-items: center;
+    flex-wrap: nowrap;
     gap: 8px;
     padding: 8px 10px;
     background: var(--card-bg);
@@ -7295,6 +7404,7 @@ body {
 
 .dw-manager-item-label {
     flex: 1;
+    min-width: 0;
     font-weight: 500;
     font-size: 0.9em;
     white-space: nowrap;
@@ -7311,12 +7421,15 @@ body {
 }
 
 .dw-manager-item-actions {
-    display: none;
+    flex-shrink: 0;
+    margin-left: auto;
+    display: flex;
     gap: 2px;
+    opacity: 0;
 }
 
 .dw-manager-item:hover .dw-manager-item-actions {
-    display: flex;
+    opacity: 1;
 }
 
 .dw-manager-item-actions .dw-btn-icon {
@@ -7405,6 +7518,30 @@ body {
     max-width: 500px;
 }
 
+.dw-edit-panel .form-row {
+    align-items: flex-start;
+    gap: 16px;
+}
+
+.dw-edit-panel .form-row .form-group {
+    min-width: 0;
+}
+
+/* 仅第一行（图标+颜色）：图标占剩余宽度，颜色固定一列，避免拥挤不对齐 */
+.dw-edit-panel .form-row:first-of-type .form-group:first-child {
+    flex: 1;
+}
+
+.dw-edit-panel .form-row:first-of-type .form-group:last-child {
+    flex: 0 0 100px;
+}
+
+.dw-edit-panel .form-row:first-of-type .form-group:last-child .input-color {
+    width: 100%;
+    min-width: 56px;
+    max-width: 80px;
+}
+
 .dw-edit-header {
     margin-bottom: 16px;
 }
@@ -7412,8 +7549,9 @@ body {
 .dw-edit-type-badge {
     display: inline-block;
     padding: 4px 12px;
-    background: var(--primary-color);
-    color: white;
+    background: #f0f8ff;
+    color: #007bff;
+    border: 1px solid #d0e8ff;
     border-radius: 20px;
     font-size: 0.85em;
 }
@@ -7433,8 +7571,9 @@ body {
 
 .dw-expression-group .badge {
     font-size: 0.65em;
-    background: var(--primary-color);
-    color: white;
+    background: #f0f8ff;
+    color: #007bff;
+    border: 1px solid #d0e8ff;
     padding: 2px 6px;
     border-radius: 3px;
 }

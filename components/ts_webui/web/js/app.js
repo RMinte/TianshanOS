@@ -644,7 +644,6 @@ async function loadSystemPage() {
                     <div id="data-widgets-empty" class="data-widgets-empty" style="display:none;">
                         <div class="empty-icon"><i class="ri-box-3-line"></i></div>
                         <p>还没有添加数据组件</p>
-                        <button class="btn btn-small btn-service-style" onclick="showWidgetManager()" style="font-size:0.85em">打开管理面板</button>
                     </div>
                 </div>
                 
@@ -654,7 +653,7 @@ async function loadSystemPage() {
                         <h2>风扇控制</h2>
                         <div class="section-actions fan-section-actions">
                             <button type="button" class="btn btn-sm fan-refresh-btn" onclick="refreshFans()" title="刷新" style="color:#666"><i class="ri-refresh-line"></i></button>
-                            <button type="button" class="btn btn-sm" onclick="showFanCurveModal()" style="color:#666"><i class="ri-line-chart-line"></i> 曲线</button>
+                            <button type="button" class="btn btn-sm btn-service-style" onclick="showFanCurveModal()"><i class="ri-line-chart-line"></i> 曲线</button>
                         </div>
                     </div>
                     <!-- 温度状态栏 -->
@@ -1407,20 +1406,20 @@ function updateFanInfo(data) {
             const isOff = mode === 'off';
             
             const modeInfo = {
-                'off':    { label: '关闭', color: '#6b7280', icon: '⏹' },
-                'manual': { label: '手动', color: '#f59e0b', icon: '' },
-                'auto':   { label: '自动', color: '#10b981', icon: '' },
-                'curve':  { label: '曲线', color: '#3b82f6', icon: '' }
+                'off':    { label: '关闭', color: '#6b7280', iconRi: 'ri-stop-line' },
+                'manual': { label: '手动', color: '#f59e0b', iconRi: 'ri-settings-3-line' },
+                'auto':   { label: '自动', color: '#10b981', iconRi: 'ri-run-line' },
+                'curve':  { label: '曲线', color: '#3b82f6', iconRi: 'ri-line-chart-line' }
             };
             const currentMode = modeInfo[mode] || modeInfo['auto'];
             
             return `
             <div class="fan-card ${isOff ? 'is-off' : ''}">
-                <!-- 顶部：风扇名 + 状态 -->
+                <!-- 顶部：风扇名 + 状态（仅图标） -->
                 <div class="fan-header">
                     <span class="fan-title">风扇 ${fan.id}</span>
-                    <span class="fan-status-badge" style="background:${currentMode.color}20;color:${currentMode.color}">
-                        ${currentMode.icon} ${currentMode.label}
+                    <span class="fan-status-badge" style="background:${currentMode.color}20;color:${currentMode.color}" title="${currentMode.label}">
+                        <i class="${currentMode.iconRi}"></i>
                     </span>
                 </div>
                 
@@ -1455,12 +1454,6 @@ function updateFanInfo(data) {
                            oninput="updateFanSliderUI(${fan.id}, this.value)"
                            ${!isManual ? 'disabled title="切换到手动模式后可调节"' : ''}>
                 </div>
-                
-                <!-- 底部操作 -->
-                ${mode === 'curve' ? `
-                <button class="fan-curve-btn" onclick="showFanCurveModal(${fan.id})">
-                    编辑温度曲线
-                </button>` : ''}
             </div>
         `;
         }).join('');
@@ -1759,7 +1752,9 @@ async function showFanCurveModal(fanId = 0) {
             </div>
             <div class="modal-footer">
                 <button class="btn" onclick="closeFanCurveModal()">取消</button>
-                <button class="btn btn-service-style" onclick="applyFanCurve()">应用曲线</button>
+                <button class="btn btn-service-style" onclick="importFanCurveConfig()"><i class="ri-upload-line"></i> 导入配置</button>
+                <button class="btn btn-service-style" onclick="exportFanCurveConfig()"><i class="ri-download-line"></i> 导出配置</button>
+                <button class="btn btn-service-style" onclick="applyFanCurve()"><i class="ri-check-line"></i> 应用曲线</button>
             </div>
         </div>
     `;
@@ -2229,6 +2224,17 @@ async function applyFanCurve() {
         return;
     }
     
+    // 验证温度迟滞和最小间隔（防止 NaN 导致保存失败）
+    if (isNaN(hysteresis) || hysteresis < 0 || hysteresis > 20) {
+        showToast('温度迟滞必须在 0-20°C 范围内', 'error');
+        return;
+    }
+    
+    if (isNaN(minInterval) || minInterval < 500 || minInterval > 30000) {
+        showToast('最小间隔必须在 500-30000ms 范围内', 'error');
+        return;
+    }
+    
     // 排序曲线点
     const sortedCurve = [...fanCurveConfig.curve].sort((a, b) => a.temp - b.temp);
     
@@ -2276,6 +2282,121 @@ async function applyFanCurve() {
         console.error('应用曲线失败:', e);
         showToast('应用曲线失败: ' + e.message, 'error');
     }
+}
+
+/**
+ * 导出风扇曲线配置到本地 JSON 文件，并同时保存到 SD 卡 /sdcard/config
+ */
+async function exportFanCurveConfig() {
+    const fanId = parseInt(document.getElementById('fan-curve-fan-select').value);
+    const hysteresis = parseFloat(document.getElementById('fan-curve-hysteresis').value);
+    const minInterval = parseInt(document.getElementById('fan-curve-interval').value);
+    const minDuty = parseInt(document.getElementById('fan-curve-min-duty').value);
+    const maxDuty = parseInt(document.getElementById('fan-curve-max-duty').value);
+    
+    // 构建导出配置
+    const config = {
+        version: 1,
+        type: 'fan_curve_config',
+        fan_id: fanId,
+        curve: [...fanCurveConfig.curve].sort((a, b) => a.temp - b.temp),
+        hysteresis: hysteresis,
+        min_interval: minInterval,
+        min_duty: minDuty,
+        max_duty: maxDuty,
+        exported_at: new Date().toISOString()
+    };
+    
+    const json = JSON.stringify(config, null, 2);
+    const blob = new Blob([json], { type: 'application/json' });
+    
+    // 1. 保存到本地（触发浏览器下载）
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `fan_curve_config_${fanId}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    
+    // 2. 同时保存到 SD 卡 /sdcard/config
+    const sdcardPath = `/sdcard/config/fan_curve_config_${fanId}.json`;
+    try {
+        await api.fileUpload(sdcardPath, blob);
+        showToast(`风扇 ${fanId} 曲线配置已导出（本地 + SD 卡 ${sdcardPath}）`, 'success');
+    } catch (e) {
+        showToast(`风扇 ${fanId} 曲线已保存到本地，SD 卡保存失败: ${e.message}`, 'warning');
+    }
+}
+
+/**
+ * 导入风扇曲线配置（从本地 JSON 文件）
+ */
+function importFanCurveConfig() {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json';
+    
+    input.onchange = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        
+        try {
+            const text = await file.text();
+            const config = JSON.parse(text);
+            
+            // 验证配置格式
+            if (config.type !== 'fan_curve_config') {
+                showToast('无效的配置文件格式', 'error');
+                return;
+            }
+            
+            if (!config.curve || !Array.isArray(config.curve) || config.curve.length < 2) {
+                showToast('配置文件中曲线点无效', 'error');
+                return;
+            }
+            
+            // 验证曲线点格式
+            for (const point of config.curve) {
+                if (typeof point.temp !== 'number' || typeof point.duty !== 'number') {
+                    showToast('曲线点格式错误', 'error');
+                    return;
+                }
+            }
+            
+            // 应用配置到当前界面
+            fanCurveConfig.curve = config.curve.sort((a, b) => a.temp - b.temp);
+            
+            if (typeof config.hysteresis === 'number') {
+                fanCurveConfig.hysteresis = config.hysteresis;
+                document.getElementById('fan-curve-hysteresis').value = config.hysteresis;
+            }
+            if (typeof config.min_interval === 'number') {
+                fanCurveConfig.minInterval = config.min_interval;
+                document.getElementById('fan-curve-interval').value = config.min_interval;
+            }
+            if (typeof config.min_duty === 'number') {
+                fanCurveConfig.minDuty = config.min_duty;
+                document.getElementById('fan-curve-min-duty').value = config.min_duty;
+            }
+            if (typeof config.max_duty === 'number') {
+                fanCurveConfig.maxDuty = config.max_duty;
+                document.getElementById('fan-curve-max-duty').value = config.max_duty;
+            }
+            
+            // 刷新曲线编辑器和预览
+            refreshCurveEditor();
+            drawCurvePreview();
+            
+            showToast(`已导入配置文件: ${file.name}`, 'success');
+        } catch (err) {
+            console.error('导入配置失败:', err);
+            showToast('导入配置失败: ' + err.message, 'error');
+        }
+    };
+    
+    input.click();
 }
 
 /**
@@ -2405,67 +2526,67 @@ async function refreshSystemLeds() {
 const WIDGET_TYPES = {
     ring: {
         name: '环形进度',
-        icon: '⭕',
+        icon: '<i class="ri-progress-6-line"></i>',
         description: '圆环百分比，适合 CPU/内存/磁盘使用率',
         defaultConfig: { min: 0, max: 100, unit: '%', color: '#4dabf7', decimals: 0 }
     },
     gauge: {
         name: '仪表盘',
-        icon: '🎯',
+        icon: '<i class="ri-focus-line"></i>',
         description: '半圆仪表，适合带刻度的数值',
         defaultConfig: { min: 0, max: 100, unit: '', color: '#69db7c', decimals: 1 }
     },
     temp: {
         name: '温度计',
-        icon: '🌡️',
+        icon: '<i class="ri-temp-hot-line"></i>',
         description: '垂直温度条，颜色随温度变化',
         defaultConfig: { min: 0, max: 100, unit: '°C', color: '#ff8787', decimals: 0 }
     },
     number: {
         name: '数字',
-        icon: '🔢',
+        icon: '<i class="ri-numbers-line"></i>',
         description: '大号数字显示，适合功率/电压/电流',
-        defaultConfig: { unit: 'W', color: '#74c0fc', icon: '⚡', decimals: 1 }
+        defaultConfig: { unit: 'W', color: '#74c0fc', icon: '<i class="ri-thunderstorms-line"></i>', decimals: 1 }
     },
     bar: {
         name: '进度条',
-        icon: '📊',
+        icon: '<i class="ri-bar-chart-line"></i>',
         description: '水平进度条',
         defaultConfig: { min: 0, max: 100, unit: '%', color: '#ffd43b', decimals: 1 }
     },
     text: {
         name: '文本',
-        icon: '📝',
+        icon: '<i class="ri-file-text-line"></i>',
         description: '显示文本或格式化字符串',
         defaultConfig: { unit: '', color: '#868e96' }
     },
     status: {
         name: '状态灯',
-        icon: '🔴',
+        icon: '<i class="ri-record-circle-fill"></i>',
         description: '根据值显示不同颜色状态',
         defaultConfig: { thresholds: [0, 50, 80], colors: ['#40c057', '#fab005', '#fa5252'] }
     },
     icon: {
         name: '图标状态',
-        icon: '🎭',
+        icon: '<i class="ri-emotion-line"></i>',
         description: '根据值显示不同图标',
         defaultConfig: { icons: { '0': '❌', '1': '✅', 'default': '❓' } }
     },
     dual: {
         name: '双数值',
-        icon: '📈',
+        icon: '<i class="ri-line-chart-line"></i>',
         description: '主值+副值，适合显示当前/最大等',
         defaultConfig: { unit: '', color: '#74c0fc', decimals: 1 }
     },
     percent: {
         name: '百分比',
-        icon: '💯',
+        icon: '<i class="ri-percent-line"></i>',
         description: '大号百分比数字',
         defaultConfig: { min: 0, max: 100, color: '#4dabf7', decimals: 0 }
     },
     log: {
         name: '日志流',
-        icon: '📜',
+        icon: '<i class="ri-file-list-line"></i>',
         description: '从变量读取日志文本流，支持手动刷新',
         defaultConfig: { maxLines: 15, color: '#495057', fullWidth: true }
     }
@@ -2488,18 +2609,18 @@ const LAYOUT_OPTIONS = {
  * 预设组件模板
  */
 const WIDGET_PRESETS = [
-    { id: 'cpu', label: 'CPU', type: 'ring', icon: '💻', color: '#4dabf7', unit: '%' },
-    { id: 'mem', label: '内存', type: 'ring', icon: '🧠', color: '#69db7c', unit: '%' },
-    { id: 'disk', label: '硬盘', type: 'ring', icon: '💾', color: '#ffd43b', unit: '%' },
-    { id: 'temp', label: '温度', type: 'temp', icon: '🌡️', color: '#ff8787', unit: '°C' },
-    { id: 'gpu', label: 'GPU', type: 'ring', icon: '🎮', color: '#da77f2', unit: '%' },
-    { id: 'power', label: '功耗', type: 'number', icon: '⚡', color: '#74c0fc', unit: 'W' },
-    { id: 'voltage', label: '电压', type: 'number', icon: '🔌', color: '#ffa94d', unit: 'V' },
-    { id: 'current', label: '电流', type: 'number', icon: '💡', color: '#ff6b6b', unit: 'A' },
-    { id: 'network', label: '网速', type: 'bar', icon: '🌐', color: '#38d9a9', unit: 'Mbps' },
-    { id: 'status', label: '状态', type: 'status', icon: '🔴', color: '#40c057', unit: '' },
-    { id: 'uptime', label: '运行时间', type: 'text', icon: '⏱️', color: '#868e96', unit: '' },
-    { id: 'log', label: '日志流', type: 'log', icon: '📜', color: '#495057', maxLines: 15, layout: 'full' },
+    { id: 'cpu', label: 'CPU', type: 'ring', icon: '<i class="ri-cpu-line"></i>', color: '#4dabf7', unit: '%' },
+    { id: 'mem', label: '内存', type: 'ring', icon: '<i class="ri-brain-line"></i>', color: '#69db7c', unit: '%' },
+    { id: 'disk', label: '硬盘', type: 'ring', icon: '<i class="ri-hard-drive-line"></i>', color: '#ffd43b', unit: '%' },
+    { id: 'temp', label: '温度', type: 'temp', icon: '<i class="ri-temp-hot-line"></i>', color: '#ff8787', unit: '°C' },
+    { id: 'gpu', label: 'GPU', type: 'ring', icon: '<i class="ri-gamepad-line"></i>', color: '#da77f2', unit: '%' },
+    { id: 'power', label: '功耗', type: 'number', icon: '<i class="ri-thunderstorms-line"></i>', color: '#74c0fc', unit: 'W' },
+    { id: 'voltage', label: '电压', type: 'number', icon: '<i class="ri-plug-line"></i>', color: '#ffa94d', unit: 'V' },
+    { id: 'current', label: '电流', type: 'number', icon: '<i class="ri-lightbulb-line"></i>', color: '#ff6b6b', unit: 'A' },
+    { id: 'network', label: '网速', type: 'bar', icon: '<i class="ri-global-line"></i>', color: '#38d9a9', unit: 'Mbps' },
+    { id: 'status', label: '状态', type: 'status', icon: '<i class="ri-record-circle-fill"></i>', color: '#40c057', unit: '' },
+    { id: 'uptime', label: '运行时间', type: 'text', icon: '<i class="ri-timer-line"></i>', color: '#868e96', unit: '' },
+    { id: 'log', label: '日志流', type: 'log', icon: '<i class="ri-file-list-line"></i>', color: '#495057', maxLines: 15, layout: 'full' },
 ];
 
 // 当前配置的组件列表
@@ -3336,7 +3457,7 @@ function showWidgetManager(editWidgetId = null) {
     modal.innerHTML = `
         <div class="modal-content dw-manager-modal cc-compact">
             <div class="modal-header">
-                <h2>数据监控管理</h2>
+                <h2>数据组件管理</h2>
                 <button class="modal-close" onclick="closeModal('widget-manager-modal')"><i class="ri-close-line"></i></button>
             </div>
             <div class="modal-body dw-manager-body">
@@ -3368,7 +3489,7 @@ function showWidgetManager(editWidgetId = null) {
                 </div>
                 <div class="dw-manager-main" id="dw-manager-main">
                     <div class="dw-manager-empty">
-                        <i class="ri-dashboard-line" style="font-size:48px;opacity:0.3;"></i>
+                        <i class="ri-box-3-line" style="font-size:48px;opacity:0.3;"></i>
                         <p>选择左侧组件进行编辑<br>或添加新组件</p>
                     </div>
                 </div>
@@ -3613,7 +3734,7 @@ function showWidgetEditPanel(widgetId) {
     main.innerHTML = `
         <div class="dw-edit-panel">
             <div class="dw-edit-header">
-                <span class="dw-edit-type-badge">${typeConfig.icon || '📊'} ${typeConfig.name || widget.type}</span>
+                <span class="dw-edit-type-badge">${typeConfig.icon || '<i class="ri-dashboard-line"></i>'} ${typeConfig.name || widget.type}</span>
             </div>
             
             <div class="form-group">
@@ -3634,7 +3755,7 @@ function showWidgetEditPanel(widgetId) {
             
             <!-- 布局选项 -->
             <div class="form-group">
-                <label>📐 布局宽度</label>
+                <label><i class="ri-ruler-line"></i> 布局宽度</label>
                 <div class="dw-layout-options">
                     ${LAYOUT_OPTIONS.width.map(opt => `
                         <label class="dw-layout-option ${widget.layout === opt.value || (!widget.layout && opt.value === 'auto') ? 'active' : ''}">
@@ -3794,7 +3915,7 @@ function deleteDataWidget(widgetId) {
     if (main) {
         main.innerHTML = `
             <div class="dw-manager-empty">
-                <div style="font-size:48px;opacity:0.3;">📊</div>
+                <i class="ri-box-3-line" style="font-size:48px;opacity:0.3;"></i>
                 <p>选择左侧组件进行编辑<br>或添加新组件</p>
             </div>
         `;
@@ -5185,7 +5306,9 @@ function generateLedModalContent(device, type) {
                 </div>
                 <div class="config-actions cc-actions">
                     <button class="btn btn-sm" onclick="resetColorCorrection()" style="color:#666">${t('ledPage.ccReset')}</button>
-                    <button class="btn btn-service-style btn-sm" onclick="applyColorCorrection()">${t('ledPage.ccApply')}</button>
+                    <button class="btn btn-sm btn-service-style" onclick="ccExport()" title="${t('ledPage.ccExportTip')}"><i class="ri-download-line"></i> ${t('ledPage.ccExport')}</button>
+                    <button class="btn btn-sm btn-service-style" onclick="ccImport()" title="${t('ledPage.ccImportTip')}"><i class="ri-upload-line"></i> ${t('ledPage.ccImport')}</button>
+                    <button class="btn btn-sm btn-service-style" onclick="applyColorCorrection()"><i class="ri-save-line"></i> ${t('ledPage.ccApply')}</button>
                 </div>
             </div>
         `;
@@ -5225,10 +5348,7 @@ function openLedModal(device, type) {
         modal.querySelector('.modal-content').classList.add('cc-compact');
         if (headerActions) {
             if (type === 'colorcorrection') {
-                headerActions.innerHTML = `
-                    <button class="btn btn-sm btn-service-style" onclick="ccExport()" title="${t('ledPage.ccExportTip')}"><i class="ri-download-line"></i> ${t('ledPage.ccExport')}</button>
-                    <button class="btn btn-sm btn-service-style" onclick="ccImport()" title="${t('ledPage.ccImportTip')}"><i class="ri-upload-line"></i> ${t('ledPage.ccImport')}</button>
-                `;
+                headerActions.innerHTML = '';
             } else if (type === 'effect') {
                 headerActions.innerHTML = `
                     <button class="btn btn-sm" onclick="stopEffectFromModal('${device}')" style="color:#666"><i class="ri-stop-circle-line"></i> ${t('ledPage.stop')}</button>
@@ -5887,36 +6007,6 @@ function getDeviceDescription(name) {
         'matrix': 'LED 矩阵屏 (16x16)'
     };
     return descriptions[name.toLowerCase()] || 'LED 设备';
-}
-
-function getEffectIcon(name) {
-    const icons = {
-        // 通用
-        'rainbow': '🌈',
-        'breathing': '💨',
-        'solid': '⬛',
-        'sparkle': '✨',
-        // Touch 专属
-        'pulse': '💓',
-        'color_cycle': '🔄',
-        'heartbeat': '❤️',
-        // Board 专属
-        'chase': '🏃',
-        'comet': '☄️',
-        'spin': '🔄',
-        'breathe_wave': '🌊',
-        // Matrix 专属
-        'fire': '🔥',
-        'rain': '🌧️',
-        'coderain': '💻',
-        'plasma': '🎆',
-        'ripple': '💧',
-        // 其他
-        'wave': '🌊',
-        'gradient': '🎨',
-        'twinkle': '⭐'
-    };
-    return icons[name.toLowerCase()] || '🎯';
 }
 
 /** 程序动画模态框内使用的 RemixIcon（无 emoji，用已纳入 minimal 字体的 ri-play-line） */
@@ -10772,7 +10862,7 @@ async function loadSecurityPage() {
             <div class="section">
                 <h2>密钥管理</h2>
                 <div class="button-group" style="margin-bottom:15px">
-                    <button class="btn btn-service-style" onclick="showGenerateKeyModal()"><i class="ri-add-line"></i> 生成新密钥</button>
+                    <button class="btn btn-sm btn-service-style" onclick="showGenerateKeyModal()"><i class="ri-add-line"></i> 生成新密钥</button>
                 </div>
                 <table class="data-table">
                     <thead>
@@ -10832,12 +10922,12 @@ async function loadSecurityPage() {
                     </div>
                 </div>
                 <div class="button-group" style="display:flex;flex-wrap:wrap;gap:8px">
-                    <button class="btn btn-service-style" id="btn-cert-gen-key" onclick="showCertGenKeyModal()"><i class="ri-key-line"></i> 生成密钥对</button>
-                    <button class="btn btn-service-style" id="btn-cert-gen-csr" onclick="showCertCSRModal()" disabled><i class="ri-file-text-line"></i> 生成 CSR</button>
-                    <button class="btn btn-service-style" id="btn-cert-install" onclick="showCertInstallModal()" disabled><i class="ri-upload-line"></i> 安装证书</button>
-                    <button class="btn btn-service-style" id="btn-cert-install-ca" onclick="showCertInstallCAModal()" disabled><i class="ri-shield-keyhole-line"></i> 安装 CA</button>
-                    <button class="btn" id="btn-cert-view" onclick="showCertViewModal()" disabled style="color:#666"><i class="ri-eye-line"></i> 查看证书</button>
-                    <button class="btn btn-danger" id="btn-cert-delete" onclick="deleteCertCredentials()" disabled><i class="ri-delete-bin-line"></i> 删除凭证</button>
+                    <button class="btn btn-sm btn-service-style" id="btn-cert-gen-key" onclick="showCertGenKeyModal()"><i class="ri-key-line"></i> 生成密钥对</button>
+                    <button class="btn btn-sm btn-service-style" id="btn-cert-gen-csr" onclick="showCertCSRModal()" disabled><i class="ri-file-text-line"></i> 生成 CSR</button>
+                    <button class="btn btn-sm btn-service-style" id="btn-cert-install" onclick="showCertInstallModal()" disabled><i class="ri-upload-line"></i> 安装证书</button>
+                    <button class="btn btn-sm btn-service-style" id="btn-cert-install-ca" onclick="showCertInstallCAModal()" disabled><i class="ri-shield-keyhole-line"></i> 安装 CA</button>
+                    <button class="btn btn-sm" id="btn-cert-view" onclick="showCertViewModal()" disabled style="color:#666"><i class="ri-eye-line"></i> 查看证书</button>
+                    <button class="btn btn-sm btn-danger" id="btn-cert-delete" onclick="deleteCertCredentials()" disabled><i class="ri-delete-bin-line"></i> 删除凭证</button>
                 </div>
             </div>
             
@@ -10864,10 +10954,10 @@ async function loadSecurityPage() {
                     </p>
                 </div>
                 <div class="button-group" style="display:flex;flex-wrap:wrap;gap:8px">
-                    <button class="btn btn-service-style" onclick="showConfigPackExportCertModal()"><i class="ri-download-line"></i> 导出设备证书</button>
-                    <button class="btn btn-service-style" onclick="showConfigPackImportModal()"><i class="ri-upload-line"></i> 导入配置包</button>
-                    <button class="btn btn-service-style" id="btn-pack-export" onclick="showConfigPackExportModal()" disabled><i class="ri-download-line"></i> 导出配置包</button>
-                    <button class="btn" onclick="showConfigPackListModal()" style="color:#666"><i class="ri-file-text-line"></i> 查看配置包列表</button>
+                    <button class="btn btn-sm btn-service-style" onclick="showConfigPackExportCertModal()"><i class="ri-download-line"></i> 导出设备证书</button>
+                    <button class="btn btn-sm btn-service-style" onclick="showConfigPackImportModal()"><i class="ri-upload-line"></i> 导入配置包</button>
+                    <button class="btn btn-sm btn-service-style" id="btn-pack-export" onclick="showConfigPackExportModal()" disabled><i class="ri-download-line"></i> 导出配置包</button>
+                    <button class="btn btn-sm" onclick="showConfigPackListModal()" style="color:#666"><i class="ri-file-text-line"></i> 查看配置包列表</button>
                 </div>
             </div>
             
@@ -10890,10 +10980,10 @@ async function loadSecurityPage() {
                             <label>证书 PEM</label>
                             <textarea id="pack-cert-pem" readonly style="width:100%;height:200px;font-family:monospace;font-size:11px"></textarea>
                         </div>
-                        <button class="btn btn-small btn-service-style" onclick="copyPackCertToClipboard()" style="margin-top:8px"><i class="ri-file-text-line"></i> 复制到剪贴板</button>
+                        <button class="btn btn-sm btn-service-style" onclick="copyPackCertToClipboard()" style="margin-top:8px"><i class="ri-file-text-line"></i> 复制到剪贴板</button>
                     </div>
                     <div class="form-actions" style="margin-top:15px">
-                        <button class="btn" onclick="hideConfigPackExportCertModal()">关闭</button>
+                        <button class="btn btn-sm" onclick="hideConfigPackExportCertModal()">关闭</button>
                     </div>
                 </div>
             </div>
@@ -10917,9 +11007,9 @@ async function loadSecurityPage() {
                         <div id="pack-preview-content"></div>
                     </div>
                     <div class="form-actions" style="margin-top:15px">
-                        <button class="btn" onclick="hideConfigPackImportModal()">取消</button>
-                        <button class="btn" onclick="verifyConfigPack()" style="color:#666"><i class="ri-search-line"></i> 仅验证</button>
-                        <button class="btn btn-service-style" onclick="importConfigPack()"><i class="ri-upload-line"></i> 导入</button>
+                        <button class="btn btn-sm" onclick="hideConfigPackImportModal()">取消</button>
+                        <button class="btn btn-sm" onclick="verifyConfigPack()" style="color:#666"><i class="ri-search-line"></i> 仅验证</button>
+                        <button class="btn btn-sm btn-service-style" onclick="importConfigPack()"><i class="ri-upload-line"></i> 导入</button>
                     </div>
                 </div>
             </div>
@@ -10935,13 +11025,13 @@ async function loadSecurityPage() {
                         <label>选择配置文件 <span style="color:#999;font-size:0.9em">(可多选)</span></label>
                         <div style="display:flex;gap:8px;margin-bottom:8px">
                             <input type="text" id="pack-export-browse-path" value="/sdcard/config" style="flex:1" readonly>
-                            <button class="btn btn-small" onclick="packExportBrowseUp()" style="color:#666"><i class="ri-arrow-up-s-line"></i> 上级</button>
-                            <button class="btn btn-small" onclick="packExportBrowseRefresh()" style="color:#666"><i class="ri-refresh-line"></i> 刷新</button>
+                            <button class="btn btn-sm" onclick="packExportBrowseUp()" style="color:#666"><i class="ri-arrow-up-s-line"></i> 上级</button>
+                            <button class="btn btn-sm" onclick="packExportBrowseRefresh()" style="color:#666"><i class="ri-refresh-line"></i> 刷新</button>
                         </div>
                         <div style="display:flex;gap:8px;margin-bottom:8px">
-                            <button class="btn btn-small" onclick="packExportSelectAll()" style="color:#666">全选</button>
-                            <button class="btn btn-small" onclick="packExportDeselectAll()" style="color:#666">取消全选</button>
-                            <button class="btn btn-small" onclick="packExportSelectDir()" style="color:#666"><i class="ri-folder-open-line"></i> 选择整个目录</button>
+                            <button class="btn btn-sm" onclick="packExportSelectAll()" style="color:#666">全选</button>
+                            <button class="btn btn-sm" onclick="packExportDeselectAll()" style="color:#666">取消全选</button>
+                            <button class="btn btn-sm" onclick="packExportSelectDir()" style="color:#666"><i class="ri-folder-open-line"></i> 选择整个目录</button>
                         </div>
                         <div id="pack-export-file-list" style="border:1px solid #ddd;border-radius:4px;height:180px;overflow-y:auto;background:#f9f9f9">
                             <div style="padding:20px;text-align:center;color:#666"><i class="ri-refresh-line"></i> 加载中...</div>
@@ -10969,14 +11059,14 @@ async function loadSecurityPage() {
                         <label>生成的配置包 (.tscfg)</label>
                         <textarea id="pack-export-tscfg" readonly style="width:100%;height:100px;font-family:monospace;font-size:10px" placeholder="配置包将在此显示..."></textarea>
                         <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-                            <button class="btn btn-small btn-service-style" onclick="copyPackTscfgToClipboard()" id="btn-pack-copy" style="display:none"><i class="ri-file-text-line"></i> 复制到剪贴板</button>
-                            <button class="btn btn-small btn-service-style" onclick="downloadPackTscfg()" id="btn-pack-download" style="display:none"><i class="ri-download-line"></i> 下载到本地</button>
+                            <button class="btn btn-sm btn-service-style" onclick="copyPackTscfgToClipboard()" id="btn-pack-copy" style="display:none"><i class="ri-file-text-line"></i> 复制到剪贴板</button>
+                            <button class="btn btn-sm btn-service-style" onclick="downloadPackTscfg()" id="btn-pack-download" style="display:none"><i class="ri-download-line"></i> 下载到本地</button>
                             <span id="pack-export-saved-path" style="color:#4caf50;font-size:0.9em;display:none"></span>
                         </div>
                     </div>
                     <div class="form-actions" style="margin-top:15px">
-                        <button class="btn" onclick="hideConfigPackExportModal()">取消</button>
-                        <button class="btn btn-service-style" id="btn-pack-export-generate" onclick="exportConfigPack()" disabled><i class="ri-download-line"></i> 生成配置包</button>
+                        <button class="btn btn-sm" onclick="hideConfigPackExportModal()">取消</button>
+                        <button class="btn btn-sm btn-service-style" id="btn-pack-export-generate" onclick="exportConfigPack()" disabled><i class="ri-download-line"></i> 生成配置包</button>
                     </div>
                 </div>
             </div>
@@ -10989,7 +11079,7 @@ async function loadSecurityPage() {
                         <label>目录路径</label>
                         <div style="display:flex;gap:8px">
                             <input type="text" id="pack-list-path" value="/sdcard/config" style="flex:1">
-                            <button class="btn" onclick="refreshConfigPackList()" style="color:#666"><i class="ri-refresh-line"></i> 刷新</button>
+                            <button class="btn btn-sm btn-service-style" onclick="refreshConfigPackList()"><i class="ri-refresh-line"></i> 刷新</button>
                         </div>
                     </div>
                     <div id="pack-list-loading" style="text-align:center;padding:20px"><i class="ri-refresh-line"></i> 加载中...</div>
@@ -11000,7 +11090,7 @@ async function loadSecurityPage() {
                         <tbody id="pack-list-tbody"></tbody>
                     </table>
                     <div class="form-actions" style="margin-top:15px">
-                        <button class="btn" onclick="hideConfigPackListModal()">关闭</button>
+                        <button class="btn btn-sm" onclick="hideConfigPackListModal()">关闭</button>
                     </div>
                 </div>
             </div>
@@ -11021,7 +11111,7 @@ async function loadSecurityPage() {
                             <option value="ec256">ECDSA P-256</option>
                             <option value="ec384">ECDSA P-384</option>
                         </select>
-                        <div style="font-size:0.85em;color:#e67e22;margin-top:4px"><i class="ri-alert-line"></i> ECDSA 密钥暂不支持 SSH 公钥认证，请使用 RSA</div>
+                        <div class="form-group-hint form-group-hint-warning"><i class="ri-alert-line"></i><span>ECDSA 密钥暂不支持 SSH 公钥认证，请使用 RSA</span></div>
                     </div>
                     <div class="form-group">
                         <label>备注 (可选)</label>
@@ -11030,18 +11120,18 @@ async function loadSecurityPage() {
                     <div class="form-group">
                         <label>别名 (可选)</label>
                         <input type="text" id="keygen-alias" placeholder="用于替代密钥 ID 显示">
-                        <div style="font-size:0.85em;color:#666;margin-top:4px"><i class="ri-information-line"></i> 启用「隐藏密钥」时建议填写，用于显示</div>
+                        <div class="form-group-hint"><i class="ri-information-line"></i><span>启用「隐藏密钥」时建议填写，用于显示</span></div>
                     </div>
-                    <div class="form-group">
-                        <label><input type="checkbox" id="keygen-exportable"> 允许导出私钥</label>
+                    <div class="form-group form-group-checkbox-row">
+                        <label class="form-group-checkbox-label"><input type="checkbox" id="keygen-exportable"> 允许导出私钥</label>
                     </div>
-                    <div class="form-group">
-                        <label><input type="checkbox" id="keygen-hidden"> 隐藏密钥 ID</label>
-                        <div style="font-size:0.85em;color:#666;margin-top:4px"><i class="ri-information-line"></i> 启用后，低权限用户无法看到真实的密钥 ID</div>
+                    <div class="form-group form-group-checkbox-row">
+                        <label class="form-group-checkbox-label"><input type="checkbox" id="keygen-hidden"> 隐藏密钥 ID</label>
+                        <div class="form-group-hint"><i class="ri-information-line"></i><span>启用后，低权限用户无法看到真实的密钥 ID</span></div>
                     </div>
                     <div class="form-actions">
-                        <button class="btn" onclick="hideGenerateKeyModal()">取消</button>
-                        <button class="btn btn-service-style" onclick="generateKey()">生成</button>
+                        <button class="btn btn-sm" onclick="hideGenerateKeyModal()">取消</button>
+                        <button class="btn btn-sm btn-service-style" onclick="generateKey()">生成</button>
                     </div>
                 </div>
             </div>
@@ -11078,8 +11168,8 @@ async function loadSecurityPage() {
                         </div>
                         <div id="deploy-result" class="result-box hidden" style="margin-bottom:15px"></div>
                         <div class="form-actions">
-                            <button class="btn" onclick="hideDeployKeyModal()" style="color:#666">取消</button>
-                            <button class="btn btn-service-style" id="deploy-btn" onclick="deployKey()"><i class="ri-rocket-line"></i> 开始部署</button>
+                            <button class="btn btn-sm" onclick="hideDeployKeyModal()" style="color:#666">取消</button>
+                            <button class="btn btn-sm btn-service-style" id="deploy-btn" onclick="deployKey()"><i class="ri-rocket-line"></i> 开始部署</button>
                         </div>
                     </div>
                 </div>
@@ -11117,8 +11207,8 @@ async function loadSecurityPage() {
                         </div>
                         <div id="revoke-result" class="result-box hidden" style="margin-bottom:15px"></div>
                         <div class="form-actions">
-                            <button class="btn" onclick="hideRevokeKeyModal()" style="color:#666">取消</button>
-                            <button class="btn btn-danger" id="revoke-btn" onclick="revokeKey()"><i class="ri-alert-line"></i> 撤销公钥</button>
+                            <button class="btn btn-sm" onclick="hideRevokeKeyModal()" style="color:#666">取消</button>
+                            <button class="btn btn-sm btn-danger" id="revoke-btn" onclick="revokeKey()"><i class="ri-alert-line"></i> 撤销公钥</button>
                         </div>
                     </div>
                 </div>
@@ -11152,8 +11242,8 @@ async function loadSecurityPage() {
                         <strong>建议</strong>：如果您确认服务器已重装或密钥已更新，可以点击"更新主机密钥"移除旧记录，然后重新连接以信任新密钥。
                     </p>
                     <div class="form-actions">
-                        <button class="btn" onclick="hideHostMismatchModal()" style="color:#666">取消</button>
-                        <button class="btn btn-warning" onclick="removeAndRetry()"><i class="ri-refresh-line"></i> 更新主机密钥</button>
+                        <button class="btn btn-sm" onclick="hideHostMismatchModal()" style="color:#666">取消</button>
+                        <button class="btn btn-sm btn-warning" onclick="removeAndRetry()"><i class="ri-refresh-line"></i> 更新主机密钥</button>
                     </div>
                 </div>
             </div>
@@ -11168,8 +11258,8 @@ async function loadSecurityPage() {
                     </div>
                     <div id="cert-genkey-result" class="result-box hidden" style="margin-bottom:15px"></div>
                     <div class="form-actions">
-                        <button class="btn" onclick="hideCertGenKeyModal()" style="color:#666">取消</button>
-                        <button class="btn btn-service-style" id="cert-genkey-btn" onclick="generateCertKeypair()"><i class="ri-key-line"></i> 生成</button>
+                        <button class="btn btn-sm" onclick="hideCertGenKeyModal()" style="color:#666">取消</button>
+                        <button class="btn btn-sm btn-service-style" id="cert-genkey-btn" onclick="generateCertKeypair()"><i class="ri-key-line"></i> 生成</button>
                     </div>
                 </div>
             </div>
@@ -11177,7 +11267,7 @@ async function loadSecurityPage() {
             <!-- HTTPS 证书：生成/查看 CSR 弹窗 -->
             <div class="modal hidden" id="cert-csr-modal">
                 <div class="modal-content" style="max-width:600px">
-                    <h2>📋 证书签名请求 (CSR)</h2>
+                    <h2>证书签名请求 (CSR)</h2>
                     <div class="form-group">
                         <label>设备 ID (CN)</label>
                         <input type="text" id="csr-device-id" placeholder="TIANSHAN-RM01-0001">
@@ -11194,12 +11284,12 @@ async function loadSecurityPage() {
                     <div id="csr-result-box" class="hidden" style="margin-top:15px">
                         <label>CSR 内容（复制到 CA 服务器签发）</label>
                         <textarea id="csr-pem-output" readonly style="width:100%;height:200px;font-family:monospace;font-size:11px"></textarea>
-                        <button class="btn btn-small" onclick="copyCSRToClipboard()" style="margin-top:8px">📋 复制到剪贴板</button>
+                        <button class="btn btn-sm btn-service-style" onclick="copyCSRToClipboard()" style="margin-top:8px"><i class="ri-file-text-line"></i> 复制到剪贴板</button>
                     </div>
                     <div id="csr-gen-result" class="result-box hidden" style="margin-top:10px"></div>
                     <div class="form-actions" style="margin-top:15px">
-                        <button class="btn" onclick="hideCertCSRModal()">关闭</button>
-                        <button class="btn btn-service-style" id="csr-gen-btn" onclick="generateCSR()">📋 生成 CSR</button>
+                        <button class="btn btn-sm" onclick="hideCertCSRModal()">关闭</button>
+                        <button class="btn btn-sm btn-service-style" id="csr-gen-btn" onclick="generateCSR()"><i class="ri-file-text-line"></i> 生成 CSR</button>
                     </div>
                 </div>
             </div>
@@ -11207,7 +11297,7 @@ async function loadSecurityPage() {
             <!-- HTTPS 证书：安装证书弹窗 -->
             <div class="modal hidden" id="cert-install-modal">
                 <div class="modal-content" style="max-width:600px">
-                    <h2>📥 安装设备证书</h2>
+                    <h2>安装设备证书</h2>
                     <p style="color:#666;margin-bottom:15px">粘贴 CA 签发的 PEM 格式证书</p>
                     <div class="form-group">
                         <label>证书 PEM</label>
@@ -11215,8 +11305,8 @@ async function loadSecurityPage() {
                     </div>
                     <div id="cert-install-result" class="result-box hidden" style="margin-top:10px"></div>
                     <div class="form-actions" style="margin-top:15px">
-                        <button class="btn" onclick="hideCertInstallModal()">取消</button>
-                        <button class="btn btn-service-style" onclick="installCertificate()">📥 安装</button>
+                        <button class="btn btn-sm" onclick="hideCertInstallModal()">取消</button>
+                        <button class="btn btn-sm btn-service-style" onclick="installCertificate()"><i class="ri-upload-line"></i> 安装</button>
                     </div>
                 </div>
             </div>
@@ -11224,7 +11314,7 @@ async function loadSecurityPage() {
             <!-- HTTPS 证书：安装 CA 链弹窗 -->
             <div class="modal hidden" id="cert-ca-modal">
                 <div class="modal-content" style="max-width:600px">
-                    <h2>🏛️ 安装 CA 证书链</h2>
+                    <h2>安装 CA 证书链</h2>
                     <p style="color:#666;margin-bottom:15px">粘贴根证书和中间证书（PEM 格式，可拼接多个）</p>
                     <div class="form-group">
                         <label>CA 证书链 PEM</label>
@@ -11232,8 +11322,8 @@ async function loadSecurityPage() {
                     </div>
                     <div id="ca-install-result" class="result-box hidden" style="margin-top:10px"></div>
                     <div class="form-actions" style="margin-top:15px">
-                        <button class="btn" onclick="hideCertInstallCAModal()">取消</button>
-                        <button class="btn btn-service-style" onclick="installCAChain()">🏛️ 安装</button>
+                        <button class="btn btn-sm" onclick="hideCertInstallCAModal()">取消</button>
+                        <button class="btn btn-sm btn-service-style" onclick="installCAChain()"><i class="ri-upload-line"></i> 安装</button>
                     </div>
                 </div>
             </div>
@@ -11241,14 +11331,14 @@ async function loadSecurityPage() {
             <!-- HTTPS 证书：查看证书弹窗 -->
             <div class="modal hidden" id="cert-view-modal">
                 <div class="modal-content" style="max-width:600px">
-                    <h2>👁️ 查看设备证书</h2>
+                    <h2>查看设备证书</h2>
                     <div id="cert-view-loading" style="text-align:center;padding:20px"><i class="ri-refresh-line"></i> 加载中...</div>
                     <div id="cert-view-content" class="hidden">
                         <textarea id="cert-view-pem" readonly style="width:100%;height:250px;font-family:monospace;font-size:11px"></textarea>
-                        <button class="btn btn-small" onclick="copyCertToClipboard()" style="margin-top:8px">📋 复制到剪贴板</button>
+                        <button class="btn btn-sm btn-service-style" onclick="copyCertToClipboard()" style="margin-top:8px"><i class="ri-file-text-line"></i> 复制到剪贴板</button>
                     </div>
                     <div class="form-actions" style="margin-top:15px">
-                        <button class="btn" onclick="hideCertViewModal()">关闭</button>
+                        <button class="btn btn-sm" onclick="hideCertViewModal()">关闭</button>
                     </div>
                 </div>
             </div>
@@ -11298,15 +11388,15 @@ async function refreshSecurityPage() {
                         ${key.alias && !key.hidden ? `<div style="font-size:0.85em;color:#666;margin-top:2px">${escapeHtml(key.alias)}</div>` : ''}
                     </td>
                     <td>${escapeHtml(key.type_desc || key.type)}</td>
-                    <td><span class="badge badge-info">SSH</span> ${escapeHtml(key.comment) || '-'}</td>
+                    <td><span class="badge badge-service-style">SSH</span> ${escapeHtml(key.comment) || '-'}</td>
                     <td>${formatTimestamp(key.created)}</td>
                     <td>${key.exportable ? '是' : '否'}</td>
                     <td>
-                        <button class="btn btn-small btn-service-style" onclick="exportKey('${escapeHtml(key.id)}')" ${key.has_pubkey ? '' : 'disabled'}><i class="ri-download-line"></i> 公钥</button>
-                        <button class="btn btn-small btn-service-style" onclick="exportPrivateKey('${escapeHtml(key.id)}')" ${key.exportable === false ? 'disabled' : ''} title="${key.exportable === false ? '此密钥不可导出私钥' : '导出私钥'}" style="${key.exportable === false ? 'color:#999' : ''}"><i class="ri-key-line"></i> 私钥</button>
-                        <button class="btn btn-small btn-service-style" onclick="showDeployKeyModal('${escapeHtml(key.id)}')" ${key.has_pubkey ? '' : 'disabled'} title="部署公钥到远程服务器"><i class="ri-rocket-line"></i> 部署</button>
-                        <button class="btn btn-small btn-warning" onclick="showRevokeKeyModal('${escapeHtml(key.id)}')" ${key.has_pubkey ? '' : 'disabled'} title="从远程服务器撤销公钥"><i class="ri-alert-line"></i> 撤销</button>
-                        <button class="btn btn-small btn-danger" onclick="deleteKey('${escapeHtml(key.id)}')"><i class="ri-delete-bin-line"></i> 删除</button>
+                        <button class="btn btn-sm btn-service-style" onclick="exportKey('${escapeHtml(key.id)}')" ${key.has_pubkey ? '' : 'disabled'}><i class="ri-download-line"></i> 公钥</button>
+                        <button class="btn btn-sm btn-service-style" onclick="exportPrivateKey('${escapeHtml(key.id)}')" ${key.exportable === false ? 'disabled' : ''} title="${key.exportable === false ? '此密钥不可导出私钥' : '导出私钥'}" style="${key.exportable === false ? 'color:#999' : ''}"><i class="ri-key-line"></i> 私钥</button>
+                        <button class="btn btn-sm btn-service-style" onclick="showDeployKeyModal('${escapeHtml(key.id)}')" ${key.has_pubkey ? '' : 'disabled'} title="部署公钥到远程服务器"><i class="ri-rocket-line"></i> 部署</button>
+                        <button class="btn btn-sm btn-warning" onclick="showRevokeKeyModal('${escapeHtml(key.id)}')" ${key.has_pubkey ? '' : 'disabled'} title="从远程服务器撤销公钥"><i class="ri-alert-line"></i> 撤销</button>
+                        <button class="btn btn-sm btn-danger" onclick="deleteKey('${escapeHtml(key.id)}')"><i class="ri-delete-bin-line"></i> 删除</button>
                     </td>
                 </tr>
                 `;
@@ -11338,13 +11428,13 @@ async function refreshSecurityPage() {
                         <div style="font-size:0.85em;color:#666;margin-top:2px">HTTPS 服务器密钥</div>
                     </td>
                     <td>ECDSA P-256</td>
-                    <td><span class="badge" style="background:#2196f3;color:white">HTTPS</span> ${escapeHtml(comment)}</td>
+                    <td><span class="badge badge-service-style">HTTPS</span> ${escapeHtml(comment)}</td>
                     <td>-</td>
                     <td>否</td>
                     <td>
-                        <button class="btn btn-small btn-service-style" onclick="showCertCSRModal()" title="生成证书签名请求"><i class="ri-file-text-line"></i> CSR</button>
-                        <button class="btn btn-small" onclick="showCertViewModal()" ${hasCert ? '' : 'disabled'} title="查看证书" style="color:#666"><i class="ri-eye-line"></i> 证书</button>
-                        <button class="btn btn-small btn-danger" onclick="deleteCertCredentials()" title="删除 HTTPS 密钥和证书"><i class="ri-delete-bin-line"></i> 删除</button>
+                        <button class="btn btn-sm btn-service-style" onclick="showCertCSRModal()" title="生成证书签名请求"><i class="ri-file-text-line"></i> CSR</button>
+                        <button class="btn btn-sm" onclick="showCertViewModal()" ${hasCert ? '' : 'disabled'} title="查看证书" style="color:#666"><i class="ri-eye-line"></i> 证书</button>
+                        <button class="btn btn-sm btn-danger" onclick="deleteCertCredentials()" title="删除 HTTPS 密钥和证书"><i class="ri-delete-bin-line"></i> 删除</button>
                     </td>
                 </tr>
                 `;
@@ -11357,11 +11447,11 @@ async function refreshSecurityPage() {
                         <div style="font-size:0.85em;color:#999;margin-top:2px">HTTPS 服务器密钥</div>
                     </td>
                     <td style="color:#888">-</td>
-                    <td><span class="badge" style="background:#ff9800;color:white">HTTPS</span> <em style="color:#888">未生成密钥</em></td>
+                    <td><span class="badge badge-service-style">HTTPS</span> <em style="color:#888">未生成密钥</em></td>
                     <td>-</td>
                     <td>-</td>
                     <td>
-                        <button class="btn btn-small btn-service-style" onclick="showCertGenKeyModal()" title="生成 HTTPS 密钥对"><i class="ri-key-line"></i> 生成密钥</button>
+                        <button class="btn btn-sm btn-service-style" onclick="showCertGenKeyModal()" title="生成 HTTPS 密钥对"><i class="ri-key-line"></i> 生成密钥</button>
                     </td>
                 </tr>
                 `;
@@ -11431,7 +11521,7 @@ async function refreshSshHostsList() {
                 <td>${escapeHtml(h.host)}</td>
                 <td>${h.port}</td>
                 <td>${escapeHtml(h.username)}</td>
-                <td><span class="badge badge-info"><i class="ri-key-line"></i> ${escapeHtml(h.keyid || 'default')}</span></td>
+                <td><span class="badge badge-service-style"><i class="ri-key-line"></i> ${escapeHtml(h.keyid || 'default')}</span></td>
                 <td>
                     <button class="btn btn-sm" onclick="testSshHostByIndex(${idx})" title="测试连接" style="color:#666"><i class="ri-search-line"></i> 测试</button>
                     <button class="btn btn-sm btn-service-style" onclick="exportSshHost('${escapeHtml(h.id)}')" title="导出配置为 .tscfg"><i class="ri-download-line"></i> 导出</button>
@@ -11472,7 +11562,7 @@ async function refreshKnownHostsList() {
             <tr>
                 <td><code>${escapeHtml(h.host)}</code></td>
                 <td>${h.port}</td>
-                <td><span class="badge">${escapeHtml(h.type)}</span></td>
+                <td><span class="badge badge-service-style">${escapeHtml(h.type)}</span></td>
                 <td><code style="font-size:0.8em;word-break:break-all">${escapeHtml(h.fingerprint.substring(0, 32))}...</code></td>
                 <td>${formatTimestamp(h.added)}</td>
                 <td>
@@ -12758,7 +12848,7 @@ function hideConfigPackExportModal() {
 // 文件浏览器：刷新当前目录
 async function packExportBrowseRefresh() {
     const fileList = document.getElementById('pack-export-file-list');
-    fileList.innerHTML = '<div style="padding:20px;text-align:center;color:#666">🔄 加载中...</div>';
+    fileList.innerHTML = '<div style="padding:20px;text-align:center;color:#666"><i class="ri-refresh-line"></i> 加载中...</div>';
     
     try {
         const result = await api.storageList(packExportCurrentPath);
@@ -12782,14 +12872,12 @@ async function packExportBrowseRefresh() {
         packExportCurrentEntries = filteredEntries;
         
         if (filteredEntries.length === 0) {
-            fileList.innerHTML = '<div style="padding:20px;text-align:center;color:#999">📁 没有配置文件 (.json)</div>';
+            fileList.innerHTML = '<div style="padding:20px;text-align:center;color:#999"><i class="ri-folder-line"></i> 没有配置文件 (.json)</div>';
             return;
         }
         
-        let html = '<div style="padding:4px">';
+        let html = '<div class="pack-export-file-list-inner">';
         for (const entry of filteredEntries) {
-            const icon = entry.type === 'dir' ? '📁' : '📄';
-            const size = entry.type === 'file' ? ` <span style="color:#999;font-size:0.9em">(${formatFileSize(entry.size)})</span>` : '';
             const fullPath = packExportCurrentPath + '/' + entry.name;
             const isSelected = packExportSelectedFiles.has(fullPath);
             const bgColor = isSelected ? '#e3f2fd' : '';
@@ -12799,21 +12887,21 @@ async function packExportBrowseRefresh() {
             if (entry.type === 'dir') {
                 // 目录：点击进入，无复选框
                 html += `<div onclick="packExportBrowseInto('${safeName}')" 
-                    style="padding:8px 12px;cursor:pointer;border-bottom:1px solid #eee;display:flex;align-items:center" 
+                    class="pack-export-file-row pack-export-dir-row" 
                     onmouseover="this.style.background='#f0f0f0'" onmouseout="this.style.background=''">
-                    <span style="margin-right:8px">${icon}</span>
-                    <span style="flex:1">${entry.name}</span>
+                    <span class="pack-export-row-icon"><i class="ri-folder-line"></i></span>
+                    <span class="pack-export-row-name">${escapeHtml(entry.name)}</span>
                 </div>`;
             } else {
-                // 文件：带复选框
+                // 文件：网格四列 复选框|图标|文件名|大小，避免错位
                 const checkboxId = 'pack-export-cb-' + entry.name.replace(/[^a-zA-Z0-9]/g, '_');
-                html += `<div style="padding:8px 12px;border-bottom:1px solid #eee;background:${bgColor};display:flex;align-items:center">
+                const sizeStr = formatFileSize(entry.size);
+                html += `<div class="pack-export-file-row pack-export-file-row-with-cb" style="background:${bgColor}">
                     <input type="checkbox" id="${checkboxId}" ${isSelected ? 'checked' : ''} 
-                        onclick="packExportToggleFile('${safeName}', this.checked)" style="margin-right:8px">
-                    <label for="${checkboxId}" style="flex:1;cursor:pointer;margin:0;display:flex;align-items:center">
-                        <span style="margin-right:4px">${icon}</span>
-                        <span>${entry.name}</span>${size}
-                    </label>
+                        onclick="packExportToggleFile('${safeName}', this.checked)" class="pack-export-row-cb">
+                    <span class="pack-export-row-icon"><i class="ri-file-text-line"></i></span>
+                    <label for="${checkboxId}" class="pack-export-row-label"><span class="pack-export-row-name">${escapeHtml(entry.name)}</span></label>
+                    <span class="pack-export-row-size">(${sizeStr})</span>
                 </div>`;
             }
         }
@@ -12824,7 +12912,7 @@ async function packExportBrowseRefresh() {
         packExportUpdateSelectedDisplay();
         
     } catch (e) {
-        fileList.innerHTML = `<div style="padding:20px;text-align:center;color:#e74c3c">❌ 加载失败: ${e.message}</div>`;
+        fileList.innerHTML = `<div style="padding:20px;text-align:center;color:#e74c3c"><i class="ri-error-warning-line"></i> 加载失败: ${e.message}</div>`;
     }
 }
 

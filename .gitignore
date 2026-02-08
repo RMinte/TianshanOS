@@ -47,4 +47,5 @@ secrets/
 password*.txt
 
 # Documentation
-TianshanOS frontend modification.md
+frontend_modification.md
+frontend_emoji_list.md

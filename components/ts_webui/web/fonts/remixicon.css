@@ -94,6 +94,8 @@
 .ri-stop-line:before { content: "\f1a1"; }
 .ri-play-line:before { content: "\f00b"; }
 .ri-settings-line:before { content: "\f0ee"; }
+.ri-settings-3-line:before { content: "\f0e6"; }
+.ri-run-line:before { content: "\f0a5"; }
 
 /* Host card icon */
 .ri-server-line:before { content: "\f0e0"; }
@@ -126,3 +128,17 @@
 .ri-error-warning-line:before { content: "\eca1"; }
 .ri-arrow-up-s-line:before { content: "\ea78"; }
 .ri-checkbox-blank-circle-line:before { content: "\eb7d"; }
+
+/* Data widget manager - types and presets */
+.ri-dashboard-line:before { content: "\ec14"; }
+.ri-progress-6-line:before { content: "\f485"; }
+.ri-numbers-line:before { content: "\efaa"; }
+.ri-record-circle-fill:before { content: "\f059"; }
+.ri-emotion-line:before { content: "\ec90"; }
+.ri-percent-line:before { content: "\efe6"; }
+.ri-file-list-line:before { content: "\ecf1"; }
+.ri-cpu-line:before { content: "\ebf0"; }
+.ri-brain-line:before { content: "\f2f7"; }
+.ri-hard-drive-line:before { content: "\edfb"; }
+.ri-gamepad-line:before { content: "\edab"; }
+.ri-ruler-line:before { content: "\f0a3"; }
