@@ -83,7 +83,7 @@ class SubscriptionManager {
     handleMessage(msg) {
         // 处理订阅确认
         if (msg.type === 'subscribed' || msg.type === 'unsubscribed') {
-            const status = msg.success ? '✅' : '❌';
+            const status = msg.success ? 'OK' : 'Fail';
             console.log(`[SubscriptionMgr] ${msg.type}: ${msg.topic} ${status}`);
             if (!msg.success && msg.error) {
                 console.error(`[SubscriptionMgr] Error: ${msg.error}`);
@@ -489,11 +489,11 @@ function handlePowerEvent(msg) {
     
     // 显示警告
     if (state === 'LOW_VOLTAGE' || state === 'SHUTDOWN') {
-        showToast(`⚠️ 低电压警告: ${voltage}V (${countdown}s)`, 'warning', 5000);
+        showToast(`低电压警告: ${voltage}V (${countdown}s)`, 'warning', 5000);
     } else if (state === 'PROTECTED') {
-        showToast(`🛡️ 电压保护已触发`, 'error', 10000);
+        showToast(`电压保护已触发`, 'error', 10000);
     } else if (state === 'RECOVERY') {
-        showToast(`🔄 电压恢复中: ${voltage}V`, 'info', 3000);
+        showToast(`电压恢复中: ${voltage}V`, 'info', 3000);
     }
 }
 
@@ -547,7 +547,7 @@ async function loadSystemPage() {
                         <div style="flex:1;border-left:1px solid #e0e0e0;padding-left:20px">
                             <div style="display:flex;justify-content:space-between;align-items:center">
                                 <p><strong>内存</strong></p>
-                                <button class="btn btn-sm" onclick="showMemoryDetailModal()" style="font-size:0.75em;padding:2px 8px" title="查看详细内存分析">详情</button>
+                                <button class="btn btn-sm btn-gray" onclick="showMemoryDetailModal()" style="font-size:0.75em;padding:2px 8px" title="查看详细内存分析">详情</button>
                             </div>
                             <div style="margin-top:5px">
                                 <p style="font-size:0.85em;margin:3px 0">DRAM:</p>
@@ -566,8 +566,8 @@ async function loadSystemPage() {
                     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
                         <h3 style="margin:0">系统总览</h3>
                         <div style="display:flex;gap:8px">
-                            <button class="btn btn-small" onclick="showShutdownSettingsModal()" style="font-size:0.85em;color:#666" title="电压保护设置"><i class="ri-flashlight-line"></i> 关机设置</button>
-                            <button id="usb-mux-btn" class="btn btn-small" onclick="toggleUsbMux()" style="font-size:0.85em;color:#666"><i class="ri-usb-line"></i> USB: <span id="usb-mux-target">-</span></button>
+                            <button class="btn btn-small btn-gray" onclick="showShutdownSettingsModal()" style="font-size:0.85em" title="电压保护设置"><i class="ri-flashlight-line"></i> 关机设置</button>
+                            <button id="usb-mux-btn" class="btn btn-small btn-gray" onclick="toggleUsbMux()" style="font-size:0.85em"><i class="ri-usb-line"></i> USB: <span id="usb-mux-target">-</span></button>
                             <button class="btn btn-small btn-service-style" onclick="confirmReboot()" style="font-size:0.85em"><i class="ri-restart-line"></i> 重启</button>
                         </div>
                     </div>
@@ -611,8 +611,8 @@ async function loadSystemPage() {
                             <p><strong>状态:</strong> <span id="sys-time-status">-</span> <span style="font-size:0.85em;color:#888">(<span id="sys-time-source">-</span>)</span></p>
                             <p><strong>时区:</strong> <span id="sys-timezone">-</span></p>
                             <div style="margin-top:8px;display:flex;gap:5px">
-                                <button type="button" class="btn btn-small time-sync-btn" onclick="syncTimeFromBrowser()" style="font-size:0.85em;padding:4px 8px;color:#666"><i class="ri-refresh-line"></i> 同步</button>
-                                <button class="btn btn-small" onclick="showTimezoneModal()" style="font-size:0.85em;padding:4px 8px;color:#666"><i class="ri-time-line"></i> 时区</button>
+                                <button type="button" class="btn btn-small btn-gray time-sync-btn" onclick="syncTimeFromBrowser()" style="font-size:0.85em;padding:4px 8px"><i class="ri-refresh-line"></i> 同步</button>
+                                <button class="btn btn-small btn-gray" onclick="showTimezoneModal()" style="font-size:0.85em;padding:4px 8px"><i class="ri-time-line"></i> 时区</button>
                             </div>
                         </div>
                     </div>
@@ -626,7 +626,7 @@ async function loadSystemPage() {
                     <div class="section-header">
                         <h2>设备面板</h2>
                         <div class="section-actions">
-                            <button id="agx-power-btn" class="btn btn-sm btn-danger" onclick="toggleAgxPower()">🔴 AGX 已关闭</button>
+                            <button id="agx-power-btn" class="btn btn-sm btn-danger" onclick="toggleAgxPower()"><i class="ri-checkbox-blank-circle-fill" style="color:#c62828"></i> AGX 已关闭</button>
                             <button id="lpmu-power-btn" class="btn btn-sm btn-warning" onclick="toggleLpmuPower()"><i class="ri-alert-line"></i> LPMU 检测中</button>
                             <button class="btn btn-sm btn-service-style" onclick="showWidgetManager()"><i class="ri-apps-line"></i> 组件管理</button>
                         </div>
@@ -652,7 +652,7 @@ async function loadSystemPage() {
                     <div class="section-header">
                         <h2>风扇控制</h2>
                         <div class="section-actions fan-section-actions">
-                            <button type="button" class="btn btn-sm fan-refresh-btn" onclick="refreshFans()" title="刷新" style="color:#666"><i class="ri-refresh-line"></i></button>
+                            <button type="button" class="btn btn-sm btn-gray fan-refresh-btn" onclick="refreshFans()" title="刷新"><i class="ri-refresh-line"></i></button>
                             <button type="button" class="btn btn-sm btn-service-style" onclick="showFanCurveModal()"><i class="ri-line-chart-line"></i> 曲线</button>
                         </div>
                     </div>
@@ -672,7 +672,7 @@ async function loadSystemPage() {
                                 <input type="number" id="fan-test-temp" class="input input-sm" 
                                        placeholder="--" min="0" max="100" step="1" style="width:60px;">
                                 <button class="btn btn-sm btn-warning" onclick="applyTestTemp()">测试</button>
-                                <button class="btn btn-sm" onclick="clearTestTemp()">清除</button>
+                                <button class="btn btn-sm btn-gray" onclick="clearTestTemp()">清除</button>
                             </div>
                         </div>
                     </div>
@@ -687,9 +687,9 @@ async function loadSystemPage() {
                 <div class="led-page-header">
                     <h2>LED 控制</h2>
                     <div class="led-quick-actions">
-                        <button type="button" class="btn btn-sm led-refresh-btn" onclick="refreshSystemLeds()" title="刷新" style="color:#666"><i class="ri-refresh-line"></i></button>
-                        <button class="btn btn-sm system-led-cc-btn" id="system-led-cc-btn" onclick="openLedModal('matrix', 'colorcorrection')" style="display:none;color:#666"><i class="ri-contrast-line"></i> 色彩校正</button>
-                        <button class="btn btn-sm" onclick="allLedsOff()" style="color:#666">全部关闭</button>
+                        <button type="button" class="btn btn-sm btn-gray led-refresh-btn" onclick="refreshSystemLeds()" title="刷新"><i class="ri-refresh-line"></i></button>
+                        <button class="btn btn-sm btn-gray system-led-cc-btn" id="system-led-cc-btn" onclick="openLedModal('matrix', 'colorcorrection')" style="display:none"><i class="ri-contrast-line"></i> 色彩校正</button>
+                        <button class="btn btn-sm btn-gray" onclick="allLedsOff()">全部关闭</button>
                     </div>
                 </div>
                 <div id="system-led-devices-grid" class="led-devices-grid">
@@ -873,7 +873,7 @@ function updateUsbMuxButton() {
     if (!usbMuxConfigured) {
         if (targetEl) targetEl.textContent = '未配置';
         if (btn) {
-            btn.className = 'btn btn-small';
+            btn.className = 'btn btn-small btn-gray';
             btn.disabled = true;
         }
         return;
@@ -886,7 +886,7 @@ function updateUsbMuxButton() {
     if (btn) {
         btn.disabled = false;
         const colorClass = USB_MUX_COLORS[usbMuxTarget] || '';
-        btn.className = 'btn btn-small ' + colorClass;
+        btn.className = 'btn btn-small btn-gray ' + colorClass.trim();
     }
 }
 
@@ -2068,7 +2068,7 @@ async function loadVariableBindStatus() {
                 if (!optionExists) {
                     const tempOpt = document.createElement('option');
                     tempOpt.value = boundVar;
-                    tempOpt.textContent = `📊 ${boundVar} (当前)`;
+                    tempOpt.textContent = `${boundVar} (当前)`;
                     selectEl.appendChild(tempOpt);
                 }
                 selectEl.value = boundVar;
@@ -2096,7 +2096,7 @@ async function loadVariableBindStatus() {
             
             if (priorityVars.length > 0) {
                 const group1 = document.createElement('optgroup');
-                group1.label = '🌡️ 温度变量';
+                group1.label = '温度变量';
                 priorityVars.forEach(v => {
                     const opt = document.createElement('option');
                     opt.value = v.name;
@@ -2108,7 +2108,7 @@ async function loadVariableBindStatus() {
             
             if (otherVars.length > 0) {
                 const group2 = document.createElement('optgroup');
-                group2.label = '📊 其他数值变量';
+                group2.label = '其他数值变量';
                 otherVars.forEach(v => {
                     const opt = document.createElement('option');
                     opt.value = v.name;
@@ -2506,7 +2506,7 @@ async function refreshSystemLeds() {
         } else {
             container.innerHTML = `
                 <div class="led-empty-state">
-                    <div class="empty-icon">⚠️</div>
+                    <div class="empty-icon"><i class="ri-error-warning-line" style="color:var(--warning-color)"></i></div>
                     <h3>未找到 LED 设备</h3>
                     <p>LED 设备可能尚未启动</p>
                 </div>
@@ -2570,7 +2570,7 @@ const WIDGET_TYPES = {
         name: '图标状态',
         icon: '<i class="ri-emotion-line"></i>',
         description: '根据值显示不同图标',
-        defaultConfig: { icons: { '0': '❌', '1': '✅', 'default': '❓' } }
+        defaultConfig: { icons: { '0': '<i class="ri-close-line"></i>', '1': '<i class="ri-check-line"></i>', 'default': '<i class="ri-question-line"></i>' } }
     },
     dual: {
         name: '双数值',
@@ -2923,7 +2923,7 @@ function renderWidgetHtml(widget) {
         case 'icon':
             contentHtml = `
                 <div class="dw-icon-container">
-                    <div class="dw-icon-display" id="dw-${id}-icon">❓</div>
+                    <div class="dw-icon-display" id="dw-${id}-icon"><i class="ri-question-line"></i></div>
                     <div class="dw-icon-label" id="dw-${id}-value">-</div>
                 </div>`;
             break;
@@ -3119,9 +3119,9 @@ function updateWidgetValue(widget, value) {
         case 'icon': {
             const iconEl = document.getElementById(`dw-${id}-icon`);
             const valueEl = document.getElementById(`dw-${id}-value`);
-            const iconMap = icons || { '0': '❌', '1': '✅', 'default': '❓' };
-            const displayIcon = iconMap[String(value)] || iconMap['default'] || '❓';
-            if (iconEl) iconEl.textContent = displayIcon;
+            const iconMap = icons || { '0': '<i class="ri-close-line"></i>', '1': '<i class="ri-check-line"></i>', 'default': '<i class="ri-question-line"></i>' };
+            const displayIcon = iconMap[String(value)] || iconMap['default'] || '<i class="ri-question-line"></i>';
+            if (iconEl) iconEl.innerHTML = displayIcon;
             if (valueEl) valueEl.textContent = value;
             break;
         }
@@ -3652,7 +3652,7 @@ function createNewWidget(type) {
         widget.colors = defaults.colors || ['#40c057', '#fab005', '#fa5252'];
     }
     if (type === 'icon') {
-        widget.icons = defaults.icons || { '0': '❌', '1': '✅', 'default': '❓' };
+        widget.icons = defaults.icons || { '0': '<i class="ri-close-line"></i>', '1': '<i class="ri-check-line"></i>', 'default': '<i class="ri-question-line"></i>' };
     }
     if (type === 'log') {
         widget.maxLines = defaults.maxLines || 15;
@@ -4056,7 +4056,7 @@ async function refreshQuickActions() {
             } else {
                 container.innerHTML = `
                     <div class="quick-actions-empty">
-                        <i class="ri-dashboard-line" style="font-size:2.5em;opacity:0.3"></i>
+                        <div class="empty-icon"><i class="ri-dashboard-line"></i></div>
                         <p>暂无快捷操作</p>
                         <small>在自动化规则中启用"手动触发"选项</small>
                     </div>
@@ -4145,7 +4145,7 @@ async function triggerQuickAction(ruleId) {
     const card = event?.currentTarget || document.getElementById(`quick-action-${ruleId}`);
     if (!card) {
         console.error('triggerQuickAction: card not found for ruleId=', ruleId);
-        showToast('❌ 无法找到操作卡片', 'error');
+        showToast('无法找到操作卡片', 'error');
         return;
     }
     
@@ -4411,7 +4411,7 @@ function startQuickLogTail(logFile, hostId, intervalMs = 5000) {
     const status = document.getElementById('quick-log-status');
     
     if (btn) {
-        btn.textContent = '⏹️ 停止跟踪';
+        btn.innerHTML = '<i class="ri-stop-line"></i> 停止跟踪';
         btn.classList.remove('btn-service-style');
         btn.classList.add('btn-danger');
     }
@@ -4468,7 +4468,7 @@ function stopQuickLogTail() {
     const status = document.getElementById('quick-log-status');
     
     if (btn) {
-        btn.textContent = '▶️ 开始跟踪';
+        btn.innerHTML = '<i class="ri-play-line"></i> 开始跟踪';
         btn.classList.remove('btn-danger');
         btn.classList.add('btn-service-style');
     }
@@ -4587,7 +4587,7 @@ function showTimezoneModal() {
     
     modal.innerHTML = `
         <div class="modal-content" style="max-width:400px">
-            <h2>⚙️ 设置时区</h2>
+            <h2>设置时区</h2>
             <div class="form-group">
                 <label>时区</label>
                 <select id="timezone-select" class="form-control">
@@ -4657,11 +4657,11 @@ async function loadLedPage() {
     content.innerHTML = `
         <div class="page-led">
             <div class="led-page-header">
-                <h1>💡 LED 控制</h1>
+                <h1>LED 控制</h1>
                 <div class="led-quick-actions">
-                    <button type="button" class="btn btn-sm led-refresh-btn" onclick="refreshLedPage()" title="刷新" style="color:#666"><i class="ri-refresh-line"></i></button>
-                    <button class="btn btn-sm led-color-correction-btn" id="led-page-cc-btn" onclick="openLedModal('matrix', 'colorcorrection')" style="display:none;color:#666"><i class="ri-contrast-line"></i> 色彩校正</button>
-                    <button class="btn btn-sm" onclick="allLedsOff()" style="color:#666">全部关闭</button>
+                    <button type="button" class="btn btn-sm btn-gray led-refresh-btn" onclick="refreshLedPage()" title="刷新"><i class="ri-refresh-line"></i></button>
+                    <button class="btn btn-sm btn-gray led-color-correction-btn" id="led-page-cc-btn" onclick="openLedModal('matrix', 'colorcorrection')" style="display:none"><i class="ri-contrast-line"></i> 色彩校正</button>
+                    <button class="btn btn-sm btn-gray" onclick="allLedsOff()">全部关闭</button>
                 </div>
             </div>
             <div id="led-devices-grid" class="led-devices-grid">
@@ -4706,7 +4706,7 @@ async function refreshLedPage() {
         } else {
             container.innerHTML = `
                 <div class="led-empty-state">
-                    <div class="empty-icon">⚠️</div>
+                    <div class="empty-icon"><i class="ri-error-warning-line" style="color:var(--warning-color)"></i></div>
                     <h3>未找到 LED 设备</h3>
                     <p>LED 设备可能尚未启动，请检查：</p>
                     <ul>
@@ -4962,7 +4962,7 @@ function openColorModal(device) {
     const title = document.getElementById('led-modal-title');
     const body = document.getElementById('led-modal-body');
     
-    title.textContent = `🎨 ${device} - 颜色设置`;
+    title.textContent = `${device} - 颜色设置`;
     body.innerHTML = `
         <div class="modal-section">
             <h3>颜色选择</h3>
@@ -5024,10 +5024,10 @@ function updateToggleButton(device, isOn) {
     if (btn && !btn.classList.contains('led-power-btn')) {
         if (isOn) {
             btn.classList.add('on');
-            btn.innerHTML = '🔆 已开启';
+            btn.innerHTML = '<i class="ri-sun-line"></i> 已开启';
         } else {
             btn.classList.remove('on');
-            btn.innerHTML = '💡 已关闭';
+            btn.innerHTML = '<i class="ri-lightbulb-line"></i> 已关闭';
         }
     }
 }
@@ -5093,7 +5093,7 @@ function generateLedModalContent(device, type) {
                 </div>
 
                 <div class="config-actions cc-actions">
-                    <button class="btn btn-sm" onclick="resetEffectFromModal('${device}')" style="color:#666">${t('ledPage.ccReset')}</button>
+                    <button class="btn btn-sm btn-gray" onclick="resetEffectFromModal('${device}')">${t('ledPage.ccReset')}</button>
                     <button class="btn btn-service-style btn-sm" onclick="applyEffectFromModal('${device}')"><i class="ri-save-line"></i> ${t('ledPage.ccApply')}</button>
                 </div>
             </div>
@@ -5111,7 +5111,7 @@ function generateLedModalContent(device, type) {
                         <h4>图像</h4>
                         <div class="config-row">
                             <input type="text" id="modal-image-path" placeholder="/sdcard/images/..." class="input-flex" value="/sdcard/images/">
-                            <button class="btn btn-sm" onclick="browseImages()" style="color:#666"><i class="ri-folder-open-line"></i> 浏览</button>
+                            <button class="btn btn-sm btn-gray" onclick="browseImages()"><i class="ri-folder-open-line"></i> 浏览</button>
                         </div>
                         <div class="config-row">
                             <label><input type="checkbox" id="modal-image-center" checked> 居中显示</label>
@@ -5139,7 +5139,7 @@ function generateLedModalContent(device, type) {
                         <div class="config-row">
                             <label>背景图</label>
                             <input type="text" id="modal-qr-bg-image" placeholder="无" readonly style="flex:1;cursor:pointer" onclick="openFilePickerFor('modal-qr-bg-image', '/sdcard/images')">
-                            <button class="btn btn-sm" onclick="document.getElementById('modal-qr-bg-image').value=''" title="清除" style="color:#666"><i class="ri-close-line"></i></button>
+                            <button class="btn btn-sm btn-gray" onclick="document.getElementById('modal-qr-bg-image').value=''" title="清除"><i class="ri-close-line"></i></button>
                         </div>
                         <div class="config-row">
                             <button class="btn btn-service-style btn-sm" onclick="generateQrCodeFromModal()">生成 QR 码</button>
@@ -5165,7 +5165,7 @@ function generateLedModalContent(device, type) {
                         <select id="modal-text-font">
                             <option value="default">默认</option>
                         </select>
-                        <button class="btn btn-sm" onclick="loadFontListForModal()" title="刷新字体" style="color:#666"><i class="ri-refresh-line"></i> 刷新字体</button>
+                        <button class="btn btn-sm btn-gray" onclick="loadFontListForModal()" title="刷新字体"><i class="ri-refresh-line"></i> 刷新字体</button>
                     </div>
                     <div class="config-row">
                         <label>对齐</label>
@@ -5305,7 +5305,7 @@ function generateLedModalContent(device, type) {
                     </div>
                 </div>
                 <div class="config-actions cc-actions">
-                    <button class="btn btn-sm" onclick="resetColorCorrection()" style="color:#666">${t('ledPage.ccReset')}</button>
+                    <button class="btn btn-sm btn-gray" onclick="resetColorCorrection()">${t('ledPage.ccReset')}</button>
                     <button class="btn btn-sm btn-service-style" onclick="ccExport()" title="${t('ledPage.ccExportTip')}"><i class="ri-download-line"></i> ${t('ledPage.ccExport')}</button>
                     <button class="btn btn-sm btn-service-style" onclick="ccImport()" title="${t('ledPage.ccImportTip')}"><i class="ri-upload-line"></i> ${t('ledPage.ccImport')}</button>
                     <button class="btn btn-sm btn-service-style" onclick="applyColorCorrection()"><i class="ri-save-line"></i> ${t('ledPage.ccApply')}</button>
@@ -5351,7 +5351,7 @@ function openLedModal(device, type) {
                 headerActions.innerHTML = '';
             } else if (type === 'effect') {
                 headerActions.innerHTML = `
-                    <button class="btn btn-sm" onclick="stopEffectFromModal('${device}')" style="color:#666"><i class="ri-stop-circle-line"></i> ${t('ledPage.stop')}</button>
+                    <button class="btn btn-sm btn-gray" onclick="stopEffectFromModal('${device}')"><i class="ri-stop-circle-line"></i> ${t('ledPage.stop')}</button>
                 `;
             } else {
                 headerActions.innerHTML = '';
@@ -5993,11 +5993,11 @@ async function ccImport() {
 
 function getDeviceIcon(name) {
     const icons = {
-        'touch': '👆',
-        'board': '🔲',
-        'matrix': '🔢'
+        'touch': '<i class="ri-lightbulb-flash-line"></i>',
+        'board': '<i class="ri-dashboard-3-line"></i>',
+        'matrix': '<i class="ri-apps-line"></i>'
     };
-    return icons[name.toLowerCase()] || '💡';
+    return icons[name.toLowerCase()] || '<i class="ri-lightbulb-line"></i>';
 }
 
 function getDeviceDescription(name) {
@@ -6066,7 +6066,7 @@ async function applyEffect(device) {
         if (btn) {
             btn.classList.add('on');
             const icon = btn.querySelector('.power-icon');
-            if (icon) icon.textContent = '🔆';
+            if (icon) icon.innerHTML = '<i class="ri-sun-line"></i>';
         }
         
         // 更新顶部当前动画显示
@@ -6138,7 +6138,7 @@ async function fillColor(device) {
         const btn = document.getElementById(`toggle-${device}`);
         if (btn) {
             btn.classList.add('on');
-            btn.querySelector('.toggle-icon').textContent = '⬛';
+            btn.querySelector('.toggle-icon').innerHTML = '<i class="ri-checkbox-blank-circle-fill"></i>';
             btn.querySelector('.toggle-text').textContent = '关灯';
         }
         showToast(`${device} 已填充 ${color}`, 'success');
@@ -6156,7 +6156,7 @@ async function quickFill(device, color) {
         const btn = document.getElementById(`toggle-${device}`);
         if (btn) {
             btn.classList.add('on');
-            btn.querySelector('.toggle-icon').textContent = '⬛';
+            btn.querySelector('.toggle-icon').innerHTML = '<i class="ri-checkbox-blank-circle-fill"></i>';
             btn.querySelector('.toggle-text').textContent = '关灯';
         }
         showToast(`${device} → ${color}`, 'success');
@@ -6173,7 +6173,7 @@ async function clearLed(device) {
         const btn = document.getElementById(`toggle-${device}`);
         if (btn) {
             btn.classList.remove('on');
-            btn.querySelector('.toggle-icon').textContent = '💡';
+            btn.querySelector('.toggle-icon').innerHTML = '<i class="ri-lightbulb-line"></i>';
             btn.querySelector('.toggle-text').textContent = '开灯';
         }
         showToast(`${device} 已关闭`, 'success');
@@ -6190,7 +6190,7 @@ async function startEffect(device, effect) {
         const btn = document.getElementById(`toggle-${device}`);
         if (btn) {
             btn.classList.add('on');
-            btn.querySelector('.toggle-icon').textContent = '⬛';
+            btn.querySelector('.toggle-icon').innerHTML = '<i class="ri-checkbox-blank-circle-fill"></i>';
             btn.querySelector('.toggle-text').textContent = '关灯';
         }
         showToast(`${device}: ${effect} 已启动`, 'success');
@@ -6282,7 +6282,7 @@ async function loadFilePickerDirectory(path) {
             if (result.error.includes('not found') || result.error.includes('Directory')) {
                 listContainer.innerHTML = `
                     <div class="empty-state">
-                        <div>📂 目录不存在</div>
+                        <div>目录不存在</div>
                         <button class="btn btn-sm btn-service-style" onclick="createAndOpenDir('${path}')">创建目录</button>
                     </div>`;
                 return;
@@ -6301,7 +6301,7 @@ async function loadFilePickerDirectory(path) {
         });
         
         if (filtered.length === 0) {
-            listContainer.innerHTML = '<div class="empty-state">📂 无图片文件</div>';
+            listContainer.innerHTML = '<div class="empty-state">无图片文件</div>';
             return;
         }
         
@@ -6316,7 +6316,7 @@ async function loadFilePickerDirectory(path) {
         
         listContainer.innerHTML = filtered.map(f => {
             const isDir = f.type === 'dir' || f.type === 'directory';
-            const icon = isDir ? '📁' : getFileIcon(f.name);
+            const icon = isDir ? '<i class="ri-folder-line"></i>' : getFileIcon(f.name);
             const fullPath = path + (path.endsWith('/') ? '' : '/') + f.name;
             return `
                 <div class="file-picker-item ${isDir ? 'directory' : 'file'}" 
@@ -6830,7 +6830,7 @@ async function loadNetworkPage() {
                         
                         <!-- STA 信息 -->
                         <div class="config-section" id="wifi-sta-section">
-                            <h4>📶 站点连接</h4>
+                            <h4>站点连接</h4>
                             <div class="config-row">
                                 <span class="config-label">状态</span>
                                 <span class="config-value" id="net-wifi-sta-status">-</span>
@@ -6848,14 +6848,14 @@ async function loadNetworkPage() {
                                 <span class="config-value" id="net-wifi-sta-rssi">-</span>
                             </div>
                             <div class="wifi-sta-actions">
-                                <button class="btn btn-sm" id="wifi-scan-btn" onclick="showWifiScan()">📡 扫描</button>
+                                <button class="btn btn-sm" id="wifi-scan-btn" onclick="showWifiScan()"><i class="ri-scan-line"></i> 扫描</button>
                                 <button class="btn btn-sm btn-danger hidden" id="wifi-disconnect-btn" onclick="disconnectWifi()">断开</button>
                             </div>
                         </div>
                         
                         <!-- AP 信息 -->
                         <div class="config-section" id="wifi-ap-section">
-                            <h4>📻 热点</h4>
+                            <h4><i class="ri-broadcast-line"></i> 热点</h4>
                             <div class="config-row">
                                 <span class="config-label">状态</span>
                                 <span class="config-value" id="net-wifi-ap-status">-</span>
@@ -6873,8 +6873,8 @@ async function loadNetworkPage() {
                                 <span class="config-value" id="net-wifi-ap-sta-count">0</span>
                             </div>
                             <div class="wifi-ap-actions">
-                                <button class="btn btn-sm" id="ap-config-btn" onclick="showApConfig()">⚙️ 配置</button>
-                                <button class="btn btn-sm" id="ap-stations-btn" onclick="showApStations()">👥 设备</button>
+                                <button class="btn btn-sm" id="ap-config-btn" onclick="showApConfig()"><i class="ri-settings-3-line"></i> 配置</button>
+                                <button class="btn btn-sm" id="ap-stations-btn" onclick="showApStations()"><i class="ri-server-line"></i> 设备</button>
                             </div>
                         </div>
                     </div>
@@ -6906,7 +6906,7 @@ async function loadNetworkPage() {
                             </div>
                             <div class="service-detail" id="dhcp-interfaces-list"></div>
                             <div class="service-actions">
-                                <button class="btn btn-sm" onclick="showDhcpClients()">👥 客户端</button>
+                                <button class="btn btn-sm" onclick="showDhcpClients()"><i class="ri-user-line"></i> 客户端</button>
                             </div>
                         </div>
                         
@@ -6936,10 +6936,10 @@ async function loadNetworkPage() {
             <!-- WiFi 扫描结果面板 -->
             <div class="net-section hidden" id="wifi-scan-section">
                 <div class="section-header">
-                    <h3>📡 WiFi 网络</h3>
+                    <h3>WiFi 网络</h3>
                     <div class="section-actions">
-                        <button class="btn btn-sm" onclick="showWifiScan()">🔄 刷新</button>
-                        <button class="btn btn-sm" onclick="hideWifiScan()">✕ 关闭</button>
+                        <button class="btn btn-sm" onclick="showWifiScan()"><i class="ri-refresh-line"></i> 刷新</button>
+                        <button class="btn btn-sm" onclick="hideWifiScan()"><i class="ri-close-line"></i> 关闭</button>
                     </div>
                 </div>
                 <div class="wifi-networks" id="wifi-scan-results"></div>
@@ -6948,8 +6948,8 @@ async function loadNetworkPage() {
             <!-- AP 接入设备面板 -->
             <div class="net-section hidden" id="ap-stations-section">
                 <div class="section-header">
-                    <h3>👥 热点接入设备</h3>
-                    <button class="btn btn-sm" onclick="hideApStations()">✕ 关闭</button>
+                    <h3>热点接入设备</h3>
+                    <button class="btn btn-sm" onclick="hideApStations()"><i class="ri-close-line"></i> 关闭</button>
                 </div>
                 <div class="ap-stations-list" id="ap-stations-results"></div>
             </div>
@@ -6957,14 +6957,14 @@ async function loadNetworkPage() {
             <!-- DHCP 客户端面板 -->
             <div class="net-section hidden" id="dhcp-clients-section">
                 <div class="section-header">
-                    <h3>👥 DHCP 客户端</h3>
+                    <h3>DHCP 客户端</h3>
                     <div class="section-actions">
                         <select id="dhcp-iface-select" class="select-sm" onchange="loadDhcpClients()">
                             <option value="ap">WiFi AP</option>
                             <option value="eth">Ethernet</option>
                         </select>
-                        <button class="btn btn-sm" onclick="loadDhcpClients()">🔄</button>
-                        <button class="btn btn-sm" onclick="hideDhcpClients()">✕</button>
+                        <button class="btn btn-sm" onclick="loadDhcpClients()"><i class="ri-refresh-line"></i></button>
+                        <button class="btn btn-sm" onclick="hideDhcpClients()"><i class="ri-close-line"></i></button>
                     </div>
                 </div>
                 <div class="dhcp-clients-list" id="dhcp-clients-results"></div>
@@ -6974,8 +6974,8 @@ async function loadNetworkPage() {
             <div class="modal hidden" id="ap-config-modal">
                 <div class="modal-content modal-sm">
                     <div class="modal-header">
-                        <h2>⚙️ WiFi 热点配置</h2>
-                        <button class="modal-close" onclick="hideApConfig()">✕</button>
+                        <h2>WiFi 热点配置</h2>
+                        <button class="modal-close" onclick="hideApConfig()"><i class="ri-close-line"></i></button>
                     </div>
                     <div class="form-group">
                         <label>SSID</label>
@@ -7159,9 +7159,9 @@ async function refreshNetworkPage() {
             badge.className = 'service-badge ' + (enabled ? 'badge-ok' : 'badge-warn');
             
             document.getElementById('net-nat-wifi').innerHTML = wifiConnected ? 
-                '<span class="status-dot green"></span>✓' : '<span class="status-dot red"></span>✗';
+                '<span class="status-dot green"></span><i class="ri-check-line"></i>' : '<span class="status-dot red"></span><i class="ri-close-line"></i>';
             document.getElementById('net-nat-eth').innerHTML = ethUp ? 
-                '<span class="status-dot green"></span>✓' : '<span class="status-dot red"></span>✗';
+                '<span class="status-dot green"></span><i class="ri-check-line"></i>' : '<span class="status-dot red"></span><i class="ri-close-line"></i>';
             
             // NAT 按钮
             const natToggleBtn = document.getElementById('nat-toggle-btn');
@@ -7266,7 +7266,7 @@ async function showWifiScan() {
         const errorMsg = e.message || '';
         if (errorMsg.includes('STA') || errorMsg.includes('APSTA') || errorMsg.includes('mode')) {
             container.innerHTML = `<div class="error-state">
-                <div class="error-icon">⚠️</div>
+                <div class="error-icon"><i class="ri-error-warning-line" style="color:var(--danger-color)"></i></div>
                 <div class="error-text">需要切换到 STA 或 APSTA 模式</div>
             </div>`;
         } else {
@@ -7280,10 +7280,7 @@ function hideWifiScan() {
 }
 
 function getSignalIcon(rssi) {
-    if (rssi >= -50) return '📶';
-    if (rssi >= -60) return '📶';
-    if (rssi >= -70) return '📶';
-    return '📶';
+    return '<i class="ri-signal-wifi-3-line"></i>';
 }
 
 function escapeHtml(str) {
@@ -7330,7 +7327,7 @@ async function showApStations() {
             }
             container.innerHTML = result.data.stations.map(sta => `
                 <div class="device-card">
-                    <div class="device-icon">📱</div>
+                    <div class="device-icon"><i class="ri-smartphone-line"></i></div>
                     <div class="device-info">
                         <div class="device-mac">${sta.mac}</div>
                         <div class="device-rssi">${sta.rssi} dBm</div>
@@ -7407,7 +7404,7 @@ async function loadDhcpClients() {
             }
             container.innerHTML = result.data.clients.map(client => `
                 <div class="device-card">
-                    <div class="device-icon">${client.is_static ? '📌' : '💻'}</div>
+                    <div class="device-icon">${client.is_static ? '<i class="ri-lock-line"></i>' : '<i class="ri-computer-line"></i>'}</div>
                     <div class="device-info">
                         <div class="device-ip">${client.ip}</div>
                         <div class="device-mac">${client.mac}</div>
@@ -7470,7 +7467,7 @@ async function loadFilesPage() {
                     <div class="file-actions">
                         <button class="btn btn-service-style btn-file-action" onclick="showUploadDialog()"><i class="ri-upload-line"></i> 上传文件</button>
                         <button class="btn btn-service-style btn-file-action" onclick="showNewFolderDialog()"><i class="ri-folder-add-line"></i> 新建文件夹</button>
-                        <button type="button" class="btn btn-file-action files-refresh-btn" onclick="refreshFilesPage()" title="刷新" style="color:#666"><i class="ri-refresh-line"></i></button>
+                        <button type="button" class="btn btn-file-action btn-gray files-refresh-btn" onclick="refreshFilesPage()" title="刷新"><i class="ri-refresh-line"></i></button>
                     </div>
                 </div>
                 
@@ -7513,7 +7510,7 @@ async function loadFilesPage() {
                     </div>
                     <div id="upload-list"></div>
                     <div class="config-actions cc-actions">
-                        <button class="btn btn-sm" onclick="closeUploadDialog()" style="color:#666">取消</button>
+                        <button class="btn btn-sm btn-gray" onclick="closeUploadDialog()">取消</button>
                         <button class="btn btn-service-style btn-sm" onclick="uploadFiles()">上传</button>
                     </div>
                 </div>
@@ -7774,7 +7771,7 @@ async function loadDirectory(path) {
         });
         
         if (entries.length === 0) {
-            listContainer.innerHTML = '<div class="empty-folder">📂 空文件夹</div>';
+            listContainer.innerHTML = '<div class="empty-folder">空文件夹</div>';
             // 仍然添加事件监听器（虽然没有文件）
             listContainer.addEventListener('click', handleFileListClick);
             return;
@@ -7997,7 +7994,7 @@ function handleFileSelect(event) {
         <div class="upload-item">
             <span>${f.name}</span>
             <span class="file-size">${formatFileSize(f.size)}</span>
-            <button class="btn btn-sm" onclick="removeUploadFile(${i})">✕</button>
+            <button class="btn btn-sm" onclick="removeUploadFile(${i})"><i class="ri-close-line"></i></button>
         </div>
     `).join('');
 }
@@ -8030,7 +8027,7 @@ async function uploadFiles() {
             const result = await api.fileUpload(targetPath, file);
             console.log('Upload result:', result);
             if (items[i]) {
-                items[i].innerHTML = `<span>${file.name}</span><span class="success">✓ 完成</span>`;
+                items[i].innerHTML = `<span>${file.name}</span><span class="success">完成</span>`;
             }
             
             // 检查是否是配置包上传，显示验证结果
@@ -8039,7 +8036,7 @@ async function uploadFiles() {
                 if (pack.valid) {
                     const signer = pack.signature?.signer_cn || '未知';
                     const isOfficial = pack.signature?.is_official ? '(官方)' : '';
-                    showToast(`配置包验证成功 ✓\n签名者: ${signer} ${isOfficial}`, 'success', 5000);
+                    showToast(`配置包验证成功\n签名者: ${signer} ${isOfficial}`, 'success', 5000);
                     
                     // 显示应用确认对话框
                     setTimeout(() => {
@@ -8052,7 +8049,7 @@ async function uploadFiles() {
         } catch (e) {
             console.error('Upload error:', e);
             if (items[i]) {
-                items[i].innerHTML = `<span>${file.name}</span><span class="error">✕ 失败: ${e.message}</span>`;
+                items[i].innerHTML = `<span>${file.name}</span><span class="error">失败: ${e.message}</span>`;
             }
         }
     }
@@ -8426,52 +8423,52 @@ async function loadCommandsPage() {
             <!-- 执行结果 -->
             <div class="section" id="exec-result-section" style="display:none">
                 <div class="section-header">
-                    <h2>📤 执行结果</h2>
+                    <h2>执行结果</h2>
                     <div class="section-actions">
-                        <button id="cancel-exec-btn" class="btn btn-sm" onclick="cancelExecution()" style="display:none;background:#dc3545;color:white">⏹️ 取消 (Esc)</button>
-                        <button class="btn btn-sm" onclick="clearExecResult()">🗑️ 清除</button>
+                        <button id="cancel-exec-btn" class="btn btn-sm" onclick="cancelExecution()" style="display:none;background:#dc3545;color:white"><i class="ri-stop-line"></i> 取消 (Esc)</button>
+                        <button class="btn btn-sm" onclick="clearExecResult()"><i class="ri-delete-bin-line"></i> 清除</button>
                     </div>
                 </div>
                 <!-- nohup 快捷操作按钮 -->
                 <div id="nohup-actions" class="nohup-actions" style="display:none">
-                    <button class="btn btn-sm" id="nohup-view-log" onclick="nohupViewLog()">📄 查看日志</button>
-                    <button class="btn btn-sm" id="nohup-tail-log" onclick="nohupTailLog()">👁️ 实时跟踪</button>
-                    <button class="btn btn-sm" id="nohup-stop-tail" onclick="nohupStopTail()" style="display:none;background:#ffc107;color:#333">⏹️ 停止跟踪</button>
-                    <button class="btn btn-sm" id="nohup-check-process" onclick="nohupCheckProcess()">🔍 检查进程</button>
-                    <button class="btn btn-sm" id="nohup-stop-process" onclick="nohupStopProcess()" style="background:#dc3545;color:white">🛑 停止进程</button>
+                    <button class="btn btn-sm" id="nohup-view-log" onclick="nohupViewLog()"><i class="ri-file-text-line"></i> 查看日志</button>
+                    <button class="btn btn-sm" id="nohup-tail-log" onclick="nohupTailLog()"><i class="ri-eye-line"></i> 实时跟踪</button>
+                    <button class="btn btn-sm" id="nohup-stop-tail" onclick="nohupStopTail()" style="display:none;background:#ffc107;color:#333"><i class="ri-stop-line"></i> 停止跟踪</button>
+                    <button class="btn btn-sm" id="nohup-check-process" onclick="nohupCheckProcess()"><i class="ri-search-line"></i> 检查进程</button>
+                    <button class="btn btn-sm" id="nohup-stop-process" onclick="nohupStopProcess()" style="background:#dc3545;color:white"><i class="ri-stop-circle-line"></i> 停止进程</button>
                 </div>
                 <pre id="exec-result" class="exec-result"></pre>
                 
                 <!-- 模式匹配结果面板 -->
                 <div id="match-result-panel" class="match-result-panel" style="display:none">
                     <div class="match-panel-header">
-                        <h3>🎯 匹配结果</h3>
+                        <h3>匹配结果</h3>
                         <span class="match-status" id="match-status-badge"></span>
                     </div>
                     <div class="match-result-grid">
                         <div class="match-result-item">
-                            <div class="match-label">✅ 成功匹配</div>
+                            <div class="match-label">成功匹配</div>
                             <div class="match-value" id="match-expect-result">-</div>
                             <code class="match-var">msg.expect_matched</code>
                         </div>
                         <div class="match-result-item">
-                            <div class="match-label">❌ 失败匹配</div>
+                            <div class="match-label">失败匹配</div>
                             <div class="match-value" id="match-fail-result">-</div>
                             <code class="match-var">msg.fail_matched</code>
                         </div>
                         <div class="match-result-item">
-                            <div class="match-label">📋 提取内容</div>
+                            <div class="match-label">提取内容</div>
                             <div class="match-value match-extracted" id="match-extracted-result">-</div>
                             <code class="match-var">msg.extracted</code>
                         </div>
                         <div class="match-result-item">
-                            <div class="match-label">🏷️ 最终状态</div>
+                            <div class="match-label">最终状态</div>
                             <div class="match-value" id="match-final-status">-</div>
                             <code class="match-var">msg.status</code>
                         </div>
                     </div>
                     <div class="match-api-hint">
-                        <small>💡 WebSocket 消息字段可在 <code>handleSshExecMessage(msg)</code> 回调中使用</small>
+                        <small>WebSocket 消息字段可在 <code>handleSshExecMessage(msg)</code> 回调中使用</small>
                     </div>
                 </div>
             </div>
@@ -8624,7 +8621,7 @@ async function loadCommandsPage() {
                         </details>
                         
                         <div class="form-actions">
-                            <button type="button" class="btn" onclick="closeCommandModal()" style="color:#666">取消</button>
+                            <button type="button" class="btn btn-gray" onclick="closeCommandModal()">取消</button>
                             <button type="submit" class="btn btn-service-style" onclick="saveCommand()">保存</button>
                         </div>
                     </form>
@@ -9029,7 +9026,7 @@ async function loadHostSelector() {
                  onclick="selectHost('__orphan__')" 
                  data-host-id="__orphan__"
                  style="background:#fff3cd;border-color:#ffc107">
-                <div class="host-name">⚠️ 孤儿命令</div>
+                <div class="host-name"><i class="ri-error-warning-line" style="color:var(--warning-color)"></i> 孤儿命令</div>
                 <div class="host-info" style="color:#856404">${orphanCount} 个命令引用了不存在的主机</div>
             </div>
             `;
@@ -9080,7 +9077,7 @@ function refreshCommandsList() {
         const isOrphan = cmd.orphan === true;
         const orphanWarningHtml = isOrphan ? `
             <div class="orphan-warning" style="background:#fff3cd;border:1px solid #ffc107;border-radius:4px;padding:4px 8px;margin-bottom:8px;color:#856404;font-size:12px;">
-                ⚠️ 主机 "${escapeHtml(cmd.originalHostId || '?')}" 不存在，请删除或重新关联
+                主机 "${escapeHtml(cmd.originalHostId || '?')}" 不存在，请删除或重新关联
             </div>
         ` : '';
         
@@ -9088,9 +9085,9 @@ function refreshCommandsList() {
         const hasPatternsConfig = cmd.expectPattern || cmd.failPattern || cmd.extractPattern;
         const patternsHtml = hasPatternsConfig ? `
             <div class="cmd-patterns">
-                ${cmd.expectPattern ? '<span class="pattern-tag success" title="成功模式: ' + escapeHtml(cmd.expectPattern) + '">✅</span>' : ''}
-                ${cmd.failPattern ? '<span class="pattern-tag fail" title="失败模式: ' + escapeHtml(cmd.failPattern) + '">❌</span>' : ''}
-                ${cmd.extractPattern ? '<span class="pattern-tag extract" title="提取模式: ' + escapeHtml(cmd.extractPattern) + '">📋</span>' : ''}
+                ${cmd.expectPattern ? '<span class="pattern-tag success" title="成功模式: ' + escapeHtml(cmd.expectPattern) + '"><i class="ri-check-line"></i></span>' : ''}
+                ${cmd.failPattern ? '<span class="pattern-tag fail" title="失败模式: ' + escapeHtml(cmd.failPattern) + '"><i class="ri-close-line"></i></span>' : ''}
+                ${cmd.extractPattern ? '<span class="pattern-tag extract" title="提取模式: ' + escapeHtml(cmd.extractPattern) + '"><i class="ri-file-list-line"></i></span>' : ''}
             </div>
         ` : '';
         
@@ -9108,13 +9105,13 @@ function refreshCommandsList() {
         }
         
         // 变量按钮（仅当设置了 varName 时显示）
-        const varBtnHtml = cmd.varName ? `<button class="btn btn-sm" onclick="showCommandVariables('${escapeHtml(cmd.varName)}')" title="查看变量: ${escapeHtml(cmd.varName)}.*">📊</button>` : '';
+        const varBtnHtml = cmd.varName ? `<button class="btn btn-sm" onclick="showCommandVariables('${escapeHtml(cmd.varName)}')" title="查看变量: ${escapeHtml(cmd.varName)}.*"><i class="ri-bar-chart-line"></i></button>` : '';
         
         // 服务模式按钮（日志、停止）
         const safeName = cmd.name.replace(/[^a-zA-Z0-9]/g, '').slice(0, 20) || 'cmd';
         const serviceActionsHtml = (cmd.nohup && cmd.serviceMode) ? `
-            <button class="btn btn-sm" onclick="viewServiceLog(${idx}, '${escapeHtml(safeName)}')" title="查看日志">📄</button>
-            <button class="btn btn-sm" onclick="stopServiceProcess(${idx}, '${escapeHtml(safeName)}')" title="停止服务" style="background:#dc3545;color:white">⏹️</button>
+            <button class="btn btn-sm" onclick="viewServiceLog(${idx}, '${escapeHtml(safeName)}')" title="查看日志"><i class="ri-file-text-line"></i></button>
+            <button class="btn btn-sm" onclick="stopServiceProcess(${idx}, '${escapeHtml(safeName)}')" title="停止服务" style="background:#dc3545;color:white"><i class="ri-stop-line"></i></button>
         ` : '';
         
         // 图标显示：支持 RemixIcon 类名、图片路径或旧版 Emoji
@@ -9143,12 +9140,12 @@ function refreshCommandsList() {
             ${cmd.desc ? `<div class="cmd-desc" title="${escapeHtml(cmd.desc)}">${escapeHtml(cmd.desc)}</div>` : ''}
             <div class="cmd-code" title="${escapeHtml(cmd.command)}">${escapeHtml(cmd.command.split('\n')[0])}${cmd.command.includes('\n') ? ' ...' : ''}</div>
             <div class="cmd-actions">
-                <button class="btn btn-sm btn-exec" onclick="executeCommand(${idx})" title="${isOrphan ? '主机不存在，无法执行' : '执行'}" ${execBtnDisabled}>▶️</button>
+                <button class="btn btn-sm btn-exec" onclick="executeCommand(${idx})" title="${isOrphan ? '主机不存在，无法执行' : '执行'}" ${execBtnDisabled}><i class="ri-play-line"></i></button>
                 ${serviceActionsHtml}
                 ${varBtnHtml}
-                <button class="btn btn-sm btn-service-style" onclick="exportSshCommand('${escapeHtml(cmd.id)}')" title="导出配置">📤</button>
-                <button class="btn btn-sm" onclick="editCommand(${idx})" title="编辑">✏️</button>
-                <button class="btn btn-sm" onclick="deleteCommand(${idx})" title="删除" style="background:#dc3545;color:white">🗑️</button>
+                <button class="btn btn-sm btn-service-style" onclick="exportSshCommand('${escapeHtml(cmd.id)}')" title="导出配置"><i class="ri-upload-line"></i></button>
+                <button class="btn btn-sm" onclick="editCommand(${idx})" title="编辑"><i class="ri-edit-line"></i></button>
+                <button class="btn btn-sm" onclick="deleteCommand(${idx})" title="删除" style="background:#dc3545;color:white"><i class="ri-delete-bin-line"></i></button>
             </div>
         </div>
     `}).join('');
@@ -9188,12 +9185,12 @@ async function updateServiceStatusInList() {
                 statusEl.textContent = getServiceStatusLabel(status);
                 statusEl.className = `service-status status-${status}`;
             } else {
-                statusEl.textContent = '⏸️ 未启动';
+                statusEl.textContent = '未启动';
                 statusEl.className = 'service-status status-idle';
             }
         } catch (e) {
             console.error(`[ServiceStatus] Error getting ${varName}.status:`, e);
-            statusEl.textContent = '❓ 未知';
+            statusEl.textContent = '未知';
             statusEl.className = 'service-status status-unknown';
         }
     }
@@ -9204,12 +9201,12 @@ async function updateServiceStatusInList() {
  */
 function getServiceStatusLabel(status) {
     const labels = {
-        'ready': '✅ 就绪',
-        'checking': '🔄 检测中',
-        'timeout': '⚠️ 超时',
-        'failed': '❌ 失败',
-        'idle': '⏸️ 未启动',
-        'stopped': '⏹️ 已停止'
+        'ready': '就绪',
+        'checking': '检测中',
+        'timeout': '超时',
+        'failed': '失败',
+        'idle': '未启动',
+        'stopped': '已停止'
     };
     return labels[status] || status;
 }
@@ -9296,7 +9293,7 @@ async function showCommandVariables(varName) {
     
     // 更新标题
     const header = modal.querySelector('.modal-header h2');
-    if (header) header.textContent = `📊 指令变量: ${varName}.*`;
+    if (header) header.textContent = `指令变量: ${varName}.*`;
     
     body.innerHTML = '<div class="loading">加载中...</div>';
     modal.classList.remove('hidden');
@@ -9338,10 +9335,10 @@ async function showCommandVariables(varName) {
                 </table>
             `;
         } else {
-            body.innerHTML = `<p style="text-align:center;color:var(--danger-color)">⚠️ ${result.message || '获取变量失败'}</p>`;
+            body.innerHTML = `<p style="text-align:center;color:var(--danger-color)">${result.message || '获取变量失败'}</p>`;
         }
     } catch (error) {
-        body.innerHTML = `<p style="text-align:center;color:var(--danger-color)">❌ ${error.message}</p>`;
+        body.innerHTML = `<p style="text-align:center;color:var(--danger-color)">${error.message}</p>`;
     }
 }
 
@@ -9781,27 +9778,27 @@ function showExportSshCommandModal(cmdId) {
     
     modal.innerHTML = `
         <div class="modal-content" style="max-width:600px">
-            <h2>📤 导出 SSH 指令配置</h2>
+            <h2>导出 SSH 指令配置</h2>
             <p style="color:#666;font-size:0.9rem">导出指令 <strong>${escapeHtml(cmdId)}</strong> 的配置为加密配置包</p>
             
             <div class="form-group" style="margin-top:15px">
                 <label>
                     <input type="checkbox" id="export-ssh-cmd-include-host" checked> 同时导出依赖的主机配置
                 </label>
-                <div style="font-size:0.85em;color:#666;margin-top:4px">💡 推荐勾选，便于在目标设备完整导入</div>
+                <div style="font-size:0.85em;color:#666;margin-top:4px">推荐勾选，便于在目标设备完整导入</div>
             </div>
             
             <div class="form-group">
                 <label>目标设备证书 (PEM)</label>
                 <textarea id="export-ssh-cmd-cert" placeholder="-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----" style="width:100%;height:120px;font-family:monospace;font-size:11px"></textarea>
-                <div style="font-size:0.85em;color:#666;margin-top:4px">💡 粘贴目标设备的证书。留空则使用本机证书（自加密）</div>
+                <div style="font-size:0.85em;color:#666;margin-top:4px">粘贴目标设备的证书。留空则使用本机证书（自加密）</div>
             </div>
             
             <div id="export-ssh-cmd-result" class="result-box hidden" style="margin-top:10px"></div>
             
             <div class="form-actions" style="margin-top:15px">
                 <button class="btn" onclick="hideExportSshCommandModal()">取消</button>
-                <button class="btn btn-service-style" id="export-ssh-cmd-btn" onclick="doExportSshCommandFromModal('${escapeHtml(cmdId)}')">📤 导出</button>
+                <button class="btn btn-service-style" id="export-ssh-cmd-btn" onclick="doExportSshCommandFromModal('${escapeHtml(cmdId)}')"><i class="ri-upload-line"></i> 导出</button>
             </div>
         </div>
     `;
@@ -9821,17 +9818,17 @@ async function doExportSshCommandFromModal(cmdId) {
     const exportBtn = document.getElementById('export-ssh-cmd-btn');
     
     resultBox.classList.remove('hidden', 'success', 'error');
-    resultBox.textContent = '🔄 正在生成配置包...';
+    resultBox.textContent = '正在生成配置包...';
     exportBtn.disabled = true;
     
     try {
         await doExportSshCommand(cmdId, certText || null, includeHost);
         resultBox.className = 'result-box success';
-        resultBox.textContent = '✅ 导出成功！';
+        resultBox.textContent = '导出成功！';
         setTimeout(() => hideExportSshCommandModal(), 1000);
     } catch (e) {
         resultBox.className = 'result-box error';
-        resultBox.textContent = '❌ ' + e.message;
+        resultBox.textContent = e.message;
     } finally {
         exportBtn.disabled = false;
     }
@@ -9919,7 +9916,7 @@ async function showImportSshCommandModal() {
             <!-- 步骤 2: 预览 (默认隐藏) -->
             <div id="import-ssh-cmd-step2" style="display:none">
                 <div class="info-card" style="background:#f8f9fa;padding:15px;border-radius:8px;margin-top:15px">
-                    <h4 style="margin:0 0 10px 0">📋 配置包内容</h4>
+                    <h4 style="margin:0 0 10px 0">配置包内容</h4>
                     <div id="import-ssh-cmd-preview"></div>
                 </div>
                 <div class="form-group" style="margin-top:15px">
@@ -9944,7 +9941,7 @@ async function showImportSshCommandModal() {
             <div id="import-ssh-cmd-result" class="result-box hidden" style="margin-top:10px"></div>
             
             <div class="form-actions" style="margin-top:15px">
-                <button class="btn" onclick="hideImportSshCommandModal()" style="color:#666">取消</button>
+                <button class="btn btn-gray" onclick="hideImportSshCommandModal()">取消</button>
                 <button class="btn btn-service-style" id="import-ssh-cmd-btn" onclick="confirmSshCommandImport()" disabled>确认导入</button>
             </div>
         </div>
@@ -9976,7 +9973,7 @@ async function previewSshCommandImport() {
     const file = fileInput.files[0];
     
     resultBox.classList.remove('hidden', 'success', 'error', 'warning');
-    resultBox.textContent = '🔄 正在验证配置包...';
+    resultBox.textContent = '正在验证配置包...';
     importBtn.disabled = true;
     step2.style.display = 'none';
     
@@ -9998,8 +9995,8 @@ async function previewSshCommandImport() {
             let html = `
                 <table style="width:100%;font-size:0.9em">
                     <tr><td style="width:80px;color:#666">配置 ID:</td><td><code>${escapeHtml(data.id)}</code></td></tr>
-                    <tr><td style="color:#666">类型:</td><td>${data.type === 'ssh_command' ? '📋 SSH 指令' : data.type}</td></tr>
-                    <tr><td style="color:#666">签名者:</td><td>${escapeHtml(data.signer)} ${data.official ? '✅ 官方' : ''}</td></tr>
+                    <tr><td style="color:#666">类型:</td><td>${data.type === 'ssh_command' ? 'SSH 指令' : data.type}</td></tr>
+                    <tr><td style="color:#666">签名者:</td><td>${escapeHtml(data.signer)} ${data.official ? '官方' : ''}</td></tr>
                     <tr><td style="color:#666">备注:</td><td style="color:#888;font-size:0.85em">${escapeHtml(data.note || '重启后自动加载')}</td></tr>
                 </table>
             `;
@@ -10008,21 +10005,21 @@ async function previewSshCommandImport() {
             if (hostGroup) hostGroup.style.display = 'none';
             
             if (data.exists) {
-                html += `<div style="margin-top:10px;padding:8px;background:#fff3cd;border-radius:4px;color:#856404">⚠️ 该配置已存在，导入将覆盖现有文件</div>`;
+                html += `<div style="margin-top:10px;padding:8px;background:#fff3cd;border-radius:4px;color:#856404">该配置已存在，导入将覆盖现有文件</div>`;
             }
             
             previewDiv.innerHTML = html;
             step2.style.display = 'block';
             resultBox.className = 'result-box success';
-            resultBox.textContent = '✅ 签名验证通过';
+            resultBox.textContent = '签名验证通过';
             importBtn.disabled = false;
         } else {
             resultBox.className = 'result-box error';
-            resultBox.textContent = '❌ ' + (result.message || '无法验证配置包');
+            resultBox.textContent = (result.message || '无法验证配置包');
         }
     } catch (e) {
         resultBox.className = 'result-box error';
-        resultBox.textContent = '❌ ' + e.message;
+        resultBox.textContent = e.message;
     }
 }
 
@@ -10056,23 +10053,23 @@ async function confirmSshCommandImport() {
             const data = result.data;
             if (data?.exists && !data?.imported) {
                 resultBox.className = 'result-box warning';
-                resultBox.textContent = `⚠️ 配置 ${data.id} 已存在，请勾选「覆盖」选项`;
+                resultBox.textContent = `配置 ${data.id} 已存在，请勾选「覆盖」选项`;
                 importBtn.disabled = false;
             } else {
                 resultBox.className = 'result-box success';
-                resultBox.innerHTML = `✅ 已保存配置: <code>${escapeHtml(data?.id)}</code><br><small style="color:#666">重启系统后生效</small>`;
+                resultBox.innerHTML = `已保存配置: <code>${escapeHtml(data?.id)}</code><br><small style="color:#666">重启系统后生效</small>`;
                 showToast(`已导入配置，重启后生效`, 'success');
                 // 不刷新列表，因为还没加载
                 setTimeout(() => hideImportSshCommandModal(), 2000);
             }
         } else {
             resultBox.className = 'result-box error';
-            resultBox.textContent = '❌ ' + (result.message || '导入失败');
+            resultBox.textContent = (result.message || '导入失败');
             importBtn.disabled = false;
         }
     } catch (e) {
         resultBox.className = 'result-box error';
-        resultBox.textContent = '❌ ' + e.message;
+        resultBox.textContent = e.message;
         importBtn.disabled = false;
     }
 }
@@ -10143,7 +10140,7 @@ async function nohupTailLog() {
     tailBtn.style.display = 'none';
     stopBtn.style.display = 'inline-block';
     
-    resultPre.textContent += `\n\n━━━━━━━━━━━━━━━━━━━━━━\n📡 开始实时跟踪: ${currentNohupInfo.logFile}\n（点击"停止跟踪"按钮退出）\n━━━━━━━━━━━━━━━━━━━━━━\n`;
+    resultPre.textContent += `\n\n━━━━━━━━━━━━━━━━━━━━━━\n开始实时跟踪: ${currentNohupInfo.logFile}\n（点击"停止跟踪"按钮退出）\n━━━━━━━━━━━━━━━━━━━━━━\n`;
     lastTailContent = '';
     
     // 定时获取日志
@@ -10200,7 +10197,7 @@ function nohupStopTail() {
     if (tailBtn) tailBtn.style.display = 'inline-block';
     if (stopBtn) stopBtn.style.display = 'none';
     
-    resultPre.textContent += `\n━━━━━━━━━━━━━━━━━━━━━━\n⏹️ 已停止实时跟踪\n`;
+    resultPre.textContent += `\n━━━━━━━━━━━━━━━━━━━━━━\n已停止实时跟踪\n`;
     resultPre.scrollTop = resultPre.scrollHeight;
 }
 
@@ -10211,7 +10208,7 @@ async function nohupCheckProcess() {
         return;
     }
     // 使用 PID 文件检查进程状态，并显示进程详情
-    await executeNohupHelperCommand(`if [ -f ${currentNohupInfo.pidFile} ]; then PID=$(cat ${currentNohupInfo.pidFile}); if kill -0 $PID 2>/dev/null; then echo "✅ 进程运行中 (PID: $PID)"; ps -p $PID -o pid,user,%cpu,%mem,etime,args --no-headers 2>/dev/null || ps -p $PID 2>/dev/null; else echo "⚠️ 进程已退出 (PID: $PID)"; fi; else echo "❌ PID 文件不存在"; fi`);
+    await executeNohupHelperCommand(`if [ -f ${currentNohupInfo.pidFile} ]; then PID=$(cat ${currentNohupInfo.pidFile}); if kill -0 $PID 2>/dev/null; then echo "进程运行中 (PID: $PID)"; ps -p $PID -o pid,user,%cpu,%mem,etime,args --no-headers 2>/dev/null || ps -p $PID 2>/dev/null; else echo "进程已退出 (PID: $PID)"; fi; else echo "❌ PID 文件不存在"; fi`);
 }
 
 /* nohup 快捷操作：停止进程（使用 PID 文件） */
@@ -10230,7 +10227,7 @@ async function nohupStopProcess() {
     nohupStopTail();
     
     // 使用 PID 文件精确停止
-    await executeNohupHelperCommand(`if [ -f ${currentNohupInfo.pidFile} ]; then kill $(cat ${currentNohupInfo.pidFile}) 2>/dev/null && rm -f ${currentNohupInfo.pidFile} && echo "✅ 进程已停止"; else echo "⚠️ PID 文件不存在"; fi`);
+    await executeNohupHelperCommand(`if [ -f ${currentNohupInfo.pidFile} ]; then kill $(cat ${currentNohupInfo.pidFile}) 2>/dev/null && rm -f ${currentNohupInfo.pidFile} && echo "进程已停止"; else echo "PID 文件不存在"; fi`);
     
     // 再次检查进程状态
     await executeNohupHelperCommand(`[ -f ${currentNohupInfo.pidFile} ] && kill -0 $(cat ${currentNohupInfo.pidFile}) 2>/dev/null && echo "⚠️ 进程仍在运行" || echo "✅ 确认：进程已停止"`);
@@ -10301,7 +10298,7 @@ async function viewServiceLog(idx, safeName) {
     document.getElementById('cancel-exec-btn').style.display = 'none';
     document.getElementById('nohup-actions').style.display = 'none';
     
-    resultPre.textContent = `📄 查看服务日志: ${cmd.name}\n文件: ${logFile}\n\n`;
+    resultPre.textContent = `查看服务日志: ${cmd.name}\n文件: ${logFile}\n\n`;
     resultSection.scrollIntoView({ behavior: 'smooth' });
     
     try {
@@ -10395,7 +10392,7 @@ async function stopServiceProcess(idx, safeName) {
             
             const killStatus = (killResult.data?.stdout || '').trim();
             if (killStatus === 'STOPPED') {
-                resultPre.textContent += `✅ 服务已停止\n`;
+                resultPre.textContent += `服务已停止\n`;
                 showToast('服务已停止', 'success');
                 
                 // 更新状态变量
@@ -10408,7 +10405,7 @@ async function stopServiceProcess(idx, safeName) {
                 // 刷新命令列表状态
                 updateServiceStatusInList();
             } else {
-                resultPre.textContent += `⚠️ 进程可能仍在运行，尝试强制终止...\n`;
+                resultPre.textContent += `进程可能仍在运行，尝试强制终止...\n`;
                 // 发送 SIGKILL
                 await api.call('ssh.exec', {
                     host: host.host,
@@ -10418,15 +10415,15 @@ async function stopServiceProcess(idx, safeName) {
                     command: `kill -9 ${pid} 2>/dev/null; rm -f ${pidFile}`,
                     timeout_ms: 5000
                 });
-                resultPre.textContent += `✅ 已强制终止\n`;
+                resultPre.textContent += `已强制终止\n`;
                 showToast('服务已强制停止', 'warning');
                 updateServiceStatusInList();
             }
         } else if (status === 'STOPPED') {
-            resultPre.textContent += `⚠️ 进程已经停止\n`;
+            resultPre.textContent += `进程已经停止\n`;
             showToast('进程已经停止', 'info');
         } else {
-            resultPre.textContent += `⚠️ PID 文件不存在，服务可能未启动\n`;
+            resultPre.textContent += `PID 文件不存在，服务可能未启动\n`;
             showToast('服务未运行', 'info');
         }
     } catch (e) {
@@ -10497,14 +10494,14 @@ async function executeCommand(idx) {
     let statusInfo = `⏳ 正在连接: ${cmd.name}\n主机: ${host.username}@${host.host}:${host.port}\n命令: ${actualCommand}\n`;
     if (cmd.nohup) {
         statusInfo += `\n🚀 后台执行模式: 命令将在服务器后台运行，断开后不受影响\n`;
-        statusInfo += `📄 日志文件: ${nohupLogFile}\n`;
+        statusInfo += `日志文件: ${nohupLogFile}\n`;
     } else if (cmd.expectPattern || cmd.failPattern || cmd.extractPattern) {
-        statusInfo += `\n📋 模式匹配配置:\n`;
-        if (cmd.expectPattern) statusInfo += `  ✅ 成功模式: ${cmd.expectPattern}\n`;
-        if (cmd.failPattern) statusInfo += `  ❌ 失败模式: ${cmd.failPattern}\n`;
-        if (cmd.extractPattern) statusInfo += `  📋 提取模式: ${cmd.extractPattern}\n`;
-        if (cmd.stopOnMatch) statusInfo += `  ⏹️ 匹配后自动停止: 是\n`;
-        if (cmd.varName) statusInfo += `  📝 存储变量: \${${cmd.varName}.*}\n`;
+        statusInfo += `\n模式匹配配置:\n`;
+        if (cmd.expectPattern) statusInfo += `  成功模式: ${cmd.expectPattern}\n`;
+        if (cmd.failPattern) statusInfo += `  失败模式: ${cmd.failPattern}\n`;
+        if (cmd.extractPattern) statusInfo += `  提取模式: ${cmd.extractPattern}\n`;
+        if (cmd.stopOnMatch) statusInfo += `  匹配后自动停止: 是\n`;
+        if (cmd.varName) statusInfo += `  存储变量: \${${cmd.varName}.*}\n`;
     }
     statusInfo += `\n`;
     resultPre.textContent = statusInfo;
@@ -10541,10 +10538,10 @@ async function executeCommand(idx) {
         currentExecSessionId = result.data?.session_id;
         
         if (cmd.nohup) {
-            resultPre.textContent += `✅ 命令已提交到服务器后台\n\n`;
-            resultPre.textContent += `💡 使用上方按钮查看日志、跟踪输出或检查进程状态\n`;
-            resultPre.textContent += `\n📄 日志文件: ${nohupLogFile}\n`;
-            resultPre.textContent += `🔍 进程关键词: ${cmd.command.split(' ')[0]}\n`;
+            resultPre.textContent += `命令已提交到服务器后台\n\n`;
+            resultPre.textContent += `使用上方按钮查看日志、跟踪输出或检查进程状态\n`;
+            resultPre.textContent += `\n日志文件: ${nohupLogFile}\n`;
+            resultPre.textContent += `进程关键词: ${cmd.command.split(' ')[0]}\n`;
             // nohup 命令不跟踪会话
             currentExecSessionId = null;
         } else {
@@ -10556,14 +10553,14 @@ async function executeCommand(idx) {
     } catch (e) {
         // nohup 模式下超时是正常的（命令在后台运行）
         if (cmd.nohup && (e.message.includes('timeout') || e.message.includes('超时'))) {
-            resultPre.textContent += `✅ 命令已提交到服务器后台\n\n`;
-            resultPre.textContent += `💡 使用上方按钮查看日志、跟踪输出或检查进程状态\n`;
-            resultPre.textContent += `\n📄 日志文件: ${nohupLogFile}\n`;
-            resultPre.textContent += `🔍 进程关键词: ${cmd.command.split(' ')[0]}\n`;
+            resultPre.textContent += `命令已提交到服务器后台\n\n`;
+            resultPre.textContent += `使用上方按钮查看日志、跟踪输出或检查进程状态\n`;
+            resultPre.textContent += `\n日志文件: ${nohupLogFile}\n`;
+            resultPre.textContent += `进程关键词: ${cmd.command.split(' ')[0]}\n`;
             currentExecSessionId = null;
             return;
         }
-        resultPre.textContent = `❌ 启动执行失败\n\n${e.message}`;
+        resultPre.textContent = `启动执行失败\n\n${e.message}`;
         showToast('启动执行失败: ' + e.message, 'error');
         cancelBtn.style.display = 'none';
         currentExecSessionId = null;
@@ -10586,7 +10583,7 @@ async function cancelExecution() {
     } catch (e) {
         showToast('取消失败: ' + e.message, 'error');
         cancelBtn.disabled = false;
-        cancelBtn.textContent = '⏹️ 取消 (Esc)';
+        cancelBtn.innerHTML = '<i class="ri-stop-line"></i> 取消 (Esc)';
     }
 }
 
@@ -10639,15 +10636,15 @@ function handleSshExecMessage(msg) {
                 
                 if (isFinal) {
                     /* 终止匹配（expect/fail 模式匹配成功）*/
-                    resultPre.textContent += `\n🎯 模式匹配成功!\n`;
+                    resultPre.textContent += `\n模式匹配成功!\n`;
                     if (msg.expect_matched) {
-                        resultPre.textContent += `  ✅ 期望模式匹配: 是\n`;
+                        resultPre.textContent += `  期望模式匹配: 是\n`;
                     }
                     if (msg.fail_matched) {
-                        resultPre.textContent += `  ❌ 失败模式匹配: 是\n`;
+                        resultPre.textContent += `  失败模式匹配: 是\n`;
                     }
                     if (msg.extracted) {
-                        resultPre.textContent += `  📋 提取内容: ${msg.extracted}\n`;
+                        resultPre.textContent += `  提取内容: ${msg.extracted}\n`;
                     }
                     showToast('模式匹配成功', msg.fail_matched ? 'error' : 'success');
                 } else if (isExtractOnly) {
@@ -10668,30 +10665,30 @@ function handleSshExecMessage(msg) {
                 // 显示模式匹配结果
                 if (msg.status) {
                     const statusMap = {
-                        'running': '⏳ 运行中',
-                        'success': '✅ 成功',
-                        'failed': '❌ 失败',
-                        'timeout': '⏱️ 超时',
-                        'cancelled': '⏹️ 已取消',
-                        'match_success': '✅ 模式匹配成功',
-                        'match_failed': '❌ 模式匹配失败'
+                        'running': '运行中',
+                        'success': '成功',
+                        'failed': '失败',
+                        'timeout': '超时',
+                        'cancelled': '已取消',
+                        'match_success': '模式匹配成功',
+                        'match_failed': '模式匹配失败'
                     };
                     resultPre.textContent += `状态: ${statusMap[msg.status] || msg.status}\n`;
                 }
                 
                 // 显示期望模式匹配结果
                 if (msg.expect_matched !== undefined) {
-                    resultPre.textContent += `期望模式匹配: ${msg.expect_matched ? '✅ 是' : '❌ 否'}\n`;
+                    resultPre.textContent += `期望模式匹配: ${msg.expect_matched ? '是' : '否'}\n`;
                 }
                 
                 // 显示失败模式匹配结果
                 if (msg.fail_matched !== undefined) {
-                    resultPre.textContent += `失败模式匹配: ${msg.fail_matched ? '⚠️ 是' : '✅ 否'}\n`;
+                    resultPre.textContent += `失败模式匹配: ${msg.fail_matched ? '是' : '否'}\n`;
                 }
                 
                 // 显示提取的内容
                 if (msg.extracted) {
-                    resultPre.textContent += `\n📋 提取内容:\n${msg.extracted}\n`;
+                    resultPre.textContent += `\n提取内容:\n${msg.extracted}\n`;
                 }
                 
                 // 更新匹配结果面板
@@ -10720,7 +10717,7 @@ function handleSshExecMessage(msg) {
             
         case 'ssh_exec_error':
             if (msg.session_id === currentExecSessionId) {
-                resultPre.textContent += `\n❌ 错误: ${msg.error}\n`;
+                resultPre.textContent += `\n错误: ${msg.error}\n`;
                 if (cancelBtn) {
                     cancelBtn.style.display = 'none';
                 }
@@ -10731,7 +10728,7 @@ function handleSshExecMessage(msg) {
             
         case 'ssh_exec_cancelled':
             if (msg.session_id === currentExecSessionId) {
-                resultPre.textContent += `\n⏹️ 已取消执行\n`;
+                resultPre.textContent += `\n已取消执行\n`;
                 if (cancelBtn) {
                     cancelBtn.style.display = 'none';
                 }
@@ -10781,7 +10778,7 @@ function updateMatchResultPanel(msg, isExtractOnly = false) {
     const expectResult = document.getElementById('match-expect-result');
     if (expectResult) {
         if (msg.expect_matched !== undefined) {
-            expectResult.textContent = msg.expect_matched ? '✅ true' : '❌ false';
+            expectResult.textContent = msg.expect_matched ? 'true' : 'false';
             expectResult.className = `match-value ${msg.expect_matched ? 'true' : 'false'}`;
         } else {
             expectResult.textContent = '未配置';
@@ -10793,7 +10790,7 @@ function updateMatchResultPanel(msg, isExtractOnly = false) {
     const failResult = document.getElementById('match-fail-result');
     if (failResult) {
         if (msg.fail_matched !== undefined) {
-            failResult.textContent = msg.fail_matched ? '⚠️ true (检测到错误)' : '✅ false';
+            failResult.textContent = msg.fail_matched ? 'true (检测到错误)' : 'false';
             failResult.className = `match-value ${msg.fail_matched ? 'false' : 'true'}`;
         } else {
             failResult.textContent = '未配置';
@@ -10875,7 +10872,7 @@ async function loadSecurityPage() {
             <div class="section">
                 <h2>已部署主机</h2>
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px">
-                    <p style="color:#666;font-size:0.9em;margin:0"><i class="ri-information-line"></i> 通过上方密钥的「部署」按钮将公钥部署到远程服务器后，主机将自动出现在此列表</p>
+                    <p style="color:#666;margin:0"><i class="ri-information-line"></i> 通过上方密钥的「部署」按钮将公钥部署到远程服务器后，主机将自动出现在此列表</p>
                     <button class="btn btn-sm btn-service-style" onclick="showImportSshHostModal()"><i class="ri-upload-line"></i> 导入主机</button>
                 </div>
                 <table class="data-table">
@@ -10901,19 +10898,19 @@ async function loadSecurityPage() {
                 <h2>HTTPS 证书</h2>
                 <div id="cert-status-card" class="info-card" style="margin-bottom:15px">
                     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-                        <span style="font-size:1.1em;font-weight:bold">
+                        <span style="font-weight:bold">
                             <span id="cert-status-icon"><i class="ri-refresh-line"></i></span>
                             <span id="cert-status-text">加载中...</span>
                         </span>
                         <span id="cert-expiry-badge" class="badge" style="display:none"></span>
                     </div>
                     <div id="cert-info-details" style="display:none">
-                        <div style="display:grid;grid-template-columns:repeat(2, 1fr);gap:8px;font-size:0.9em">
+                        <div style="display:grid;grid-template-columns:repeat(2, 1fr);gap:8px">
                             <div><strong>主体 CN：</strong><span id="cert-subject-cn">-</span></div>
                             <div><strong>签发者：</strong><span id="cert-issuer-cn">-</span></div>
                             <div><strong>生效时间：</strong><span id="cert-not-before">-</span></div>
                             <div><strong>过期时间：</strong><span id="cert-not-after">-</span></div>
-                            <div><strong>序列号：</strong><span id="cert-serial" style="font-family:monospace;font-size:0.85em">-</span></div>
+                            <div><strong>序列号：</strong><span id="cert-serial" style="font-family:monospace">-</span></div>
                             <div><strong>有效状态：</strong><span id="cert-valid-status">-</span></div>
                         </div>
                     </div>
@@ -10926,7 +10923,7 @@ async function loadSecurityPage() {
                     <button class="btn btn-sm btn-service-style" id="btn-cert-gen-csr" onclick="showCertCSRModal()" disabled><i class="ri-file-text-line"></i> 生成 CSR</button>
                     <button class="btn btn-sm btn-service-style" id="btn-cert-install" onclick="showCertInstallModal()" disabled><i class="ri-upload-line"></i> 安装证书</button>
                     <button class="btn btn-sm btn-service-style" id="btn-cert-install-ca" onclick="showCertInstallCAModal()" disabled><i class="ri-shield-keyhole-line"></i> 安装 CA</button>
-                    <button class="btn btn-sm" id="btn-cert-view" onclick="showCertViewModal()" disabled style="color:#666"><i class="ri-eye-line"></i> 查看证书</button>
+                    <button class="btn btn-sm btn-gray" id="btn-cert-view" onclick="showCertViewModal()" disabled><i class="ri-eye-line"></i> 查看证书</button>
                     <button class="btn btn-sm btn-danger" id="btn-cert-delete" onclick="deleteCertCredentials()" disabled><i class="ri-delete-bin-line"></i> 删除凭证</button>
                 </div>
             </div>
@@ -10935,21 +10932,21 @@ async function loadSecurityPage() {
                 <h2>配置包 (Config Pack)</h2>
                 <div id="config-pack-status-card" class="info-card" style="margin-bottom:15px">
                     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-                        <span style="font-size:1.1em;font-weight:bold">
+                        <span style="font-weight:bold">
                             <span id="pack-status-icon"><i class="ri-refresh-line"></i></span>
                             <span id="pack-status-text">加载中...</span>
                         </span>
                         <span id="pack-device-type-badge" class="badge" style="display:none"></span>
                     </div>
                     <div id="pack-info-details" style="display:none">
-                        <div style="display:grid;grid-template-columns:repeat(2, 1fr);gap:8px;font-size:0.9em">
+                        <div style="display:grid;grid-template-columns:repeat(2, 1fr);gap:8px">
                             <div><strong>设备类型：</strong><span id="pack-device-type">-</span></div>
                             <div><strong>证书 CN：</strong><span id="pack-cert-cn">-</span></div>
-                            <div><strong>证书指纹：</strong><span id="pack-cert-fp" style="font-family:monospace;font-size:0.8em">-</span></div>
+                            <div><strong>证书指纹：</strong><span id="pack-cert-fp" style="font-family:monospace">-</span></div>
                             <div><strong>格式版本：</strong><span id="pack-version">-</span></div>
                         </div>
                     </div>
-                    <p style="color:#666;margin-top:10px;font-size:0.9em">
+                    <p style="color:#666;margin-top:10px">
                         <i class="ri-information-line"></i> 配置包系统允许安全地加密和签名配置文件，用于设备间配置分发
                     </p>
                 </div>
@@ -10957,7 +10954,7 @@ async function loadSecurityPage() {
                     <button class="btn btn-sm btn-service-style" onclick="showConfigPackExportCertModal()"><i class="ri-download-line"></i> 导出设备证书</button>
                     <button class="btn btn-sm btn-service-style" onclick="showConfigPackImportModal()"><i class="ri-upload-line"></i> 导入配置包</button>
                     <button class="btn btn-sm btn-service-style" id="btn-pack-export" onclick="showConfigPackExportModal()" disabled><i class="ri-download-line"></i> 导出配置包</button>
-                    <button class="btn btn-sm" onclick="showConfigPackListModal()" style="color:#666"><i class="ri-file-text-line"></i> 查看配置包列表</button>
+                    <button class="btn btn-sm btn-gray" onclick="showConfigPackListModal()"><i class="ri-file-text-line"></i> 查看配置包列表</button>
                 </div>
             </div>
             
@@ -10970,7 +10967,7 @@ async function loadSecurityPage() {
                     <div id="pack-export-cert-content" class="hidden">
                         <div class="form-group">
                             <label>证书指纹 (SHA256)</label>
-                            <input type="text" id="pack-cert-fingerprint" readonly style="font-family:monospace;font-size:0.9em;background:#f5f5f5">
+                            <input type="text" id="pack-cert-fingerprint" readonly style="font-family:monospace;background:#f5f5f5">
                         </div>
                         <div class="form-group">
                             <label>证书 CN</label>
@@ -10978,7 +10975,7 @@ async function loadSecurityPage() {
                         </div>
                         <div class="form-group">
                             <label>证书 PEM</label>
-                            <textarea id="pack-cert-pem" readonly style="width:100%;height:200px;font-family:monospace;font-size:11px"></textarea>
+                            <textarea id="pack-cert-pem" readonly style="width:100%;height:200px;font-family:monospace"></textarea>
                         </div>
                         <button class="btn btn-sm btn-service-style" onclick="copyPackCertToClipboard()" style="margin-top:8px"><i class="ri-file-text-line"></i> 复制到剪贴板</button>
                     </div>
@@ -10999,7 +10996,7 @@ async function loadSecurityPage() {
                     </div>
                     <div class="form-group">
                         <label>或粘贴 JSON 内容</label>
-                        <textarea id="pack-import-content" placeholder='{"tscfg_version":"1.0", ...}' style="width:100%;height:150px;font-family:monospace;font-size:11px"></textarea>
+                        <textarea id="pack-import-content" placeholder='{"tscfg_version":"1.0", ...}' style="width:100%;height:150px;font-family:monospace"></textarea>
                     </div>
                     <div id="pack-import-result" class="result-box hidden" style="margin-top:10px"></div>
                     <div id="pack-import-preview" class="hidden" style="margin-top:15px;padding:10px;background:#f8f9fa;border-radius:4px">
@@ -11008,7 +11005,7 @@ async function loadSecurityPage() {
                     </div>
                     <div class="form-actions" style="margin-top:15px">
                         <button class="btn btn-sm" onclick="hideConfigPackImportModal()">取消</button>
-                        <button class="btn btn-sm" onclick="verifyConfigPack()" style="color:#666"><i class="ri-search-line"></i> 仅验证</button>
+                        <button class="btn btn-sm btn-gray" onclick="verifyConfigPack()"><i class="ri-search-line"></i> 仅验证</button>
                         <button class="btn btn-sm btn-service-style" onclick="importConfigPack()"><i class="ri-upload-line"></i> 导入</button>
                     </div>
                 </div>
@@ -11022,16 +11019,16 @@ async function loadSecurityPage() {
                     
                     <!-- 文件浏览器 -->
                     <div class="form-group">
-                        <label>选择配置文件 <span style="color:#999;font-size:0.9em">(可多选)</span></label>
+                        <label>选择配置文件 <span style="color:#999">(可多选)</span></label>
                         <div style="display:flex;gap:8px;margin-bottom:8px">
                             <input type="text" id="pack-export-browse-path" value="/sdcard/config" style="flex:1" readonly>
-                            <button class="btn btn-sm" onclick="packExportBrowseUp()" style="color:#666"><i class="ri-arrow-up-s-line"></i> 上级</button>
-                            <button class="btn btn-sm" onclick="packExportBrowseRefresh()" style="color:#666"><i class="ri-refresh-line"></i> 刷新</button>
+                            <button class="btn btn-sm btn-gray" onclick="packExportBrowseUp()"><i class="ri-arrow-up-s-line"></i> 上级</button>
+                            <button class="btn btn-sm btn-gray" onclick="packExportBrowseRefresh()"><i class="ri-refresh-line"></i> 刷新</button>
                         </div>
                         <div style="display:flex;gap:8px;margin-bottom:8px">
-                            <button class="btn btn-sm" onclick="packExportSelectAll()" style="color:#666">全选</button>
-                            <button class="btn btn-sm" onclick="packExportDeselectAll()" style="color:#666">取消全选</button>
-                            <button class="btn btn-sm" onclick="packExportSelectDir()" style="color:#666"><i class="ri-folder-open-line"></i> 选择整个目录</button>
+                            <button class="btn btn-sm btn-gray" onclick="packExportSelectAll()">全选</button>
+                            <button class="btn btn-sm btn-gray" onclick="packExportDeselectAll()">取消全选</button>
+                            <button class="btn btn-sm btn-gray" onclick="packExportSelectDir()"><i class="ri-folder-open-line"></i> 选择整个目录</button>
                         </div>
                         <div id="pack-export-file-list" style="border:1px solid #ddd;border-radius:4px;height:180px;overflow-y:auto;background:#f9f9f9">
                             <div style="padding:20px;text-align:center;color:#666"><i class="ri-refresh-line"></i> 加载中...</div>
@@ -11051,17 +11048,17 @@ async function loadSecurityPage() {
                     </div>
                     <div class="form-group">
                         <label>目标设备证书 (PEM)</label>
-                        <textarea id="pack-export-recipient-cert" placeholder="-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----" style="width:100%;height:100px;font-family:monospace;font-size:11px" required></textarea>
-                        <div style="font-size:0.85em;color:#666;margin-top:4px"><i class="ri-information-line"></i> 粘贴目标设备导出的证书</div>
+                        <textarea id="pack-export-recipient-cert" placeholder="-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----" style="width:100%;height:100px;font-family:monospace" required></textarea>
+                        <div style="color:#666;margin-top:4px"><i class="ri-information-line"></i> 粘贴目标设备导出的证书</div>
                     </div>
                     <div id="pack-export-result" class="result-box" style="margin-top:10px;min-height:24px;visibility:hidden"></div>
                     <div id="pack-export-output" style="margin-top:15px">
                         <label>生成的配置包 (.tscfg)</label>
-                        <textarea id="pack-export-tscfg" readonly style="width:100%;height:100px;font-family:monospace;font-size:10px" placeholder="配置包将在此显示..."></textarea>
+                        <textarea id="pack-export-tscfg" readonly style="width:100%;height:100px;font-family:monospace" placeholder="配置包将在此显示..."></textarea>
                         <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
                             <button class="btn btn-sm btn-service-style" onclick="copyPackTscfgToClipboard()" id="btn-pack-copy" style="display:none"><i class="ri-file-text-line"></i> 复制到剪贴板</button>
                             <button class="btn btn-sm btn-service-style" onclick="downloadPackTscfg()" id="btn-pack-download" style="display:none"><i class="ri-download-line"></i> 下载到本地</button>
-                            <span id="pack-export-saved-path" style="color:#4caf50;font-size:0.9em;display:none"></span>
+                            <span id="pack-export-saved-path" style="color:#4caf50;display:none"></span>
                         </div>
                     </div>
                     <div class="form-actions" style="margin-top:15px">
@@ -11163,12 +11160,12 @@ async function loadSecurityPage() {
                             <label>认证密码 (首次部署需要)</label>
                             <input type="password" id="deploy-password" placeholder="输入 SSH 登录密码" required>
                         </div>
-                        <div style="background:#e3f2fd;border:1px solid #2196f3;border-radius:4px;padding:10px;margin:15px 0;font-size:0.9rem">
+                        <div style="background:#e3f2fd;border:1px solid #2196f3;border-radius:4px;padding:10px;margin:15px 0">
                             <i class="ri-information-line"></i> 部署成功后，该主机将自动添加到「已部署主机」列表，之后可使用此密钥免密登录
                         </div>
                         <div id="deploy-result" class="result-box hidden" style="margin-bottom:15px"></div>
                         <div class="form-actions">
-                            <button class="btn btn-sm" onclick="hideDeployKeyModal()" style="color:#666">取消</button>
+                            <button class="btn btn-sm btn-gray" onclick="hideDeployKeyModal()">取消</button>
                             <button class="btn btn-sm btn-service-style" id="deploy-btn" onclick="deployKey()"><i class="ri-rocket-line"></i> 开始部署</button>
                         </div>
                     </div>
@@ -11207,7 +11204,7 @@ async function loadSecurityPage() {
                         </div>
                         <div id="revoke-result" class="result-box hidden" style="margin-bottom:15px"></div>
                         <div class="form-actions">
-                            <button class="btn btn-sm" onclick="hideRevokeKeyModal()" style="color:#666">取消</button>
+                            <button class="btn btn-sm btn-gray" onclick="hideRevokeKeyModal()">取消</button>
                             <button class="btn btn-sm btn-danger" id="revoke-btn" onclick="revokeKey()"><i class="ri-alert-line"></i> 撤销公钥</button>
                         </div>
                     </div>
@@ -11242,7 +11239,7 @@ async function loadSecurityPage() {
                         <strong>建议</strong>：如果您确认服务器已重装或密钥已更新，可以点击"更新主机密钥"移除旧记录，然后重新连接以信任新密钥。
                     </p>
                     <div class="form-actions">
-                        <button class="btn btn-sm" onclick="hideHostMismatchModal()" style="color:#666">取消</button>
+                        <button class="btn btn-sm btn-gray" onclick="hideHostMismatchModal()">取消</button>
                         <button class="btn btn-sm btn-warning" onclick="removeAndRetry()"><i class="ri-refresh-line"></i> 更新主机密钥</button>
                     </div>
                 </div>
@@ -11258,7 +11255,7 @@ async function loadSecurityPage() {
                     </div>
                     <div id="cert-genkey-result" class="result-box hidden" style="margin-bottom:15px"></div>
                     <div class="form-actions">
-                        <button class="btn btn-sm" onclick="hideCertGenKeyModal()" style="color:#666">取消</button>
+                        <button class="btn btn-sm btn-gray" onclick="hideCertGenKeyModal()">取消</button>
                         <button class="btn btn-sm btn-service-style" id="cert-genkey-btn" onclick="generateCertKeypair()"><i class="ri-key-line"></i> 生成</button>
                     </div>
                 </div>
@@ -11271,7 +11268,7 @@ async function loadSecurityPage() {
                     <div class="form-group">
                         <label>设备 ID (CN)</label>
                         <input type="text" id="csr-device-id" placeholder="TIANSHAN-RM01-0001">
-                        <div style="font-size:0.85em;color:#666;margin-top:4px">留空则使用默认配置</div>
+                        <div style="color:#666;margin-top:4px">留空则使用默认配置</div>
                     </div>
                     <div class="form-group">
                         <label>组织 (O)</label>
@@ -11283,12 +11280,12 @@ async function loadSecurityPage() {
                     </div>
                     <div id="csr-result-box" class="hidden" style="margin-top:15px">
                         <label>CSR 内容（复制到 CA 服务器签发）</label>
-                        <textarea id="csr-pem-output" readonly style="width:100%;height:200px;font-family:monospace;font-size:11px"></textarea>
+                        <textarea id="csr-pem-output" readonly style="width:100%;height:200px;font-family:monospace"></textarea>
                         <button class="btn btn-sm btn-service-style" onclick="copyCSRToClipboard()" style="margin-top:8px"><i class="ri-file-text-line"></i> 复制到剪贴板</button>
                     </div>
                     <div id="csr-gen-result" class="result-box hidden" style="margin-top:10px"></div>
                     <div class="form-actions" style="margin-top:15px">
-                        <button class="btn btn-sm" onclick="hideCertCSRModal()">关闭</button>
+                        <button class="btn btn-sm btn-gray" onclick="hideCertCSRModal()">关闭</button>
                         <button class="btn btn-sm btn-service-style" id="csr-gen-btn" onclick="generateCSR()"><i class="ri-file-text-line"></i> 生成 CSR</button>
                     </div>
                 </div>
@@ -11301,7 +11298,7 @@ async function loadSecurityPage() {
                     <p style="color:#666;margin-bottom:15px">粘贴 CA 签发的 PEM 格式证书</p>
                     <div class="form-group">
                         <label>证书 PEM</label>
-                        <textarea id="cert-pem-input" placeholder="-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----" style="width:100%;height:200px;font-family:monospace;font-size:11px"></textarea>
+                        <textarea id="cert-pem-input" placeholder="-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----" style="width:100%;height:200px;font-family:monospace"></textarea>
                     </div>
                     <div id="cert-install-result" class="result-box hidden" style="margin-top:10px"></div>
                     <div class="form-actions" style="margin-top:15px">
@@ -11318,7 +11315,7 @@ async function loadSecurityPage() {
                     <p style="color:#666;margin-bottom:15px">粘贴根证书和中间证书（PEM 格式，可拼接多个）</p>
                     <div class="form-group">
                         <label>CA 证书链 PEM</label>
-                        <textarea id="ca-pem-input" placeholder="-----BEGIN CERTIFICATE-----&#10;(Root CA)&#10;-----END CERTIFICATE-----&#10;-----BEGIN CERTIFICATE-----&#10;(Intermediate CA)&#10;-----END CERTIFICATE-----" style="width:100%;height:200px;font-family:monospace;font-size:11px"></textarea>
+                        <textarea id="ca-pem-input" placeholder="-----BEGIN CERTIFICATE-----&#10;(Root CA)&#10;-----END CERTIFICATE-----&#10;-----BEGIN CERTIFICATE-----&#10;(Intermediate CA)&#10;-----END CERTIFICATE-----" style="width:100%;height:200px;font-family:monospace"></textarea>
                     </div>
                     <div id="ca-install-result" class="result-box hidden" style="margin-top:10px"></div>
                     <div class="form-actions" style="margin-top:15px">
@@ -11334,7 +11331,7 @@ async function loadSecurityPage() {
                     <h2>查看设备证书</h2>
                     <div id="cert-view-loading" style="text-align:center;padding:20px"><i class="ri-refresh-line"></i> 加载中...</div>
                     <div id="cert-view-content" class="hidden">
-                        <textarea id="cert-view-pem" readonly style="width:100%;height:250px;font-family:monospace;font-size:11px"></textarea>
+                        <textarea id="cert-view-pem" readonly style="width:100%;height:250px;font-family:monospace"></textarea>
                         <button class="btn btn-sm btn-service-style" onclick="copyCertToClipboard()" style="margin-top:8px"><i class="ri-file-text-line"></i> 复制到剪贴板</button>
                     </div>
                     <div class="form-actions" style="margin-top:15px">
@@ -11385,7 +11382,7 @@ async function refreshSecurityPage() {
                 <tr>
                     <td>
                         <code>${hiddenIcon}${escapeHtml(displayId)}</code>
-                        ${key.alias && !key.hidden ? `<div style="font-size:0.85em;color:#666;margin-top:2px">${escapeHtml(key.alias)}</div>` : ''}
+                        ${key.alias && !key.hidden ? `<div style="color:#666;margin-top:2px">${escapeHtml(key.alias)}</div>` : ''}
                     </td>
                     <td>${escapeHtml(key.type_desc || key.type)}</td>
                     <td><span class="badge badge-service-style">SSH</span> ${escapeHtml(key.comment) || '-'}</td>
@@ -11425,7 +11422,7 @@ async function refreshSecurityPage() {
                 <tr style="background:#f0f7ff">
                     <td>
                         <code><i class="ri-key-line"></i> https</code>
-                        <div style="font-size:0.85em;color:#666;margin-top:2px">HTTPS 服务器密钥</div>
+                        <div style="color:#666;margin-top:2px">HTTPS 服务器密钥</div>
                     </td>
                     <td>ECDSA P-256</td>
                     <td><span class="badge badge-service-style">HTTPS</span> ${escapeHtml(comment)}</td>
@@ -11433,7 +11430,7 @@ async function refreshSecurityPage() {
                     <td>否</td>
                     <td>
                         <button class="btn btn-sm btn-service-style" onclick="showCertCSRModal()" title="生成证书签名请求"><i class="ri-file-text-line"></i> CSR</button>
-                        <button class="btn btn-sm" onclick="showCertViewModal()" ${hasCert ? '' : 'disabled'} title="查看证书" style="color:#666"><i class="ri-eye-line"></i> 证书</button>
+                        <button class="btn btn-sm btn-gray" onclick="showCertViewModal()" ${hasCert ? '' : 'disabled'} title="查看证书"><i class="ri-eye-line"></i> 证书</button>
                         <button class="btn btn-sm btn-danger" onclick="deleteCertCredentials()" title="删除 HTTPS 密钥和证书"><i class="ri-delete-bin-line"></i> 删除</button>
                     </td>
                 </tr>
@@ -11444,7 +11441,7 @@ async function refreshSecurityPage() {
                 <tr style="background:#fff8e1">
                     <td>
                         <code style="color:#888"><i class="ri-lock-line"></i> https</code>
-                        <div style="font-size:0.85em;color:#999;margin-top:2px">HTTPS 服务器密钥</div>
+                        <div style="color:#999;margin-top:2px">HTTPS 服务器密钥</div>
                     </td>
                     <td style="color:#888">-</td>
                     <td><span class="badge badge-service-style">HTTPS</span> <em style="color:#888">未生成密钥</em></td>
@@ -11523,10 +11520,10 @@ async function refreshSshHostsList() {
                 <td>${escapeHtml(h.username)}</td>
                 <td><span class="badge badge-service-style"><i class="ri-key-line"></i> ${escapeHtml(h.keyid || 'default')}</span></td>
                 <td>
-                    <button class="btn btn-sm" onclick="testSshHostByIndex(${idx})" title="测试连接" style="color:#666"><i class="ri-search-line"></i> 测试</button>
+                    <button class="btn btn-sm btn-gray" onclick="testSshHostByIndex(${idx})" title="测试连接"><i class="ri-search-line"></i> 测试</button>
                     <button class="btn btn-sm btn-service-style" onclick="exportSshHost('${escapeHtml(h.id)}')" title="导出配置为 .tscfg"><i class="ri-download-line"></i> 导出</button>
                     <button class="btn btn-sm btn-danger" onclick="revokeKeyFromHost(${idx})" title="撤销公钥"><i class="ri-lock-unlock-line"></i> 撤销</button>
-                    <button class="btn btn-sm" onclick="removeHostByIndex(${idx})" title="仅移除本地记录" style="color:#666"><i class="ri-delete-bin-line"></i> 移除</button>
+                    <button class="btn btn-sm btn-gray" onclick="removeHostByIndex(${idx})" title="仅移除本地记录"><i class="ri-delete-bin-line"></i> 移除</button>
                 </td>
             </tr>
         `).join('');
@@ -11566,7 +11563,7 @@ async function refreshKnownHostsList() {
                 <td><code style="font-size:0.8em;word-break:break-all">${escapeHtml(h.fingerprint.substring(0, 32))}...</code></td>
                 <td>${formatTimestamp(h.added)}</td>
                 <td>
-                    <button class="btn btn-sm" onclick="showFullFingerprint(${idx})" title="查看完整指纹" style="color:#666"><i class="ri-eye-line"></i> 查看</button>
+                    <button class="btn btn-sm btn-gray" onclick="showFullFingerprint(${idx})" title="查看完整指纹"><i class="ri-eye-line"></i> 查看</button>
                     <button class="btn btn-sm btn-danger" onclick="removeKnownHost(${idx})" title="删除指纹记录"><i class="ri-delete-bin-line"></i> 删除</button>
                 </td>
             </tr>
@@ -11642,13 +11639,13 @@ async function testSshConnection(hostId) {
         });
         
         if (execResult.code === 0) {
-            showToast(`✅ 连接 ${hostId} 成功！`, 'success');
+            showToast(`连接 ${hostId} 成功！`, 'success');
         } else {
-            showToast(`❌ 连接失败: ${execResult.message || '未知错误'}`, 'error');
+            showToast(`连接失败: ${execResult.message || '未知错误'}`, 'error');
         }
     } catch (e) {
         console.error('Test SSH connection error:', e);
-        showToast(`❌ 测试失败: ${e.message}`, 'error');
+        showToast(`测试失败: ${e.message}`, 'error');
     }
 }
 
@@ -11675,13 +11672,13 @@ async function testSshHostByIndex(index) {
         });
         
         if (execResult.code === 0) {
-            showToast(`✅ 连接 ${host.id} 成功！`, 'success');
+            showToast(`连接 ${host.id} 成功！`, 'success');
         } else {
-            showToast(`❌ 连接失败: ${execResult.message || '未知错误'}`, 'error');
+            showToast(`连接失败: ${execResult.message || '未知错误'}`, 'error');
         }
     } catch (e) {
         console.error('Test SSH connection error:', e);
-        showToast(`❌ 测试失败: ${e.message}`, 'error');
+        showToast(`测试失败: ${e.message}`, 'error');
     }
 }
 
@@ -11732,15 +11729,15 @@ function showExportSshHostModal(hostId) {
                 <button class="modal-close" onclick="hideExportSshHostModal()"><i class="ri-close-line"></i></button>
             </div>
             <div class="modal-body">
-                <p style="color:#666;font-size:0.9rem">导出主机 <strong>${escapeHtml(hostId)}</strong> 的配置为加密配置包</p>
+                <p style="color:#666">导出主机 <strong>${escapeHtml(hostId)}</strong> 的配置为加密配置包</p>
                 <div class="form-group" style="margin-top:15px">
                     <label>目标设备证书 (PEM)</label>
-                    <textarea id="export-ssh-host-cert" placeholder="-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----" style="width:100%;height:120px;font-family:monospace;font-size:11px"></textarea>
-                    <div style="font-size:0.85em;color:#666;margin-top:4px"><i class="ri-information-line"></i> 粘贴目标设备的证书。留空则使用本机证书（自加密）</div>
+                    <textarea id="export-ssh-host-cert" placeholder="-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----" style="width:100%;height:120px;font-family:monospace"></textarea>
+                    <div style="color:#666;margin-top:4px"><i class="ri-information-line"></i> 粘贴目标设备的证书。留空则使用本机证书（自加密）</div>
                 </div>
                 <div id="export-ssh-host-result" class="result-box hidden" style="margin-top:10px"></div>
                 <div class="modal-footer cc-compact-footer" style="margin-top:15px;padding-top:15px;border-top:1px solid #eee">
-                    <button class="btn" onclick="hideExportSshHostModal()" style="color:#666">取消</button>
+                    <button class="btn btn-gray" onclick="hideExportSshHostModal()">取消</button>
                     <button class="btn btn-service-style" id="export-ssh-host-btn" onclick="doExportSshHostFromModal('${escapeHtml(hostId)}')"><i class="ri-download-line"></i> 导出</button>
                 </div>
             </div>
@@ -11828,7 +11825,7 @@ function showImportSshHostModal() {
     modal.innerHTML = `
         <div class="modal-content" style="max-width:550px">
             <h2>导入 SSH 主机配置</h2>
-            <p style="color:#666;font-size:0.9rem">选择 .tscfg 配置包文件以导入 SSH 主机配置</p>
+            <p style="color:#666">选择 .tscfg 配置包文件以导入 SSH 主机配置</p>
             
             <!-- 步骤 1: 选择文件 -->
             <div id="import-ssh-host-step1">
@@ -11887,7 +11884,7 @@ async function previewSshHostImport() {
     const file = fileInput.files[0];
     
     resultBox.classList.remove('hidden', 'success', 'error', 'warning');
-    resultBox.textContent = '🔄 正在验证配置包...';
+    resultBox.textContent = '正在验证配置包...';
     importBtn.disabled = true;
     step2.style.display = 'none';
     
@@ -12035,14 +12032,14 @@ function revokeKeyFromHost(index) {
             </div>
             <div class="modal-body">
                 <p>将从服务器 <strong>${escapeHtml(host.username)}@${escapeHtml(host.host)}:${host.port}</strong> 撤销密钥 <code>${escapeHtml(host.keyid || 'default')}</code></p>
-                <p style="color:#666;font-size:0.9rem;margin-top:10px">撤销成功后将自动从列表中移除该主机</p>
+                <p style="color:#666;margin-top:10px">撤销成功后将自动从列表中移除该主机</p>
                 <div class="form-group" style="margin-top:15px">
                     <label>服务器密码</label>
                     <input type="password" id="revoke-host-password" class="form-control" placeholder="输入 SSH 密码">
                 </div>
                 <div id="revoke-host-result" class="result-box hidden" style="margin-top:10px"></div>
                 <div class="modal-footer cc-compact-footer" style="margin-top:15px;padding-top:15px;border-top:1px solid #eee">
-                    <button class="btn" onclick="hideRevokeHostModal()" style="color:#666">取消</button>
+                    <button class="btn btn-gray" onclick="hideRevokeHostModal()">取消</button>
                     <button class="btn btn-danger" id="revoke-host-btn" onclick="doRevokeFromHost(${index})"><i class="ri-lock-unlock-line"></i> 撤销并移除</button>
                 </div>
             </div>
@@ -12162,7 +12159,7 @@ async function exportKey(id) {
 
 async function exportPrivateKey(id) {
     // 安全确认
-    if (!confirm(`⚠️ 安全警告\n\n您正在导出私钥 "${id}"。\n\n私钥是高度敏感的安全凭证，请确保：\n• 不要在公共网络传输\n• 不要分享给他人\n• 安全存储在本地\n\n确定要继续吗？`)) {
+    if (!confirm(`安全警告\n\n您正在导出私钥 "${id}"。\n\n私钥是高度敏感的安全凭证，请确保：\n• 不要在公共网络传输\n• 不要分享给他人\n• 安全存储在本地\n\n确定要继续吗？`)) {
         return;
     }
     
@@ -12197,11 +12194,11 @@ function showPubkeyModal(id, pubkey, type, comment) {
             <div class="modal-body">
                 <p style="margin-bottom:10px;color:#666">类型: ${escapeHtml(type)}${comment ? ' | 备注: ' + escapeHtml(comment) : ''}</p>
                 <textarea id="pubkey-content" readonly style="width:100%;height:150px;font-family:monospace;font-size:12px;resize:vertical">${escapeHtml(pubkey)}</textarea>
-                <p style="margin-top:10px;font-size:0.85rem;color:#888">
+                <p style="margin-top:10px;color:#888">
                     <i class="ri-information-line"></i> 将此公钥添加到远程服务器的 <code>~/.ssh/authorized_keys</code> 文件中即可实现免密登录
                 </p>
                 <div class="modal-footer cc-compact-footer" style="margin-top:15px;padding-top:15px;border-top:1px solid #eee">
-                    <button class="btn" onclick="closePubkeyModal()" style="color:#666">关闭</button>
+                    <button class="btn btn-gray" onclick="closePubkeyModal()">关闭</button>
                     <button class="btn btn-service-style" onclick="copyPubkey()"><i class="ri-file-text-line"></i> 复制到剪贴板</button>
                     <button class="btn btn-service-style" onclick="downloadPubkey('${escapeHtml(id)}')"><i class="ri-download-line"></i> 下载文件</button>
                 </div>
@@ -12234,12 +12231,12 @@ function showPrivkeyModal(id, privkey, type, comment) {
                 <strong><i class="ri-alert-line"></i> 安全警告</strong>：私钥是敏感信息，请妥善保管！
             </div>
             <p style="margin-bottom:10px;color:#666">类型: ${escapeHtml(type)}${comment ? ' | 备注: ' + escapeHtml(comment) : ''}</p>
-            <textarea id="privkey-content" readonly style="width:100%;height:200px;font-family:monospace;font-size:11px;resize:vertical;background:#2d2d2d;color:#00ff00">${escapeHtml(privkey)}</textarea>
-            <p style="margin-top:10px;font-size:0.85rem;color:#888">
+            <textarea id="privkey-content" readonly style="width:100%;height:200px;font-family:monospace;resize:vertical;background:#2d2d2d;color:#00ff00">${escapeHtml(privkey)}</textarea>
+            <p style="margin-top:10px;color:#888">
                 <i class="ri-information-line"></i> 保存为 <code>~/.ssh/${escapeHtml(id)}</code> 并设置权限 <code>chmod 600</code>
             </p>
             <div class="form-actions" style="margin-top:15px">
-                <button class="btn" onclick="closePrivkeyModal()" style="color:#666">关闭</button>
+                <button class="btn btn-gray" onclick="closePrivkeyModal()">关闭</button>
                 <button class="btn btn-service-style" onclick="copyPrivkey()"><i class="ri-file-text-line"></i> 复制到剪贴板</button>
                 <button class="btn btn-service-style" onclick="downloadPrivkey('${escapeHtml(id)}')"><i class="ri-download-line"></i> 下载文件</button>
             </div>
@@ -12594,7 +12591,7 @@ async function loadConfigPackCert() {
         loading.style.display = 'none';
         content.classList.remove('hidden');
     } catch (e) {
-        loading.textContent = '❌ 加载失败: ' + e.message;
+        loading.textContent = '加载失败: ' + e.message;
     }
 }
 
@@ -12655,7 +12652,7 @@ async function verifyConfigPack() {
         const data = result.data;
         if (data.valid) {
             resultBox.className = 'result-box success';
-            resultBox.innerHTML = '✅ 签名验证通过';
+            resultBox.innerHTML = '签名验证通过';
             
             // 显示签名信息
             if (data.signature) {
@@ -12664,7 +12661,7 @@ async function verifyConfigPack() {
                     <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:0.9em">
                         <div><strong>签名者：</strong>${sig.signer_cn || '-'}</div>
                         <div><strong>组织：</strong>${sig.signer_ou || '-'}</div>
-                        <div><strong>官方签名：</strong>${sig.is_official ? '✅ 是' : '❌ 否'}</div>
+                        <div><strong>官方签名：</strong>${sig.is_official ? '是' : '否'}</div>
                         <div><strong>签名时间：</strong>${sig.signed_at ? formatTimestamp(sig.signed_at) : '-'}</div>
                     </div>
                 `;
@@ -12672,11 +12669,11 @@ async function verifyConfigPack() {
             }
         } else {
             resultBox.className = 'result-box error';
-            resultBox.textContent = '❌ 验证失败: ' + (data.result_message || '签名无效');
+            resultBox.textContent = '验证失败: ' + (data.result_message || '签名无效');
         }
     } catch (e) {
         resultBox.className = 'result-box error';
-        resultBox.textContent = '❌ 验证失败: ' + e.message;
+        resultBox.textContent = '验证失败: ' + e.message;
     }
 }
 
@@ -12702,7 +12699,7 @@ async function importConfigPack() {
         
         const data = result.data;
         resultBox.className = 'result-box success';
-        resultBox.innerHTML = `✅ 配置包已导入<br><small>保存至: ${data.saved_path || '未知'}</small>`;
+        resultBox.innerHTML = `配置包已导入<br><small>保存至: ${data.saved_path || '未知'}</small>`;
         
         // 显示详细信息（无解密内容）
         const sig = data.signature || {};
@@ -12714,7 +12711,7 @@ async function importConfigPack() {
                 <div><strong>创建时间：</strong>${data.created_at ? formatTimestamp(data.created_at) : '-'}</div>
                 <div><strong>签名者：</strong>${sig.signer_cn || '-'} (${sig.signer_ou || '-'})</div>
                 <div><strong>签名时间：</strong>${sig.signed_at ? formatTimestamp(sig.signed_at) : '-'}</div>
-                <div><strong>官方签名：</strong>${sig.is_official ? '✅ 是' : '❌ 否'}</div>
+                <div><strong>官方签名：</strong>${sig.is_official ? '是' : '否'}</div>
                 <div><strong>保存路径：</strong>${data.saved_path || '-'}</div>
             </div>
             <div style="margin-top:10px;padding:8px;background:#e8f5e9;border-radius:4px;font-size:12px">
@@ -12725,7 +12722,7 @@ async function importConfigPack() {
         
     } catch (e) {
         resultBox.className = 'result-box error';
-        resultBox.textContent = '❌ 导入失败: ' + e.message;
+        resultBox.textContent = '导入失败: ' + e.message;
     }
 }
 
@@ -12748,11 +12745,11 @@ function showConfigPackApplyConfirm(path, packInfo) {
             </div>
             <div class="modal-body">
                 <div style="background:#e8f5e9;padding:12px;border-radius:6px;margin-bottom:15px">
-                    <div style="color:#2e7d32;font-weight:bold;margin-bottom:8px">✅ 验证成功</div>
+                    <div style="color:#2e7d32;font-weight:bold;margin-bottom:8px">验证成功</div>
                     <div style="font-size:0.9em;color:#333">
-                        <div>📄 文件: <code>${path.split('/').pop()}</code></div>
+                        <div>文件: <code>${path.split('/').pop()}</code></div>
                         <div>🔐 签名者: ${signerInfo}</div>
-                        ${sig.is_official ? '<div style="color:#1976d2">✓ 官方签名</div>' : ''}
+                        ${sig.is_official ? '<div style="color:#1976d2">官方签名</div>' : ''}
                     </div>
                 </div>
                 <p style="margin:0;color:#666;font-size:0.9em">
@@ -12793,13 +12790,13 @@ async function applyConfigPackFromPath(path) {
         if (data.success) {
             const modules = data.applied_modules || [];
             const moduleList = modules.length > 0 ? modules.join(', ') : '无';
-            showToast(`✅ 配置已应用\n模块: ${moduleList}`, 'success', 5000);
+            showToast(`配置已应用\n模块: ${moduleList}`, 'success', 5000);
         } else {
-            showToast(`❌ 应用失败: ${data.result_message}`, 'error');
+            showToast(`应用失败: ${data.result_message}`, 'error');
         }
     } catch (e) {
         console.error('Apply config pack error:', e);
-        showToast('❌ 应用失败: ' + e.message, 'error');
+        showToast('应用失败: ' + e.message, 'error');
     }
 }
 
@@ -13135,9 +13132,9 @@ async function exportConfigPack() {
         const savedPath = data.saved_path || '';
         
         resultBox.className = 'result-box success';
-        let resultHtml = `✅ 配置包已生成<br>📁 文件名: <b>${fileName}</b><br>📊 大小: ${fileSize} 字节 (${okFiles.length} 个配置文件)`;
+        let resultHtml = `配置包已生成<br>文件名: <b>${fileName}</b><br>大小: ${fileSize} 字节 (${okFiles.length} 个配置文件)`;
         if (savedPath) {
-            resultHtml += `<br>💾 已保存到: <code>${savedPath}</code>`;
+            resultHtml += `<br>已保存到: <code>${savedPath}</code>`;
         }
         resultBox.innerHTML = resultHtml;
         
@@ -13155,7 +13152,7 @@ async function exportConfigPack() {
         // 显示保存路径
         const savedPathSpan = document.getElementById('pack-export-saved-path');
         if (savedPath && savedPathSpan) {
-            savedPathSpan.textContent = `✅ 已保存到设备`;
+            savedPathSpan.textContent = `已保存到设备`;
             savedPathSpan.style.display = 'inline';
         }
         
@@ -13164,13 +13161,13 @@ async function exportConfigPack() {
         
         if (!tscfgContent) {
             console.warn('[ConfigPack] tscfg content is empty!');
-            resultBox.innerHTML += '<br>⚠️ 警告: 配置包内容为空';
+            resultBox.innerHTML += '<br>警告: 配置包内容为空';
         }
         
     } catch (e) {
         console.error('[ConfigPack] Export error:', e);
         resultBox.className = 'result-box error';
-        resultBox.textContent = '❌ 生成失败: ' + e.message;
+        resultBox.textContent = '生成失败: ' + e.message;
     }
 }
 
@@ -13237,10 +13234,10 @@ async function refreshConfigPackList() {
                     <td>${escapeHtml(file.name)}</td>
                     <td>${formatBytes(file.size || 0)}</td>
                     <td>${escapeHtml(file.signer || '-')}</td>
-                    <td>${file.is_official ? '✅' : '❌'}</td>
-                    <td>${file.valid ? '<span style="color:green">✅ 有效</span>' : '<span style="color:red">❌ 无效</span>'}</td>
+                    <td>${file.is_official ? '是' : '否'}</td>
+                    <td>${file.valid ? '<span style="color:green">有效</span>' : '<span style="color:red">无效</span>'}</td>
                     <td>
-                        <button class="btn btn-small" onclick="importPackFromList('${escapeHtml(path)}/${escapeHtml(file.name)}')">📥 导入</button>
+                        <button class="btn btn-small" onclick="importPackFromList('${escapeHtml(path)}/${escapeHtml(file.name)}')"><i class="ri-download-line"></i> 导入</button>
                     </td>
                 `;
                 tbody.appendChild(tr);
@@ -13251,7 +13248,7 @@ async function refreshConfigPackList() {
         table.classList.remove('hidden');
         
     } catch (e) {
-        loading.textContent = '❌ 加载失败: ' + e.message;
+        loading.textContent = '加载失败: ' + e.message;
     }
 }
 
@@ -13447,7 +13444,7 @@ async function generateCertKeypair() {
     try {
         const result = await api.certGenerateKeypair(force);
         if (result.code === 0 || result.data?.success) {
-            resultBox.textContent = '✅ ECDSA P-256 密钥对生成成功！';
+            resultBox.textContent = 'ECDSA P-256 密钥对生成成功！';
             resultBox.classList.add('success');
             showToast('密钥对生成成功', 'success');
             
@@ -13459,7 +13456,7 @@ async function generateCertKeypair() {
             throw new Error(result.message || '生成失败');
         }
     } catch (e) {
-        resultBox.textContent = '❌ 生成失败: ' + e.message;
+        resultBox.textContent = '生成失败: ' + e.message;
         resultBox.classList.add('error');
     } finally {
         btn.disabled = false;
@@ -13507,7 +13504,7 @@ async function generateCSR() {
             throw new Error(result.message || '生成失败');
         }
     } catch (e) {
-        resultBox.textContent = '❌ 生成失败: ' + e.message;
+        resultBox.textContent = '生成失败: ' + e.message;
         resultBox.classList.add('error');
     } finally {
         btn.disabled = false;
@@ -13548,7 +13545,7 @@ async function installCertificate() {
     try {
         const result = await api.certInstall(certPem);
         if (result.code === 0 || result.data?.success) {
-            resultBox.textContent = '✅ 证书安装成功！';
+            resultBox.textContent = '证书安装成功！';
             resultBox.classList.add('success');
             showToast('证书安装成功', 'success');
             
@@ -13560,7 +13557,7 @@ async function installCertificate() {
             throw new Error(result.message || '安装失败');
         }
     } catch (e) {
-        resultBox.textContent = '❌ 安装失败: ' + e.message;
+        resultBox.textContent = '安装失败: ' + e.message;
         resultBox.classList.add('error');
     }
 }
@@ -13590,7 +13587,7 @@ async function installCAChain() {
     try {
         const result = await api.certInstallCA(caPem);
         if (result.code === 0 || result.data?.success) {
-            resultBox.textContent = '✅ CA 证书链安装成功！';
+            resultBox.textContent = 'CA 证书链安装成功！';
             resultBox.classList.add('success');
             showToast('CA 证书链安装成功', 'success');
             
@@ -13602,7 +13599,7 @@ async function installCAChain() {
             throw new Error(result.message || '安装失败');
         }
     } catch (e) {
-        resultBox.textContent = '❌ 安装失败: ' + e.message;
+        resultBox.textContent = '安装失败: ' + e.message;
         resultBox.classList.add('error');
     }
 }
@@ -13626,7 +13623,7 @@ async function showCertViewModal() {
             throw new Error(result.message || '获取证书失败');
         }
     } catch (e) {
-        loading.textContent = '❌ 加载失败: ' + e.message;
+        loading.textContent = '加载失败: ' + e.message;
     }
 }
 
@@ -13644,7 +13641,7 @@ function copyCertToClipboard() {
 }
 
 async function deleteCertCredentials() {
-    if (!confirm('⚠️ 确定要删除所有 PKI 凭证吗？\n\n这将删除：\n• 私钥\n• 设备证书\n• CA 证书链\n\n此操作不可撤销！')) {
+    if (!confirm('确定要删除所有 PKI 凭证吗？\n\n这将删除：\n• 私钥\n• 设备证书\n• CA 证书链\n\n此操作不可撤销！')) {
         return;
     }
     
@@ -13781,7 +13778,7 @@ async function loadTerminalPage() {
         <div id="terminal-logs-modal" class="modal" style="display:none" onclick="if(event.target===this) closeTerminalLogsModal()">
             <div class="modal-content" style="width:90%; max-width:1200px; height:85vh">
                 <div class="modal-header">
-                    <h2>📋 系统日志</h2>
+                    <h2>系统日志</h2>
                     <button class="modal-close" onclick="closeTerminalLogsModal()">&times;</button>
                 </div>
                 <div class="modal-body" style="padding:0; display:flex; flex-direction:column; height:calc(100% - 60px)">
@@ -13818,8 +13815,8 @@ async function loadTerminalPage() {
                                 <input type="checkbox" id="modal-log-auto-scroll" checked>
                                 <span>自动滚动</span>
                             </label>
-                            <button class="btn btn-small" onclick="loadModalHistoryLogs()" title="刷新日志">🔄</button>
-                            <button class="btn btn-small btn-danger" onclick="clearModalLogs()" title="清空日志">🗑️</button>
+                            <button class="btn btn-small" onclick="loadModalHistoryLogs()" title="刷新日志"><i class="ri-refresh-line"></i></button>
+                            <button class="btn btn-small btn-danger" onclick="clearModalLogs()" title="清空日志"><i class="ri-delete-bin-line"></i></button>
                         </div>
                     </div>
                     
@@ -13827,7 +13824,7 @@ async function loadTerminalPage() {
                     <div class="log-panel" style="flex:1; margin:0 15px 15px; overflow:hidden">
                         <div id="modal-log-container" class="log-viewer">
                             <div class="log-empty">
-                                <div class="icon">📋</div>
+                                <div class="icon"><i class="ri-file-list-line"></i></div>
                                 <div class="text">等待日志...</div>
                             </div>
                         </div>
@@ -14192,7 +14189,7 @@ function renderModalLogs() {
     if (filtered.length === 0) {
         container.innerHTML = `
             <div class="log-empty">
-                <div class="icon">📋</div>
+                <div class="icon"><i class="ri-file-list-line"></i></div>
                 <div class="text">暂无日志</div>
             </div>
         `;
@@ -14503,7 +14500,7 @@ async function loadOtaPage() {
                     <div class="server-input-group">
                         <input type="text" id="ota-server-input" class="form-input" 
                                placeholder="http://192.168.1.100:57807">
-                        <button class="btn btn-icon" onclick="saveOtaServer()" title="保存到设备" style="color:#666">保存</button>
+                        <button class="btn btn-icon btn-gray" onclick="saveOtaServer()" title="保存到设备">保存</button>
                         <button class="btn btn-service-style" onclick="checkForUpdates()">检查更新</button>
                     </div>
                 </div>
@@ -15285,7 +15282,7 @@ function startRebootDetection() {
                 
                 if (countdownEl) {
                     countdownEl.innerHTML = `
-                        <span style="color:#27ae60">✅ 设备已恢复！</span>
+                        <span style="color:#27ae60">设备已恢复！</span>
                         <br><span style="font-size:0.9em">当前版本: ${newVersion}</span>
                     `;
                 }
@@ -15306,7 +15303,7 @@ function startRebootDetection() {
                 
                 if (countdownEl) {
                     countdownEl.innerHTML = `
-                        <span style="color:#e74c3c">⚠️ 等待超时</span>
+                        <span style="color:#e74c3c">等待超时</span>
                         <br><span style="font-size:0.9em">请手动检查设备状态并刷新页面</span>
                         <br><button class="btn btn-service-style btn-small" onclick="window.location.reload()" 
                             style="margin-top:10px">刷新页面</button>
@@ -15457,7 +15454,7 @@ async function validateOta() {
 }
 
 function confirmRollback() {
-    if (!confirm('⚠️ 确认回滚到上一版本固件？\n\n系统将立即重启并加载上一个分区的固件。\n请确保上一版本固件可用！')) {
+    if (!confirm('确认回滚到上一版本固件？\n\n系统将立即重启并加载上一个分区的固件。\n请确保上一版本固件可用！')) {
         return;
     }
     
@@ -15613,7 +15610,7 @@ async function saveOtaServer() {
         
         if (result.code === 0) {
             if (serverUrl) {
-                showToast('✅ OTA 服务器地址已保存', 'success');
+                showToast('OTA 服务器地址已保存', 'success');
             } else {
                 showToast('OTA 服务器地址已清除', 'info');
             }
@@ -15638,7 +15635,7 @@ async function checkForUpdates() {
     const statusDiv = document.getElementById('ota-update-status');
     statusDiv.style.display = 'block';
     statusDiv.className = 'ota-update-status';
-    statusDiv.innerHTML = '<p>🔍 正在检查更新...</p>';
+    statusDiv.innerHTML = '<p><i class="ri-search-line"></i> 正在检查更新...</p>';
     
     try {
         // 尝试通过设备测试连接（如果 API 存在）
@@ -15736,7 +15733,7 @@ async function checkForUpdates() {
             statusDiv.innerHTML = `
                 <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
                     <div>
-                        <span style="font-weight:600">⚠️ 服务器版本较旧</span>
+                        <span style="font-weight:600">服务器版本较旧</span>
                         <div style="margin-top:5px;font-size:0.9em;color:#666">
                             <code>${localVersion}</code> → <code style="color:#ff9800">${serverVersion}</code>
                         </div>
@@ -15761,7 +15758,7 @@ async function checkForUpdates() {
         statusDiv.className = 'ota-update-status error';
         statusDiv.innerHTML = `
             <div>
-                <span style="font-weight:600">❌ 检查更新失败</span>
+                <span style="font-weight:600">检查更新失败</span>
                 <div style="margin-top:5px;font-size:0.9em;color:#666">${error.message}</div>
             </div>
         `;
@@ -15826,7 +15823,7 @@ async function upgradeViaProxy(serverUrl) {
     
     try {
         // ===== 第一步：浏览器下载固件 =====
-        updateStep(1, '📥 下载固件中...');
+        updateStep(1, '下载固件中...');
         const firmwareUrl = serverUrl.replace(/\/$/, '') + '/firmware';
         messageEl.textContent = '从 OTA 服务器下载';
         progressBar.style.width = '0%';
@@ -15848,7 +15845,7 @@ async function upgradeViaProxy(serverUrl) {
         showToast(`固件下载完成 (${formatSize(firmwareData.byteLength)})`, 'success');
         
         // ===== 第二步：上传固件到 ESP32 =====
-        updateStep(2, '📤 上传固件到设备...');
+        updateStep(2, '上传固件到设备...');
         messageEl.textContent = `固件大小: ${formatSize(firmwareData.byteLength)}`;
         progressBar.style.width = '0%';
         progressPercent.textContent = '';
@@ -15865,11 +15862,11 @@ async function upgradeViaProxy(serverUrl) {
         console.log('Proxy OTA: Firmware uploaded to device');
         showToast('固件写入完成！', 'success');
         progressBar.style.width = '100%';
-        progressPercent.textContent = '✓';
+        progressPercent.textContent = '';
         
         // ===== 第三步：处理 WebUI（如果启用）=====
         if (includeWww) {
-            updateStep(3, '📥 下载 WebUI...');
+            updateStep(3, '下载 WebUI...');
             const wwwUrl = serverUrl.replace(/\/$/, '') + '/www';
             messageEl.textContent = '从 OTA 服务器下载';
             progressBar.style.width = '0%';
@@ -15889,7 +15886,7 @@ async function upgradeViaProxy(serverUrl) {
                 showToast(`WebUI 下载完成 (${formatSize(wwwData.byteLength)})`, 'success');
                 
                 // 上传 www.bin
-                updateStep(4, '📤 上传 WebUI 到设备...');
+                updateStep(4, '上传 WebUI 到设备...');
                 messageEl.textContent = `WebUI 大小: ${formatSize(wwwData.byteLength)}`;
                 progressBar.style.width = '0%';
                 progressPercent.textContent = '';
@@ -15904,7 +15901,7 @@ async function upgradeViaProxy(serverUrl) {
                     console.log('Proxy OTA: WWW uploaded to device');
                     showToast('WebUI 写入完成！', 'success');
                     progressBar.style.width = '100%';
-                    progressPercent.textContent = '✓';
+                    progressPercent.textContent = '';
                 }
             } catch (wwwError) {
                 console.warn('WWW download/upload failed:', wwwError);
@@ -15913,10 +15910,10 @@ async function upgradeViaProxy(serverUrl) {
         }
         
         // ===== 最终步骤：升级完成，触发重启 =====
-        stateEl.textContent = '✅ 全部升级完成！';
+        stateEl.textContent = '全部升级完成';
         progressBar.style.width = '100%';
         progressBar.style.background = 'linear-gradient(90deg, #27ae60, #2ecc71)';
-        progressPercent.textContent = '✓';
+        progressPercent.textContent = '';
         messageEl.innerHTML = `
             <div style="text-align:center">
                 <p>固件${includeWww ? '和 WebUI ' : ''}升级完成，设备正在重启...</p>
@@ -15938,7 +15935,7 @@ async function upgradeViaProxy(serverUrl) {
         
     } catch (error) {
         console.error('Proxy OTA failed:', error);
-        stateEl.textContent = '❌ 升级失败';
+        stateEl.textContent = '升级失败';
         messageEl.textContent = error.message;
         progressBar.style.width = '0%';
         progressPercent.textContent = '';
@@ -16563,7 +16560,7 @@ async function refreshMemoryDetail() {
         console.error('Memory detail error:', error);
         body.innerHTML = `
             <div class="error-message">
-                <p>❌ 获取内存详情失败</p>
+                <p>获取内存详情失败</p>
                 <p style="font-size:0.9em;color:#666">${error.message}</p>
             </div>
         `;
@@ -16622,8 +16619,8 @@ async function loadAutomationPage() {
                     <h2>数据源</h2>
                     <div class="section-actions">
                         <button class="btn btn-success btn-sm" onclick="showAddSourceModal()"><i class="ri-add-line"></i> 添加</button>
-                        <button class="btn btn-sm" onclick="showImportSourceModal()" title="导入配置包" style="color:#666"><i class="ri-download-line"></i> 导入</button>
-                        <button type="button" class="btn btn-sm automation-refresh-btn" onclick="refreshSources()" title="刷新" style="color:#666"><i class="ri-refresh-line"></i></button>
+                        <button class="btn btn-sm btn-gray" onclick="showImportSourceModal()" title="导入配置包"><i class="ri-download-line"></i> 导入</button>
+                        <button type="button" class="btn btn-sm btn-gray automation-refresh-btn" onclick="refreshSources()" title="刷新"><i class="ri-refresh-line"></i></button>
                     </div>
                 </div>
                 <div class="card compact">
@@ -16639,8 +16636,8 @@ async function loadAutomationPage() {
                     <h2>规则列表</h2>
                     <div class="section-actions">
                         <button class="btn btn-success btn-sm" onclick="showAddRuleModal()"><i class="ri-add-line"></i> 添加</button>
-                        <button class="btn btn-sm" onclick="showImportRuleModal()" title="导入配置包" style="color:#666"><i class="ri-download-line"></i> 导入</button>
-                        <button type="button" class="btn btn-sm automation-refresh-btn" onclick="refreshRules()" title="刷新" style="color:#666"><i class="ri-refresh-line"></i></button>
+                        <button class="btn btn-sm btn-gray" onclick="showImportRuleModal()" title="导入配置包"><i class="ri-download-line"></i> 导入</button>
+                        <button type="button" class="btn btn-sm btn-gray automation-refresh-btn" onclick="refreshRules()" title="刷新"><i class="ri-refresh-line"></i></button>
                     </div>
                 </div>
                 <div class="card compact">
@@ -16656,8 +16653,8 @@ async function loadAutomationPage() {
                     <h2>动作模板</h2>
                     <div class="section-actions">
                         <button class="btn btn-success btn-sm" onclick="showAddActionModal()"><i class="ri-add-line"></i> 添加</button>
-                        <button class="btn btn-sm" onclick="showImportActionModal()" title="导入配置包" style="color:#666"><i class="ri-download-line"></i> 导入</button>
-                        <button type="button" class="btn btn-sm automation-refresh-btn" onclick="refreshActions()" title="刷新" style="color:#666"><i class="ri-refresh-line"></i></button>
+                        <button class="btn btn-sm btn-gray" onclick="showImportActionModal()" title="导入配置包"><i class="ri-download-line"></i> 导入</button>
+                        <button type="button" class="btn btn-sm btn-gray automation-refresh-btn" onclick="refreshActions()" title="刷新"><i class="ri-refresh-line"></i></button>
                     </div>
                 </div>
                 <div class="card compact">
@@ -16817,10 +16814,10 @@ async function refreshRules() {
                                 <td>${r.actions_count || 0}</td>
                                 <td>${r.trigger_count || 0}</td>
                                 <td style="white-space:nowrap">
-                                    <button class="btn btn-sm" onclick="toggleRule('${r.id}', ${!r.enabled})" title="${r.enabled ? '禁用' : '启用'}" style="color:#666"><i class="${r.enabled ? 'ri-stop-circle-line' : 'ri-play-circle-line'}"></i></button>
-                                    <button class="btn btn-sm" onclick="triggerRule('${r.id}')" title="手动触发" style="color:#666"><i class="ri-play-line"></i></button>
-                                    <button class="btn btn-sm" onclick="editRule('${r.id}')" title="编辑" style="color:#666"><i class="ri-edit-line"></i></button>
-                                    <button class="btn btn-sm" onclick="showExportRuleModal('${r.id}')" title="导出配置包" style="color:#666"><i class="ri-download-line"></i></button>
+                                    <button class="btn btn-sm btn-gray" onclick="toggleRule('${r.id}', ${!r.enabled})" title="${r.enabled ? '禁用' : '启用'}"><i class="${r.enabled ? 'ri-stop-circle-line' : 'ri-play-circle-line'}"></i></button>
+                                    <button class="btn btn-sm btn-gray" onclick="triggerRule('${r.id}')" title="手动触发"><i class="ri-play-line"></i></button>
+                                    <button class="btn btn-sm btn-gray" onclick="editRule('${r.id}')" title="编辑"><i class="ri-edit-line"></i></button>
+                                    <button class="btn btn-sm btn-gray" onclick="showExportRuleModal('${r.id}')" title="导出配置包"><i class="ri-download-line"></i></button>
                                     <button class="btn btn-sm btn-danger" onclick="deleteRule('${r.id}')" title="删除"><i class="ri-delete-bin-line"></i></button>
                                 </td>
                             </tr>
@@ -16902,9 +16899,9 @@ async function refreshSources() {
                                 <td><span class="status-badge ${s.enabled ? 'status-running' : 'status-stopped'}">${s.enabled ? '启用' : '禁用'}</span></td>
                                 <td>${s.poll_interval_ms ? (s.poll_interval_ms / 1000) + '秒' : '-'}</td>
                                 <td style="white-space:nowrap">
-                                    <button class="btn btn-sm" onclick="showSourceVariables('${s.id}')" title="查看变量" style="color:#666"><i class="ri-bar-chart-box-line"></i></button>
-                                    <button class="btn btn-sm" onclick="toggleSource('${s.id}', ${!s.enabled})" title="${s.enabled ? '禁用' : '启用'}" style="color:#666"><i class="${s.enabled ? 'ri-stop-circle-line' : 'ri-play-circle-line'}"></i></button>
-                                    <button class="btn btn-sm" onclick="showExportSourceModal('${s.id}')" title="导出配置包" style="color:#666"><i class="ri-download-line"></i></button>
+                                    <button class="btn btn-sm btn-gray" onclick="showSourceVariables('${s.id}')" title="查看变量"><i class="ri-bar-chart-box-line"></i></button>
+                                    <button class="btn btn-sm btn-gray" onclick="toggleSource('${s.id}', ${!s.enabled})" title="${s.enabled ? '禁用' : '启用'}"><i class="${s.enabled ? 'ri-stop-circle-line' : 'ri-play-circle-line'}"></i></button>
+                                    <button class="btn btn-sm btn-gray" onclick="showExportSourceModal('${s.id}')" title="导出配置包"><i class="ri-download-line"></i></button>
                                     <button class="btn btn-sm btn-danger" onclick="deleteSource('${s.id}')" title="删除"><i class="ri-delete-bin-line"></i></button>
                                 </td>
                             </tr>
@@ -16989,7 +16986,7 @@ function renderVariables(variables) {
         html += `
             <details class="variable-group" open>
                 <summary class="variable-group-header">
-                    <span class="source-name">📡 ${source}</span>
+                    <span class="source-name"><i class="ri-signal-wifi-3-line"></i> ${source}</span>
                     <span class="variable-count">${vars.length} 个变量</span>
                 </summary>
                 <div class="variable-items">
@@ -17034,7 +17031,7 @@ function formatVariableValue(value, type) {
             return `<span class="number-value">${num % 1 === 0 ? num : num.toFixed(2)}</span>`;
         }
     } else if (type === 'boolean') {
-        return value ? '<span class="bool-true">✓ true</span>' : '<span class="bool-false">✗ false</span>';
+        return value ? '<span class="bool-true"><i class="ri-check-line"></i> true</span>' : '<span class="bool-false"><i class="ri-close-line"></i> false</span>';
     } else if (type === 'string') {
         const str = String(value);
         if (str.length > 50) {
@@ -17110,9 +17107,9 @@ async function refreshActions() {
                                 <td>${a.async ? '<span class="badge badge-warning">异步</span>' : '<span class="badge badge-light">同步</span>'}</td>
                                 <td class="text-muted">${a.description || '-'}</td>
                                 <td>
-                                    <button class="btn btn-xs" onclick="testAction('${a.id}')" title="测试" style="color:#666"><i class="ri-play-line"></i></button>
-                                    <button class="btn btn-xs" onclick="editAction('${a.id}')" title="编辑" style="color:#666"><i class="ri-edit-line"></i></button>
-                                    <button class="btn btn-xs" onclick="showExportActionModal('${a.id}')" title="导出配置包" style="color:#666"><i class="ri-download-line"></i></button>
+                                    <button class="btn btn-xs btn-gray" onclick="testAction('${a.id}')" title="测试"><i class="ri-play-line"></i></button>
+                                    <button class="btn btn-xs btn-gray" onclick="editAction('${a.id}')" title="编辑"><i class="ri-edit-line"></i></button>
+                                    <button class="btn btn-xs btn-gray" onclick="showExportActionModal('${a.id}')" title="导出配置包"><i class="ri-download-line"></i></button>
                                     <button class="btn btn-danger btn-xs" onclick="deleteAction('${a.id}')" title="删除"><i class="ri-delete-bin-line"></i></button>
                                 </td>
                             </tr>
@@ -17260,7 +17257,7 @@ function showAddActionModal() {
                 </div>
             </div>
             <div class="modal-footer cc-compact-footer">
-                <button class="btn" onclick="closeModal('action-modal')" style="color:#666">取消</button>
+                <button class="btn btn-gray" onclick="closeModal('action-modal')">取消</button>
                 <button class="btn btn-service-style" onclick="submitAction()"><i class="ri-save-line"></i> 保存动作</button>
             </div>
         </div>
@@ -17940,11 +17937,11 @@ function updateActionLedTypeFields() {
             break;
             
         case 'filter_stop':
-            html = `<div class="form-hint" style="padding:10px;color:var(--text-light);">⏹ 停止当前运行的滤镜效果，无需额外参数</div>`;
+            html = `<div class="form-hint" style="padding:10px;color:var(--text-light);">停止当前运行的滤镜效果，无需额外参数</div>`;
             break;
             
         case 'text_stop':
-            html = `<div class="form-hint" style="padding:10px;color:var(--text-light);">⏹ 停止当前运行的文本覆盖层，无需额外参数</div>`;
+            html = `<div class="form-hint" style="padding:10px;color:var(--text-light);">停止当前运行的文本覆盖层，无需额外参数</div>`;
             break;
             
         case 'text':
@@ -17953,7 +17950,7 @@ function updateActionLedTypeFields() {
                     <label>文本内容 <span class="required">*</span></label>
                     <div class="input-with-btn">
                         <input type="text" id="action-led-text" class="input" placeholder="要显示的文本，支持 \${变量名}">
-                        <button type="button" class="btn btn-sm" onclick="showVariableSelectModal('action-led-text')" title="插入变量">📊</button>
+                        <button type="button" class="btn btn-sm" onclick="showVariableSelectModal('action-led-text')" title="插入变量"><i class="ri-bar-chart-line"></i></button>
                     </div>
                 </div>
                 <div class="form-row">
@@ -18024,7 +18021,7 @@ function updateActionLedTypeFields() {
                     <div class="input-with-btn">
                         <input type="text" id="action-led-image-path" class="input" placeholder="/sdcard/images/xxx.png 或 \${变量名}" value="/sdcard/images/">
                         <button type="button" class="btn btn-sm" onclick="browseActionImages()" title="浏览文件">📁</button>
-                        <button type="button" class="btn btn-sm" onclick="showVariableSelectModal('action-led-image-path')" title="插入变量">📊</button>
+                        <button type="button" class="btn btn-sm" onclick="showVariableSelectModal('action-led-image-path')" title="插入变量"><i class="ri-bar-chart-line"></i></button>
                     </div>
                     <small class="form-hint">支持 PNG、JPG、BMP、GIF 格式，路径支持变量</small>
                 </div>
@@ -18040,7 +18037,7 @@ function updateActionLedTypeFields() {
                     <label>编码内容 <span class="required">*</span></label>
                     <div class="input-with-btn">
                         <input type="text" id="action-led-qr-text" class="input" placeholder="文本或URL，支持 \${变量名}">
-                        <button type="button" class="btn btn-sm" onclick="showVariableSelectModal('action-led-qr-text')" title="插入变量">📊</button>
+                        <button type="button" class="btn btn-sm" onclick="showVariableSelectModal('action-led-qr-text')" title="插入变量"><i class="ri-bar-chart-line"></i></button>
                     </div>
                 </div>
                 <div class="form-row">
@@ -18199,7 +18196,7 @@ async function showImageSelectModal(title, onSelect) {
         listEl.style.display = 'block';
         listEl.innerHTML = images.map(img => {
             const fullPath = `/sdcard/images/${img.name}`;
-            const icon = img.name.toLowerCase().endsWith('.gif') ? '🎞️' : '🖼️';
+            const icon = img.name.toLowerCase().endsWith('.gif') ? '<i class="ri-movie-line"></i>' : '<i class="ri-image-line"></i>';
             const size = formatFileSize(img.size);
             return `
                 <div class="image-select-item" data-path="${fullPath}" style="
@@ -18214,7 +18211,7 @@ async function showImageSelectModal(title, onSelect) {
                         <div style="font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${img.name}</div>
                         <small style="color:var(--text-light);">${size}</small>
                     </div>
-                    <span class="image-select-check" style="display:none;color:var(--success);font-size:20px;">✓</span>
+                    <span class="image-select-check" style="display:none;color:var(--success);font-size:20px;"><i class="ri-check-line"></i></span>
                 </div>
             `;
         }).join('');
@@ -18289,12 +18286,12 @@ async function showVariableSelectModal(targetInputId, mode = 'insert') {
     modal.innerHTML = `
         <div class="modal-content" style="max-width:550px;">
             <div class="modal-header">
-                <h3>📊 选择变量</h3>
+                <h3>选择变量</h3>
                 <button class="modal-close" onclick="closeModal('variable-select-modal')">&times;</button>
             </div>
             <div class="modal-body">
                 <div style="margin-bottom:12px;">
-                    <input type="text" id="var-search" class="input" placeholder="🔍 搜索变量..." 
+                    <input type="text" id="var-search" class="input" placeholder="搜索变量..." 
                            oninput="filterVariableList(this.value)" style="width:100%;">
                 </div>
                 <div id="variable-select-loading" style="text-align:center;padding:20px;">
@@ -18351,7 +18348,7 @@ async function showVariableSelectModal(targetInputId, mode = 'insert') {
                 <div class="var-group-items" id="${groupId}" style="display:none;">`;
             
             vars.forEach(v => {
-                const typeIcon = { 'bool': '🔘', 'int': '🔢', 'float': '📊', 'string': '📝' }[v.type] || '📋';
+                const typeIcon = { 'bool': '<i class="ri-record-circle-fill"></i>', 'int': '<i class="ri-numbers-line"></i>', 'float': '<i class="ri-bar-chart-line"></i>', 'string': '<i class="ri-file-text-line"></i>' }[v.type] || '<i class="ri-file-list-line"></i>';
                 const displayValue = v.value !== undefined ? String(v.value).substring(0, 30) : '-';
                 html += `
                     <div class="var-select-item" data-name="${v.name}" data-source="${sourceId}" style="
@@ -18366,7 +18363,7 @@ async function showVariableSelectModal(targetInputId, mode = 'insert') {
                             <div style="font-weight:500;font-family:monospace;">\${${v.name}}</div>
                             <small style="color:var(--text-light);">当前值: ${displayValue}${displayValue.length >= 30 ? '...' : ''}</small>
                         </div>
-                        <span class="var-select-check" style="display:none;color:var(--success);font-size:20px;">✓</span>
+                        <span class="var-select-check" style="display:none;color:var(--success);font-size:20px;"><i class="ri-check-line"></i></span>
                     </div>
                 `;
             });
@@ -18810,11 +18807,11 @@ async function editAction(id) {
         
         // 更改模态框标题和按钮
         const modalTitle = document.querySelector('#action-modal .modal-header h3');
-        if (modalTitle) modalTitle.textContent = '✏️ 编辑动作模板';
+        if (modalTitle) modalTitle.textContent = '编辑动作模板';
         
         const submitBtn = document.querySelector('#action-modal button[onclick="submitAction()"]');
         if (submitBtn) {
-            submitBtn.textContent = '💾 更新';
+            submitBtn.textContent = '更新';
             submitBtn.setAttribute('onclick', `updateAction('${tpl.id}')`);
         }
         
@@ -18912,7 +18909,7 @@ async function showSourceVariables(sourceId) {
     
     // 更新标题
     const header = modal.querySelector('.modal-header h2');
-    if (header) header.textContent = `📊 ${sourceId} 变量`;
+    if (header) header.textContent = `${sourceId} 变量`;
     
     body.innerHTML = '<div class="loading">加载中...</div>';
     modal.classList.remove('hidden');
@@ -18951,10 +18948,10 @@ async function showSourceVariables(sourceId) {
                 </table>
             `;
         } else {
-            body.innerHTML = `<p style="text-align:center;color:var(--danger-color)">⚠️ ${result.message || '获取变量失败'}</p>`;
+            body.innerHTML = `<p style="text-align:center;color:var(--danger-color)">${result.message || '获取变量失败'}</p>`;
         }
     } catch (error) {
-        body.innerHTML = `<p style="text-align:center;color:var(--danger-color)">❌ ${error.message}</p>`;
+        body.innerHTML = `<p style="text-align:center;color:var(--danger-color)">${error.message}</p>`;
     }
 }
 
@@ -19045,7 +19042,7 @@ async function saveShutdownSettings() {
     try {
         const result = await api.powerProtectionSet(config);
         if (result.code === 0) {
-            showToast('✅ 关机设置已保存', 'success');
+            showToast('关机设置已保存', 'success');
             closeShutdownSettingsModal();
         } else {
             errorDiv.textContent = result.message || '保存失败';
@@ -19081,7 +19078,7 @@ async function resetShutdownSettings() {
             document.getElementById('ss-shutdown-delay').value = 60;
             document.getElementById('ss-recovery-hold').value = 5;
             document.getElementById('ss-fan-stop-delay').value = 60;
-            showToast('✅ 已恢复默认设置', 'success');
+            showToast('已恢复默认设置', 'success');
         } else {
             showToast('恢复失败: ' + (result.message || 'Unknown error'), 'error');
         }
@@ -19207,7 +19204,7 @@ function showAddSourceModal() {
                     <div id="rest-test-result" class="test-result-panel" style="display:none">
                         <div class="test-result-header">
                             <span class="test-status"></span>
-                            <button class="btn btn-sm" onclick="toggleJsonPreview()" style="color:#666"><i class="ri-file-text-line"></i> 原始数据</button>
+                            <button class="btn btn-sm btn-gray" onclick="toggleJsonPreview()"><i class="ri-file-text-line"></i> 原始数据</button>
                         </div>
                         <div id="rest-json-preview" class="json-preview" style="display:none"></div>
                         <div id="rest-var-selector" class="var-selector">
@@ -19237,7 +19234,7 @@ function showAddSourceModal() {
                     <div id="ws-test-result" class="test-result-panel" style="display:none">
                         <div class="test-result-header">
                             <span class="test-status"></span>
-                            <button class="btn btn-sm" onclick="toggleWsJsonPreview()" style="color:#666"><i class="ri-file-text-line"></i> 原始数据</button>
+                            <button class="btn btn-sm btn-gray" onclick="toggleWsJsonPreview()"><i class="ri-file-text-line"></i> 原始数据</button>
                         </div>
                         <div id="ws-json-preview" class="json-preview" style="display:none"></div>
                         <div id="ws-var-selector" class="var-selector">
@@ -19282,7 +19279,7 @@ function showAddSourceModal() {
                     <div id="sio-test-result" class="test-result-panel" style="display:none">
                         <div class="test-result-header">
                             <span class="test-status"></span>
-                            <button class="btn btn-sm" onclick="toggleSioJsonPreview()" style="color:#666"><i class="ri-file-text-line"></i> 原始数据</button>
+                            <button class="btn btn-sm btn-gray" onclick="toggleSioJsonPreview()"><i class="ri-file-text-line"></i> 原始数据</button>
                         </div>
                         <div id="sio-json-preview" class="json-preview" style="display:none"></div>
                         <div id="sio-var-selector" class="var-selector">
@@ -19363,7 +19360,7 @@ function showAddSourceModal() {
                 </label>
             </div>
             <div class="modal-footer cc-compact-footer">
-                <button class="btn" onclick="closeModal('add-source-modal')" style="color:#666">取消</button>
+                <button class="btn btn-gray" onclick="closeModal('add-source-modal')">取消</button>
                 <button class="btn btn-service-style" onclick="submitAddSource()"><i class="ri-database-2-line"></i> 添加数据源</button>
             </div>
         </div>
@@ -19409,7 +19406,7 @@ async function testRestConnection() {
         
         if (result.code === 0 && result.data) {
             lastTestData = result.data.body;
-            statusSpan.innerHTML = `<span style="color:var(--secondary-color)">✅ 连接成功</span> <span style="color:var(--text-light)">(${result.data.status || 200})</span>`;
+            statusSpan.innerHTML = `<span style="color:var(--secondary-color)">连接成功</span> <span style="color:var(--text-light)">(${result.data.status || 200})</span>`;
             
             // 解析并显示可选变量
             try {
@@ -19423,11 +19420,11 @@ async function testRestConnection() {
                 document.getElementById('rest-json-preview').textContent = lastTestData;
             }
         } else {
-            statusSpan.innerHTML = `<span style="color:var(--danger-color)">❌ 请求失败: ${result.message || '未知错误'}</span>`;
+            statusSpan.innerHTML = `<span style="color:var(--danger-color)">请求失败: ${result.message || '未知错误'}</span>`;
             document.querySelector('#rest-var-selector .var-list').innerHTML = '';
         }
     } catch (error) {
-        statusSpan.innerHTML = `<span style="color:var(--danger-color)">❌ 错误: ${error.message}</span>`;
+        statusSpan.innerHTML = `<span style="color:var(--danger-color)">错误: ${error.message}</span>`;
         document.querySelector('#rest-var-selector .var-list').innerHTML = '';
     }
     
@@ -19467,7 +19464,7 @@ async function testWsConnection() {
         
         if (result.code === 0 && result.data) {
             lastTestData = result.data.message;
-            statusSpan.innerHTML = `<span style="color:var(--secondary-color)">✅ 连接成功，已收到数据</span>`;
+            statusSpan.innerHTML = `<span style="color:var(--secondary-color)">连接成功，已收到数据</span>`;
             
             try {
                 const jsonData = typeof lastTestData === 'string' ? JSON.parse(lastTestData) : lastTestData;
@@ -19479,11 +19476,11 @@ async function testWsConnection() {
                 document.getElementById('ws-json-preview').textContent = lastTestData;
             }
         } else {
-            statusSpan.innerHTML = `<span style="color:var(--danger-color)">❌ ${result.message || '连接失败'}</span>`;
+            statusSpan.innerHTML = `<span style="color:var(--danger-color)">${result.message || '连接失败'}</span>`;
             document.querySelector('#ws-var-selector .var-list').innerHTML = '';
         }
     } catch (error) {
-        statusSpan.innerHTML = `<span style="color:var(--danger-color)">❌ 错误: ${error.message}</span>`;
+        statusSpan.innerHTML = `<span style="color:var(--danger-color)">错误: ${error.message}</span>`;
         document.querySelector('#ws-var-selector .var-list').innerHTML = '';
     }
     
@@ -19531,7 +19528,7 @@ async function testSioConnection() {
             lastTestData = data.data;
             
             // 显示成功状态和发现的事件
-            let statusHtml = `<span style="color:var(--secondary-color)">✅ 连接成功</span>`;
+            let statusHtml = `<span style="color:var(--secondary-color)">连接成功</span>`;
             if (data.event) {
                 statusHtml += ` <span style="color:var(--text-light)">| 事件: <strong>${eventName}</strong></span>`;
             }
@@ -19562,7 +19559,7 @@ async function testSioConnection() {
             if (result.data && result.data.sid) {
                 errorMsg += ` (已获取 SID，但未收到事件数据)`;
             }
-            statusSpan.innerHTML = `<span style="color:var(--danger-color)">❌ ${errorMsg}</span>`;
+            statusSpan.innerHTML = `<span style="color:var(--danger-color)">${errorMsg}</span>`;
             document.querySelector('#sio-var-selector .var-list').innerHTML = 
                 '<div class="var-item disabled">提示：留空事件名称可自动发现服务器推送的事件</div>';
             
@@ -19573,7 +19570,7 @@ async function testSioConnection() {
             }
         }
     } catch (error) {
-        statusSpan.innerHTML = `<span style="color:var(--danger-color)">❌ 错误: ${error.message}</span>`;
+        statusSpan.innerHTML = `<span style="color:var(--danger-color)">错误: ${error.message}</span>`;
         document.querySelector('#sio-var-selector .var-list').innerHTML = '';
     }
     
@@ -20089,8 +20086,8 @@ function showAddRuleModal(ruleData = null) {
                             </div>
                             <div class="icon-path-input">
                                 <input type="text" id="rule-icon-path" readonly placeholder="选择图片...">
-                                <button type="button" class="btn btn-sm" onclick="browseRuleIconImage()" style="color:#666"><i class="ri-folder-open-line"></i> 浏览</button>
-                                <button type="button" class="btn btn-sm" onclick="clearRuleIconImage()" style="color:#666"><i class="ri-close-line"></i></button>
+                                <button type="button" class="btn btn-sm btn-gray" onclick="browseRuleIconImage()"><i class="ri-folder-open-line"></i> 浏览</button>
+                                <button type="button" class="btn btn-sm btn-gray" onclick="clearRuleIconImage()"><i class="ri-close-line"></i></button>
                             </div>
                         </div>
                     </div>
@@ -20150,7 +20147,7 @@ function showAddRuleModal(ruleData = null) {
                 </div>
             </div>
             <div class="modal-footer cc-compact-footer">
-                <button class="btn" onclick="closeModal('add-rule-modal')" style="color:#666">取消</button>
+                <button class="btn btn-gray" onclick="closeModal('add-rule-modal')">取消</button>
                 <button class="btn btn-service-style" onclick="submitAddRule(${isEdit ? "'" + ruleData.id + "'" : ''})">${isEdit ? '<i class="ri-save-line"></i> 保存修改' : '<i class="ri-add-line"></i> 添加规则'}</button>
             </div>
         </div>
@@ -20396,7 +20393,7 @@ async function openConditionVarSelector(rowId) {
             </div>
             <div class="modal-body">
                 <div style="margin-bottom:12px;">
-                    <input type="text" id="var-search" class="input" placeholder="🔍 搜索变量..." 
+                    <input type="text" id="var-search" class="input" placeholder="搜索变量..." 
                            oninput="filterVariableList(this.value)" style="width:100%;">
                 </div>
                 <div id="variable-select-loading" style="text-align:center;padding:20px;">
@@ -20452,7 +20449,7 @@ async function openConditionVarSelector(rowId) {
                 <div class="var-group-items" id="${groupId}" style="display:none;">`;
             
             vars.forEach(v => {
-                const typeIcon = { 'bool': '🔘', 'int': '🔢', 'float': '📊', 'string': '📝' }[v.type] || '📋';
+                const typeIcon = { 'bool': '<i class="ri-record-circle-fill"></i>', 'int': '<i class="ri-numbers-line"></i>', 'float': '<i class="ri-bar-chart-line"></i>', 'string': '<i class="ri-file-text-line"></i>' }[v.type] || '<i class="ri-file-list-line"></i>';
                 const displayValue = v.value !== undefined ? String(v.value).substring(0, 30) : '-';
                 html += `
                     <div class="var-select-item" data-name="${v.name}" data-source="${sourceId}" style="
@@ -20748,7 +20745,7 @@ async function showVariableSelectModalForCondition() {
             </div>
             <div class="modal-body">
                 <div style="margin-bottom:12px;">
-                    <input type="text" id="var-search" class="input" placeholder="🔍 搜索变量..." 
+                    <input type="text" id="var-search" class="input" placeholder="搜索变量..." 
                            oninput="filterVariableList(this.value)" style="width:100%;">
                 </div>
                 <div id="variable-select-loading" style="text-align:center;padding:20px;">
@@ -20804,7 +20801,7 @@ async function showVariableSelectModalForCondition() {
                 <div class="var-group-items" id="${groupId}" style="display:none;">`;
             
             vars.forEach(v => {
-                const typeIcon = { 'bool': '🔘', 'int': '🔢', 'float': '📊', 'string': '📝' }[v.type] || '📋';
+                const typeIcon = { 'bool': '<i class="ri-record-circle-fill"></i>', 'int': '<i class="ri-numbers-line"></i>', 'float': '<i class="ri-bar-chart-line"></i>', 'string': '<i class="ri-file-text-line"></i>' }[v.type] || '<i class="ri-file-list-line"></i>';
                 const displayValue = v.value !== undefined ? String(v.value).substring(0, 30) : '-';
                 html += `
                     <div class="var-select-item" data-name="${v.name}" data-source="${sourceId}" style="
@@ -21179,7 +21176,7 @@ function showExportSourceModal(sourceId) {
                 </div>
                 <div id="export-source-result" class="result-box hidden" style="margin-top:10px"></div>
                 <div class="modal-footer cc-compact-footer" style="margin-top:15px;padding-top:15px;border-top:1px solid #eee">
-                    <button class="btn" onclick="hideExportSourceModal()" style="color:#666">取消</button>
+                    <button class="btn btn-gray" onclick="hideExportSourceModal()">取消</button>
                     <button class="btn btn-service-style" id="export-source-btn" onclick="doExportSource('${escapeHtml(sourceId)}')"><i class="ri-download-line"></i> 导出</button>
                 </div>
             </div>
@@ -21275,7 +21272,7 @@ function showImportSourceModal() {
                 </div>
                 <div id="import-source-result" class="result-box hidden" style="margin-top:10px"></div>
                 <div class="modal-footer cc-compact-footer" style="margin-top:15px;padding-top:15px;border-top:1px solid #eee">
-                    <button class="btn" onclick="hideImportSourceModal()" style="color:#666">取消</button>
+                    <button class="btn btn-gray" onclick="hideImportSourceModal()">取消</button>
                     <button class="btn btn-service-style" id="import-source-btn" onclick="confirmSourceImport()" disabled><i class="ri-download-line"></i> 确认导入</button>
                 </div>
             </div>
@@ -21421,7 +21418,7 @@ function showExportRuleModal(ruleId) {
                 </div>
                 <div id="export-rule-result" class="result-box hidden" style="margin-top:10px"></div>
                 <div class="modal-footer cc-compact-footer" style="margin-top:15px;padding-top:15px;border-top:1px solid #eee">
-                    <button class="btn" onclick="hideExportRuleModal()" style="color:#666">取消</button>
+                    <button class="btn btn-gray" onclick="hideExportRuleModal()">取消</button>
                     <button class="btn btn-service-style" id="export-rule-btn" onclick="doExportRule('${escapeHtml(ruleId)}')"><i class="ri-download-line"></i> 导出</button>
                 </div>
             </div>
@@ -21517,7 +21514,7 @@ function showImportRuleModal() {
                 </div>
                 <div id="import-rule-result" class="result-box hidden" style="margin-top:10px"></div>
                 <div class="modal-footer cc-compact-footer" style="margin-top:15px;padding-top:15px;border-top:1px solid #eee">
-                    <button class="btn" onclick="hideImportRuleModal()" style="color:#666">取消</button>
+                    <button class="btn btn-gray" onclick="hideImportRuleModal()">取消</button>
                     <button class="btn btn-service-style" id="import-rule-btn" onclick="confirmRuleImport()" disabled><i class="ri-download-line"></i> 确认导入</button>
                 </div>
             </div>
@@ -21663,7 +21660,7 @@ function showExportActionModal(actionId) {
                 </div>
                 <div id="export-action-result" class="result-box hidden" style="margin-top:10px"></div>
                 <div class="modal-footer cc-compact-footer" style="margin-top:15px;padding-top:15px;border-top:1px solid #eee">
-                    <button class="btn" onclick="hideExportActionModal()" style="color:#666">取消</button>
+                    <button class="btn btn-gray" onclick="hideExportActionModal()">取消</button>
                     <button class="btn btn-service-style" id="export-action-btn" onclick="doExportAction('${escapeHtml(actionId)}')"><i class="ri-download-line"></i> 导出</button>
                 </div>
             </div>
@@ -21759,7 +21756,7 @@ function showImportActionModal() {
                 </div>
                 <div id="import-action-result" class="result-box hidden" style="margin-top:10px"></div>
                 <div class="modal-footer cc-compact-footer" style="margin-top:15px;padding-top:15px;border-top:1px solid #eee">
-                    <button class="btn" onclick="hideImportActionModal()" style="color:#666">取消</button>
+                    <button class="btn btn-gray" onclick="hideImportActionModal()">取消</button>
                     <button class="btn btn-service-style" id="import-action-btn" onclick="confirmActionImport()" disabled><i class="ri-download-line"></i> 确认导入</button>
                 </div>
             </div>

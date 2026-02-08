@@ -46,6 +46,16 @@ http://<服务器IP>:57807
 
 然后点击"检查更新"按钮。
 
+### 4. 发布前编译（让设备能检测到新固件）
+
+版本号仅在 **CMake 重新配置** 时更新。若只做增量编译（`idf.py build`），固件版本不变，设备上会显示「已是最新版本」。发布 OTA 前请用：
+
+```bash
+./tools/build.sh --fresh
+```
+
+或 `rm -f build/CMakeCache.txt && idf.py build`，再用 `--build-dir build` 启动 OTA 服务器。
+
 ## API 端点
 
 | 端点 | 方法 | 说明 |

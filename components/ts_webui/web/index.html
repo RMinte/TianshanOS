@@ -48,7 +48,7 @@
             <div id="page-content">
                 <!-- 动态页面内容由 SPA 路由器加载 -->
                 <div class="loading">
-                    <div class="spinner"></div>
+                    <i class="ri-refresh-line loading-icon"></i>
                     <p data-i18n="common.loading">加载中...</p>
                 </div>
             </div>
@@ -105,11 +105,11 @@
     <div id="file-picker-modal" class="modal hidden">
         <div class="modal-content file-picker-modal">
             <div class="modal-header">
-                <h2>📁 <span data-i18n="files.selectFiles">选择文件</span></h2>
+                <h2><i class="ri-folder-open-line"></i> <span data-i18n="files.selectFiles">选择文件</span></h2>
                 <button class="modal-close" onclick="closeFilePicker()">&times;</button>
             </div>
             <div class="file-picker-path">
-                <button class="btn btn-sm" onclick="filePickerGoUp()">⬆️ <span data-i18n="files.parentFolder">上级</span></button>
+                <button class="btn btn-sm" onclick="filePickerGoUp()"><i class="ri-arrow-up-s-line"></i> <span data-i18n="files.parentFolder">上级</span></button>
                 <span id="file-picker-current-path">/sdcard/images</span>
             </div>
             <div class="file-picker-list" id="file-picker-list">
