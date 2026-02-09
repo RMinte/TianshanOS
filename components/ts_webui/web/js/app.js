@@ -1,6 +1,7 @@
 /**
  * TianshanOS Web App - Main Application
  */
+if (typeof window.t === 'undefined') window.t = function(k) { return k; };
 
 // =========================================================================
 //                         全局状态
@@ -151,6 +152,13 @@ document.addEventListener('DOMContentLoaded', () => {
     router.register('/security', loadSecurityPage);
     router.register('/automation', loadAutomationPage);
     
+    // 语言切换时重新渲染当前页，使主内容使用新语言；下一帧恢复右上角登录态（避免 translateDOM 覆盖 #user-name）
+    window.addEventListener('languageChanged', () => {
+        const loader = router.getCurrentLoader();
+        if (loader) loader();
+        setTimeout(() => updateAuthUI(), 0);
+    });
+    
     // 启动 WebSocket
     setupWebSocket();
     
@@ -177,18 +185,18 @@ function updateAuthUI() {
         const level = api.getLevel();
         const levelIcon = 'ri-user-line'; // 统一使用人形图标
         
-        loginBtn.textContent = '登出';
+        loginBtn.textContent = t('security.logout');
         loginBtn.classList.add('btn-service-style');
         userName.innerHTML = `<i class="${levelIcon}"></i> ${username}`;
-        userName.title = `权限级别: ${level}`;
+        userName.title = (typeof t === 'function' ? t('ui.permissionLevel') : '权限级别') + ': ' + level;
         loginBtn.onclick = logout;
         
         // 更新导航菜单可见性
         router.updateNavVisibility();
     } else {
-        loginBtn.textContent = '登录';
-        loginBtn.classList.remove('btn-service-style');
-        userName.textContent = '未登录';
+        loginBtn.textContent = t('security.login');
+        loginBtn.classList.add('btn-service-style');
+        userName.textContent = t('ui.notLoggedIn');
         userName.title = '';
         loginBtn.onclick = showLoginModal;
         
@@ -218,7 +226,7 @@ document.getElementById('login-form')?.addEventListener('submit', async (e) => {
     
     // 显示加载状态
     submitBtn.disabled = true;
-    submitBtn.textContent = '登录中...';
+    submitBtn.textContent = t('login.loggingIn');
     errorEl?.classList.add('hidden');
     
     try {
@@ -234,31 +242,31 @@ document.getElementById('login-form')?.addEventListener('submit', async (e) => {
             }
             
             router.navigate();
-            showToast(`欢迎, ${username}!`, 'success');
+            showToast(t('login.welcomeName', { name: username }), 'success');
         } else {
             // 显示错误信息
             if (errorEl) {
-                errorEl.textContent = result.message || '登录失败';
+                errorEl.textContent = result.message || t('login.loginFailed');
                 errorEl.classList.remove('hidden');
             }
-            showToast(result.message || '登录失败', 'error');
+            showToast(result.message || t('login.loginFailed'), 'error');
         }
     } catch (error) {
         if (errorEl) {
-            errorEl.textContent = error.message || '网络错误';
+            errorEl.textContent = error.message || t('login.networkError');
             errorEl.classList.remove('hidden');
         }
-        showToast('登录失败: ' + error.message, 'error');
+        showToast(t('login.loginFailed') + ': ' + error.message, 'error');
     } finally {
         submitBtn.disabled = false;
-        submitBtn.textContent = '登录';
+        submitBtn.textContent = t('login.loginButton');
     }
 });
 
 async function logout() {
     try {
         await api.logout();
-        showToast('已登出', 'info');
+        showToast(t('toast.loggedOut'), 'info');
     } finally {
         updateAuthUI();
         window.location.hash = '/';  // 重定向到首页
@@ -276,29 +284,29 @@ function showPasswordChangeReminder() {
     modal.innerHTML = `
         <div class="modal-content" style="max-width:400px;">
             <div class="modal-header">
-                <h3>安全提醒</h3>
+                <h3>${typeof t === 'function' ? t('login.securityReminder') : '安全提醒'}</h3>
             </div>
             <div class="modal-body">
-                <p style="margin-bottom:16px;">您正在使用默认密码，建议立即修改以确保系统安全。</p>
+                <p style="margin-bottom:16px;">${typeof t === 'function' ? t('login.defaultPasswordHint') : '您正在使用默认密码，建议立即修改以确保系统安全。'}</p>
                 <form id="change-password-form">
                     <div class="form-group">
-                        <label>当前密码</label>
+                        <label>${typeof t === 'function' ? t('login.currentPassword') : '当前密码'}</label>
                         <input type="password" id="change-old-pwd" class="input" required>
                     </div>
                     <div class="form-group">
-                        <label>新密码 (4-64字符)</label>
+                        <label>${typeof t === 'function' ? t('login.newPassword') : '新密码 (4-64字符)'}</label>
                         <input type="password" id="change-new-pwd" class="input" minlength="4" maxlength="64" required>
                     </div>
                     <div class="form-group">
-                        <label>确认新密码</label>
+                        <label>${typeof t === 'function' ? t('login.confirmNewPassword') : '确认新密码'}</label>
                         <input type="password" id="change-confirm-pwd" class="input" minlength="4" maxlength="64" required>
                     </div>
                     <div id="change-pwd-error" class="form-error hidden"></div>
                 </form>
             </div>
             <div class="modal-footer">
-                <button class="btn" onclick="closePasswordChangeModal()">稍后修改</button>
-                <button class="btn btn-service-style" onclick="submitPasswordChange()">立即修改</button>
+                <button class="btn" onclick="closePasswordChangeModal()">${typeof t === 'function' ? t('login.changeLater') : '稍后修改'}</button>
+                <button class="btn btn-service-style" onclick="submitPasswordChange()">${typeof t === 'function' ? t('login.changeNow') : '立即修改'}</button>
             </div>
         </div>
     `;
@@ -316,15 +324,14 @@ async function submitPasswordChange() {
     const confirmPwd = document.getElementById('change-confirm-pwd').value;
     const errorEl = document.getElementById('change-pwd-error');
     
-    // 验证
     if (newPwd !== confirmPwd) {
-        errorEl.textContent = '两次输入的新密码不一致';
+        errorEl.textContent = typeof t === 'function' ? t('login.passwordMismatch') : '两次输入的新密码不一致';
         errorEl.classList.remove('hidden');
         return;
     }
     
     if (newPwd.length < 4) {
-        errorEl.textContent = '新密码至少4个字符';
+        errorEl.textContent = typeof t === 'function' ? t('login.passwordMinLength') : '新密码至少4个字符';
         errorEl.classList.remove('hidden');
         return;
     }
@@ -333,13 +340,13 @@ async function submitPasswordChange() {
         const result = await api.changePassword(oldPwd, newPwd);
         if (result.code === 0) {
             closePasswordChangeModal();
-            showToast('密码修改成功！', 'success');
+            showToast(t('login.passwordChanged'), 'success');
         } else {
-            errorEl.textContent = result.message || '修改失败';
+            errorEl.textContent = result.message || t('toast.saveFailed');
             errorEl.classList.remove('hidden');
         }
     } catch (error) {
-        errorEl.textContent = error.message || '网络错误';
+        errorEl.textContent = error.message || t('login.networkError');
         errorEl.classList.remove('hidden');
     }
 }
@@ -532,22 +539,22 @@ async function loadSystemPage() {
                 <!-- 资源监控 (标题栏含服务状态) - 放首位，高频被动观察 -->
                 <div class="card">
                     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-                        <h3 style="margin:0">资源监控</h3>
+                        <h3 style="margin:0">${t('system.resourceMonitor')}</h3>
                         <button class="btn btn-sm btn-service-style" onclick="showServicesModal()" style="cursor:pointer">
-                            <i class="ri-service-line"></i> 服务 <span id="services-running">-</span>/<span id="services-total">-</span>
+                            <i class="ri-service-line"></i> ${t('system.services')} <span id="services-running">-</span>/<span id="services-total">-</span>
                         </button>
                     </div>
                     <div class="card-content" style="display:flex;gap:20px">
                         <div style="flex:1">
                             <p><strong>CPU</strong></p>
                             <div id="cpu-cores" style="margin-top:5px">
-                                <div class="loading-small">加载中...</div>
+                                <div class="loading-small">${t('common.loading')}</div>
                             </div>
                         </div>
                         <div style="flex:1;border-left:1px solid #e0e0e0;padding-left:20px">
                             <div style="display:flex;justify-content:space-between;align-items:center">
-                                <p><strong>内存</strong></p>
-                                <button class="btn btn-sm btn-gray" onclick="showMemoryDetailModal()" style="font-size:0.75em;padding:2px 8px" title="查看详细内存分析">详情</button>
+                                <p><strong>${t('system.memory')}</strong></p>
+                                <button class="btn btn-sm btn-gray" onclick="showMemoryDetailModal()" style="font-size:0.75em;padding:2px 8px" title="${t('system.memoryDetail')}">${t('system.detail')}</button>
                             </div>
                             <div style="margin-top:5px">
                                 <p style="font-size:0.85em;margin:3px 0">DRAM:</p>
@@ -564,28 +571,28 @@ async function loadSystemPage() {
                 <!-- 系统总览 (包含电源) - 第二位，操作按钮在右手热区 -->
                 <div class="card">
                     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-                        <h3 style="margin:0">系统总览</h3>
+                        <h3 style="margin:0">${t('system.title')}</h3>
                         <div style="display:flex;gap:8px">
-                            <button class="btn btn-small btn-gray" onclick="showShutdownSettingsModal()" style="font-size:0.85em" title="电压保护设置"><i class="ri-flashlight-line"></i> 关机设置</button>
+                            <button class="btn btn-small btn-gray" onclick="showShutdownSettingsModal()" style="font-size:0.85em" title="${t('system.shutdownSettings')}"><i class="ri-flashlight-line"></i> ${t('system.shutdownSettings')}</button>
                             <button id="usb-mux-btn" class="btn btn-small btn-gray" onclick="toggleUsbMux()" style="font-size:0.85em"><i class="ri-usb-line"></i> USB: <span id="usb-mux-target">-</span></button>
-                            <button class="btn btn-small btn-service-style" onclick="confirmReboot()" style="font-size:0.85em"><i class="ri-restart-line"></i> 重启</button>
+                            <button class="btn btn-small btn-service-style" onclick="confirmReboot()" style="font-size:0.85em"><i class="ri-restart-line"></i> ${t('system.reboot')}</button>
                         </div>
                     </div>
                     <div class="card-content" style="display:flex;gap:20px">
                         <div style="flex:1">
-                            <p style="font-size:0.9em;color:#888;margin-bottom:5px">系统信息</p>
-                            <p><strong>芯片:</strong> <span id="sys-chip">-</span></p>
-                            <p><strong>固件:</strong> <span id="sys-version">-</span> / <span id="sys-idf" style="font-size:0.85em;color:#888">-</span></p>
-                            <p><strong>运行:</strong> <span id="sys-uptime">-</span></p>
+                            <p style="font-size:0.9em;color:#888;margin-bottom:5px">${t('system.overview')}</p>
+                            <p><strong>${t('system.chip')}:</strong> <span id="sys-chip">-</span></p>
+                            <p><strong>${t('system.firmware')}:</strong> <span id="sys-version">-</span> / <span id="sys-idf" style="font-size:0.85em;color:#888">-</span></p>
+                            <p><strong>${t('system.uptime')}:</strong> <span id="sys-uptime">-</span></p>
                             <p style="font-size:0.8em;color:#888;margin-top:5px" id="sys-compile">-</p>
                         </div>
                         <div style="flex:1;border-left:1px solid #e0e0e0;padding-left:20px">
-                            <p style="font-size:0.9em;color:#888;margin-bottom:5px">电源状态</p>
-                            <p><strong>输入:</strong> <span id="voltage">-</span> <span style="font-size:0.85em;color:#888">/ 内部 <span id="internal-voltage">-</span></span></p>
-                            <p><strong>电流:</strong> <span id="current">-</span></p>
-                            <p><strong>功率:</strong> <span id="power-watts">-</span></p>
-                            <p style="display:flex;align-items:center;gap:6px"><strong>保护:</strong> 
-                                <i id="protection-toggle-icon" class="ri-toggle-line" onclick="toggleProtection()" title="点击切换保护状态" style="color:#666;cursor:pointer;font-size:1.2em"></i>
+                            <p style="font-size:0.9em;color:#888;margin-bottom:5px">${t('system.power')}</p>
+                            <p><strong>${t('system.inputVoltage')}:</strong> <span id="voltage">-</span> <span style="font-size:0.85em;color:#888">/ ${t('system.internal')} <span id="internal-voltage">-</span></span></p>
+                            <p><strong>${t('system.current')}:</strong> <span id="current">-</span></p>
+                            <p><strong>${t('system.wattage')}:</strong> <span id="power-watts">-</span></p>
+                            <p style="display:flex;align-items:center;gap:6px"><strong>${t('system.protection')}:</strong> 
+                                <i id="protection-toggle-icon" class="ri-toggle-line" onclick="toggleProtection()" title="${t('system.toggleProtectionTitle')}" style="color:#666;cursor:pointer;font-size:1.2em"></i>
                                 <span id="protection-status" style="font-size:0.85em">-</span>
                             </p>
                         </div>
@@ -595,24 +602,24 @@ async function loadSystemPage() {
                 <!-- 网络 & 时间 -->
                 <div class="card">
                     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-                        <h3 style="margin:0">网络 & 时间</h3>
-                        <button class="btn btn-small btn-service-style" onclick="router.navigate('/ota')" style="font-size:0.85em"><i class="ri-download-cloud-line"></i> OTA</button>
+                        <h3 style="margin:0">${t('system.networkTime')}</h3>
+                        <button class="btn btn-small btn-service-style" onclick="router.navigate('/ota')" style="font-size:0.85em"><i class="ri-download-cloud-line"></i> ${t('nav.ota')}</button>
                     </div>
                     <div class="card-content" style="display:flex;gap:20px">
                         <div style="flex:1">
-                            <p style="font-size:0.9em;color:#888;margin-bottom:5px">网络连接</p>
-                            <p><strong>以太网:</strong> <span id="eth-status">-</span></p>
-                            <p><strong>WiFi:</strong> <span id="wifi-status">-</span></p>
-                            <p><strong>IP:</strong> <span id="ip-addr" style="font-size:0.9em">-</span></p>
+                            <p style="font-size:0.9em;color:#888;margin-bottom:5px">${t('network.connection')}</p>
+                            <p><strong>${t('system.ethernet')}:</strong> <span id="eth-status">-</span></p>
+                            <p><strong>${t('system.wifi')}:</strong> <span id="wifi-status">-</span></p>
+                            <p><strong>${t('system.ipAddress')}:</strong> <span id="ip-addr" style="font-size:0.9em">-</span></p>
                         </div>
                         <div style="flex:1;border-left:1px solid #e0e0e0;padding-left:20px">
-                            <p style="font-size:0.9em;color:#888;margin-bottom:5px">时间同步</p>
-                            <p><strong>当前:</strong> <span id="sys-datetime" style="font-size:0.9em">-</span></p>
-                            <p><strong>状态:</strong> <span id="sys-time-status">-</span> <span style="font-size:0.85em;color:#888">(<span id="sys-time-source">-</span>)</span></p>
-                            <p><strong>时区:</strong> <span id="sys-timezone">-</span></p>
+                            <p style="font-size:0.9em;color:#888;margin-bottom:5px">${t('system.timeSync')}</p>
+                            <p><strong>${t('system.currentTime')}:</strong> <span id="sys-datetime" style="font-size:0.9em">-</span></p>
+                            <p><strong>${t('system.timeStatus')}:</strong> <span id="sys-time-status">-</span> <span style="font-size:0.85em;color:#888">(<span id="sys-time-source">-</span>)</span></p>
+                            <p><strong>${t('system.timezone')}:</strong> <span id="sys-timezone">-</span></p>
                             <div style="margin-top:8px;display:flex;gap:5px">
-                                <button type="button" class="btn btn-small btn-gray time-sync-btn" onclick="syncTimeFromBrowser()" style="font-size:0.85em;padding:4px 8px"><i class="ri-refresh-line"></i> 同步</button>
-                                <button class="btn btn-small btn-gray" onclick="showTimezoneModal()" style="font-size:0.85em;padding:4px 8px"><i class="ri-time-line"></i> 时区</button>
+                                <button type="button" class="btn btn-small btn-gray time-sync-btn" onclick="syncTimeFromBrowser()" style="font-size:0.85em;padding:4px 8px"><i class="ri-refresh-line"></i> ${t('system.syncTime')}</button>
+                                <button class="btn btn-small btn-gray" onclick="showTimezoneModal()" style="font-size:0.85em;padding:4px 8px"><i class="ri-time-line"></i> ${t('system.timezone')}</button>
                             </div>
                         </div>
                     </div>
@@ -624,16 +631,16 @@ async function loadSystemPage() {
                 <!-- 设备面板 -->
                 <div class="section device-panel-section">
                     <div class="section-header">
-                        <h2>设备面板</h2>
+                        <h2>${t('system.devicePanel')}</h2>
                         <div class="section-actions">
-                            <button id="agx-power-btn" class="btn btn-sm btn-danger" onclick="toggleAgxPower()"><i class="ri-checkbox-blank-circle-fill" style="color:#c62828"></i> AGX 已关闭</button>
-                            <button id="lpmu-power-btn" class="btn btn-sm btn-warning" onclick="toggleLpmuPower()"><i class="ri-alert-line"></i> LPMU 检测中</button>
-                            <button class="btn btn-sm btn-service-style" onclick="showWidgetManager()"><i class="ri-apps-line"></i> 组件管理</button>
+                            <button id="agx-power-btn" class="btn btn-sm btn-danger" onclick="toggleAgxPower()"><i class="ri-checkbox-blank-circle-fill" style="color:#c62828"></i> ${t('system.agxStopped')}</button>
+                            <button id="lpmu-power-btn" class="btn btn-sm btn-warning" onclick="toggleLpmuPower()"><i class="ri-alert-line"></i> ${t('system.lpmuDetecting')}</button>
+                            <button class="btn btn-sm btn-service-style" onclick="showWidgetManager()"><i class="ri-apps-line"></i> ${t('system.widgetManager')}</button>
                         </div>
                     </div>
                     <!-- 快捷操作区域 -->
                     <div id="quick-actions-grid" class="quick-actions-grid">
-                        <div class="loading-inline">加载中...</div>
+                        <div class="loading-inline">${t('common.loading')}</div>
                     </div>
                     <!-- 分隔线 -->
                     <div class="device-panel-divider"></div>
@@ -643,41 +650,41 @@ async function loadSystemPage() {
                     </div>
                     <div id="data-widgets-empty" class="data-widgets-empty" style="display:none;">
                         <div class="empty-icon"><i class="ri-box-3-line"></i></div>
-                        <p>还没有添加数据组件</p>
+                        <p>${t('system.noDataWidgetsYet')}</p>
                     </div>
                 </div>
                 
                 <!-- 风扇控制 -->
                 <div class="section fan-control-section">
                     <div class="section-header">
-                        <h2>风扇控制</h2>
+                        <h2>${t('fan.title')}</h2>
                         <div class="section-actions fan-section-actions">
-                            <button type="button" class="btn btn-sm btn-gray fan-refresh-btn" onclick="refreshFans()" title="刷新"><i class="ri-refresh-line"></i></button>
-                            <button type="button" class="btn btn-sm btn-service-style" onclick="showFanCurveModal()"><i class="ri-line-chart-line"></i> 曲线</button>
+                            <button type="button" class="btn btn-sm btn-gray fan-refresh-btn" onclick="refreshFans()" title="${t('common.refresh')}"><i class="ri-refresh-line"></i></button>
+                            <button type="button" class="btn btn-sm btn-service-style" onclick="showFanCurveModal()"><i class="ri-line-chart-line"></i> ${t('fan.curve')}</button>
                         </div>
                     </div>
                     <!-- 温度状态栏 -->
                     <div class="fan-temp-status-bar" id="fan-temp-status-bar">
                         <div class="temp-status-item">
-                            <span class="temp-label"><i class="ri-temp-hot-line"></i> 有效温度</span>
+                            <span class="temp-label"><i class="ri-temp-hot-line"></i> ${t('fan.effectiveTemp')}</span>
                             <span class="temp-value" id="fan-global-temp">--°C</span>
                         </div>
                         <div class="temp-status-item">
-                            <span class="temp-label"><i class="ri-dashboard-3-line"></i> 目标转速</span>
+                            <span class="temp-label"><i class="ri-dashboard-3-line"></i> ${t('fan.targetSpeed')}</span>
                             <span class="temp-value" id="fan-global-duty">--%</span>
                         </div>
                         <div class="temp-status-item test-temp-control">
-                            <span class="temp-label"><i class="ri-scan-line"></i> 测试温度</span>
+                            <span class="temp-label"><i class="ri-scan-line"></i> ${t('fan.testTemp')}</span>
                             <div class="test-temp-input-wrap">
                                 <input type="number" id="fan-test-temp" class="input input-sm" 
                                        placeholder="--" min="0" max="100" step="1" style="width:60px;">
-                                <button class="btn btn-sm btn-warning" onclick="applyTestTemp()">测试</button>
-                                <button class="btn btn-sm btn-gray" onclick="clearTestTemp()">清除</button>
+                                <button class="btn btn-sm btn-warning" onclick="applyTestTemp()">${t('common.test')}</button>
+                                <button class="btn btn-sm btn-gray" onclick="clearTestTemp()">${t('fan.clearTest')}</button>
                             </div>
                         </div>
                     </div>
                     <div class="fans-grid" id="fans-grid">
-                        <div class="loading">加载中...</div>
+                        <div class="loading">${t('common.loading')}</div>
                     </div>
                 </div>
             </div>
@@ -685,15 +692,15 @@ async function loadSystemPage() {
             <!-- LED 控制 -->
             <div class="section">
                 <div class="led-page-header">
-                    <h2>LED 控制</h2>
+                    <h2>${t('led.title')}</h2>
                     <div class="led-quick-actions">
-                        <button type="button" class="btn btn-sm btn-gray led-refresh-btn" onclick="refreshSystemLeds()" title="刷新"><i class="ri-refresh-line"></i></button>
-                        <button class="btn btn-sm btn-gray system-led-cc-btn" id="system-led-cc-btn" onclick="openLedModal('matrix', 'colorcorrection')" style="display:none"><i class="ri-contrast-line"></i> 色彩校正</button>
-                        <button class="btn btn-sm btn-gray" onclick="allLedsOff()">全部关闭</button>
+                        <button type="button" class="btn btn-sm btn-gray led-refresh-btn" onclick="refreshSystemLeds()" title="${t('common.refresh')}"><i class="ri-refresh-line"></i></button>
+                        <button class="btn btn-sm btn-gray system-led-cc-btn" id="system-led-cc-btn" onclick="openLedModal('matrix', 'colorcorrection')" style="display:none"><i class="ri-contrast-line"></i> ${t('ledPage.colorCorrectionTitle')}</button>
+                        <button class="btn btn-sm btn-gray" onclick="allLedsOff()">${t('led.allOff')}</button>
                     </div>
                 </div>
                 <div id="system-led-devices-grid" class="led-devices-grid">
-                    <div class="loading-inline">加载设备中...</div>
+                    <div class="loading-inline">${t('ledPage.loadingDevices')}</div>
                 </div>
             </div>
         </div>
@@ -702,18 +709,18 @@ async function loadSystemPage() {
         <div id="services-modal" class="modal hidden">
             <div class="modal-content cc-compact" style="max-width:900px">
                 <div class="modal-header">
-                    <h2>服务状态</h2>
+                    <h2>${t('system.serviceStatusTitle')}</h2>
                     <button class="modal-close" onclick="hideServicesModal()"><i class="ri-close-line"></i></button>
                 </div>
                 <div class="modal-body">
                     <table class="data-table" id="services-table">
                         <thead>
                             <tr>
-                                <th>服务名称</th>
-                                <th>状态</th>
-                                <th>阶段</th>
-                                <th>健康</th>
-                                <th>操作</th>
+                                <th>${t('system.serviceName')}</th>
+                                <th>${t('system.serviceStatus')}</th>
+                                <th>${t('system.stage')}</th>
+                                <th>${t('system.health')}</th>
+                                <th>${t('common.actions')}</th>
                             </tr>
                         </thead>
                         <tbody id="services-body"></tbody>
@@ -814,7 +821,7 @@ async function refreshSystemPageOnce() {
         const fans = await api.fanStatus();
         updateFanInfo(fans.data);
     } catch (e) { 
-        document.getElementById('fans-grid').innerHTML = '<p class="text-muted">风扇状态不可用</p>';
+        document.getElementById('fans-grid').innerHTML = '<p class="text-muted">' + t('fan.statusUnavailable') + '</p>';
     }
     
     // 服务列表
@@ -871,7 +878,7 @@ function updateUsbMuxButton() {
     const btn = document.getElementById('usb-mux-btn');
 
     if (!usbMuxConfigured) {
-        if (targetEl) targetEl.textContent = '未配置';
+        if (targetEl) targetEl.textContent = t('common.notConfigured');
         if (btn) {
             btn.className = 'btn btn-small btn-gray';
             btn.disabled = true;
@@ -902,7 +909,7 @@ function updateProtectionUI(running) {
         icon.style.color = running ? '#2e7d32' : '#666';
     }
     if (statusSpan) {
-        statusSpan.textContent = running ? '已启用' : '已禁用';
+        statusSpan.textContent = running ? t('status.enabled') : t('status.disabled');
         statusSpan.style.color = running ? '#2e7d32' : '#666';
     }
 }
@@ -933,16 +940,16 @@ async function toggleProtection() {
         if (result.code === 0) {
             const isRunning = result.data?.running ?? newState;
             updateProtectionUI(isRunning);
-            showToast(isRunning ? '电压保护已启用' : '电压保护已禁用', isRunning ? 'success' : 'warning');
+            showToast(isRunning ? t('system.protectionEnabled') : t('system.protectionDisabled'), isRunning ? 'success' : 'warning');
         } else {
             // 恢复原状态
             updateProtectionUI(currentRunning);
-            showToast('切换失败: ' + (result.message || '未知错误'), 'error');
+            showToast(t('system.switchFailed') + ': ' + (result.message || t('common.unknown')), 'error');
         }
     } catch (e) {
         // 恢复原状态
         updateProtectionUI(currentRunning);
-        showToast('切换失败: ' + e.message, 'error');
+        showToast(t('system.switchFailed') + ': ' + e.message, 'error');
     } finally {
         if (icon) icon.style.pointerEvents = 'auto';
     }
@@ -950,7 +957,7 @@ async function toggleProtection() {
 
 async function toggleUsbMux() {
     if (!usbMuxConfigured) {
-        showToast('USB MUX 未配置', 'warning');
+        showToast(t('system.usbMuxNotConfigured'), 'warning');
         return;
     }
 
@@ -961,18 +968,18 @@ async function toggleUsbMux() {
     const displayName = USB_MUX_DISPLAY[newTarget];
 
     try {
-        showToast(`切换 USB 到 ${displayName}...`, 'info');
+        showToast(t('system.usbSwitchTo', { name: displayName }), 'info');
         const result = await api.call('device.usb.set', { target: newTarget }, 'POST');
 
         if (result.code === 0) {
             usbMuxTarget = newTarget;
             updateUsbMuxButton();
-            showToast(`USB 已切换到 ${displayName}`, 'success');
+            showToast(t('system.usbSwitchedTo', { name: displayName }), 'success');
         } else {
-            showToast(`切换失败: ${result.message || '未知错误'}`, 'error');
+            showToast(t('system.switchFailed') + ': ' + (result.message || t('common.unknown')), 'error');
         }
     } catch (e) {
-        showToast(`切换失败: ${e.message}`, 'error');
+        showToast(t('system.switchFailed') + ': ' + e.message, 'error');
     }
 }
 
@@ -996,33 +1003,34 @@ function updateAgxPowerButton() {
     if (!btn) return;
 
     if (agxPowerState) {
-        btn.innerHTML = '<i class="ri-checkbox-blank-circle-fill" style="color:#2e7d32"></i> AGX 运行中';
+        btn.innerHTML = '<i class="ri-checkbox-blank-circle-fill" style="color:#2e7d32"></i> ' + t('system.agxRunning');
         btn.className = 'btn btn-sm btn-success';
-        btn.title = '点击关闭 AGX 电源';
+        btn.title = t('system.agxPowerOffTitle');
     } else {
-        btn.innerHTML = '<i class="ri-checkbox-blank-circle-fill" style="color:#c62828"></i> AGX 已关闭';
+        btn.innerHTML = '<i class="ri-checkbox-blank-circle-fill" style="color:#c62828"></i> ' + t('system.agxStopped');
         btn.className = 'btn btn-sm btn-danger';
-        btn.title = '点击开启 AGX 电源';
+        btn.title = t('system.agxPowerOnTitle');
     }
 }
 
 async function toggleAgxPower() {
     const action = agxPowerState ? 'off' : 'on';
-    const actionText = agxPowerState ? '断电' : '上电';
+    const toastInfo = agxPowerState ? t('system.agxPoweringOff') : t('system.agxPoweringOn');
+    const toastSuccess = agxPowerState ? t('system.agxPowerOffSuccess') : t('system.agxPowerOnSuccess');
 
     try {
-        showToast(`AGX ${actionText}中...`, 'info');
+        showToast(toastInfo, 'info');
         const result = await api.call('device.power', { device: 'agx', action: action }, 'POST');
 
         if (result.code === 0) {
             agxPowerState = !agxPowerState;
             updateAgxPowerButton();
-            showToast(`AGX 已${actionText}`, 'success');
+            showToast(toastSuccess, 'success');
         } else {
-            showToast(`AGX ${actionText}失败: ${result.message || '未知错误'}`, 'error');
+            showToast(t('system.agxPowerFail') + ': ' + (result.message || t('common.unknown')), 'error');
         }
     } catch (e) {
-        showToast(`AGX ${actionText}失败: ${e.message}`, 'error');
+        showToast(t('system.agxPowerFail') + ': ' + e.message, 'error');
     }
 }
 
@@ -1035,12 +1043,12 @@ let lpmuPollingStartTime = 0;
 let lpmuPollingMode = 'startup'; // 'startup' | 'shutdown'
 
 async function toggleLpmuPower() {
-    if (!confirm('确定要触发 LPMU 电源按钮吗？\n\n这将发送一个脉冲信号，效果类似按物理电源按钮。')) {
+    if (!confirm(t('system.lpmuTriggerConfirm'))) {
         return;
     }
 
     try {
-        showToast('LPMU 电源触发中...', 'info');
+        showToast(t('system.lpmuTriggering'), 'info');
         // 记录触发前的状态（用于决定检测逻辑）
         const wasOnline = (lpmuState === 'online');
 
@@ -1048,14 +1056,14 @@ async function toggleLpmuPower() {
         const result = await api.call('device.power', { device: 'lpmu', action: 'toggle' }, 'POST');
 
         if (result.code === 0) {
-            showToast('LPMU 电源已触发，开始检测状态...', 'success');
+            showToast(t('system.lpmuTriggerSuccess'), 'success');
             // 启动状态检测（传入之前的状态）
             startLpmuStatePolling(wasOnline);
         } else {
-            showToast(`LPMU 触发失败: ${result.message || '未知错误'}`, 'error');
+            showToast(t('system.lpmuTriggerFail') + ': ' + (result.message || t('common.unknown')), 'error');
         }
     } catch (e) {
-        showToast(`LPMU 触发失败: ${e.message}`, 'error');
+        showToast(t('system.lpmuTriggerFail') + ': ' + e.message, 'error');
     }
 }
 
@@ -1087,7 +1095,7 @@ function startLpmuStatePolling(wasOnline = false) {
                 lpmuState = 'online';
                 updateLpmuPowerButton();
                 stopLpmuStatePolling();
-                showToast(`LPMU 已上线 (${Math.round(elapsed)}秒)`, 'success');
+                showToast(t('system.lpmuOnlineSuccess') + ' (' + Math.round(elapsed) + (getLanguage() === 'zh-CN' ? '秒' : 's') + ')', 'success');
                 return;
             }
             updateLpmuPowerButton(remaining);
@@ -1095,7 +1103,7 @@ function startLpmuStatePolling(wasOnline = false) {
                 lpmuState = 'offline';
                 updateLpmuPowerButton();
                 stopLpmuStatePolling();
-                showToast('LPMU 开机检测超时，认定为已关闭', 'warning');
+                showToast(t('system.lpmuStartupTimeout'), 'warning');
             }
         } else {
             if (elapsed < minWaitSec) {
@@ -1106,7 +1114,7 @@ function startLpmuStatePolling(wasOnline = false) {
                 lpmuState = 'offline';
                 updateLpmuPowerButton();
                 stopLpmuStatePolling();
-                showToast(`LPMU 已关闭 (${Math.round(elapsed)}秒)`, 'success');
+                showToast(t('system.lpmuOfflineSuccess') + ' (' + Math.round(elapsed) + (getLanguage() === 'zh-CN' ? '秒' : 's') + ')', 'success');
                 return;
             }
             updateLpmuPowerButton(remaining);
@@ -1114,7 +1122,7 @@ function startLpmuStatePolling(wasOnline = false) {
                 lpmuState = 'online';
                 updateLpmuPowerButton();
                 stopLpmuStatePolling();
-                showToast('LPMU 关机检测超时，设备可能仍在运行', 'warning');
+                showToast(t('system.lpmuShutdownTimeout'), 'warning');
             }
         }
     }, 5000);
@@ -1173,25 +1181,25 @@ function updateLpmuPowerButton(remainingSec = 0) {
 
     switch (lpmuState) {
         case 'online':
-            btn.innerHTML = '<i class="ri-checkbox-blank-circle-fill" style="color:#2e7d32"></i> LPMU 运行中';
+            btn.innerHTML = '<i class="ri-checkbox-blank-circle-fill" style="color:#2e7d32"></i> ' + t('system.lpmuRunning');
             btn.className = 'btn btn-sm btn-success';
-            btn.title = 'LPMU 在线 (ping 10.10.99.99 可达)\n点击触发电源按钮';
+            btn.title = t('system.lpmuOnlineTitle');
             break;
         case 'offline':
-            btn.innerHTML = '<i class="ri-checkbox-blank-circle-fill" style="color:#c62828"></i> LPMU 已关闭';
+            btn.innerHTML = '<i class="ri-checkbox-blank-circle-fill" style="color:#c62828"></i> ' + t('system.lpmuStopped');
             btn.className = 'btn btn-sm btn-danger';
-            btn.title = 'LPMU 离线 (ping 10.10.99.99 不可达)\n点击触发电源按钮';
+            btn.title = t('system.lpmuOfflineTitle');
             break;
         case 'detecting':
-            const timeText = remainingSec > 0 ? ` (${remainingSec}s)` : '';
-            btn.innerHTML = `<i class="ri-hourglass-line"></i> 状态获取中${timeText}`;
+            const timeText = remainingSec > 0 ? ' (' + remainingSec + 's)' : '';
+            btn.innerHTML = '<i class="ri-hourglass-line"></i> ' + t('system.statusFetching') + timeText;
             btn.className = 'btn btn-sm btn-warning';
-            btn.title = '正在检测 LPMU 状态...\n最多等待 80 秒';
+            btn.title = t('system.lpmuDetectingTitle');
             break;
         default:
-            btn.innerHTML = '<i class="ri-alert-line"></i> LPMU 检测中';
+            btn.innerHTML = '<i class="ri-alert-line"></i> ' + t('system.lpmuDetecting');
             btn.className = 'btn btn-sm btn-warning';
-            btn.title = 'LPMU 状态未知\n点击触发电源按钮';
+            btn.title = t('system.lpmuUnknownTitle');
     }
 }
 
@@ -1256,12 +1264,12 @@ function updateTimeInfo(data) {
         setTimeout(() => syncTimeFromBrowser(true), 500);  // 延迟执行避免阻塞页面加载
     }
     
-    const statusText = data.synced ? '已同步' : '未同步';
+    const statusText = data.synced ? (typeof t === 'function' ? t('system.timeSynced') : '已同步') : (typeof t === 'function' ? t('system.timeNotSynced') : '未同步');
     const statusElem = document.getElementById('sys-time-status');
     if (statusElem) {
         statusElem.textContent = statusText;
     }
-    const sourceMap = { ntp: 'NTP', http: '浏览器', manual: '手动', none: '未同步' };
+    const sourceMap = typeof t === 'function' ? { ntp: t('system.timeSourceNtp'), http: t('system.timeSourceHttp'), manual: t('system.timeSourceManual'), none: t('system.timeSourceNone') } : { ntp: 'NTP', http: '浏览器', manual: '手动', none: '未同步' };
     const sourceElem = document.getElementById('sys-time-source');
     if (sourceElem) {
         sourceElem.textContent = sourceMap[data.source] || data.source;
@@ -1334,8 +1342,8 @@ function updateNetworkInfo(data) {
     if (!data) return;
     const eth = data.ethernet || {};
     const wifi = data.wifi || {};
-    document.getElementById('eth-status').textContent = eth.status === 'connected' ? '已连接' : '未连接';
-    document.getElementById('wifi-status').textContent = wifi.connected ? '已连接' : '未连接';
+    document.getElementById('eth-status').textContent = eth.status === 'connected' ? (typeof t === 'function' ? t('status.connected') : '已连接') : (typeof t === 'function' ? t('status.disconnected') : '未连接');
+    document.getElementById('wifi-status').textContent = wifi.connected ? (typeof t === 'function' ? t('status.connected') : '已连接') : (typeof t === 'function' ? t('status.disconnected') : '未连接');
     document.getElementById('ip-addr').textContent = eth.ip || wifi.ip || '-';
 }
 
@@ -1405,60 +1413,56 @@ function updateFanInfo(data) {
             const isManual = mode === 'manual';
             const isOff = mode === 'off';
             
+            const _off = typeof t === 'function' ? t('fanPage.modeOff') : '关闭';
+            const _manual = typeof t === 'function' ? t('fanPage.modeManual') : '手动';
+            const _auto = typeof t === 'function' ? t('fanPage.modeAuto') : '自动';
+            const _curve = typeof t === 'function' ? t('fanPage.modeCurve') : '曲线';
             const modeInfo = {
-                'off':    { label: '关闭', color: '#6b7280', iconRi: 'ri-stop-line' },
-                'manual': { label: '手动', color: '#f59e0b', iconRi: 'ri-settings-3-line' },
-                'auto':   { label: '自动', color: '#10b981', iconRi: 'ri-run-line' },
-                'curve':  { label: '曲线', color: '#3b82f6', iconRi: 'ri-line-chart-line' }
+                'off':    { label: _off, color: '#6b7280', iconRi: 'ri-stop-line' },
+                'manual': { label: _manual, color: '#f59e0b', iconRi: 'ri-settings-3-line' },
+                'auto':   { label: _auto, color: '#10b981', iconRi: 'ri-run-line' },
+                'curve':  { label: _curve, color: '#3b82f6', iconRi: 'ri-line-chart-line' }
             };
             const currentMode = modeInfo[mode] || modeInfo['auto'];
+            const _fanTitle = typeof t === 'function' ? t('fanPage.fanN', { id: fan.id }) : `风扇 ${fan.id}`;
+            const _speedAdjust = typeof t === 'function' ? t('fanPage.speedAdjust') : '转速调节';
+            const _manualHint = typeof t === 'function' ? t('fanPage.manualModeHint') : '切换到手动模式后可调节';
             
             return `
             <div class="fan-card ${isOff ? 'is-off' : ''}">
-                <!-- 顶部：风扇名 + 状态（仅图标） -->
                 <div class="fan-header">
-                    <span class="fan-title">风扇 ${fan.id}</span>
+                    <span class="fan-title">${_fanTitle}</span>
                     <span class="fan-status-badge" style="background:${currentMode.color}20;color:${currentMode.color}" title="${currentMode.label}">
                         <i class="${currentMode.iconRi}"></i>
                     </span>
                 </div>
-                
-                <!-- 中间：大转速数字（曲线/自动模式显示目标，手动模式显示当前） -->
                 <div class="fan-speed-display">
                     <span class="fan-speed-num">${displayDuty}</span>
                     <span class="fan-speed-percent">%</span>
                     ${rpm > 0 ? `<div class="fan-rpm-small">${rpm} RPM</div>` : ''}
                 </div>
-                
-                <!-- 模式选择 -->
                 <div class="fan-mode-tabs">
-                    <button class="fan-mode-tab ${mode === 'off' ? 'active off' : ''}" 
-                            onclick="setFanMode(${fan.id}, 'off')">关闭</button>
-                    <button class="fan-mode-tab ${mode === 'manual' ? 'active manual' : ''}" 
-                            onclick="setFanMode(${fan.id}, 'manual')">手动</button>
-                    <button class="fan-mode-tab ${mode === 'auto' ? 'active auto' : ''}" 
-                            onclick="setFanMode(${fan.id}, 'auto')">自动</button>
-                    <button class="fan-mode-tab ${mode === 'curve' ? 'active curve' : ''}" 
-                            onclick="setFanMode(${fan.id}, 'curve')">曲线</button>
+                    <button class="fan-mode-tab ${mode === 'off' ? 'active off' : ''}" onclick="setFanMode(${fan.id}, 'off')">${_off}</button>
+                    <button class="fan-mode-tab ${mode === 'manual' ? 'active manual' : ''}" onclick="setFanMode(${fan.id}, 'manual')">${_manual}</button>
+                    <button class="fan-mode-tab ${mode === 'auto' ? 'active auto' : ''}" onclick="setFanMode(${fan.id}, 'auto')">${_auto}</button>
+                    <button class="fan-mode-tab ${mode === 'curve' ? 'active curve' : ''}" onclick="setFanMode(${fan.id}, 'curve')">${_curve}</button>
                 </div>
-                
-                <!-- 速度调节滑块 -->
                 <div class="fan-slider-wrap ${isManual ? '' : 'disabled'}">
                     <div class="fan-slider-label">
-                        <span>转速调节</span>
+                        <span>${_speedAdjust}</span>
                         <span class="fan-slider-value">${duty}%</span>
                     </div>
                     <input type="range" class="fan-slider" min="0" max="100" value="${duty}" 
                            id="fan-slider-${fan.id}"
                            onchange="setFanSpeed(${fan.id}, this.value)"
                            oninput="updateFanSliderUI(${fan.id}, this.value)"
-                           ${!isManual ? 'disabled title="切换到手动模式后可调节"' : ''}>
+                           ${!isManual ? 'disabled title="' + _manualHint + '"' : ''}>
                 </div>
             </div>
         `;
         }).join('');
     } else {
-        container.innerHTML = '<p class="text-muted">无可用风扇</p>';
+        container.innerHTML = '<p class="text-muted">' + (typeof t === 'function' ? t('fanPage.noFans') : '无可用风扇') + '</p>';
     }
 }
 
@@ -1507,7 +1511,7 @@ function updateServiceList(data) {
             <td>${svc.phase}</td>
             <td>${svc.healthy ? '<i class="ri-check-line health-ok"></i>' : '<i class="ri-close-line health-fail"></i>'}</td>
             <td>
-                <button class="btn btn-small" onclick="serviceAction('${svc.name}', 'restart')">重启</button>
+                <button class="btn btn-small" onclick="serviceAction('${svc.name}', 'restart')">${t('system.reboot')}</button>
             </td>
         `;
         tbody.appendChild(tr);
@@ -1658,103 +1662,78 @@ async function showFanCurveModal(fanId = 0) {
     modal.innerHTML = `
         <div class="modal-content cc-compact" style="max-width:650px;">
             <div class="modal-header">
-                <h2>风扇曲线管理</h2>
+                <h2>${t('fanPage.curveManagement')}</h2>
                 <button class="modal-close" onclick="closeFanCurveModal()"><i class="ri-close-line"></i></button>
             </div>
             <div class="modal-body">
-                <!-- 风扇选择 -->
                 <div class="form-group">
-                    <label>选择风扇</label>
+                    <label>${t('fanPage.selectFan')}</label>
                     <select id="fan-curve-fan-select" class="input" onchange="updateFanCurvePreview()">
-                        <option value="0">风扇 0</option>
-                        <option value="1">风扇 1</option>
-                        <option value="2">风扇 2</option>
-                        <option value="3">风扇 3</option>
+                        <option value="0">${t('fanPage.fanN', { id: 0 })}</option>
+                        <option value="1">${t('fanPage.fanN', { id: 1 })}</option>
+                        <option value="2">${t('fanPage.fanN', { id: 2 })}</option>
+                        <option value="3">${t('fanPage.fanN', { id: 3 })}</option>
                     </select>
                 </div>
-                
-                <!-- 温度变量绑定 -->
                 <div class="form-group" style="background:var(--bg-tertiary); border-radius:8px; padding:12px 0;">
                     <label style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-                        <span>绑定温度变量</span>
+                        <span>${t('fanPage.bindTempVar')}</span>
                         <div style="display:flex; gap:8px; align-items:center;">
-                            <span id="variable-bind-status" class="badge" style="background:#f0f8ff;color:#007bff;border:1px solid #d0e8ff;">未绑定</span>
-                            <div id="fan-curve-temp-current" style="
-                                padding:4px 12px; background:var(--bg-secondary); border-radius:6px;
-                                font-size:16px; font-weight:bold; color:var(--primary);">
-                                --°C
-                            </div>
+                            <span id="variable-bind-status" class="badge" style="background:#f0f8ff;color:#007bff;border:1px solid #d0e8ff;">${t('fanPage.unbound')}</span>
+                            <div id="fan-curve-temp-current" style="padding:4px 12px; background:var(--bg-secondary); border-radius:6px; font-size:16px; font-weight:bold; color:var(--primary);">--°C</div>
                         </div>
                     </label>
                     <div style="display:flex; gap:8px; align-items:center;">
                         <select id="temp-variable-select" class="input" style="flex:1;">
-                            <option value="">-- 选择变量 --</option>
+                            <option value="">${t('fanPage.selectVariable')}</option>
                         </select>
-                        <button class="btn btn-sm btn-service-style" onclick="bindTempVariable()">绑定</button>
+                        <button class="btn btn-sm btn-service-style" onclick="bindTempVariable()">${t('fanPage.bind')}</button>
                         <button class="btn btn-sm btn-secondary" onclick="unbindTempVariable()"><i class="ri-delete-bin-line"></i></button>
                     </div>
-                    <small class="form-hint" id="temp-source-hint" style="margin-top:4px;">
-                        选择一个浮点类型变量作为温度源（如 agx.cpu_temp）
-                    </small>
+                    <small class="form-hint" id="temp-source-hint" style="margin-top:4px;">${t('fanPage.selectVariableHint')}</small>
                 </div>
-                
-                <!-- 曲线点编辑 -->
                 <div class="form-group">
                     <label style="display:flex;justify-content:space-between;align-items:center;">
-                        <span>温度-转速曲线</span>
-                        <button class="btn btn-sm btn-success" onclick="addCurvePoint()"><i class="ri-add-line"></i> 添加点</button>
+                        <span>${t('fanPage.tempSpeedCurve')}</span>
+                        <button class="btn btn-sm btn-success" onclick="addCurvePoint()"><i class="ri-add-line"></i> ${t('fanPage.addPoint')}</button>
                     </label>
-                    <div id="fan-curve-points" class="fan-curve-points">
-                        ${renderCurvePoints()}
-                    </div>
-                    <small class="form-hint">温度低于最小点时使用最小转速，高于最大点时使用最大转速</small>
+                    <div id="fan-curve-points" class="fan-curve-points">${renderCurvePoints()}</div>
+                    <small class="form-hint">${t('fanPage.curveHint')}</small>
                 </div>
-                
-                <!-- 曲线预览 -->
                 <div class="form-group">
-                    <label>曲线预览</label>
-                    <div class="fan-curve-preview">
-                        <canvas id="fan-curve-canvas" width="560" height="200"></canvas>
-                    </div>
+                    <label>${t('fanPage.curvePreview')}</label>
+                    <div class="fan-curve-preview"><canvas id="fan-curve-canvas" width="560" height="200"></canvas></div>
                 </div>
-                
-                <!-- 占空比限制 -->
                 <div class="form-row">
                     <div class="form-group" style="flex:1;">
-                        <label>最小占空比 (%)</label>
-                        <input type="number" id="fan-curve-min-duty" class="input" 
-                               value="${fanCurveConfig.minDuty}" min="0" max="100" step="1">
-                        <small class="form-hint">低于此值时的最低转速</small>
+                        <label>${t('fanPage.minDuty')}</label>
+                        <input type="number" id="fan-curve-min-duty" class="input" value="${fanCurveConfig.minDuty}" min="0" max="100" step="1">
+                        <small class="form-hint">${t('fanPage.minDutyHint')}</small>
                     </div>
                     <div class="form-group" style="flex:1;">
-                        <label>最大占空比 (%)</label>
-                        <input type="number" id="fan-curve-max-duty" class="input" 
-                               value="${fanCurveConfig.maxDuty}" min="0" max="100" step="1">
-                        <small class="form-hint">高于此值时的最高转速</small>
+                        <label>${t('fanPage.maxDuty')}</label>
+                        <input type="number" id="fan-curve-max-duty" class="input" value="${fanCurveConfig.maxDuty}" min="0" max="100" step="1">
+                        <small class="form-hint">${t('fanPage.maxDutyHint')}</small>
                     </div>
                 </div>
-                
-                <!-- 迟滞设置 -->
                 <div class="form-row">
                     <div class="form-group" style="flex:1;">
-                        <label>温度迟滞 (°C)</label>
-                        <input type="number" id="fan-curve-hysteresis" class="input" 
-                               value="${fanCurveConfig.hysteresis}" min="0" max="20" step="0.5">
-                        <small class="form-hint">防止频繁调速</small>
+                        <label>${t('fanPage.tempHysteresis')}</label>
+                        <input type="number" id="fan-curve-hysteresis" class="input" value="${fanCurveConfig.hysteresis}" min="0" max="20" step="0.5">
+                        <small class="form-hint">${t('fanPage.hysteresisHint')}</small>
                     </div>
                     <div class="form-group" style="flex:1;">
-                        <label>最小间隔 (ms)</label>
-                        <input type="number" id="fan-curve-interval" class="input" 
-                               value="${fanCurveConfig.minInterval}" min="500" max="30000" step="100">
-                        <small class="form-hint">调速最小时间间隔</small>
+                        <label>${t('fanPage.minInterval')}</label>
+                        <input type="number" id="fan-curve-interval" class="input" value="${fanCurveConfig.minInterval}" min="500" max="30000" step="100">
+                        <small class="form-hint">${t('fanPage.intervalHint')}</small>
                     </div>
                 </div>
             </div>
             <div class="modal-footer">
-                <button class="btn" onclick="closeFanCurveModal()">取消</button>
-                <button class="btn btn-service-style" onclick="importFanCurveConfig()"><i class="ri-upload-line"></i> 导入配置</button>
-                <button class="btn btn-service-style" onclick="exportFanCurveConfig()"><i class="ri-download-line"></i> 导出配置</button>
-                <button class="btn btn-service-style" onclick="applyFanCurve()"><i class="ri-check-line"></i> 应用曲线</button>
+                <button class="btn" onclick="closeFanCurveModal()">${t('fanPage.cancel')}</button>
+                <button class="btn btn-service-style" onclick="importFanCurveConfig()"><i class="ri-upload-line"></i> ${t('fan.importConfig')}</button>
+                <button class="btn btn-service-style" onclick="exportFanCurveConfig()"><i class="ri-download-line"></i> ${t('fan.exportConfig')}</button>
+                <button class="btn btn-service-style" onclick="applyFanCurve()"><i class="ri-check-line"></i> ${t('fanPage.applyCurve')}</button>
             </div>
         </div>
     `;
@@ -1783,6 +1762,8 @@ function closeFanCurveModal() {
  * 渲染曲线点列表
  */
 function renderCurvePoints() {
+    const _tempPh = typeof t === 'function' ? t('fanPage.tempPlaceholder') : '温度';
+    const _speedPh = typeof t === 'function' ? t('fanPage.speedPlaceholder') : '转速';
     return fanCurveConfig.curve.map((point, index) => `
         <div class="curve-point-row" data-index="${index}">
             <div class="curve-point-inputs">
@@ -1791,7 +1772,7 @@ function renderCurvePoints() {
                     <input type="number" class="input curve-temp-input" 
                            value="${point.temp}" min="-20" max="120" step="1"
                            onchange="updateCurvePoint(${index}, 'temp', this.value)"
-                           placeholder="温度">
+                           placeholder="${_tempPh}">
                     <span class="field-unit">°C</span>
                 </div>
                 <span class="curve-arrow"><i class="ri-arrow-right-line"></i></span>
@@ -1800,7 +1781,7 @@ function renderCurvePoints() {
                     <input type="number" class="input curve-duty-input" 
                            value="${point.duty}" min="0" max="100" step="1"
                            onchange="updateCurvePoint(${index}, 'duty', this.value)"
-                           placeholder="转速">
+                           placeholder="${_speedPh}">
                     <span class="field-unit">%</span>
                 </div>
             </div>
@@ -1818,7 +1799,7 @@ function renderCurvePoints() {
  */
 function addCurvePoint() {
     if (fanCurveConfig.curve.length >= 10) {
-        showToast('最多支持 10 个曲线点', 'warning');
+        showToast(typeof t === 'function' ? t('fanPage.maxCurvePoints') : '最多支持 10 个曲线点', 'warning');
         return;
     }
     
@@ -1836,7 +1817,7 @@ function addCurvePoint() {
  */
 function removeCurvePoint(index) {
     if (fanCurveConfig.curve.length <= 2) {
-        showToast('至少需要 2 个曲线点', 'warning');
+        showToast(typeof t === 'function' ? t('fanPage.minCurvePoints') : '至少需要 2 个曲线点', 'warning');
         return;
     }
     fanCurveConfig.curve.splice(index, 1);
@@ -2016,7 +1997,7 @@ async function loadTempSourceStatus() {
             // 更新提示信息
             const hintEl = document.getElementById('temp-source-hint');
             if (hintEl && data.bound_variable) {
-                hintEl.textContent = `当前绑定: ${data.bound_variable}`;
+                hintEl.textContent = (typeof t === 'function' ? t('fanPage.currentBound') : '当前绑定') + ': ' + data.bound_variable;
             }
         }
         
@@ -2047,10 +2028,10 @@ async function loadVariableBindStatus() {
             const boundVar = bindResult.data.bound_variable;
             if (statusEl) {
                 if (boundVar) {
-                    statusEl.textContent = `已绑定: ${boundVar}`;
+                    statusEl.textContent = (typeof t === 'function' ? t('fanPage.bound') : '已绑定') + ': ' + boundVar;
                     statusEl.className = 'badge badge-success';
                 } else {
-                    statusEl.textContent = '未绑定';
+                    statusEl.textContent = typeof t === 'function' ? t('fanPage.unbound') : '未绑定';
                     statusEl.className = 'badge badge-secondary';
                 }
             }
@@ -2068,7 +2049,7 @@ async function loadVariableBindStatus() {
                 if (!optionExists) {
                     const tempOpt = document.createElement('option');
                     tempOpt.value = boundVar;
-                    tempOpt.textContent = `${boundVar} (当前)`;
+                    tempOpt.textContent = boundVar + ' (' + (typeof t === 'function' ? t('common.current') : '当前') + ')';
                     selectEl.appendChild(tempOpt);
                 }
                 selectEl.value = boundVar;
@@ -2082,7 +2063,7 @@ async function loadVariableBindStatus() {
             const currentVal = selectEl.value;
             
             // 清空并重建选项
-            selectEl.innerHTML = '<option value="">-- 选择变量 --</option>';
+            selectEl.innerHTML = `<option value="">-- ${typeof t === 'function' ? t('automation.selectVariable') : '选择变量'} --</option>`;
             
             // 过滤并添加浮点类型变量（温度相关）
             const tempVars = varsResult.data.variables.filter(v => 
@@ -2149,7 +2130,7 @@ async function bindTempVariable() {
     const varName = selectEl?.value;
     
     if (!varName) {
-        showToast('请选择要绑定的变量', 'warning');
+        showToast(typeof t === 'function' ? t('fanPage.selectVarToBind') : '请选择要绑定的变量', 'warning');
         return;
     }
     
@@ -2161,16 +2142,16 @@ async function bindTempVariable() {
             // 自动切换到变量模式
             await api.call('temp.select', { source: 'variable' });
             
-            showToast(`温度已绑定到变量: ${varName}`, 'success');
+            showToast(typeof t === 'function' ? t('fanPage.tempBoundToVar', { var: varName }) : `温度已绑定到变量: ${varName}`, 'success');
             
             // 刷新状态
             await loadTempSourceStatus();
         } else {
-            showToast(`绑定失败: ${result.message}`, 'error');
+            showToast((typeof t === 'function' ? t('fanPage.bindFailed') : '绑定失败') + ': ' + result.message, 'error');
         }
     } catch (e) {
         console.error('绑定温度变量失败:', e);
-        showToast(`绑定失败: ${e.message}`, 'error');
+        showToast((typeof t === 'function' ? t('fanPage.bindFailed') : '绑定失败') + ': ' + e.message, 'error');
     }
 }
 
@@ -2182,16 +2163,16 @@ async function unbindTempVariable() {
         const result = await api.call('temp.bind', { variable: null });
         
         if (result.code === 0) {
-            showToast('温度变量绑定已解除', 'success');
+            showToast(typeof t === 'function' ? t('fanPage.unbindSuccess') : '温度变量绑定已解除', 'success');
             
             // 刷新状态
             await loadTempSourceStatus();
         } else {
-            showToast(`解绑失败: ${result.message}`, 'error');
+            showToast((typeof t === 'function' ? t('fanPage.unbindFailed') : '解绑失败') + ': ' + result.message, 'error');
         }
     } catch (e) {
         console.error('解绑温度变量失败:', e);
-        showToast(`解绑失败: ${e.message}`, 'error');
+        showToast((typeof t === 'function' ? t('fanPage.unbindFailed') : '解绑失败') + ': ' + e.message, 'error');
     }
 }
 
@@ -2215,23 +2196,23 @@ async function applyFanCurve() {
     
     // 验证
     if (fanCurveConfig.curve.length < 2) {
-        showToast('至少需要 2 个曲线点', 'error');
+        showToast(typeof t === 'function' ? t('fanPage.minCurvePoints') : '至少需要 2 个曲线点', 'error');
         return;
     }
     
     if (minDuty > maxDuty) {
-        showToast('最小占空比不能大于最大占空比', 'error');
+        showToast(typeof t === 'function' ? t('fanPage.dutyOrderError') : '最小占空比不能大于最大占空比', 'error');
         return;
     }
     
     // 验证温度迟滞和最小间隔（防止 NaN 导致保存失败）
     if (isNaN(hysteresis) || hysteresis < 0 || hysteresis > 20) {
-        showToast('温度迟滞必须在 0-20°C 范围内', 'error');
+        showToast(typeof t === 'function' ? t('fanPage.hysteresisRangeError') : '温度迟滞必须在 0-20°C 范围内', 'error');
         return;
     }
     
     if (isNaN(minInterval) || minInterval < 500 || minInterval > 30000) {
-        showToast('最小间隔必须在 500-30000ms 范围内', 'error');
+        showToast(typeof t === 'function' ? t('fanPage.intervalRangeError') : '最小间隔必须在 500-30000ms 范围内', 'error');
         return;
     }
     
@@ -2272,7 +2253,7 @@ async function applyFanCurve() {
             throw new Error(modeResult.message || '切换模式失败');
         }
         
-        showToast(`风扇 ${fanId} 曲线已应用并保存`, 'success');
+        showToast(typeof t === 'function' ? t('fanPage.curveApplied', { id: fanId }) : `风扇 ${fanId} 曲线已应用并保存`, 'success');
         closeFanCurveModal();
         
         // 刷新风扇状态
@@ -2280,7 +2261,7 @@ async function applyFanCurve() {
         
     } catch (e) {
         console.error('应用曲线失败:', e);
-        showToast('应用曲线失败: ' + e.message, 'error');
+        showToast((typeof t === 'function' ? t('fanPage.applyCurveFailed') : '应用曲线失败') + ': ' + e.message, 'error');
     }
 }
 
@@ -2324,9 +2305,9 @@ async function exportFanCurveConfig() {
     const sdcardPath = `/sdcard/config/fan_curve_config_${fanId}.json`;
     try {
         await api.fileUpload(sdcardPath, blob);
-        showToast(`风扇 ${fanId} 曲线配置已导出（本地 + SD 卡 ${sdcardPath}）`, 'success');
+        showToast(typeof t === 'function' ? t('fanPage.curveExported', { id: fanId, path: sdcardPath }) : `风扇 ${fanId} 曲线配置已导出（本地 + SD 卡 ${sdcardPath}）`, 'success');
     } catch (e) {
-        showToast(`风扇 ${fanId} 曲线已保存到本地，SD 卡保存失败: ${e.message}`, 'warning');
+        showToast(typeof t === 'function' ? t('fanPage.curveExportSdFailed', { id: fanId, msg: e.message }) : `风扇 ${fanId} 曲线已保存到本地，SD 卡保存失败: ${e.message}`, 'warning');
     }
 }
 
@@ -2348,19 +2329,18 @@ function importFanCurveConfig() {
             
             // 验证配置格式
             if (config.type !== 'fan_curve_config') {
-                showToast('无效的配置文件格式', 'error');
+                showToast(typeof t === 'function' ? t('fanPage.invalidConfigFormat') : '无效的配置文件格式', 'error');
                 return;
             }
             
             if (!config.curve || !Array.isArray(config.curve) || config.curve.length < 2) {
-                showToast('配置文件中曲线点无效', 'error');
+                showToast(typeof t === 'function' ? t('fanPage.invalidCurvePoints') : '配置文件中曲线点无效', 'error');
                 return;
             }
             
-            // 验证曲线点格式
             for (const point of config.curve) {
                 if (typeof point.temp !== 'number' || typeof point.duty !== 'number') {
-                    showToast('曲线点格式错误', 'error');
+                    showToast(typeof t === 'function' ? t('fanPage.curvePointFormatError') : '曲线点格式错误', 'error');
                     return;
                 }
             }
@@ -2389,10 +2369,10 @@ function importFanCurveConfig() {
             refreshCurveEditor();
             drawCurvePreview();
             
-            showToast(`已导入配置文件: ${file.name}`, 'success');
+            showToast(typeof t === 'function' ? t('fanPage.configImported', { name: file.name }) : `已导入配置文件: ${file.name}`, 'success');
         } catch (err) {
             console.error('导入配置失败:', err);
-            showToast('导入配置失败: ' + err.message, 'error');
+            showToast((typeof t === 'function' ? t('fanPage.importConfigFailed') : '导入配置失败') + ': ' + err.message, 'error');
         }
     };
     
@@ -2456,16 +2436,16 @@ async function serviceAction(name, action) {
 }
 
 function confirmReboot() {
-    if (confirm('确定要重启系统吗？')) {
-        showToast('正在发送重启命令...', 'info');
+    if (confirm(t('system.rebootConfirm'))) {
+        showToast(t('system.rebootSending'), 'info');
         api.reboot(500)
             .then((result) => {
                 console.log('Reboot response:', result);
-                showToast('系统正在重启，请稍候...', 'success');
+                showToast(t('system.rebootingPleaseWait'), 'success');
             })
             .catch((err) => {
                 console.error('Reboot failed:', err);
-                showToast('重启失败: ' + err.message, 'error');
+                showToast(t('system.rebootFailed') + ': ' + err.message, 'error');
             });
     }
 }
@@ -3457,40 +3437,40 @@ function showWidgetManager(editWidgetId = null) {
     modal.innerHTML = `
         <div class="modal-content dw-manager-modal cc-compact">
             <div class="modal-header">
-                <h2>数据组件管理</h2>
+                <h2>${t('dataWidget.management')}</h2>
                 <button class="modal-close" onclick="closeModal('widget-manager-modal')"><i class="ri-close-line"></i></button>
             </div>
             <div class="modal-body dw-manager-body">
                 <div class="dw-manager-sidebar">
                     <div class="dw-manager-section">
-                        <h4>面板设置</h4>
+                        <h4>${t('dataWidget.panelSettings')}</h4>
                         <div class="form-group" style="margin-bottom:15px;">
-                            <label style="font-size:0.9em;">自动刷新间隔</label>
+                            <label style="font-size:0.9em;">${t('dataWidget.autoRefreshInterval')}</label>
                             <div style="display:flex;gap:8px;align-items:center;">
                                 <select id="dw-refresh-interval" onchange="updateRefreshInterval()" style="flex:1;">
-                                    <option value="0" ${dataWidgetsRefreshInterval === 0 ? 'selected' : ''}>禁用</option>
-                                    <option value="1000" ${dataWidgetsRefreshInterval === 1000 ? 'selected' : ''}>1 秒</option>
-                                    <option value="2000" ${dataWidgetsRefreshInterval === 2000 ? 'selected' : ''}>2 秒</option>
-                                    <option value="5000" ${dataWidgetsRefreshInterval === 5000 ? 'selected' : ''}>5 秒</option>
-                                    <option value="10000" ${dataWidgetsRefreshInterval === 10000 ? 'selected' : ''}>10 秒</option>
-                                    <option value="30000" ${dataWidgetsRefreshInterval === 30000 ? 'selected' : ''}>30 秒</option>
-                                    <option value="60000" ${dataWidgetsRefreshInterval === 60000 ? 'selected' : ''}>1 分钟</option>
+                                    <option value="0" ${dataWidgetsRefreshInterval === 0 ? 'selected' : ''}>${t('dataWidget.disabled')}</option>
+                                    <option value="1000" ${dataWidgetsRefreshInterval === 1000 ? 'selected' : ''}>${t('dataWidget.seconds1')}</option>
+                                    <option value="2000" ${dataWidgetsRefreshInterval === 2000 ? 'selected' : ''}>${t('dataWidget.seconds2')}</option>
+                                    <option value="5000" ${dataWidgetsRefreshInterval === 5000 ? 'selected' : ''}>${t('dataWidget.seconds5')}</option>
+                                    <option value="10000" ${dataWidgetsRefreshInterval === 10000 ? 'selected' : ''}>${t('dataWidget.seconds10')}</option>
+                                    <option value="30000" ${dataWidgetsRefreshInterval === 30000 ? 'selected' : ''}>${t('dataWidget.seconds30')}</option>
+                                    <option value="60000" ${dataWidgetsRefreshInterval === 60000 ? 'selected' : ''}>${t('dataWidget.minute1')}</option>
                                 </select>
                             </div>
                         </div>
                     </div>
                     <div class="dw-manager-section">
-                        <h4>已添加组件</h4>
+                        <h4>${t('dataWidget.addedWidgets')}</h4>
                         <div id="dw-manager-list" class="dw-manager-list"></div>
                         <button class="btn btn-service-style btn-block" onclick="showAddWidgetPanel()" style="margin-top:12px;">
-                            <i class="ri-add-line"></i> 添加新组件
+                            <i class="ri-add-line"></i> ${t('dataWidget.addNewWidget')}
                         </button>
                     </div>
                 </div>
                 <div class="dw-manager-main" id="dw-manager-main">
                     <div class="dw-manager-empty">
                         <i class="ri-box-3-line" style="font-size:48px;opacity:0.3;"></i>
-                        <p>选择左侧组件进行编辑<br>或添加新组件</p>
+                        <p>${t('dataWidget.selectWidgetHint')}</p>
                     </div>
                 </div>
             </div>
@@ -3516,7 +3496,9 @@ function updateRefreshInterval() {
         dataWidgetsRefreshInterval = parseInt(select.value) || 0;
         saveDataWidgetsRefreshInterval();
         startDataWidgetsAutoRefresh();
-        showToast(`刷新间隔已设置为 ${dataWidgetsRefreshInterval > 0 ? (dataWidgetsRefreshInterval / 1000) + ' 秒' : '禁用'}`, 'success');
+        const _sec = typeof t === 'function' ? t('dataWidget.second') : '秒';
+        const intervalText = dataWidgetsRefreshInterval > 0 ? (dataWidgetsRefreshInterval / 1000) + ' ' + _sec : (typeof t === 'function' ? t('dataWidget.disabled') : '禁用');
+        showToast(typeof t === 'function' ? t('toast.refreshIntervalSet', { interval: intervalText }) : `刷新间隔已设置为 ${intervalText}`, 'success');
     }
 }
 
@@ -3528,22 +3510,28 @@ function renderWidgetManagerList() {
     if (!list) return;
     
     if (dataWidgets.length === 0) {
-        list.innerHTML = '<div class="dw-manager-empty-list">暂无组件</div>';
+        list.innerHTML = '<div class="dw-manager-empty-list">' + t('dataWidget.noWidgets') + '</div>';
         return;
     }
     
-    list.innerHTML = dataWidgets.map((w, idx) => `
+    list.innerHTML = dataWidgets.map((w, idx) => {
+        const typeName = (typeof t === 'function' && w.type) ? (t('dataWidget.widgetType' + w.type.charAt(0).toUpperCase() + w.type.slice(1)) || WIDGET_TYPES[w.type]?.name) : (WIDGET_TYPES[w.type]?.name || w.type);
+        const moveUpTitle = typeof t === 'function' ? t('dataWidget.moveUp') : '上移';
+        const moveDownTitle = typeof t === 'function' ? t('dataWidget.moveDown') : '下移';
+        const deleteTitle = typeof t === 'function' ? t('dataWidget.delete') : '删除';
+        return `
         <div class="dw-manager-item" data-id="${w.id}" onclick="showWidgetEditPanel('${w.id}')">
             <span class="dw-manager-item-icon">${w.icon || WIDGET_TYPES[w.type]?.icon || '<i class="ri-dashboard-line"></i>'}</span>
             <span class="dw-manager-item-label">${w.label}</span>
-            <span class="dw-manager-item-type">${WIDGET_TYPES[w.type]?.name || w.type}</span>
+            <span class="dw-manager-item-type">${typeName}</span>
             <div class="dw-manager-item-actions">
-                <button class="dw-btn-icon" onclick="event.stopPropagation();moveWidget('${w.id}',-1)" title="上移" ${idx === 0 ? 'disabled' : ''}><i class="ri-arrow-up-line"></i></button>
-                <button class="dw-btn-icon" onclick="event.stopPropagation();moveWidget('${w.id}',1)" title="下移" ${idx === dataWidgets.length - 1 ? 'disabled' : ''}><i class="ri-arrow-down-line"></i></button>
-                <button class="dw-btn-icon" onclick="event.stopPropagation();deleteDataWidget('${w.id}')" title="删除"><i class="ri-delete-bin-line"></i></button>
+                <button class="dw-btn-icon" onclick="event.stopPropagation();moveWidget('${w.id}',-1)" title="${moveUpTitle}" ${idx === 0 ? 'disabled' : ''}><i class="ri-arrow-up-line"></i></button>
+                <button class="dw-btn-icon" onclick="event.stopPropagation();moveWidget('${w.id}',1)" title="${moveDownTitle}" ${idx === dataWidgets.length - 1 ? 'disabled' : ''}><i class="ri-arrow-down-line"></i></button>
+                <button class="dw-btn-icon" onclick="event.stopPropagation();deleteDataWidget('${w.id}')" title="${deleteTitle}"><i class="ri-delete-bin-line"></i></button>
             </div>
         </div>
-    `).join('');
+    `;
+    }).join('');
 }
 
 /**
@@ -3569,29 +3557,36 @@ function showAddWidgetPanel() {
     const main = document.getElementById('dw-manager-main');
     if (!main) return;
     
-    // 预设模板
-    const presetsHtml = WIDGET_PRESETS.map(p => `
+    const typeNameKeys = { ring: 'Ring', gauge: 'Gauge', temp: 'Temp', number: 'Number', bar: 'Bar', text: 'Text', status: 'Status', icon: 'Icon', dual: 'Dual', percent: 'Percent', log: 'Log' };
+    const typesHtml = Object.entries(WIDGET_TYPES).map(([key, cfg]) => {
+        const nameKey = 'dataWidget.type' + (typeNameKeys[key] || key);
+        const descKey = nameKey + 'Desc';
+        return `
+        <div class="dw-type-card" onclick="createNewWidget('${key}')">
+            <span class="dw-type-icon">${cfg.icon}</span>
+            <span class="dw-type-name">${typeof t === 'function' ? t(nameKey) : cfg.name}</span>
+            <span class="dw-type-desc">${typeof t === 'function' ? t(descKey) : cfg.description}</span>
+        </div>
+    `;
+    }).join('');
+    
+    const presetLabelKeys = { cpu: 'presetCpu', mem: 'presetMem', disk: 'presetDisk', temp: 'presetTemp', gpu: 'presetGpu', power: 'presetPower', voltage: 'presetVoltage', current: 'presetCurrent', network: 'presetNetwork', status: 'presetStatus', uptime: 'presetUptime', log: 'presetLog' };
+    const presetsHtml = WIDGET_PRESETS.map(p => {
+        const label = typeof t === 'function' ? t('dataWidget.' + (presetLabelKeys[p.id] || p.id)) : p.label;
+        return `
         <div class="dw-preset-item" onclick="addWidgetFromPreset('${p.id}')">
             <span class="dw-preset-icon">${p.icon}</span>
-            <span class="dw-preset-label">${p.label}</span>
+            <span class="dw-preset-label">${label}</span>
         </div>
-    `).join('');
-    
-    // 组件类型
-    const typesHtml = Object.entries(WIDGET_TYPES).map(([key, t]) => `
-        <div class="dw-type-card" onclick="createNewWidget('${key}')">
-            <span class="dw-type-icon">${t.icon}</span>
-            <span class="dw-type-name">${t.name}</span>
-            <span class="dw-type-desc">${t.description}</span>
-        </div>
-    `).join('');
+    `;
+    }).join('');
     
     main.innerHTML = `
         <div class="dw-add-panel">
-            <h4>快速添加预设</h4>
+            <h4>${typeof t === 'function' ? t('dataWidget.quickAddPreset') : '快速添加预设'}</h4>
             <div class="dw-presets-grid">${presetsHtml}</div>
             
-            <h4 style="margin-top:20px;">自定义组件类型</h4>
+            <h4 style="margin-top:20px;">${typeof t === 'function' ? t('dataWidget.customWidgetType') : '自定义组件类型'}</h4>
             <div class="dw-types-grid">${typesHtml}</div>
         </div>
     `;
@@ -3622,7 +3617,9 @@ function addWidgetFromPreset(presetId) {
     renderDataWidgets();
     renderWidgetManagerList();
     showWidgetEditPanel(widget.id);
-    showToast(`已添加 ${preset.label}`, 'success');
+    const _presetLabelKeys = { cpu: 'presetCpu', mem: 'presetMem', disk: 'presetDisk', temp: 'presetTemp', gpu: 'presetGpu', power: 'presetPower', voltage: 'presetVoltage', current: 'presetCurrent', network: 'presetNetwork', status: 'presetStatus', uptime: 'presetUptime', log: 'presetLog' };
+    const addedName = typeof t === 'function' ? t('dataWidget.' + (_presetLabelKeys[preset.id] || preset.id)) : preset.label;
+    showToast(typeof t === 'function' ? t('toast.widgetAdded', { name: addedName }) : `已添加 ${preset.label}`, 'success');
 }
 
 /**
@@ -3637,7 +3634,7 @@ function createNewWidget(type) {
     const widget = {
         id: generateWidgetId(),
         type,
-        label: '新组件',
+        label: typeof t === 'function' ? t('dataWidget.newWidget') : '新组件',
         icon: typeConfig.icon,
         color: defaults.color || '#4dabf7',
         unit: defaults.unit || '',
@@ -3689,7 +3686,7 @@ function showWidgetEditPanel(widgetId) {
     if (widget.type === 'status') {
         extraConfigHtml = `
             <div class="form-group">
-                <label>阈值设置（正常/注意/警告）</label>
+                <label>${typeof t === 'function' ? t('dataWidget.thresholdSettings') : '阈值设置（正常/注意/警告）'}</label>
                 <div class="form-row">
                     <input type="number" id="edit-threshold-1" class="input" value="${widget.thresholds?.[0] || 0}" placeholder="0">
                     <input type="number" id="edit-threshold-2" class="input" value="${widget.thresholds?.[1] || 50}" placeholder="50">
@@ -3700,83 +3697,88 @@ function showWidgetEditPanel(widgetId) {
     if (widget.type === 'dual') {
         extraConfigHtml = `
             <div class="form-group">
-                <label>副值表达式</label>
+                <label>${typeof t === 'function' ? t('dataWidget.secondaryExpression') : '副值表达式'}</label>
                 <input type="text" id="edit-expression2" class="input" value="${widget.expression2 || ''}" 
-                       placeholder="例如: \${max_value}">
-                <small class="form-hint">显示在主值右侧的副值</small>
+                       placeholder="${typeof t === 'function' ? t('dataWidget.secondaryExpressionPlaceholder') : '例如: ${max_value}'}">
+                <small class="form-hint">${typeof t === 'function' ? t('dataWidget.secondaryExpressionHint') : '显示在主值右侧的副值'}</small>
             </div>`;
     }
     if (widget.type === 'log') {
         extraConfigHtml = `
             <div class="form-row">
                 <div class="form-group">
-                    <label>显示行数</label>
+                    <label>${typeof t === 'function' ? t('dataWidget.displayLines') : '显示行数'}</label>
                     <input type="number" id="edit-max-lines" class="input" value="${widget.maxLines || 15}" min="5" max="100">
                 </div>
                 <div class="form-group">
-                    <label>刷新间隔（毫秒）</label>
+                    <label>${typeof t === 'function' ? t('dataWidget.refreshIntervalMs') : '刷新间隔（毫秒）'}</label>
                     <input type="number" id="edit-refresh-interval" class="input" value="${widget.refreshInterval || 2000}" min="500" max="60000" step="500">
                 </div>
             </div>
             <div class="form-group dw-expression-group">
-                <label>日志变量 <span class="badge">核心</span></label>
+                <label>${typeof t === 'function' ? t('dataWidget.logVariable') : '日志变量'} <span class="badge">${typeof t === 'function' ? t('common.core') : '核心'}</span></label>
                 <div class="dw-expression-input">
                     <input type="text" id="edit-expression" class="input" value="${widget.expression || ''}" 
-                           placeholder="选择包含日志文本的变量">
-                    <button class="btn" onclick="selectVariableForWidget()">选择变量</button>
+                           placeholder="${typeof t === 'function' ? t('dataWidget.logVariablePlaceholder') : '选择包含日志文本的变量'}">
+                    <button class="btn" onclick="selectVariableForWidget()">${typeof t === 'function' ? t('dataWidget.selectVariable') : '选择变量'}</button>
                 </div>
-                <small class="form-hint">
-                    选择一个包含日志文本的变量，日志会追加显示（支持多行，用 \\n 分隔）
-                </small>
+                <small class="form-hint">${typeof t === 'function' ? t('dataWidget.logVariableHint') : '选择一个包含日志文本的变量，日志会追加显示（支持多行，用 \\n 分隔）'}</small>
             </div>`;
     }
     
     main.innerHTML = `
         <div class="dw-edit-panel">
             <div class="dw-edit-header">
-                <span class="dw-edit-type-badge">${typeConfig.icon || '<i class="ri-dashboard-line"></i>'} ${typeConfig.name || widget.type}</span>
+                <span class="dw-edit-type-badge">${typeConfig.icon || '<i class="ri-dashboard-line"></i>'} ${typeof t === 'function' ? (t('dataWidget.widgetType' + (widget.type ? widget.type.charAt(0).toUpperCase() + widget.type.slice(1) : '')) || typeConfig.name) : (typeConfig.name || widget.type)}</span>
             </div>
             
             <div class="form-group">
-                <label>标签名称</label>
-                <input type="text" id="edit-label" class="input" value="${widget.label}" placeholder="组件名称">
+                <label>${typeof t === 'function' ? t('dataWidget.labelName') : '标签名称'}</label>
+                <input type="text" id="edit-label" class="input" value="${widget.label}" placeholder="${typeof t === 'function' ? t('dataWidget.labelPlaceholder') : '组件名称'}">
             </div>
             
             <div class="form-row">
                 <div class="form-group">
-                    <label>图标</label>
-                    <input type="text" id="edit-icon" class="input" value="${widget.icon || ''}" placeholder="emoji">
+                    <label>${typeof t === 'function' ? t('dataWidget.icon') : '图标'}</label>
+                    <input type="text" id="edit-icon" class="input" value="${widget.icon || ''}" placeholder="${typeof t === 'function' ? t('dataWidget.iconPlaceholder') || 'emoji' : 'emoji'}">
                 </div>
                 <div class="form-group">
-                    <label>颜色</label>
+                    <label>${typeof t === 'function' ? t('dataWidget.color') : '颜色'}</label>
                     <input type="color" id="edit-color" class="input input-color" value="${widget.color || '#4dabf7'}">
                 </div>
             </div>
             
-            <!-- 布局选项 -->
             <div class="form-group">
-                <label><i class="ri-ruler-line"></i> 布局宽度</label>
+                <label><i class="ri-ruler-line"></i> ${typeof t === 'function' ? t('dataWidget.layoutWidth') : '布局宽度'}</label>
                 <div class="dw-layout-options">
-                    ${LAYOUT_OPTIONS.width.map(opt => `
-                        <label class="dw-layout-option ${widget.layout === opt.value || (!widget.layout && opt.value === 'auto') ? 'active' : ''}">
-                            <input type="radio" name="edit-layout" value="${opt.value}" 
-                                   ${widget.layout === opt.value || (!widget.layout && opt.value === 'auto') ? 'checked' : ''}
-                                   onchange="updateLayoutPreview()">
-                            <span class="dw-layout-label">${opt.label}</span>
-                            <span class="dw-layout-desc">${opt.desc}</span>
-                        </label>
-                    `).join('')}
+                    ${(typeof t === 'function' ? [
+                        { value: 'auto', labelKey: 'dataWidget.layoutAuto', descKey: 'dataWidget.layoutAutoDesc' },
+                        { value: 'small', labelKey: 'dataWidget.layoutSmall', descKey: 'dataWidget.layoutSmallDesc' },
+                        { value: 'medium', labelKey: 'dataWidget.layoutMedium', descKey: 'dataWidget.layoutMediumDesc' },
+                        { value: 'large', labelKey: 'dataWidget.layoutLarge', descKey: 'dataWidget.layoutLargeDesc' },
+                        { value: 'full', labelKey: 'dataWidget.layoutFull', descKey: 'dataWidget.layoutFullDesc' }
+                    ] : LAYOUT_OPTIONS.width).map(opt => {
+                        const val = opt.value;
+                        const lab = typeof opt.labelKey === 'string' && typeof t === 'function' ? t(opt.labelKey) : (opt.label || opt.labelKey);
+                        const desc = typeof opt.descKey === 'string' && typeof t === 'function' ? t(opt.descKey) : (opt.desc || opt.descKey);
+                        const active = widget.layout === val || (!widget.layout && val === 'auto');
+                        return `<label class="dw-layout-option ${active ? 'active' : ''}">
+                            <input type="radio" name="edit-layout" value="${val}" ${active ? 'checked' : ''} onchange="updateLayoutPreview()">
+                            <span class="dw-layout-label">${lab}</span>
+                            <span class="dw-layout-desc">${desc}</span>
+                        </label>`;
+                    }).join('')}
                 </div>
             </div>
             
             ${widget.type !== 'log' ? `
             <div class="form-row">
                 <div class="form-group">
-                    <label>单位</label>
+                    <label>${typeof t === 'function' ? t('dataWidget.unit') : '单位'}</label>
                     <input type="text" id="edit-unit" class="input" value="${widget.unit || ''}" placeholder="%、°C、W">
                 </div>
                 <div class="form-group">
-                    <label>小数位</label>
+                    <label>${typeof t === 'function' ? t('dataWidget.decimals') : '小数位'}</label>
                     <input type="number" id="edit-decimals" class="input" value="${widget.decimals || 1}" min="0" max="4">
                 </div>
             </div>
@@ -3785,11 +3787,11 @@ function showWidgetEditPanel(widgetId) {
             ${widget.type !== 'text' && widget.type !== 'icon' && widget.type !== 'status' && widget.type !== 'log' ? `
             <div class="form-row">
                 <div class="form-group">
-                    <label>最小值</label>
+                    <label>${typeof t === 'function' ? t('dataWidget.minValue') : '最小值'}</label>
                     <input type="number" id="edit-min" class="input" value="${widget.min || 0}">
                 </div>
                 <div class="form-group">
-                    <label>最大值</label>
+                    <label>${typeof t === 'function' ? t('dataWidget.maxValue') : '最大值'}</label>
                     <input type="number" id="edit-max" class="input" value="${widget.max || 100}">
                 </div>
             </div>
@@ -3799,28 +3801,26 @@ function showWidgetEditPanel(widgetId) {
             
             ${widget.type !== 'log' ? `
             <div class="form-group dw-expression-group">
-                <label>数据表达式 <span class="badge">核心</span></label>
+                <label>${typeof t === 'function' ? t('dataWidget.dataExpression') : '数据表达式'} <span class="badge">${typeof t === 'function' ? t('common.core') : '核心'}</span></label>
                 <div class="dw-expression-input">
                     <input type="text" id="edit-expression" class="input" value="${widget.expression || ''}" 
-                           placeholder="点击选择变量或输入表达式">
-                    <button class="btn" onclick="selectVariableForWidget()">选择变量</button>
+                           placeholder="${typeof t === 'function' ? t('dataWidget.dataExpressionPlaceholder') : '点击选择变量或输入表达式'}">
+                    <button class="btn" onclick="selectVariableForWidget()">${typeof t === 'function' ? t('dataWidget.selectVariable') : '选择变量'}</button>
                 </div>
-                <small class="form-hint">
-                    支持: <code>\${变量名}</code> 引用变量，<code>\${a} + \${b}</code> 数学运算，<code>\${a} + "单位"</code> 文本拼接
-                </small>
+                <small class="form-hint">${typeof t === 'function' ? t('dataWidget.dataExpressionHint') : '支持: ${变量名} 引用变量，${a} + ${b} 数学运算，${a} + "单位" 文本拼接'}</small>
             </div>
             ` : ''}
             
             <div class="dw-edit-preview">
-                <label>预览</label>
+                <label>${typeof t === 'function' ? t('dataWidget.preview') : '预览'}</label>
                 <div class="dw-preview-card" id="dw-preview-card">
                     ${renderWidgetHtml(widget)}
                 </div>
             </div>
             
             <div class="dw-edit-actions">
-                <button class="btn btn-danger" onclick="deleteDataWidget('${widget.id}')"><i class="ri-delete-bin-line"></i> 删除</button>
-                <button class="btn btn-service-style" onclick="saveWidgetEdit('${widget.id}')"><i class="ri-save-line"></i> 保存</button>
+                <button class="btn btn-danger" onclick="deleteDataWidget('${widget.id}')"><i class="ri-delete-bin-line"></i> ${typeof t === 'function' ? t('dataWidget.delete') : '删除'}</button>
+                <button class="btn btn-service-style" onclick="saveWidgetEdit('${widget.id}')"><i class="ri-save-line"></i> ${typeof t === 'function' ? t('dataWidget.save') : '保存'}</button>
             </div>
         </div>
     `;
@@ -3888,7 +3888,7 @@ function saveWidgetEdit(widgetId) {
     renderDataWidgets();
     renderWidgetManagerList();
     refreshDataWidgets();
-    showToast('组件已保存', 'success');
+    showToast(typeof t === 'function' ? t('toast.widgetSaved') : '组件已保存', 'success');
     
     // 关闭管理器模态框
     closeModal('widget-manager-modal');
@@ -3916,12 +3916,12 @@ function deleteDataWidget(widgetId) {
         main.innerHTML = `
             <div class="dw-manager-empty">
                 <i class="ri-box-3-line" style="font-size:48px;opacity:0.3;"></i>
-                <p>选择左侧组件进行编辑<br>或添加新组件</p>
+                <p>${t('dataWidget.selectWidgetHint')}</p>
             </div>
         `;
     }
     
-    showToast(`已删除 ${widget.label}`, 'info');
+    showToast(typeof t === 'function' ? t('toast.widgetDeleted', { name: widget.label }) : `已删除 ${widget.label}`, 'info');
 }
 
 // ==================== 快捷操作（手动触发规则） ====================
@@ -4057,17 +4057,17 @@ async function refreshQuickActions() {
                 container.innerHTML = `
                     <div class="quick-actions-empty">
                         <div class="empty-icon"><i class="ri-dashboard-line"></i></div>
-                        <p>暂无快捷操作</p>
-                        <small>在自动化规则中启用"手动触发"选项</small>
+                        <p>${typeof t === 'function' ? t('automationPage.noQuickActions') : '暂无快捷操作'}</p>
+                        <small>${typeof t === 'function' ? t('automationPage.quickActionsHint') : '在自动化规则中启用"手动触发"选项'}</small>
                     </div>
                 `;
             }
         } else {
-            container.innerHTML = '<p class="text-muted">无法加载快捷操作</p>';
+            container.innerHTML = '<p class="text-muted">' + (typeof t === 'function' ? (t('automationPage.loadQuickActionsFailed') || '无法加载快捷操作') : '无法加载快捷操作') + '</p>';
         }
     } catch (e) {
         console.error('Quick actions error:', e);
-        container.innerHTML = `<p class="text-muted">加载失败</p>`;
+        container.innerHTML = '<p class="text-muted">' + (typeof t === 'function' ? t('filePage.loadFailed') : '加载失败') + '</p>';
     }
 }
 
@@ -4151,7 +4151,7 @@ async function triggerQuickAction(ruleId) {
     
     // 检查是否已经在执行中（防止重复点击）
     if (card.classList.contains('triggering')) {
-        showToast('⏳ 操作正在执行中...', 'warning');
+        showToast(typeof t === 'function' ? t('toast.processing') : 'Operation in progress...', 'warning');
         return;
     }
     
@@ -4164,7 +4164,7 @@ async function triggerQuickAction(ruleId) {
         const iconEl = card.querySelector('.quick-action-icon');
         const originalIcon = iconEl?.innerHTML;
         if (iconEl) {
-            iconEl.innerHTML = '<span class="spinner-small">⏳</span>';
+            iconEl.innerHTML = '<span class="spinner-small"><i class="ri-time-line"></i></span>';
         }
         
         console.log('triggerQuickAction: calling API for ruleId=', ruleId);
@@ -4320,7 +4320,7 @@ async function quickActionViewLog(logFile, hostId) {
                     <button class="modal-close" onclick="closeQuickLogModal()">&times;</button>
                 </div>
                 <div class="modal-body" style="padding:0">
-                    <pre id="quick-log-content" style="max-height:400px;overflow:auto;padding:15px;margin:0;background:#1a1a2e;color:#eee;font-size:12px;white-space:pre-wrap">加载中...</pre>
+                    <pre id="quick-log-content" style="max-height:400px;overflow:auto;padding:15px;margin:0;background:#1a1a2e;color:#eee;font-size:12px;white-space:pre-wrap">${t('common.loading')}</pre>
                 </div>
                 <div class="modal-footer" style="display:flex;gap:10px;padding:10px 15px;justify-content:space-between;align-items:center">
                     <div style="display:flex;gap:8px;align-items:center">
@@ -4541,10 +4541,10 @@ async function quickActionStopProcess(pidFile, hostId, cmdName) {
 async function syncTimeFromBrowser(silent = false) {
     try {
         const now = Date.now();
-        if (!silent) showToast('正在从浏览器同步时间...', 'info');
+        if (!silent) showToast(t('toast.timeSyncSyncing'), 'info');
         const result = await api.timeSync(now);
         if (result.data?.synced) {
-            if (!silent) showToast(`时间已同步: ${result.data.datetime}`, 'success');
+            if (!silent) showToast(t('toast.timeSynced', { datetime: result.data.datetime }), 'success');
             
             // 重新获取时间信息并更新显示
             try {
@@ -4556,23 +4556,23 @@ async function syncTimeFromBrowser(silent = false) {
                 console.error('Failed to refresh time info:', e);
             }
         } else {
-            if (!silent) showToast('时间同步失败', 'error');
+            if (!silent) showToast(t('toast.timeSyncFailed'), 'error');
         }
     } catch (e) {
-        if (!silent) showToast('同步失败: ' + e.message, 'error');
+        if (!silent) showToast(t('toast.syncFailed') + ': ' + e.message, 'error');
     }
 }
 
 async function forceNtpSync() {
     try {
-        showToast('正在强制NTP同步...', 'info');
+        showToast(t('toast.ntpSyncing'), 'info');
         const result = await api.timeForceSync();
         if (result.data?.syncing) {
-            showToast('NTP同步已启动，请稍候刷新查看结果', 'success');
+            showToast(t('toast.ntpStarted'), 'success');
             setTimeout(refreshSystemPage, 3000);
         }
     } catch (e) {
-        showToast('NTP同步失败: ' + e.message, 'error');
+        showToast(t('toast.ntpFailed') + ': ' + e.message, 'error');
     }
 }
 
@@ -4587,27 +4587,27 @@ function showTimezoneModal() {
     
     modal.innerHTML = `
         <div class="modal-content" style="max-width:400px">
-            <h2>设置时区</h2>
+            <h2>${t('common.setTimezone')}</h2>
             <div class="form-group">
-                <label>时区</label>
+                <label>${t('common.timezone')}</label>
                 <select id="timezone-select" class="form-control">
-                    <option value="CST-8">中国标准时间 (UTC+8)</option>
-                    <option value="JST-9">日本标准时间 (UTC+9)</option>
-                    <option value="KST-9">韩国标准时间 (UTC+9)</option>
-                    <option value="UTC0">UTC (UTC+0)</option>
-                    <option value="GMT0">GMT (UTC+0)</option>
-                    <option value="EST5EDT">美国东部时间 (UTC-5)</option>
-                    <option value="PST8PDT">美国太平洋时间 (UTC-8)</option>
-                    <option value="CET-1CEST">中欧时间 (UTC+1)</option>
+                    <option value="CST-8">${t('common.tzChinaStandard')}</option>
+                    <option value="JST-9">${t('common.tzJapanStandard')}</option>
+                    <option value="KST-9">${t('common.tzKoreaStandard')}</option>
+                    <option value="UTC0">${t('common.tzUTC')}</option>
+                    <option value="GMT0">${t('common.tzGMT')}</option>
+                    <option value="EST5EDT">${t('common.tzUSEastern')}</option>
+                    <option value="PST8PDT">${t('common.tzUSPacific')}</option>
+                    <option value="CET-1CEST">${t('common.tzCentralEuropean')}</option>
                 </select>
             </div>
             <div class="form-group">
-                <label>或自定义时区字符串</label>
-                <input type="text" id="timezone-custom" class="form-control" placeholder="例如: CST-8">
+                <label>${t('common.customTimezone')}</label>
+                <input type="text" id="timezone-custom" class="form-control" placeholder="${t('common.timezoneExample')}">
             </div>
             <div class="form-actions">
-                <button class="btn" onclick="hideTimezoneModal()">取消</button>
-                <button class="btn btn-service-style" onclick="applyTimezone()">应用</button>
+                <button class="btn" onclick="hideTimezoneModal()">${t('common.cancel')}</button>
+                <button class="btn btn-service-style" onclick="applyTimezone()">${t('common.apply')}</button>
             </div>
         </div>
     `;
@@ -4628,12 +4628,12 @@ async function applyTimezone() {
     try {
         const result = await api.timeSetTimezone(timezone);
         if (result.data?.success) {
-            showToast(`时区已设置为 ${timezone}，本地时间: ${result.data.local_time}`, 'success');
+            showToast(t('common.timezoneSetSuccess', { timezone, localTime: result.data.local_time }), 'success');
             hideTimezoneModal();
             await refreshSystemPage();
         }
     } catch (e) {
-        showToast('设置失败: ' + e.message, 'error');
+        showToast((typeof t === 'function' ? t('toast.setFailed') : '设置失败') + ': ' + e.message, 'error');
     }
 }
 
@@ -4665,7 +4665,7 @@ async function loadLedPage() {
                 </div>
             </div>
             <div id="led-devices-grid" class="led-devices-grid">
-                <div class="loading-inline">加载设备中...</div>
+                <div class="loading-inline">${typeof t === 'function' ? t('ledPage.loadingDevices') : '加载设备中...'}</div>
             </div>
         </div>
     `;
@@ -4734,28 +4734,35 @@ function generateLedDeviceCard(dev) {
     const isMatrix = dev.name === 'matrix' || dev.layout === 'matrix';
     const deviceEffects = dev.effects || [];
     
-    // 状态文本
-    let statusText = '已关闭';
+    const _off = typeof t === 'function' ? t('ledPage.statusOff') : '已关闭';
+    const _on = typeof t === 'function' ? t('ledPage.statusOn') : '常亮';
+    let statusText = _off;
     let statusClass = 'off';
     if (isOn) {
         if (currentAnimation) {
             statusText = `▶ ${effectDisplayName(currentAnimation)}`;
             statusClass = 'effect';
         } else {
-            statusText = '常亮';
+            statusText = _on;
             statusClass = 'on';
         }
     }
     
-    // Matrix 设备底部栏额外按钮（QR/文本/滤镜）放在保存左侧
+    const _contentTitle = typeof t === 'function' ? t('ledPage.contentTitle') : '图像/QR码';
+    const _textTitle = typeof t === 'function' ? t('ledPage.textTitle') : '文本显示';
+    const _filterTitle = typeof t === 'function' ? t('ledPage.filterEffect') : '滤镜效果';
+    const _stopEffect = typeof t === 'function' ? t('ledPage.stopEffect') : '停止动画';
+    const _clickOff = typeof t === 'function' ? t('ledPage.clickOff') : '点击关闭';
+    const _clickOn = typeof t === 'function' ? t('ledPage.clickOn') : '点击开启';
+    const _moreEffects = typeof t === 'function' ? t('ledPage.moreEffects') : '更多动画';
     const matrixFooterBtns = isMatrix ? `
-        <button class="led-quick-effect" onclick="openLedModal('${dev.name}', 'content')" title="图像/QR码">
+        <button class="led-quick-effect" onclick="openLedModal('${dev.name}', 'content')" title="${_contentTitle}">
             <i class="ri-qr-code-line"></i>
         </button>
-        <button class="led-quick-effect" onclick="openLedModal('${dev.name}', 'text')" title="文本显示">
+        <button class="led-quick-effect" onclick="openLedModal('${dev.name}', 'text')" title="${_textTitle}">
             <i class="ri-text"></i>
         </button>
-        <button class="led-quick-effect" onclick="openLedModal('${dev.name}', 'filter')" title="滤镜效果">
+        <button class="led-quick-effect" onclick="openLedModal('${dev.name}', 'filter')" title="${_filterTitle}">
             <i class="ri-color-filter-line"></i>
         </button>
     ` : '';
@@ -4769,7 +4776,7 @@ function generateLedDeviceCard(dev) {
                     <span class="led-device-desc">${description}</span>
                 </div>
                 <div class="led-device-status ${statusClass}">${statusText}</div>
-                <button class="led-stop-btn" onclick="stopEffect('${dev.name}')" title="停止动画"><i class="ri-stop-circle-line"></i> 停止动画</button>
+                <button class="led-stop-btn" onclick="stopEffect('${dev.name}')" title="${_stopEffect}"><i class="ri-stop-circle-line"></i> ${_stopEffect}</button>
             </div>
             
             <!-- 控制区域 -->
@@ -4814,10 +4821,10 @@ function generateLedDeviceCard(dev) {
             
             <!-- 底部操作栏：电源 | 更多动画 | [Matrix: QR/文本/滤镜] | 保存 -->
             <div class="led-card-footer">
-                <button class="led-power-btn ${isOn ? 'on' : ''}" id="toggle-${dev.name}" onclick="toggleLed('${dev.name}')" title="${isOn ? '点击关闭' : '点击开启'}">
+                <button class="led-power-btn ${isOn ? 'on' : ''}" id="toggle-${dev.name}" onclick="toggleLed('${dev.name}')" title="${isOn ? _clickOff : _clickOn}">
                     <i class="power-icon ${isOn ? 'ri-lightbulb-fill' : 'ri-lightbulb-line'}"></i>
                 </button>
-                <button class="led-quick-effect" onclick="openLedModal('${dev.name}', 'effect')" title="更多动画">
+                <button class="led-quick-effect" onclick="openLedModal('${dev.name}', 'effect')" title="${_moreEffects}">
                     <i class="ri-play-line"></i>
                 </button>
                 ${matrixFooterBtns}
@@ -5053,7 +5060,7 @@ function generateLedModalContent(device, type) {
                 const activeClass = isActive ? ' active' : '';
                 return `<button class="btn effect-btn${activeClass}" onclick="selectEffectInModal('${device}', '${eff}', this)">${getEffectIconRemix(eff)}${effectDisplayName(eff)}</button>`;
             }).join('')
-            : '<span class="empty">暂无可用动画</span>';
+            : '<span class="empty">' + (typeof t === 'function' ? t('ledPage.noEffects') : '暂无可用动画') + '</span>';
         
         const isOn = ledStates[device] || false;
         
@@ -5099,146 +5106,143 @@ function generateLedModalContent(device, type) {
             </div>
         `;
     } else if (type === 'content') {
-        // Matrix 图像/QR码 - 复刻全局色彩校正卡片风格与布局，按钮配色按 MD 规范，无 emoji
         return `
             <div class="modal-section cc-modal-section">
                 <div class="modal-tabs">
-                    <button class="modal-tab active" onclick="switchModalTab(this, 'modal-tab-image')">图像</button>
-                    <button class="modal-tab" onclick="switchModalTab(this, 'modal-tab-qr')">QR码</button>
+                    <button class="modal-tab active" onclick="switchModalTab(this, 'modal-tab-image')">${t('ledPage.imageTab')}</button>
+                    <button class="modal-tab" onclick="switchModalTab(this, 'modal-tab-qr')">${t('ledPage.qrTab')}</button>
                 </div>
                 <div class="modal-tab-content active" id="modal-tab-image">
                     <div class="cc-section">
-                        <h4>图像</h4>
+                        <h4>${t('ledPage.imageTab')}</h4>
                         <div class="config-row">
                             <input type="text" id="modal-image-path" placeholder="/sdcard/images/..." class="input-flex" value="/sdcard/images/">
-                            <button class="btn btn-sm btn-gray" onclick="browseImages()"><i class="ri-folder-open-line"></i> 浏览</button>
+                            <button class="btn btn-sm btn-gray" onclick="browseImages()"><i class="ri-folder-open-line"></i> ${t('ledPage.browse')}</button>
                         </div>
                         <div class="config-row">
-                            <label><input type="checkbox" id="modal-image-center" checked> 居中显示</label>
-                            <button class="btn btn-service-style btn-sm" onclick="displayImageFromModal()">显示图像</button>
+                            <label><input type="checkbox" id="modal-image-center" checked> ${t('ledPage.centerDisplay')}</label>
+                            <button class="btn btn-service-style btn-sm" onclick="displayImageFromModal()">${t('ledPage.displayImage')}</button>
                         </div>
                     </div>
                 </div>
                 <div class="modal-tab-content" id="modal-tab-qr" style="display:none;">
                     <div class="cc-section">
-                        <h4>QR码</h4>
+                        <h4>${t('ledPage.qrTab')}</h4>
                         <div class="config-row">
-                            <input type="text" id="modal-qr-text" placeholder="输入文本或URL" class="input-flex">
+                            <input type="text" id="modal-qr-text" placeholder="${t('ledPage.enterTextOrUrl')}" class="input-flex">
                         </div>
                         <div class="config-row">
-                            <label>纠错</label>
+                            <label>${t('ledPage.errorCorrection')}</label>
                             <select id="modal-qr-ecc">
                                 <option value="L">L - 7%</option>
                                 <option value="M" selected>M - 15%</option>
                                 <option value="Q">Q - 25%</option>
                                 <option value="H">H - 30%</option>
                             </select>
-                            <label>前景色</label>
+                            <label>${t('ledPage.foregroundColor')}</label>
                             <input type="color" id="modal-qr-fg" value="#ffffff">
                         </div>
                         <div class="config-row">
-                            <label>背景图</label>
-                            <input type="text" id="modal-qr-bg-image" placeholder="无" readonly style="flex:1;cursor:pointer" onclick="openFilePickerFor('modal-qr-bg-image', '/sdcard/images')">
-                            <button class="btn btn-sm btn-gray" onclick="document.getElementById('modal-qr-bg-image').value=''" title="清除"><i class="ri-close-line"></i></button>
+                            <label>${t('ledPage.backgroundImage')}</label>
+                            <input type="text" id="modal-qr-bg-image" placeholder="${t('ledPage.noBackgroundImage')}" readonly style="flex:1;cursor:pointer" onclick="openFilePickerFor('modal-qr-bg-image', '/sdcard/images')">
+                            <button class="btn btn-sm btn-gray" onclick="document.getElementById('modal-qr-bg-image').value=''" title="${t('ledPage.clear')}"><i class="ri-close-line"></i></button>
                         </div>
                         <div class="config-row">
-                            <button class="btn btn-service-style btn-sm" onclick="generateQrCodeFromModal()">生成 QR 码</button>
+                            <button class="btn btn-service-style btn-sm" onclick="generateQrCodeFromModal()">${t('ledPage.generateQrCode')}</button>
                         </div>
                     </div>
                 </div>
             </div>
         `;
     } else if (type === 'text') {
-        // Matrix 文本显示 - 复刻全局色彩校正卡片风格与布局，无 emoji，刷新字体用 RemixIcon，布局分块清晰
         return `
             <div class="modal-section cc-modal-section">
                 <div class="cc-section">
-                    <h4>文本显示</h4>
+                    <h4>${t('ledPage.textTitle')}</h4>
                     <div class="config-row">
-                        <input type="text" id="modal-text-content" placeholder="输入要显示的文本" class="input-flex">
+                        <input type="text" id="modal-text-content" placeholder="${t('ledPage.enterTextToDisplay')}" class="input-flex">
                     </div>
                 </div>
                 <div class="cc-section">
-                    <h4>字体与样式</h4>
+                    <h4>${t('ledPage.fontAndStyle')}</h4>
                     <div class="config-row">
-                        <label>字体</label>
+                        <label>${t('ledPage.font')}</label>
                         <select id="modal-text-font">
-                            <option value="default">默认</option>
+                            <option value="default">${t('common.default')}</option>
                         </select>
-                        <button class="btn btn-sm btn-gray" onclick="loadFontListForModal()" title="刷新字体"><i class="ri-refresh-line"></i> 刷新字体</button>
+                        <button class="btn btn-sm btn-gray" onclick="loadFontListForModal()" title="${t('ledPage.refreshFonts')}"><i class="ri-refresh-line"></i> ${t('ledPage.refreshFonts')}</button>
                     </div>
                     <div class="config-row">
-                        <label>对齐</label>
+                        <label>${t('ledPage.alignment')}</label>
                         <select id="modal-text-align">
-                            <option value="left">左对齐</option>
-                            <option value="center" selected>居中</option>
-                            <option value="right">右对齐</option>
+                            <option value="left">${t('ledPage.alignLeft')}</option>
+                            <option value="center" selected>${t('ledPage.alignCenter')}</option>
+                            <option value="right">${t('ledPage.alignRight')}</option>
                         </select>
-                        <label>颜色</label>
+                        <label>${t('ledPage.color')}</label>
                         <input type="color" id="modal-text-color" value="#00ff00">
                     </div>
                 </div>
                 <div class="cc-section">
-                    <h4>位置</h4>
+                    <h4>${t('ledPage.position')}</h4>
                     <div class="config-row">
                         <label>X</label>
                         <input type="number" id="modal-text-x" value="0" min="0" max="255" style="width:56px">
                         <label>Y</label>
                         <input type="number" id="modal-text-y" value="0" min="0" max="255" style="width:56px">
-                        <label><input type="checkbox" id="modal-text-auto-pos" checked> 自动位置</label>
+                        <label><input type="checkbox" id="modal-text-auto-pos" checked> ${t('ledPage.autoPosition')}</label>
                     </div>
                 </div>
                 <div class="cc-section">
-                    <h4>滚动</h4>
+                    <h4>${t('ledPage.scroll')}</h4>
                     <div class="config-row">
-                        <label>方向</label>
+                        <label>${t('ledPage.paramDirection')}</label>
                         <select id="modal-text-scroll">
-                            <option value="none">无滚动</option>
-                            <option value="left" selected>向左</option>
-                            <option value="right">向右</option>
-                            <option value="up">向上</option>
-                            <option value="down">向下</option>
+                            <option value="none">${t('ledPage.scrollNone')}</option>
+                            <option value="left" selected>${t('ledPage.scrollLeft')}</option>
+                            <option value="right">${t('ledPage.scrollRight')}</option>
+                            <option value="up">${t('ledPage.scrollUp')}</option>
+                            <option value="down">${t('ledPage.scrollDown')}</option>
                         </select>
-                        <label>速度</label>
+                        <label>${t('ledPage.paramSpeed')}</label>
                         <input type="number" id="modal-text-speed" value="50" min="1" max="100" style="width:56px">
-                        <label><input type="checkbox" id="modal-text-loop" checked> 循环滚动</label>
+                        <label><input type="checkbox" id="modal-text-loop" checked> ${t('ledPage.loopScroll')}</label>
                     </div>
                 </div>
                 <div class="config-actions cc-actions">
-                    <button class="btn btn-service-style btn-sm" onclick="displayTextFromModal()">显示</button>
-                    <button class="btn btn-danger btn-sm" onclick="stopTextFromModal()">停止</button>
+                    <button class="btn btn-service-style btn-sm" onclick="displayTextFromModal()">${t('ledPage.display')}</button>
+                    <button class="btn btn-danger btn-sm" onclick="stopTextFromModal()">${t('ledPage.stop')}</button>
                 </div>
             </div>
         `;
     } else if (type === 'filter') {
-        // Matrix 滤镜模态框 - 复刻全局色彩校正卡片风格与按钮配色，无小标题与效果名 emoji
         return `
             <div class="modal-section cc-modal-section">
                 <div class="cc-section">
                     <div class="filters-grid">
-                        <button class="btn filter-btn" data-filter="pulse" onclick="selectFilterInModal('pulse', this)">脉冲</button>
-                        <button class="btn filter-btn" data-filter="breathing" onclick="selectFilterInModal('breathing', this)">呼吸</button>
-                        <button class="btn filter-btn" data-filter="blink" onclick="selectFilterInModal('blink', this)">闪烁</button>
-                        <button class="btn filter-btn" data-filter="wave" onclick="selectFilterInModal('wave', this)">波浪</button>
-                        <button class="btn filter-btn" data-filter="scanline" onclick="selectFilterInModal('scanline', this)">扫描线</button>
-                        <button class="btn filter-btn" data-filter="glitch" onclick="selectFilterInModal('glitch', this)">故障艺术</button>
-                        <button class="btn filter-btn" data-filter="rainbow" onclick="selectFilterInModal('rainbow', this)">彩虹</button>
-                        <button class="btn filter-btn" data-filter="sparkle" onclick="selectFilterInModal('sparkle', this)">闪耀</button>
-                        <button class="btn filter-btn" data-filter="plasma" onclick="selectFilterInModal('plasma', this)">等离子体</button>
-                        <button class="btn filter-btn" data-filter="sepia" onclick="selectFilterInModal('sepia', this)">怀旧</button>
-                        <button class="btn filter-btn" data-filter="posterize" onclick="selectFilterInModal('posterize', this)">色阶分离</button>
-                        <button class="btn filter-btn" data-filter="contrast" onclick="selectFilterInModal('contrast', this)">对比度</button>
-                        <button class="btn filter-btn" data-filter="invert" onclick="selectFilterInModal('invert', this)">反色</button>
-                        <button class="btn filter-btn" data-filter="grayscale" onclick="selectFilterInModal('grayscale', this)">灰度</button>
+                        <button class="btn filter-btn" data-filter="pulse" onclick="selectFilterInModal('pulse', this)">${t('ledPage.filterPulse')}</button>
+                        <button class="btn filter-btn" data-filter="breathing" onclick="selectFilterInModal('breathing', this)">${t('ledPage.filterBreathing')}</button>
+                        <button class="btn filter-btn" data-filter="blink" onclick="selectFilterInModal('blink', this)">${t('ledPage.filterBlink')}</button>
+                        <button class="btn filter-btn" data-filter="wave" onclick="selectFilterInModal('wave', this)">${t('ledPage.filterWave')}</button>
+                        <button class="btn filter-btn" data-filter="scanline" onclick="selectFilterInModal('scanline', this)">${t('ledPage.filterScanline')}</button>
+                        <button class="btn filter-btn" data-filter="glitch" onclick="selectFilterInModal('glitch', this)">${t('ledPage.filterGlitch')}</button>
+                        <button class="btn filter-btn" data-filter="rainbow" onclick="selectFilterInModal('rainbow', this)">${t('ledPage.filterRainbow')}</button>
+                        <button class="btn filter-btn" data-filter="sparkle" onclick="selectFilterInModal('sparkle', this)">${t('ledPage.filterSparkle')}</button>
+                        <button class="btn filter-btn" data-filter="plasma" onclick="selectFilterInModal('plasma', this)">${t('ledPage.filterPlasma')}</button>
+                        <button class="btn filter-btn" data-filter="sepia" onclick="selectFilterInModal('sepia', this)">${t('ledPage.filterSepia')}</button>
+                        <button class="btn filter-btn" data-filter="posterize" onclick="selectFilterInModal('posterize', this)">${t('ledPage.filterPosterize')}</button>
+                        <button class="btn filter-btn" data-filter="contrast" onclick="selectFilterInModal('contrast', this)">${t('ledPage.filterContrast')}</button>
+                        <button class="btn filter-btn" data-filter="invert" onclick="selectFilterInModal('invert', this)">${t('ledPage.filterInvert')}</button>
+                        <button class="btn filter-btn" data-filter="grayscale" onclick="selectFilterInModal('grayscale', this)">${t('ledPage.filterGrayscale')}</button>
                     </div>
                     <div class="filter-config-modal" id="modal-filter-config" style="display:none;">
-                        <span class="filter-name" id="modal-filter-name">未选择</span>
+                        <span class="filter-name" id="modal-filter-name">${t('ledPage.effectNotSelected')}</span>
                         <div id="modal-filter-params"></div>
                     </div>
                 </div>
                 <div class="config-actions cc-actions">
-                    <button class="btn btn-service-style btn-sm" id="modal-apply-filter-btn" onclick="applyFilterFromModal()" disabled>应用</button>
-                    <button class="btn btn-danger btn-sm" onclick="stopFilterFromModal()">停止</button>
+                    <button class="btn btn-service-style btn-sm" id="modal-apply-filter-btn" onclick="applyFilterFromModal()" disabled>${t('ledPage.apply')}</button>
+                    <button class="btn btn-danger btn-sm" onclick="stopFilterFromModal()">${t('ledPage.stop')}</button>
                 </div>
             </div>
         `;
@@ -6001,12 +6005,12 @@ function getDeviceIcon(name) {
 }
 
 function getDeviceDescription(name) {
-    const descriptions = {
-        'touch': '触摸指示灯 (1颗 WS2812)',
-        'board': '主板状态灯带 (28颗 WS2812)',
-        'matrix': 'LED 矩阵屏 (16x16)'
-    };
-    return descriptions[name.toLowerCase()] || 'LED 设备';
+    if (typeof t !== 'function') {
+        const descriptions = { 'touch': '触摸指示灯 (1颗 WS2812)', 'board': '主板状态灯带 (28颗 WS2812)', 'matrix': 'LED 矩阵屏 (16x16)' };
+        return descriptions[name.toLowerCase()] || 'LED 设备';
+    }
+    const keys = { 'touch': 'ledPage.deviceTouch', 'board': 'ledPage.deviceBoard', 'matrix': 'ledPage.deviceMatrix' };
+    return t(keys[name.toLowerCase()] || 'ledPage.deviceDefault');
 }
 
 /** 程序动画模态框内使用的 RemixIcon（无 emoji，用已纳入 minimal 字体的 ri-play-line） */
@@ -6271,7 +6275,7 @@ async function loadFilePickerDirectory(path) {
     filePickerCurrentPath = path;
     document.getElementById('file-picker-current-path').textContent = path;
     const listContainer = document.getElementById('file-picker-list');
-    listContainer.innerHTML = '<div class="loading">加载中...</div>';
+    listContainer.innerHTML = '<div class="loading">' + t('common.loading') + '</div>';
     
     try {
         const result = await api.storageList(path);
@@ -6750,7 +6754,7 @@ async function loadNetworkPage() {
                     <div class="net-iface" id="net-iface-eth">
                         <div class="iface-icon"><i class="ri-network-line"></i></div>
                         <div class="iface-info">
-                            <div class="iface-name">以太网</div>
+                            <div class="iface-name">${t('network.ethernet')}</div>
                             <div class="iface-status" id="eth-quick-status">-</div>
                         </div>
                         <div class="iface-ip" id="eth-quick-ip">-</div>
@@ -6758,7 +6762,7 @@ async function loadNetworkPage() {
                     <div class="net-iface" id="net-iface-wifi">
                         <div class="iface-icon"><i class="ri-signal-wifi-3-line"></i></div>
                         <div class="iface-info">
-                            <div class="iface-name">WiFi STA</div>
+                            <div class="iface-name">${t('network.wifiSta')}</div>
                             <div class="iface-status" id="wifi-quick-status">-</div>
                         </div>
                         <div class="iface-ip" id="wifi-quick-ip">-</div>
@@ -6766,7 +6770,7 @@ async function loadNetworkPage() {
                     <div class="net-iface" id="net-iface-ap">
                         <div class="iface-icon"><i class="ri-broadcast-line"></i></div>
                         <div class="iface-info">
-                            <div class="iface-name">WiFi AP</div>
+                            <div class="iface-name">${t('network.wifiAp')}</div>
                             <div class="iface-status" id="ap-quick-status">-</div>
                         </div>
                         <div class="iface-clients" id="ap-quick-clients">-</div>
@@ -6779,10 +6783,10 @@ async function loadNetworkPage() {
                 <!-- 左侧：接口配置 -->
                 <div class="net-panel">
                     <div class="panel-header">
-                        <h3>接口配置</h3>
+                        <h3>${t('network.interfaceConfig')}</h3>
                         <div class="panel-tabs">
-                            <button class="panel-tab active btn-service-style" onclick="switchNetTab('eth')">以太网</button>
-                            <button class="panel-tab btn-service-style" onclick="switchNetTab('wifi')">WiFi</button>
+                            <button class="panel-tab active btn-service-style" onclick="switchNetTab('eth')">${t('network.ethernet')}</button>
+                            <button class="panel-tab btn-service-style" onclick="switchNetTab('wifi')">${t('network.wifi')}</button>
                         </div>
                     </div>
                     
@@ -6790,27 +6794,27 @@ async function loadNetworkPage() {
                     <div class="panel-content" id="net-tab-eth">
                         <div class="config-section">
                             <div class="config-row">
-                                <span class="config-label">链路状态</span>
+                                <span class="config-label">${t('network.linkStatus')}</span>
                                 <span class="config-value" id="net-eth-link">-</span>
                             </div>
                             <div class="config-row">
-                                <span class="config-label">IP 地址</span>
+                                <span class="config-label">${t('network.ipAddress')}</span>
                                 <span class="config-value mono" id="net-eth-ip">-</span>
                             </div>
                             <div class="config-row">
-                                <span class="config-label">子网掩码</span>
+                                <span class="config-label">${t('network.subnetMask')}</span>
                                 <span class="config-value mono" id="net-eth-netmask">-</span>
                             </div>
                             <div class="config-row">
-                                <span class="config-label">网关</span>
+                                <span class="config-label">${t('network.gateway')}</span>
                                 <span class="config-value mono" id="net-eth-gw">-</span>
                             </div>
                             <div class="config-row">
-                                <span class="config-label">DNS</span>
+                                <span class="config-label">${t('network.dns')}</span>
                                 <span class="config-value mono" id="net-eth-dns">-</span>
                             </div>
                             <div class="config-row">
-                                <span class="config-label">MAC</span>
+                                <span class="config-label">${t('network.mac')}</span>
                                 <span class="config-value mono small" id="net-eth-mac">-</span>
                             </div>
                         </div>
@@ -6819,24 +6823,24 @@ async function loadNetworkPage() {
                     <!-- WiFi 配置面板 -->
                     <div class="panel-content hidden" id="net-tab-wifi">
                         <div class="wifi-mode-selector">
-                            <label>模式:</label>
+                            <label>${t('network.mode')}:</label>
                             <select id="wifi-mode-select" onchange="setWifiMode()">
-                                <option value="off">关闭</option>
-                                <option value="sta">站点 (STA)</option>
-                                <option value="ap">热点 (AP)</option>
-                                <option value="apsta">STA+AP</option>
+                                <option value="off">${t('network.off')}</option>
+                                <option value="sta">${t('network.sta')}</option>
+                                <option value="ap">${t('network.ap')}</option>
+                                <option value="apsta">${t('network.apsta')}</option>
                             </select>
                         </div>
                         
                         <!-- STA 信息 -->
                         <div class="config-section" id="wifi-sta-section">
-                            <h4>站点连接</h4>
+                            <h4>${t('network.stationConnect')}</h4>
                             <div class="config-row">
-                                <span class="config-label">状态</span>
+                                <span class="config-label">${t('common.status')}</span>
                                 <span class="config-value" id="net-wifi-sta-status">-</span>
                             </div>
                             <div class="config-row">
-                                <span class="config-label">SSID</span>
+                                <span class="config-label">${t('network.ssid')}</span>
                                 <span class="config-value" id="net-wifi-sta-ssid">-</span>
                             </div>
                             <div class="config-row">
@@ -6844,24 +6848,24 @@ async function loadNetworkPage() {
                                 <span class="config-value mono" id="net-wifi-sta-ip">-</span>
                             </div>
                             <div class="config-row">
-                                <span class="config-label">信号</span>
+                                <span class="config-label">${t('network.signal')}</span>
                                 <span class="config-value" id="net-wifi-sta-rssi">-</span>
                             </div>
                             <div class="wifi-sta-actions">
-                                <button class="btn btn-sm" id="wifi-scan-btn" onclick="showWifiScan()"><i class="ri-scan-line"></i> 扫描</button>
-                                <button class="btn btn-sm btn-danger hidden" id="wifi-disconnect-btn" onclick="disconnectWifi()">断开</button>
+                                <button class="btn btn-sm" id="wifi-scan-btn" onclick="showWifiScan()"><i class="ri-scan-line"></i> ${t('network.scan')}</button>
+                                <button class="btn btn-sm btn-danger hidden" id="wifi-disconnect-btn" onclick="disconnectWifi()">${t('network.disconnect')}</button>
                             </div>
                         </div>
                         
                         <!-- AP 信息 -->
                         <div class="config-section" id="wifi-ap-section">
-                            <h4><i class="ri-broadcast-line"></i> 热点</h4>
+                            <h4><i class="ri-broadcast-line"></i> ${t('network.hotspot')}</h4>
                             <div class="config-row">
-                                <span class="config-label">状态</span>
+                                <span class="config-label">${t('common.status')}</span>
                                 <span class="config-value" id="net-wifi-ap-status">-</span>
                             </div>
                             <div class="config-row">
-                                <span class="config-label">SSID</span>
+                                <span class="config-label">${t('network.ssid')}</span>
                                 <span class="config-value" id="net-wifi-ap-ssid">-</span>
                             </div>
                             <div class="config-row">
@@ -6869,12 +6873,12 @@ async function loadNetworkPage() {
                                 <span class="config-value mono" id="net-wifi-ap-ip">-</span>
                             </div>
                             <div class="config-row">
-                                <span class="config-label">接入数</span>
+                                <span class="config-label">${t('network.clientCount')}</span>
                                 <span class="config-value" id="net-wifi-ap-sta-count">0</span>
                             </div>
                             <div class="wifi-ap-actions">
-                                <button class="btn btn-sm" id="ap-config-btn" onclick="showApConfig()"><i class="ri-settings-3-line"></i> 配置</button>
-                                <button class="btn btn-sm" id="ap-stations-btn" onclick="showApStations()"><i class="ri-server-line"></i> 设备</button>
+                                <button class="btn btn-sm" id="ap-config-btn" onclick="showApConfig()"><i class="ri-settings-3-line"></i> ${t('network.config')}</button>
+                                <button class="btn btn-sm" id="ap-stations-btn" onclick="showApStations()"><i class="ri-server-line"></i> ${t('network.devices')}</button>
                             </div>
                         </div>
                     </div>
@@ -6883,50 +6887,49 @@ async function loadNetworkPage() {
                 <!-- 右侧：服务配置 -->
                 <div class="net-panel">
                     <div class="panel-header">
-                        <h3>网络服务</h3>
+                        <h3>${t('network.networkServices')}</h3>
                     </div>
                     <div class="panel-content">
                         <!-- 主机名 -->
                         <div class="service-block">
                             <div class="service-header">
-                                <span class="service-name">主机名</span>
+                                <span class="service-name">${t('network.hostname')}</span>
                                 <span class="service-value" id="net-hostname">-</span>
                             </div>
                             <div class="service-config">
-                                <input type="text" id="hostname-input" placeholder="新主机名" class="input-sm">
-                                <button class="btn btn-sm" onclick="setHostname()">设置</button>
+                                <input type="text" id="hostname-input" placeholder="${t('network.newHostname')}" class="input-sm">
+                                <button class="btn btn-sm" onclick="setHostname()">${t('network.set')}</button>
                             </div>
                         </div>
                         
                         <!-- DHCP 服务 -->
                         <div class="service-block">
                             <div class="service-header">
-                                <span class="service-name">DHCP 服务器</span>
+                                <span class="service-name">${t('network.dhcpServer')}</span>
                                 <span class="service-badge" id="dhcp-badge">-</span>
                             </div>
                             <div class="service-detail" id="dhcp-interfaces-list"></div>
                             <div class="service-actions">
-                                <button class="btn btn-sm" onclick="showDhcpClients()"><i class="ri-user-line"></i> 客户端</button>
+                                <button class="btn btn-sm" onclick="showDhcpClients()"><i class="ri-user-line"></i> ${t('network.clients')}</button>
                             </div>
                         </div>
                         
-                        <!-- NAT 网关 -->
                         <div class="service-block">
                             <div class="service-header">
-                                <span class="service-name">NAT 网关</span>
+                                <span class="service-name">${typeof t === 'function' ? t('networkPage.natGateway') : 'NAT 网关'}</span>
                                 <span class="service-badge" id="nat-badge">-</span>
                             </div>
                             <div class="service-detail">
                                 <div class="nat-status-row">
-                                    <span>WiFi:</span>
+                                    <span>${typeof t === 'function' ? t('system.wifi') : 'WiFi'}:</span>
                                     <span id="net-nat-wifi">-</span>
-                                    <span>ETH:</span>
+                                    <span>${typeof t === 'function' ? t('system.ethernet') : 'ETH'}:</span>
                                     <span id="net-nat-eth">-</span>
                                 </div>
                             </div>
                             <div class="service-actions">
-                                <button class="btn btn-sm" id="nat-toggle-btn" onclick="toggleNat()">启用</button>
-                                <button class="btn btn-sm" onclick="saveNatConfig()">保存</button>
+                                <button class="btn btn-sm" id="nat-toggle-btn" onclick="toggleNat()">${typeof t === 'function' ? t('common.enable') : '启用'}</button>
+                                <button class="btn btn-sm" onclick="saveNatConfig()">${typeof t === 'function' ? t('common.save') : '保存'}</button>
                             </div>
                         </div>
                     </div>
@@ -7038,12 +7041,11 @@ async function refreshNetworkPage() {
             
             // 概览区
             updateIfaceStatus('net-iface-eth', ethConnected);
-            document.getElementById('eth-quick-status').textContent = ethConnected ? '已连接' : '未连接';
+            document.getElementById('eth-quick-status').textContent = ethConnected ? (typeof t === 'function' ? t('status.connected') : '已连接') : (typeof t === 'function' ? t('status.disconnected') : '未连接');
             document.getElementById('eth-quick-ip').textContent = eth.ip || '-';
             
-            // 详细配置
             document.getElementById('net-eth-link').innerHTML = ethConnected ? 
-                '<span class="status-dot green"></span>已连接' : '<span class="status-dot red"></span>未连接';
+                '<span class="status-dot green"></span>' + (typeof t === 'function' ? t('status.connected') : '已连接') : '<span class="status-dot red"></span>' + (typeof t === 'function' ? t('status.disconnected') : '未连接');
             document.getElementById('net-eth-ip').textContent = eth.ip || '-';
             document.getElementById('net-eth-netmask').textContent = eth.netmask || '-';
             document.getElementById('net-eth-gw').textContent = eth.gateway || '-';
@@ -7055,11 +7057,11 @@ async function refreshNetworkPage() {
             const staConnected = wifiSta.connected || wifiSta.status === 'connected';
             
             updateIfaceStatus('net-iface-wifi', staConnected);
-            document.getElementById('wifi-quick-status').textContent = staConnected ? '已连接' : '未连接';
+            document.getElementById('wifi-quick-status').textContent = staConnected ? (typeof t === 'function' ? t('status.connected') : '已连接') : (typeof t === 'function' ? t('status.disconnected') : '未连接');
             document.getElementById('wifi-quick-ip').textContent = wifiSta.ip || '-';
             
             document.getElementById('net-wifi-sta-status').innerHTML = staConnected ? 
-                '<span class="status-dot green"></span>已连接' : '<span class="status-dot red"></span>未连接';
+                '<span class="status-dot green"></span>' + (typeof t === 'function' ? t('status.connected') : '已连接') : '<span class="status-dot red"></span>' + (typeof t === 'function' ? t('status.disconnected') : '未连接');
             document.getElementById('net-wifi-sta-ssid').textContent = wifiSta.ssid || '-';
             document.getElementById('net-wifi-sta-ip').textContent = wifiSta.ip || '-';
             document.getElementById('net-wifi-sta-rssi').textContent = wifiSta.rssi ? `${wifiSta.rssi} dBm ${getSignalBars(wifiSta.rssi)}` : '-';
@@ -7078,11 +7080,11 @@ async function refreshNetworkPage() {
             const apClients = wifiAp.sta_count || 0;
             
             updateIfaceStatus('net-iface-ap', apActive);
-            document.getElementById('ap-quick-status').textContent = apActive ? '运行中' : '未启用';
-            document.getElementById('ap-quick-clients').textContent = apActive ? `${apClients} 设备` : '-';
+            document.getElementById('ap-quick-status').textContent = apActive ? (typeof t === 'function' ? t('status.running') : '运行中') : (typeof t === 'function' ? t('status.notEnabled') : '未启用');
+            document.getElementById('ap-quick-clients').textContent = apActive ? (typeof t === 'function' ? t('networkPage.devicesCount', { count: apClients }) : `${apClients} 设备`) : '-';
             
             document.getElementById('net-wifi-ap-status').innerHTML = apActive ? 
-                '<span class="status-dot green"></span>运行中' : '<span class="status-dot gray"></span>未启用';
+                '<span class="status-dot green"></span>' + (typeof t === 'function' ? t('status.running') : '运行中') : '<span class="status-dot gray"></span>' + (typeof t === 'function' ? t('status.notEnabled') : '未启用');
             document.getElementById('net-wifi-ap-ssid').textContent = wifiAp.ssid || '-';
             document.getElementById('net-wifi-ap-ip').textContent = wifiAp.ip || '-';
             document.getElementById('net-wifi-ap-sta-count').textContent = apClients;
@@ -7132,16 +7134,16 @@ async function refreshNetworkPage() {
                     <div class="dhcp-iface-row">
                         <span class="status-dot ${iface.running ? 'green' : 'gray'}"></span>
                         <span class="iface-name">${iface.display_name || iface.interface}</span>
-                        <span class="iface-detail">${iface.active_leases || 0} 租约</span>
+                        <span class="iface-detail">${typeof t === 'function' ? t('networkPage.leasesCount', { n: iface.active_leases || 0 }) : (iface.active_leases || 0) + ' 租约'}</span>
                     </div>
                 `).join('');
             } else {
-                badge.textContent = dhcp.data.running ? '运行' : '停止';
+                badge.textContent = dhcp.data.running ? (typeof t === 'function' ? t('status.running') : '运行') : (typeof t === 'function' ? t('status.stopped') : '停止');
                 badge.className = 'service-badge ' + (dhcp.data.running ? 'badge-ok' : 'badge-warn');
-                container.innerHTML = `<div class="dhcp-iface-row">
-                    <span class="status-dot ${dhcp.data.running ? 'green' : 'gray'}"></span>
-                    <span>${dhcp.data.active_leases || 0} 活跃租约</span>
-                </div>`;
+                container.innerHTML = '<div class="dhcp-iface-row">' +
+                    '<span class="status-dot ' + (dhcp.data.running ? 'green' : 'gray') + '"></span>' +
+                    '<span>' + (typeof t === 'function' ? t('networkPage.activeLeasesCount', { n: dhcp.data.active_leases || 0 }) : (dhcp.data.active_leases || 0) + ' 活跃租约') + '</span>' +
+                    '</div>';
             }
         }
     } catch (e) { console.log('DHCP error:', e); }
@@ -7155,7 +7157,7 @@ async function refreshNetworkPage() {
             const ethUp = nat.data.eth_up;
             
             const badge = document.getElementById('nat-badge');
-            badge.textContent = enabled ? '运行' : '停止';
+            badge.textContent = enabled ? (typeof t === 'function' ? t('system.running') : '运行') : (typeof t === 'function' ? t('system.stopped') : '停止');
             badge.className = 'service-badge ' + (enabled ? 'badge-ok' : 'badge-warn');
             
             document.getElementById('net-nat-wifi').innerHTML = wifiConnected ? 
@@ -7165,7 +7167,7 @@ async function refreshNetworkPage() {
             
             // NAT 按钮
             const natToggleBtn = document.getElementById('nat-toggle-btn');
-            natToggleBtn.textContent = enabled ? '禁用' : '启用';
+            natToggleBtn.textContent = enabled ? (typeof t === 'function' ? t('common.disable') : '禁用') : (typeof t === 'function' ? t('common.enable') : '启用');
             natToggleBtn.className = enabled ? 'btn btn-sm btn-danger' : 'btn btn-sm btn-success';
             
             const canToggle = enabled || (wifiConnected && ethUp);
@@ -7236,13 +7238,13 @@ async function showWifiScan() {
     const container = document.getElementById('wifi-scan-results');
     
     section.classList.remove('hidden');
-    container.innerHTML = '<div class="loading-inline">扫描中...</div>';
+    container.innerHTML = '<div class="loading-inline">' + (typeof t === 'function' ? t('networkPage.scanning') : '扫描中...') + '</div>';
     
     try {
         const result = await api.wifiScan();
         if (result.data && result.data.networks) {
             if (result.data.networks.length === 0) {
-                container.innerHTML = '<div class="empty-state">未发现网络</div>';
+                container.innerHTML = '<div class="empty-state">' + (typeof t === 'function' ? t('networkPage.noNetwork') : '未发现网络') + '</div>';
                 return;
             }
             // 按信号强度排序
@@ -7316,7 +7318,7 @@ async function showApStations() {
     const container = document.getElementById('ap-stations-results');
     
     section.classList.remove('hidden');
-    container.innerHTML = '<div class="loading-inline">加载中...</div>';
+    container.innerHTML = '<div class="loading-inline">' + t('common.loading') + '</div>';
     
     try {
         const result = await api.wifiApStations();
@@ -7393,7 +7395,7 @@ async function loadDhcpClients() {
     const iface = document.getElementById('dhcp-iface-select').value;
     const container = document.getElementById('dhcp-clients-results');
     
-    container.innerHTML = '<div class="loading-inline">加载中...</div>';
+    container.innerHTML = '<div class="loading-inline">' + t('common.loading') + '</div>';
     
     try {
         const result = await api.dhcpClients(iface);
@@ -7424,10 +7426,10 @@ async function toggleNat() {
         const status = await api.natStatus();
         if (status.data?.enabled) {
             await api.natDisable();
-            showToast('NAT 已禁用', 'success');
+            showToast(typeof t === 'function' ? t('toast.natDisabled') : 'NAT 已禁用', 'success');
         } else {
             await api.natEnable();
-            showToast('NAT 已启用', 'success');
+            showToast(typeof t === 'function' ? t('toast.natEnabled') : 'NAT 已启用', 'success');
         }
         await refreshNetworkPage();
     } catch (e) { 
@@ -7438,9 +7440,9 @@ async function toggleNat() {
 async function saveNatConfig() {
     try {
         await api.natSave();
-        showToast('NAT 配置已保存', 'success');
+        showToast(typeof t === 'function' ? t('toast.natConfigSaved') : 'NAT 配置已保存', 'success');
     } catch (e) {
-        showToast('保存失败: ' + e.message, 'error');
+        showToast((typeof t === 'function' ? t('toast.saveFailed') : '保存失败') + ': ' + e.message, 'error');
     }
 }
 
@@ -7465,15 +7467,15 @@ async function loadFilesPage() {
                 <div class="file-toolbar">
                     <div class="breadcrumb" id="breadcrumb"></div>
                     <div class="file-actions">
-                        <button class="btn btn-service-style btn-file-action" onclick="showUploadDialog()"><i class="ri-upload-line"></i> 上传文件</button>
-                        <button class="btn btn-service-style btn-file-action" onclick="showNewFolderDialog()"><i class="ri-folder-add-line"></i> 新建文件夹</button>
-                        <button type="button" class="btn btn-file-action btn-gray files-refresh-btn" onclick="refreshFilesPage()" title="刷新"><i class="ri-refresh-line"></i></button>
+                        <button class="btn btn-service-style btn-file-action" onclick="showUploadDialog()"><i class="ri-upload-line"></i> ${t('files.uploadFiles')}</button>
+                        <button class="btn btn-service-style btn-file-action" onclick="showNewFolderDialog()"><i class="ri-folder-add-line"></i> ${t('files.newFolder')}</button>
+                        <button type="button" class="btn btn-file-action btn-gray files-refresh-btn" onclick="refreshFilesPage()" title="${t('common.refresh')}"><i class="ri-refresh-line"></i></button>
                     </div>
                 </div>
                 
                 <div class="storage-tabs">
-                    <button class="tab-btn btn-gray active" onclick="navigateToPath('/sdcard')">SD 卡</button>
-                    <button class="tab-btn btn-gray" onclick="navigateToPath('/spiffs')">SPIFFS</button>
+                    <button class="tab-btn btn-gray active" onclick="navigateToPath('/sdcard')">${t('files.sdcard')}</button>
+                    <button class="tab-btn btn-gray" onclick="navigateToPath('/spiffs')">${t('files.spiffs')}</button>
                     <div class="storage-controls" id="storage-controls">
                         <!-- 动态显示挂载/卸载按钮 -->
                     </div>
@@ -7481,14 +7483,14 @@ async function loadFilesPage() {
                 
                 <!-- 批量操作工具栏 -->
                 <div class="batch-toolbar hidden" id="batch-toolbar">
-                    <span id="selected-count">已选择 0 项</span>
-                    <button class="btn btn-sm" onclick="batchDownload()"><i class="ri-download-line"></i> 批量下载</button>
-                    <button class="btn btn-sm btn-danger" onclick="batchDelete()"><i class="ri-delete-bin-line"></i> 批量删除</button>
-                    <button class="btn btn-sm" onclick="clearSelection()">取消选择</button>
+                    <span id="selected-count">${t('files.selectedCount', { n: 0 })}</span>
+                    <button class="btn btn-sm" onclick="batchDownload()"><i class="ri-download-line"></i> ${t('files.batchDownload')}</button>
+                    <button class="btn btn-sm btn-danger" onclick="batchDelete()"><i class="ri-delete-bin-line"></i> ${t('files.batchDelete')}</button>
+                    <button class="btn btn-sm" onclick="clearSelection()">${t('files.clearSelection')}</button>
                 </div>
                 
                 <div class="file-list" id="file-list">
-                    <div class="loading">加载中...</div>
+                    <div class="loading">${t('common.loading')}</div>
                 </div>
                 
                 <!-- 存储状态 -->
@@ -7500,18 +7502,18 @@ async function loadFilesPage() {
         <div id="upload-modal" class="modal hidden">
             <div class="modal-content cc-compact" style="max-width:560px">
                 <div class="modal-header">
-                    <h2>上传文件</h2>
+                    <h2>${t('files.uploadTitle')}</h2>
                     <button class="modal-close" onclick="closeUploadDialog()"><i class="ri-close-line"></i></button>
                 </div>
                 <div class="modal-body">
                     <div class="upload-area" id="upload-area">
-                        <p>点击选择文件或拖拽文件到此处</p>
+                        <p>${t('files.clickOrDrag')}</p>
                         <input type="file" id="file-input" multiple style="display:none" onchange="handleFileSelect(event)">
                     </div>
                     <div id="upload-list"></div>
                     <div class="config-actions cc-actions">
-                        <button class="btn btn-sm btn-gray" onclick="closeUploadDialog()">取消</button>
-                        <button class="btn btn-service-style btn-sm" onclick="uploadFiles()">上传</button>
+                        <button class="btn btn-sm btn-gray" onclick="closeUploadDialog()">${t('common.cancel')}</button>
+                        <button class="btn btn-service-style btn-sm" onclick="uploadFiles()">${t('common.upload')}</button>
                     </div>
                 </div>
             </div>
@@ -7520,14 +7522,14 @@ async function loadFilesPage() {
         <!-- 新建文件夹对话框 -->
         <div id="newfolder-modal" class="modal hidden">
             <div class="modal-content">
-                <h2>新建文件夹</h2>
+                <h2>${t('files.newFolderTitle')}</h2>
                 <div class="form-group">
-                    <label>文件夹名称</label>
-                    <input type="text" id="new-folder-name" placeholder="输入文件夹名称">
+                    <label>${t('files.folderName')}</label>
+                    <input type="text" id="new-folder-name" placeholder="${t('files.folderNamePlaceholder')}">
                 </div>
                 <div class="form-actions">
-                    <button class="btn" onclick="closeNewFolderDialog()">取消</button>
-                    <button class="btn btn-service-style" onclick="createNewFolder()">创建</button>
+                    <button class="btn" onclick="closeNewFolderDialog()">${t('common.cancel')}</button>
+                    <button class="btn btn-service-style" onclick="createNewFolder()">${t('files.create')}</button>
                 </div>
             </div>
         </div>
@@ -7535,15 +7537,15 @@ async function loadFilesPage() {
         <!-- 重命名对话框 -->
         <div id="rename-modal" class="modal hidden">
             <div class="modal-content">
-                <h2>重命名</h2>
+                <h2>${t('files.renameTitle')}</h2>
                 <div class="form-group">
-                    <label>新名称</label>
-                    <input type="text" id="rename-input" placeholder="输入新名称">
+                    <label>${t('files.newName')}</label>
+                    <input type="text" id="rename-input" placeholder="${t('files.newNamePlaceholder')}">
                 </div>
                 <input type="hidden" id="rename-original-path">
                 <div class="form-actions">
-                    <button class="btn" onclick="closeRenameDialog()">取消</button>
-                    <button class="btn btn-service-style" onclick="doRename()">确定</button>
+                    <button class="btn" onclick="closeRenameDialog()">${t('common.cancel')}</button>
+                    <button class="btn btn-service-style" onclick="doRename()">${t('common.confirm')}</button>
                 </div>
             </div>
         </div>
@@ -7567,7 +7569,7 @@ function updateSelectionUI() {
     
     if (selectedFiles.size > 0) {
         toolbar.classList.remove('hidden');
-        countSpan.textContent = `已选择 ${selectedFiles.size} 项`;
+        countSpan.textContent = t('files.selectedCount', { n: selectedFiles.size });
     } else {
         toolbar.classList.add('hidden');
     }
@@ -7689,31 +7691,30 @@ async function batchDownload() {
 // SD 卡挂载/卸载
 async function mountSdCard() {
     try {
-        showToast('正在挂载 SD 卡...', 'info');
+        showToast(typeof t === 'function' ? t('filePage.mountingSd') : '正在挂载 SD 卡...', 'info');
         await api.storageMount();
-        showToast('SD 卡挂载成功', 'success');
+        showToast(typeof t === 'function' ? t('filePage.mountSdSuccess') : 'SD 卡挂载成功', 'success');
         await refreshFilesPage();
     } catch (e) {
-        showToast('挂载失败: ' + e.message, 'error');
+        showToast((typeof t === 'function' ? t('filePage.mountSdFailed') : '挂载失败') + ': ' + e.message, 'error');
     }
 }
 
 async function unmountSdCard() {
-    if (!confirm('确定要卸载 SD 卡吗？\n\n卸载后将无法访问 SD 卡上的文件。')) {
+    if (!confirm(typeof t === 'function' ? t('filePage.confirmUnmountSd') : '确定要卸载 SD 卡吗？\n\n卸载后将无法访问 SD 卡上的文件。')) {
         return;
     }
     
     try {
-        showToast('正在卸载 SD 卡...', 'info');
+        showToast(typeof t === 'function' ? t('filePage.unmountingSd') : '正在卸载 SD 卡...', 'info');
         await api.storageUnmount();
-        showToast('SD 卡已卸载', 'success');
-        // 如果当前在 SD 卡目录，切换到 SPIFFS
+        showToast(typeof t === 'function' ? t('filePage.unmountSdSuccess') : 'SD 卡已卸载', 'success');
         if (currentFilePath.startsWith('/sdcard')) {
             currentFilePath = '/spiffs';
         }
         await refreshFilesPage();
     } catch (e) {
-        showToast('卸载失败: ' + e.message, 'error');
+        showToast((typeof t === 'function' ? t('filePage.unmountSdFailed') : '卸载失败') + ': ' + e.message, 'error');
     }
 }
 
@@ -7739,8 +7740,8 @@ async function loadDirectory(path) {
                 console.log('SD card not mounted, showing mount prompt');
                 listContainer.innerHTML = `
                     <div class="unmounted-notice">
-                        <div class="unmounted-text">SD 卡未挂载</div>
-                        <button class="btn btn-success" onclick="mountSdCard()">挂载 SD 卡</button>
+                        <div class="unmounted-text">${typeof t === 'function' ? t('filePage.sdCardNotMounted') : 'SD 卡未挂载'}</div>
+                        <button class="btn btn-success" onclick="mountSdCard()">${typeof t === 'function' ? t('filePage.mountSdCard') : '挂载 SD 卡'}</button>
                     </div>
                 `;
                 updateBreadcrumb(path);
@@ -7788,10 +7789,10 @@ async function loadDirectory(path) {
             <table class="file-table">
                 <thead>
                     <tr>
-                        <th style="width:3%"><input type="checkbox" id="select-all-cb" onchange="toggleSelectAll(this)" title="全选"></th>
-                        <th style="width:57%">名称</th>
-                        <th style="width:15%;text-align:center">大小</th>
-                        <th style="width:25%;text-align:center">操作</th>
+                        <th style="width:3%"><input type="checkbox" id="select-all-cb" onchange="toggleSelectAll(this)" title="${typeof t === 'function' ? t('files.selectAll') : '全选'}"></th>
+                        <th style="width:57%">${typeof t === 'function' ? t('files.name') : '名称'}</th>
+                        <th style="width:15%;text-align:center">${typeof t === 'function' ? t('files.size') : '大小'}</th>
+                        <th style="width:25%;text-align:center">${typeof t === 'function' ? t('files.action') : '操作'}</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -7831,12 +7832,12 @@ async function loadDirectory(path) {
         if (isUnmounted) {
             listContainer.innerHTML = `
                 <div class="unmounted-notice">
-                    <div class="unmounted-text">SD 卡未挂载</div>
-                    <button class="btn btn-success" onclick="mountSdCard()">挂载 SD 卡</button>
+                    <div class="unmounted-text">${typeof t === 'function' ? t('filePage.sdCardNotMounted') : 'SD 卡未挂载'}</div>
+                    <button class="btn btn-success" onclick="mountSdCard()">${typeof t === 'function' ? t('filePage.mountSdCard') : '挂载 SD 卡'}</button>
                 </div>
             `;
         } else {
-            listContainer.innerHTML = `<div class="error">加载失败: ${e.message}</div>`;
+            listContainer.innerHTML = '<div class="error">' + (typeof t === 'function' ? t('filePage.loadFailed') : '加载失败') + ': ' + e.message + '</div>';
         }
     }
 }
@@ -7885,8 +7886,8 @@ async function loadStorageStatus() {
         const spiffsMounted = status.data?.spiffs?.mounted;
         
         const formatStorage = (type, data) => {
-            if (!data?.mounted) return `<span class="unmounted">未挂载</span>`;
-            return `<span class="mounted">已挂载</span>`;
+            if (!data?.mounted) return '<span class="unmounted">' + (typeof t === 'function' ? t('filePage.notMounted') : '未挂载') + '</span>';
+            return '<span class="mounted">' + (typeof t === 'function' ? t('filePage.mounted') : '已挂载') + '</span>';
         };
         
         container.innerHTML = `
@@ -7896,18 +7897,17 @@ async function loadStorageStatus() {
             </div>
         `;
         
-        // 更新挂载/卸载按钮
         if (controlsContainer) {
             if (sdMounted) {
                 controlsContainer.innerHTML = `
-                    <button class="btn btn-sm btn-danger" onclick="unmountSdCard()" title="卸载 SD 卡">
-                        <i class="ri-eject-line"></i> 卸载 SD
+                    <button class="btn btn-sm btn-danger" onclick="unmountSdCard()" title="${typeof t === 'function' ? t('filePage.unmountSdCard') : '卸载 SD 卡'}">
+                        <i class="ri-eject-line"></i> ${typeof t === 'function' ? t('filePage.unmountSdBtn') : '卸载 SD'}
                     </button>
                 `;
             } else {
                 controlsContainer.innerHTML = `
-                    <button class="btn btn-sm btn-success" onclick="mountSdCard()" title="挂载 SD 卡">
-                        挂载 SD
+                    <button class="btn btn-sm btn-success" onclick="mountSdCard()" title="${typeof t === 'function' ? t('filePage.mountSdCard') : '挂载 SD 卡'}">
+                        ${typeof t === 'function' ? t('filePage.mountSdBtn') : '挂载 SD'}
                     </button>
                 `;
             }
@@ -8019,7 +8019,7 @@ async function uploadFiles() {
         // 更新状态
         const items = listContainer.querySelectorAll('.upload-item');
         if (items[i]) {
-            items[i].innerHTML = `<span>${file.name}</span><span class="uploading">上传中...</span>`;
+            items[i].innerHTML = `<span>${file.name}</span><span class="uploading">${typeof t === 'function' ? t('common.uploading') : '上传中...'}</span>`;
         }
         
         try {
@@ -8027,7 +8027,7 @@ async function uploadFiles() {
             const result = await api.fileUpload(targetPath, file);
             console.log('Upload result:', result);
             if (items[i]) {
-                items[i].innerHTML = `<span>${file.name}</span><span class="success">完成</span>`;
+                items[i].innerHTML = `<span>${file.name}</span><span class="success">${typeof t === 'function' ? t('fileManager.uploadComplete') : '完成'}</span>`;
             }
             
             // 检查是否是配置包上传，显示验证结果
@@ -8401,74 +8401,74 @@ async function loadCommandsPage() {
             <!-- 主机选择和指令列表 -->
             <div class="section">
                 <div class="section-header">
-                    <h2>选择主机</h2>
+                    <h2>${t('ssh.selectHost')}</h2>
                     <div class="section-actions">
-                        <button class="btn btn-small btn-service-style" onclick="showImportSshCommandModal()" style="font-size:0.85em"><i class="ri-download-line"></i> 导入指令</button>
-                        <button class="btn btn-small btn-service-style" onclick="showAddCommandModal()" style="font-size:0.85em"><i class="ri-add-line"></i> 新建指令</button>
+                        <button class="btn btn-small btn-service-style" onclick="showImportSshCommandModal()" style="font-size:0.85em"><i class="ri-download-line"></i> ${t('ssh.importCommand')}</button>
+                        <button class="btn btn-small btn-service-style" onclick="showAddCommandModal()" style="font-size:0.85em"><i class="ri-add-line"></i> ${t('ssh.newCommand')}</button>
                     </div>
                 </div>
                 <div id="host-selector" class="host-selector">
-                    <div class="loading">加载主机列表...</div>
+                    <div class="loading">${t('ssh.loadingHosts')}</div>
                 </div>
             </div>
             
             <!-- 指令列表 -->
             <div class="section">
-                <h2>指令列表</h2>
+                <h2>${t('ssh.commandList')}</h2>
                 <div id="commands-list" class="commands-list">
-                    <div class="empty-state">请先选择一个主机</div>
+                    <div class="empty-state">${t('ssh.selectHostFirst')}</div>
                 </div>
             </div>
             
             <!-- 执行结果 -->
             <div class="section" id="exec-result-section" style="display:none">
                 <div class="section-header">
-                    <h2>执行结果</h2>
+                    <h2>${t('ssh.execResult')}</h2>
                     <div class="section-actions">
-                        <button id="cancel-exec-btn" class="btn btn-sm" onclick="cancelExecution()" style="display:none;background:#dc3545;color:white"><i class="ri-stop-line"></i> 取消 (Esc)</button>
-                        <button class="btn btn-sm" onclick="clearExecResult()"><i class="ri-delete-bin-line"></i> 清除</button>
+                        <button id="cancel-exec-btn" class="btn btn-sm" onclick="cancelExecution()" style="display:none;background:#dc3545;color:white"><i class="ri-stop-line"></i> ${t('common.cancel')} (Esc)</button>
+                        <button class="btn btn-sm" onclick="clearExecResult()"><i class="ri-delete-bin-line"></i> ${t('common.clear')}</button>
                     </div>
                 </div>
                 <!-- nohup 快捷操作按钮 -->
                 <div id="nohup-actions" class="nohup-actions" style="display:none">
-                    <button class="btn btn-sm" id="nohup-view-log" onclick="nohupViewLog()"><i class="ri-file-text-line"></i> 查看日志</button>
-                    <button class="btn btn-sm" id="nohup-tail-log" onclick="nohupTailLog()"><i class="ri-eye-line"></i> 实时跟踪</button>
-                    <button class="btn btn-sm" id="nohup-stop-tail" onclick="nohupStopTail()" style="display:none;background:#ffc107;color:#333"><i class="ri-stop-line"></i> 停止跟踪</button>
-                    <button class="btn btn-sm" id="nohup-check-process" onclick="nohupCheckProcess()"><i class="ri-search-line"></i> 检查进程</button>
-                    <button class="btn btn-sm" id="nohup-stop-process" onclick="nohupStopProcess()" style="background:#dc3545;color:white"><i class="ri-stop-circle-line"></i> 停止进程</button>
+                    <button class="btn btn-sm" id="nohup-view-log" onclick="nohupViewLog()"><i class="ri-file-text-line"></i> ${typeof t === 'function' ? t('ssh.viewLog') : '查看日志'}</button>
+                    <button class="btn btn-sm" id="nohup-tail-log" onclick="nohupTailLog()"><i class="ri-eye-line"></i> ${typeof t === 'function' ? t('ssh.tailLog') : '实时跟踪'}</button>
+                    <button class="btn btn-sm" id="nohup-stop-tail" onclick="nohupStopTail()" style="display:none;background:#ffc107;color:#333"><i class="ri-stop-line"></i> ${typeof t === 'function' ? t('ssh.stopTail') : '停止跟踪'}</button>
+                    <button class="btn btn-sm" id="nohup-check-process" onclick="nohupCheckProcess()"><i class="ri-search-line"></i> ${typeof t === 'function' ? t('ssh.checkProcess') : '检查进程'}</button>
+                    <button class="btn btn-sm" id="nohup-stop-process" onclick="nohupStopProcess()" style="background:#dc3545;color:white"><i class="ri-stop-circle-line"></i> ${typeof t === 'function' ? t('ssh.stopProcess') : '停止进程'}</button>
                 </div>
                 <pre id="exec-result" class="exec-result"></pre>
                 
                 <!-- 模式匹配结果面板 -->
                 <div id="match-result-panel" class="match-result-panel" style="display:none">
                     <div class="match-panel-header">
-                        <h3>匹配结果</h3>
+                        <h3>${typeof t === 'function' ? t('ssh.matchResultTitle') : '匹配结果'}</h3>
                         <span class="match-status" id="match-status-badge"></span>
                     </div>
                     <div class="match-result-grid">
                         <div class="match-result-item">
-                            <div class="match-label">成功匹配</div>
+                            <div class="match-label">${typeof t === 'function' ? t('ssh.expectMatch') : '成功匹配'}</div>
                             <div class="match-value" id="match-expect-result">-</div>
                             <code class="match-var">msg.expect_matched</code>
                         </div>
                         <div class="match-result-item">
-                            <div class="match-label">失败匹配</div>
+                            <div class="match-label">${typeof t === 'function' ? t('ssh.failMatch') : '失败匹配'}</div>
                             <div class="match-value" id="match-fail-result">-</div>
                             <code class="match-var">msg.fail_matched</code>
                         </div>
                         <div class="match-result-item">
-                            <div class="match-label">提取内容</div>
+                            <div class="match-label">${typeof t === 'function' ? t('ssh.extractContent') : '提取内容'}</div>
                             <div class="match-value match-extracted" id="match-extracted-result">-</div>
                             <code class="match-var">msg.extracted</code>
                         </div>
                         <div class="match-result-item">
-                            <div class="match-label">最终状态</div>
+                            <div class="match-label">${typeof t === 'function' ? t('ssh.finalStatus') : '最终状态'}</div>
                             <div class="match-value" id="match-final-status">-</div>
                             <code class="match-var">msg.status</code>
                         </div>
                     </div>
                     <div class="match-api-hint">
-                        <small>WebSocket 消息字段可在 <code>handleSshExecMessage(msg)</code> 回调中使用</small>
+                        <small>${typeof t === 'function' ? t('ssh.wsMessageHint') : 'WebSocket 消息字段可在 handleSshExecMessage(msg) 回调中使用'}</small>
                     </div>
                 </div>
             </div>
@@ -8478,38 +8478,38 @@ async function loadCommandsPage() {
         <div id="command-modal" class="modal hidden">
             <div class="modal-content cc-compact" style="max-width:560px">
                 <div class="modal-header">
-                    <h2 id="command-modal-title">新建指令</h2>
+                    <h2 id="command-modal-title">${typeof t === 'function' ? t('ssh.newCommand') : '新建指令'}</h2>
                     <div id="command-modal-header-actions"></div>
                     <button class="modal-close" onclick="closeCommandModal()">&times;</button>
                 </div>
                 <div class="modal-body">
                     <form id="command-form" onsubmit="return false;">
                         <div class="form-group" id="cmd-id-group">
-                            <label>指令 ID *</label>
-                            <input type="text" id="cmd-edit-id" placeholder="例如：restart_nginx, check_status" 
+                            <label>${typeof t === 'function' ? t('ssh.cmdId') : '指令 ID'} *</label>
+                            <input type="text" id="cmd-edit-id" placeholder="${typeof t === 'function' ? t('ssh.cmdIdPlaceholder') : '例如：restart_nginx, check_status'}" 
                                    pattern="^[a-zA-Z0-9][a-zA-Z0-9_-]*[a-zA-Z0-9]$|^[a-zA-Z0-9]$"
                                    oninput="validateCommandId(this)" required>
-                            <small style="color:#666">唯一标识符，仅限字母、数字、下划线、连字符，不能以 _ 或 - 开头/结尾</small>
+                            <small style="color:#666">${typeof t === 'function' ? t('ssh.cmdIdHint') : '唯一标识符，仅限字母、数字、下划线、连字符，不能以 _ 或 - 开头/结尾'}</small>
                             <span id="cmd-id-error" class="error-hint" style="display:none;color:var(--danger-color);font-size:12px"></span>
                         </div>
                         <div class="form-group">
-                            <label>指令名称 *</label>
-                            <input type="text" id="cmd-name" placeholder="例如：重启服务" required>
+                            <label>${typeof t === 'function' ? t('ssh.cmdName') : '指令名称'} *</label>
+                            <input type="text" id="cmd-name" placeholder="${typeof t === 'function' ? t('ssh.cmdNamePlaceholder') : '例如：重启服务'}" required>
                         </div>
                         <div class="form-group">
-                            <label>SSH 命令 *</label>
-                            <textarea id="cmd-command" rows="3" placeholder="例如：sudo systemctl restart nginx" required></textarea>
-                            <small style="color:#666">支持多行命令，每行一条</small>
+                            <label>${typeof t === 'function' ? t('ssh.commandText') : 'SSH 命令'} *</label>
+                            <textarea id="cmd-command" rows="3" placeholder="${typeof t === 'function' ? t('ssh.cmdCommandPlaceholder') : '例如：sudo systemctl restart nginx'}" required></textarea>
+                            <small style="color:#666">${typeof t === 'function' ? t('ssh.multiLineHint') : '支持多行命令，每行一条'}</small>
                         </div>
                         <div class="form-group">
-                            <label>描述（可选）</label>
-                            <input type="text" id="cmd-desc" placeholder="简要说明这个指令的作用">
+                            <label>${typeof t === 'function' ? t('common.description') : '描述'}（${typeof t === 'function' ? t('common.optional') : '可选'}）</label>
+                            <input type="text" id="cmd-desc" placeholder="${typeof t === 'function' ? t('ssh.cmdDescPlaceholder') : '简要说明这个指令的作用'}">
                         </div>
                         <div class="form-group">
-                            <label>图标</label>
+                            <label>${typeof t === 'function' ? t('dataWidget.icon') : '图标'}</label>
                             <div class="icon-type-tabs">
-                                <button type="button" class="icon-tab active" onclick="switchCmdIconType('emoji')"><i class="ri-emotion-line"></i> 图标</button>
-                                <button type="button" class="icon-tab" onclick="switchCmdIconType('image')"><i class="ri-image-line"></i> 图片</button>
+                                <button type="button" class="icon-tab active" onclick="switchCmdIconType('emoji')"><i class="ri-emotion-line"></i> ${typeof t === 'function' ? t('automation.iconTab') : '图标'}</button>
+                                <button type="button" class="icon-tab" onclick="switchCmdIconType('image')"><i class="ri-image-line"></i> ${typeof t === 'function' ? t('automation.imageTab') : '图片'}</button>
                             </div>
                             <div id="icon-emoji-picker" class="icon-picker">
                                 ${['ri-rocket-line', 'ri-refresh-line', 'ri-thunderstorms-line', 'ri-tools-line', 'ri-bar-chart-line', 'ri-search-line', 'ri-save-line', 'ri-delete-bin-line', 'ri-stop-line', 'ri-play-line', 'ri-box-3-line', 'ri-settings-line'].map(icon => 
@@ -8519,12 +8519,12 @@ async function loadCommandsPage() {
                             <div id="icon-image-picker" class="icon-image-picker hidden">
                                 <div class="icon-preview-row">
                                     <div id="cmd-icon-preview" class="icon-image-preview">
-                                        <span class="preview-placeholder">无</span>
+                                        <span class="preview-placeholder">${typeof t === 'function' ? t('automation.previewNone') : '无'}</span>
                                     </div>
                                     <div class="icon-path-input">
                                         <input type="text" id="cmd-icon-path" class="input" placeholder="/sdcard/images/..." readonly>
-                                        <button type="button" class="btn btn-sm" onclick="browseCmdIconImage()"><i class="ri-folder-open-line"></i> 浏览</button>
-                                        <button type="button" class="btn btn-sm btn-danger" onclick="clearCmdIconImage()" title="清除"><i class="ri-close-line"></i></button>
+                                        <button type="button" class="btn btn-sm" onclick="browseCmdIconImage()"><i class="ri-folder-open-line"></i> ${typeof t === 'function' ? t('common.browse') : '浏览'}</button>
+                                        <button type="button" class="btn btn-sm btn-danger" onclick="clearCmdIconImage()" title="${typeof t === 'function' ? t('common.clear') : '清除'}"><i class="ri-close-line"></i></button>
                                     </div>
                                 </div>
                             </div>
@@ -8532,97 +8532,94 @@ async function loadCommandsPage() {
                             <input type="hidden" id="cmd-icon-type" value="emoji">
                         </div>
                         
-                        <!-- 高级选项 -->
                         <details class="advanced-options">
-                            <summary><i class="ri-settings-3-line"></i> 高级选项（模式匹配）</summary>
+                            <summary><i class="ri-settings-3-line"></i> ${typeof t === 'function' ? t('ssh.advancedOptions') : '高级选项（模式匹配）'}</summary>
                             <div class="advanced-content">
                                 <div class="form-group">
                                     <label class="checkbox-label">
                                         <input type="checkbox" id="cmd-nohup" onchange="updateNohupState()">
-                                        <span>后台执行（nohup）</span>
+                                        <span>${typeof t === 'function' ? t('ssh.nohupTitle') : '后台执行（nohup）'}</span>
                                     </label>
-                                    <small>命令将在服务器后台运行，SSH 断开后不受影响。适合重启、长时间任务等场景</small>
+                                    <small>${typeof t === 'function' ? t('ssh.nohupHint') : '命令将在服务器后台运行，SSH 断开后不受影响。适合重启、长时间任务等场景'}</small>
                                 </div>
                                 
-                                <!-- 服务模式配置（nohup 启用时显示） -->
                                 <div id="cmd-service-mode-options" class="service-mode-options hidden">
                                     <div class="service-mode-header">
                                         <label class="checkbox-label">
                                             <input type="checkbox" id="cmd-service-mode" onchange="updateServiceModeState()">
-                                            <span>服务模式（监测就绪状态）</span>
+                                            <span>${typeof t === 'function' ? t('ssh.serviceModeLabel') : '服务模式（监测就绪状态）'}</span>
                                         </label>
-                                        <small>启动后持续监测日志，检测到就绪字符串后更新变量状态</small>
+                                        <small>${typeof t === 'function' ? t('ssh.serviceModeHint') : '启动后持续监测日志，检测到就绪字符串后更新变量状态'}</small>
                                     </div>
                                     <div id="cmd-service-mode-fields" class="service-mode-fields hidden">
                                         <div class="form-group">
-                                            <label><i class="ri-check-line"></i> 就绪匹配模式 *</label>
-                                            <input type="text" id="cmd-ready-pattern" placeholder="例如：Running on|Server started">
-                                            <small>日志中出现此字符串时标记为就绪（支持 | 分隔多个模式）</small>
+                                            <label><i class="ri-check-line"></i> ${typeof t === 'function' ? t('ssh.readyPatternRequired') : '就绪匹配模式'} *</label>
+                                            <input type="text" id="cmd-ready-pattern" placeholder="${typeof t === 'function' ? t('ssh.cmdReadyPatternPlaceholder') : '例如：Running on|Server started'}">
+                                            <small>${typeof t === 'function' ? t('ssh.readyPatternHint') : '日志中出现此字符串时标记为就绪（支持 | 分隔多个模式）'}</small>
                                         </div>
                                         <div class="form-group">
-                                            <label><i class="ri-close-line"></i> 失败匹配模式</label>
-                                            <input type="text" id="cmd-service-fail-pattern" placeholder="例如：error|failed|Exception">
-                                            <small>日志中出现此字符串时标记为失败（可选，支持 | 分隔多个模式）</small>
+                                            <label><i class="ri-close-line"></i> ${typeof t === 'function' ? t('ssh.failPatternLabel') : '失败匹配模式'}</label>
+                                            <input type="text" id="cmd-service-fail-pattern" placeholder="${typeof t === 'function' ? t('ssh.cmdFailPatternPlaceholder') : '例如：error|failed|Exception'}">
+                                            <small>${typeof t === 'function' ? t('ssh.serviceFailPatternHint') : '日志中出现此字符串时标记为失败（可选，支持 | 分隔多个模式）'}</small>
                                         </div>
                                         <div class="form-group">
-                                            <label><i class="ri-time-line"></i> 超时（秒）</label>
+                                            <label><i class="ri-time-line"></i> ${typeof t === 'function' ? t('ssh.readyTimeoutLabel') : '超时（秒）'}</label>
                                             <input type="number" id="cmd-ready-timeout" value="120" min="10" max="600" step="10">
-                                            <small>超过此时间未匹配到就绪模式则标记为 timeout</small>
+                                            <small>${typeof t === 'function' ? t('ssh.readyTimeoutHint') : '超过此时间未匹配到就绪模式则标记为 timeout'}</small>
                                         </div>
                                         <div class="form-group">
-                                            <label><i class="ri-refresh-line"></i> 检测间隔（毫秒）</label>
+                                            <label><i class="ri-refresh-line"></i> ${typeof t === 'function' ? t('ssh.readyIntervalLabel') : '检测间隔（毫秒）'}</label>
                                             <input type="number" id="cmd-ready-interval" value="5000" min="1000" max="30000" step="1000">
-                                            <small>每隔多久检测一次日志文件</small>
+                                            <small>${typeof t === 'function' ? t('ssh.readyIntervalHint') : '每隔多久检测一次日志文件'}</small>
                                         </div>
                                         <div class="service-mode-hint">
-                                            <small>服务启动后，系统将监测日志文件：<code>/tmp/ts_nohup_[命令名].log</code></small><br>
-                                            <small>变量 <code>[变量名].status</code> 会根据日志匹配自动更新状态</small>
+                                            <small>${typeof t === 'function' ? t('ssh.serviceLogHint') : '服务启动后，系统将监测日志文件：'}<code>${typeof t === 'function' ? t('ssh.serviceLogPath') : '/tmp/ts_nohup_[命令名].log'}</code></small><br>
+                                            <small>${typeof t === 'function' ? t('ssh.serviceStatusHint') : '变量 [变量名].status 会根据日志匹配自动更新状态'}</small>
                                         </div>
                                     </div>
                                 </div>
                                 
-                                <!-- 存储变量名（独立字段，nohup 模式下也可用） -->
                                 <div class="form-group" id="cmd-var-name-group">
-                                    <label><i class="ri-file-text-line"></i> 存储变量名</label>
-                                    <input type="text" id="cmd-var-name" placeholder="例如：ping_test">
-                                    <small id="cmd-var-name-hint">执行结果将存储为 \${变量名.status}、\${变量名.extracted} 等，可在后续命令中引用</small>
+                                    <label><i class="ri-file-text-line"></i> ${typeof t === 'function' ? t('ssh.varNameLabel') : '存储变量名'}</label>
+                                    <input type="text" id="cmd-var-name" placeholder="${typeof t === 'function' ? t('ssh.cmdVarNamePlaceholder') : '例如：ping_test'}">
+                                    <small id="cmd-var-name-hint">${typeof t === 'function' ? t('ssh.varNameHint') : '执行结果将存储为 ${变量名.status}、${变量名.extracted} 等，可在后续命令中引用'}</small>
                                 </div>
                                 
                                 <div id="cmd-pattern-options">
                                     <div class="form-group">
-                                        <label><i class="ri-check-line"></i> 成功匹配模式</label>
-                                        <input type="text" id="cmd-expect-pattern" placeholder="例如：active (running)" oninput="updateTimeoutState()">
-                                        <small>输出中包含此文本时标记为成功</small>
+                                        <label><i class="ri-check-line"></i> ${typeof t === 'function' ? t('ssh.successPatternLabel') : '成功匹配模式'}</label>
+                                        <input type="text" id="cmd-expect-pattern" placeholder="${typeof t === 'function' ? t('ssh.cmdExpectPatternPlaceholder') : '例如：active (running)'}" oninput="updateTimeoutState()">
+                                        <small>${typeof t === 'function' ? t('ssh.successPatternHint') : '输出中包含此文本时标记为成功'}</small>
                                     </div>
                                     <div class="form-group">
-                                        <label><i class="ri-close-line"></i> 失败匹配模式</label>
-                                        <input type="text" id="cmd-fail-pattern" placeholder="例如：failed|error" oninput="updateTimeoutState()">
-                                        <small>输出中包含此文本时标记为失败</small>
+                                        <label><i class="ri-close-line"></i> ${typeof t === 'function' ? t('ssh.failPatternLabel') : '失败匹配模式'}</label>
+                                        <input type="text" id="cmd-fail-pattern" placeholder="${typeof t === 'function' ? t('ssh.cmdFailPatternPlaceholder') : '例如：failed|error'}" oninput="updateTimeoutState()">
+                                        <small>${typeof t === 'function' ? t('ssh.failPatternHint') : '输出中包含此文本时标记为失败'}</small>
                                     </div>
                                     <div class="form-group">
-                                        <label><i class="ri-file-list-3-line"></i> 提取模式</label>
-                                        <input type="text" id="cmd-extract-pattern" placeholder="例如：version: (.*)">
-                                        <small>从输出中提取匹配内容，使用 (.*) 捕获组</small>
+                                        <label><i class="ri-file-list-3-line"></i> ${typeof t === 'function' ? t('ssh.extractPatternLabel') : '提取模式'}</label>
+                                        <input type="text" id="cmd-extract-pattern" placeholder="${typeof t === 'function' ? t('ssh.cmdExtractPatternPlaceholder') : '例如：version: (.*)'}">
+                                        <small>${typeof t === 'function' ? t('ssh.extractPatternHint') : '从输出中提取匹配内容，使用 (.*) 捕获组'}</small>
                                     </div>
                                     <div class="form-group">
                                         <label class="checkbox-label">
                                             <input type="checkbox" id="cmd-stop-on-match" onchange="updateTimeoutState()">
-                                            <span><i class="ri-stop-line"></i> 匹配后自动停止</span>
+                                            <span><i class="ri-stop-line"></i> ${typeof t === 'function' ? t('ssh.stopOnMatchLabel') : '匹配后自动停止'}</span>
                                         </label>
-                                        <small>适用于 ping 等持续运行的命令，匹配成功后自动终止</small>
+                                        <small>${typeof t === 'function' ? t('ssh.stopOnMatchHint') : '适用于 ping 等持续运行的命令，匹配成功后自动终止'}</small>
                                     </div>
                                     <div class="form-group" id="cmd-timeout-group">
-                                        <label><i class="ri-time-line"></i> 超时（秒）</label>
+                                        <label><i class="ri-time-line"></i> ${typeof t === 'function' ? t('ssh.timeoutLabel') : '超时（秒）'}</label>
                                         <input type="number" id="cmd-timeout" value="30" min="5" max="300" step="5">
-                                        <small id="cmd-timeout-hint">超时仅在设置了成功/失败模式或勾选了"匹配后停止"时有效</small>
+                                        <small id="cmd-timeout-hint">${typeof t === 'function' ? t('ssh.timeoutHint') : '超时仅在设置了成功/失败模式或勾选了"匹配后停止"时有效'}</small>
                                     </div>
                                 </div>
                             </div>
                         </details>
                         
                         <div class="form-actions">
-                            <button type="button" class="btn btn-gray" onclick="closeCommandModal()">取消</button>
-                            <button type="submit" class="btn btn-service-style" onclick="saveCommand()">保存</button>
+                            <button type="button" class="btn btn-gray" onclick="closeCommandModal()">${typeof t === 'function' ? t('ssh.cancelBtn') : '取消'}</button>
+                            <button type="submit" class="btn btn-service-style" onclick="saveCommand()">${typeof t === 'function' ? t('ssh.saveBtn') : '保存'}</button>
                         </div>
                     </form>
                 </div>
@@ -9057,18 +9054,18 @@ function selectHost(hostId) {
 function refreshCommandsList() {
     const container = document.getElementById('commands-list');
     var createFirstBtn = '<button type="button" class="btn btn-small btn-service-style" onclick="showAddCommandModal()" style="font-size:0.85em;display:inline-block">';
-    createFirstBtn += '<i class="ri-add-line"></i> 创建第一个指令';
+    createFirstBtn += '<i class="ri-add-line"></i> ' + (typeof t === 'function' ? t('ssh.createFirstCommand') : '创建第一个指令');
     createFirstBtn += '</button>';
     
     if (!selectedHostId) {
-        container.innerHTML = '<div class="empty-state"><p>请先选择一个主机</p>' + createFirstBtn + '</div>';
+        container.innerHTML = '<div class="empty-state"><p>' + (typeof t === 'function' ? t('ssh.selectHostFirst') : '请先选择一个主机') + '</p>' + createFirstBtn + '</div>';
         return;
     }
     
     const hostCommands = sshCommands[selectedHostId] || [];
     
     if (hostCommands.length === 0) {
-        container.innerHTML = '<div class="empty-state"><p>该主机暂无指令</p>' + createFirstBtn + '</div>';
+        container.innerHTML = '<div class="empty-state"><p>' + (typeof t === 'function' ? t('ssh.noCommandsForHost') : '该主机暂无指令') + '</p>' + createFirstBtn + '</div>';
         return;
     }
     
@@ -9140,12 +9137,12 @@ function refreshCommandsList() {
             ${cmd.desc ? `<div class="cmd-desc" title="${escapeHtml(cmd.desc)}">${escapeHtml(cmd.desc)}</div>` : ''}
             <div class="cmd-code" title="${escapeHtml(cmd.command)}">${escapeHtml(cmd.command.split('\n')[0])}${cmd.command.includes('\n') ? ' ...' : ''}</div>
             <div class="cmd-actions">
-                <button class="btn btn-sm btn-exec" onclick="executeCommand(${idx})" title="${isOrphan ? '主机不存在，无法执行' : '执行'}" ${execBtnDisabled}><i class="ri-play-line"></i></button>
+                <button class="btn btn-sm btn-exec" onclick="executeCommand(${idx})" title="${isOrphan ? (typeof t === 'function' ? t('ssh.hostNotExistCannotExec') : '主机不存在，无法执行') : (typeof t === 'function' ? t('common.run') : '执行')}" ${execBtnDisabled}><i class="ri-play-line"></i></button>
                 ${serviceActionsHtml}
                 ${varBtnHtml}
-                <button class="btn btn-sm btn-service-style" onclick="exportSshCommand('${escapeHtml(cmd.id)}')" title="导出配置"><i class="ri-upload-line"></i></button>
-                <button class="btn btn-sm" onclick="editCommand(${idx})" title="编辑"><i class="ri-edit-line"></i></button>
-                <button class="btn btn-sm" onclick="deleteCommand(${idx})" title="删除" style="background:#dc3545;color:white"><i class="ri-delete-bin-line"></i></button>
+                <button class="btn btn-sm btn-service-style" onclick="exportSshCommand('${escapeHtml(cmd.id)}')" title="${typeof t === 'function' ? t('ssh.exportConfig') : '导出配置'}"><i class="ri-upload-line"></i></button>
+                <button class="btn btn-sm" onclick="editCommand(${idx})" title="${typeof t === 'function' ? t('common.edit') : '编辑'}"><i class="ri-edit-line"></i></button>
+                <button class="btn btn-sm" onclick="deleteCommand(${idx})" title="${typeof t === 'function' ? t('common.delete') : '删除'}" style="background:#dc3545;color:white"><i class="ri-delete-bin-line"></i></button>
             </div>
         </div>
     `}).join('');
@@ -9213,11 +9210,11 @@ function getServiceStatusLabel(status) {
 
 function showAddCommandModal() {
     if (!selectedHostId) {
-        showToast('请先选择一个主机', 'warning');
+        showToast((typeof t === 'function' ? t('ssh.selectHostFirst') : '请先选择一个主机'), 'warning');
         return;
     }
     
-    document.getElementById('command-modal-title').textContent = '新建指令';
+    document.getElementById('command-modal-title').textContent = (typeof t === 'function' ? t('ssh.newCommand') : '新建指令');
     
     /* 新建模式：ID 可编辑 */
     const idInput = document.getElementById('cmd-edit-id');
@@ -9295,7 +9292,7 @@ async function showCommandVariables(varName) {
     const header = modal.querySelector('.modal-header h2');
     if (header) header.textContent = `指令变量: ${varName}.*`;
     
-    body.innerHTML = '<div class="loading">加载中...</div>';
+    body.innerHTML = '<div class="loading">' + t('common.loading') + '</div>';
     modal.classList.remove('hidden');
     
     try {
@@ -9363,8 +9360,8 @@ function updateTimeoutState() {
     }
     if (timeoutHint) {
         timeoutHint.textContent = isTimeoutEffective 
-            ? '匹配超时后命令将被终止' 
-            : '超时仅在设置了成功/失败模式或勾选了"匹配后停止"时有效';
+            ? (typeof t === 'function' ? t('ssh.matchTimeoutHint') : '匹配超时后命令将被终止')
+            : (typeof t === 'function' ? t('ssh.timeoutConditionHint') : '超时仅在设置了成功/失败模式或勾选了"匹配后停止"时有效');
         timeoutHint.style.color = isTimeoutEffective ? '' : 'var(--text-muted)';
     }
 }
@@ -9390,9 +9387,9 @@ function updateNohupState() {
     // 更新变量名提示
     if (varNameGroup && varNameHint) {
         if (nohup) {
-            varNameHint.innerHTML = '服务模式下，状态变量为 <code>${变量名}.status</code>（ready/checking/timeout）';
+            varNameHint.innerHTML = (typeof t === 'function' ? t('ssh.serviceModeVarHint') : '服务模式下，状态变量为 <code>${变量名}.status</code>（ready/checking/timeout）');
         } else {
-            varNameHint.innerHTML = '执行结果将存储为 <code>${变量名}.status</code>、<code>${变量名}.extracted</code> 等，可在后续命令中引用';
+            varNameHint.innerHTML = (typeof t === 'function' ? t('ssh.varNameHint') : '执行结果将存储为 <code>${变量名}.status</code>、<code>${变量名}.extracted</code> 等，可在后续命令中引用');
         }
     }
     
@@ -9778,27 +9775,27 @@ function showExportSshCommandModal(cmdId) {
     
     modal.innerHTML = `
         <div class="modal-content" style="max-width:600px">
-            <h2>导出 SSH 指令配置</h2>
-            <p style="color:#666;font-size:0.9rem">导出指令 <strong>${escapeHtml(cmdId)}</strong> 的配置为加密配置包</p>
+            <h2>${typeof t === 'function' ? t('ssh.exportSshCmdTitle') : '导出 SSH 指令配置'}</h2>
+            <p style="color:#666;font-size:0.9rem">${typeof t === 'function' ? t('ssh.exportSshCmdDesc', {cmdId: escapeHtml(cmdId)}) : `导出指令 <strong>${escapeHtml(cmdId)}</strong> 的配置为加密配置包`}</p>
             
             <div class="form-group" style="margin-top:15px">
                 <label>
-                    <input type="checkbox" id="export-ssh-cmd-include-host" checked> 同时导出依赖的主机配置
+                    <input type="checkbox" id="export-ssh-cmd-include-host" checked> ${typeof t === 'function' ? t('ssh.includeHostConfig') : '同时导出依赖的主机配置'}
                 </label>
-                <div style="font-size:0.85em;color:#666;margin-top:4px">推荐勾选，便于在目标设备完整导入</div>
+                <div style="font-size:0.85em;color:#666;margin-top:4px">${typeof t === 'function' ? t('ssh.includeHostConfigHint') : '推荐勾选，便于在目标设备完整导入'}</div>
             </div>
             
             <div class="form-group">
-                <label>目标设备证书 (PEM)</label>
+                <label>${typeof t === 'function' ? t('securityPage.targetDeviceCert') : '目标设备证书 (PEM)'}</label>
                 <textarea id="export-ssh-cmd-cert" placeholder="-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----" style="width:100%;height:120px;font-family:monospace;font-size:11px"></textarea>
-                <div style="font-size:0.85em;color:#666;margin-top:4px">粘贴目标设备的证书。留空则使用本机证书（自加密）</div>
+                <div style="font-size:0.85em;color:#666;margin-top:4px">${typeof t === 'function' ? t('securityPage.targetCertHint') : '粘贴目标设备的证书。留空则使用本机证书（自加密）'}</div>
             </div>
             
             <div id="export-ssh-cmd-result" class="result-box hidden" style="margin-top:10px"></div>
             
             <div class="form-actions" style="margin-top:15px">
-                <button class="btn" onclick="hideExportSshCommandModal()">取消</button>
-                <button class="btn btn-service-style" id="export-ssh-cmd-btn" onclick="doExportSshCommandFromModal('${escapeHtml(cmdId)}')"><i class="ri-upload-line"></i> 导出</button>
+                <button class="btn" onclick="hideExportSshCommandModal()">${typeof t === 'function' ? t('common.cancel') : '取消'}</button>
+                <button class="btn btn-service-style" id="export-ssh-cmd-btn" onclick="doExportSshCommandFromModal('${escapeHtml(cmdId)}')"><i class="ri-upload-line"></i> ${typeof t === 'function' ? t('common.export') : '导出'}</button>
             </div>
         </div>
     `;
@@ -9818,13 +9815,13 @@ async function doExportSshCommandFromModal(cmdId) {
     const exportBtn = document.getElementById('export-ssh-cmd-btn');
     
     resultBox.classList.remove('hidden', 'success', 'error');
-    resultBox.textContent = '正在生成配置包...';
+    resultBox.textContent = (typeof t === 'function' ? t('securityPage.generatingPack') : '正在生成配置包...');
     exportBtn.disabled = true;
     
     try {
         await doExportSshCommand(cmdId, certText || null, includeHost);
         resultBox.className = 'result-box success';
-        resultBox.textContent = '导出成功！';
+        resultBox.textContent = (typeof t === 'function' ? t('toast.exportSuccess') : '导出成功！');
         setTimeout(() => hideExportSshCommandModal(), 1000);
     } catch (e) {
         resultBox.className = 'result-box error';
@@ -9852,12 +9849,12 @@ async function doExportSshCommand(cmdId, recipientCert, includeHost) {
     const result = await api.call('ssh.commands.export', params);
     
     if (result.code !== 0) {
-        throw new Error(result.message || '导出失败');
+        throw new Error(result.message || (typeof t === 'function' ? t('toast.exportFailed') : '导出失败'));
     }
     
     const data = result.data;
     if (!data?.tscfg) {
-        throw new Error('无效的响应数据');
+        throw new Error(typeof t === 'function' ? t('toast.invalidResponse') : '无效的响应数据');
     }
     
     // 下载文件
@@ -9872,8 +9869,8 @@ async function doExportSshCommand(cmdId, recipientCert, includeHost) {
     URL.revokeObjectURL(url);
     
     const msg = data.host_included 
-        ? `已导出指令配置（包含主机 ${data.host_id}）: ${data.filename}`
-        : `已导出指令配置: ${data.filename}`;
+        ? (typeof t === 'function' ? t('toast.exportedCmdWithHost', {hostId: data.host_id, filename: data.filename}) : `已导出指令配置（包含主机 ${data.host_id}）: ${data.filename}`)
+        : (typeof t === 'function' ? t('toast.exportedCmdConfig', {filename: data.filename}) : `已导出指令配置: ${data.filename}`);
     showToast(msg, 'success');
 }
 
@@ -9890,7 +9887,7 @@ async function showImportSshCommandModal() {
     }
     
     // 加载主机列表用于下拉选择
-    let hostsOptions = '<option value="">-- 使用配置中的主机 --</option>';
+    let hostsOptions = `<option value="">-- ${typeof t === 'function' ? t('ssh.useConfigHost') : '使用配置中的主机'} --</option>`;
     try {
         const result = await api.call('ssh.hosts.list', {});
         const hosts = result.data?.hosts || [];
@@ -9903,8 +9900,8 @@ async function showImportSshCommandModal() {
     
     modal.innerHTML = `
         <div class="modal-content" style="max-width:600px">
-            <h2 style="font-size:1.25rem">导入 SSH 指令配置</h2>
-            <p style="color:#666;font-size:0.9rem">选择 .tscfg 配置包文件以导入 SSH 指令</p>
+            <h2 style="font-size:1.25rem">${typeof t === 'function' ? t('ssh.importSshCmdTitle') : '导入 SSH 指令配置'}</h2>
+            <p style="color:#666;font-size:0.9rem">${typeof t === 'function' ? t('ssh.importSshCmdDesc') : '选择 .tscfg 配置包文件以导入 SSH 指令'}</p>
             
             <!-- 步骤 1: 选择文件 -->
             <div id="import-ssh-cmd-step1">
@@ -9916,33 +9913,33 @@ async function showImportSshCommandModal() {
             <!-- 步骤 2: 预览 (默认隐藏) -->
             <div id="import-ssh-cmd-step2" style="display:none">
                 <div class="info-card" style="background:#f8f9fa;padding:15px;border-radius:8px;margin-top:15px">
-                    <h4 style="margin:0 0 10px 0">配置包内容</h4>
+                    <h4 style="margin:0 0 10px 0">${typeof t === 'function' ? t('ssh.configPackContent') : '配置包内容'}</h4>
                     <div id="import-ssh-cmd-preview"></div>
                 </div>
                 <div class="form-group" style="margin-top:15px">
                     <label>
-                        <input type="checkbox" id="import-ssh-cmd-overwrite"> 覆盖已存在的配置
+                        <input type="checkbox" id="import-ssh-cmd-overwrite"> ${typeof t === 'function' ? t('ssh.overwriteExisting') : '覆盖已存在的配置'}
                     </label>
                 </div>
                 <div class="form-group" id="import-ssh-cmd-host-group" style="display:none">
                     <label>
-                        <input type="checkbox" id="import-ssh-cmd-host" checked> 同时导入包含的主机配置
+                        <input type="checkbox" id="import-ssh-cmd-host" checked> ${typeof t === 'function' ? t('ssh.importHostConfig') : '同时导入包含的主机配置'}
                     </label>
                 </div>
                 <div class="form-group">
-                    <label>绑定到主机（可选）</label>
+                    <label>${typeof t === 'function' ? t('ssh.bindToHost') : '绑定到主机（可选）'}</label>
                     <select id="import-ssh-cmd-target-host" class="form-control">
                         ${hostsOptions}
                     </select>
-                    <small style="color:#888">留空则使用配置包中指定的主机</small>
+                    <small style="color:#888">${typeof t === 'function' ? t('ssh.bindToHostHint') : '留空则使用配置包中指定的主机'}</small>
                 </div>
             </div>
             
             <div id="import-ssh-cmd-result" class="result-box hidden" style="margin-top:10px"></div>
             
             <div class="form-actions" style="margin-top:15px">
-                <button class="btn btn-gray" onclick="hideImportSshCommandModal()">取消</button>
-                <button class="btn btn-service-style" id="import-ssh-cmd-btn" onclick="confirmSshCommandImport()" disabled>确认导入</button>
+                <button class="btn btn-gray" onclick="hideImportSshCommandModal()">${typeof t === 'function' ? t('common.cancel') : '取消'}</button>
+                <button class="btn btn-service-style" id="import-ssh-cmd-btn" onclick="confirmSshCommandImport()" disabled>${typeof t === 'function' ? t('ssh.confirmImport') : '确认导入'}</button>
             </div>
         </div>
     `;
@@ -9973,7 +9970,7 @@ async function previewSshCommandImport() {
     const file = fileInput.files[0];
     
     resultBox.classList.remove('hidden', 'success', 'error', 'warning');
-    resultBox.textContent = '正在验证配置包...';
+    resultBox.textContent = (typeof t === 'function' ? t('ssh.verifyingPack') : '正在验证配置包...');
     importBtn.disabled = true;
     step2.style.display = 'none';
     
@@ -9994,10 +9991,10 @@ async function previewSshCommandImport() {
             // 轻量级验证只返回基本信息
             let html = `
                 <table style="width:100%;font-size:0.9em">
-                    <tr><td style="width:80px;color:#666">配置 ID:</td><td><code>${escapeHtml(data.id)}</code></td></tr>
-                    <tr><td style="color:#666">类型:</td><td>${data.type === 'ssh_command' ? 'SSH 指令' : data.type}</td></tr>
-                    <tr><td style="color:#666">签名者:</td><td>${escapeHtml(data.signer)} ${data.official ? '官方' : ''}</td></tr>
-                    <tr><td style="color:#666">备注:</td><td style="color:#888;font-size:0.85em">${escapeHtml(data.note || '重启后自动加载')}</td></tr>
+                    <tr><td style="width:80px;color:#666">${typeof t === 'function' ? t('ssh.configId') : '配置 ID'}:</td><td><code>${escapeHtml(data.id)}</code></td></tr>
+                    <tr><td style="color:#666">${typeof t === 'function' ? t('common.type') : '类型'}:</td><td>${data.type === 'ssh_command' ? (typeof t === 'function' ? t('ssh.sshCommand') : 'SSH 指令') : data.type}</td></tr>
+                    <tr><td style="color:#666">${typeof t === 'function' ? t('ssh.signer') : '签名者'}:</td><td>${escapeHtml(data.signer)} ${data.official ? (typeof t === 'function' ? t('ssh.official') : '官方') : ''}</td></tr>
+                    <tr><td style="color:#666">${typeof t === 'function' ? t('ssh.note') : '备注'}:</td><td style="color:#888;font-size:0.85em">${escapeHtml(data.note || (typeof t === 'function' ? t('ssh.restartToLoad') : '重启后自动加载'))}</td></tr>
                 </table>
             `;
             
@@ -10005,17 +10002,17 @@ async function previewSshCommandImport() {
             if (hostGroup) hostGroup.style.display = 'none';
             
             if (data.exists) {
-                html += `<div style="margin-top:10px;padding:8px;background:#fff3cd;border-radius:4px;color:#856404">该配置已存在，导入将覆盖现有文件</div>`;
+                html += `<div style="margin-top:10px;padding:8px;background:#fff3cd;border-radius:4px;color:#856404">${typeof t === 'function' ? t('ssh.configExistsOverwrite') : '该配置已存在，导入将覆盖现有文件'}</div>`;
             }
             
             previewDiv.innerHTML = html;
             step2.style.display = 'block';
             resultBox.className = 'result-box success';
-            resultBox.textContent = '签名验证通过';
+            resultBox.textContent = (typeof t === 'function' ? t('ssh.signatureVerified') : '签名验证通过');
             importBtn.disabled = false;
         } else {
             resultBox.className = 'result-box error';
-            resultBox.textContent = (result.message || '无法验证配置包');
+            resultBox.textContent = (result.message || (typeof t === 'function' ? t('ssh.cannotVerifyPack') : '无法验证配置包'));
         }
     } catch (e) {
         resultBox.className = 'result-box error';
@@ -10032,12 +10029,12 @@ async function confirmSshCommandImport() {
     const importBtn = document.getElementById('import-ssh-cmd-btn');
     
     if (!window._importSshCmdTscfg) {
-        showToast('请先选择文件', 'error');
+        showToast((typeof t === 'function' ? t('toast.selectFileFirst') : '请先选择文件'), 'error');
         return;
     }
     
     resultBox.classList.remove('hidden', 'success', 'error', 'warning');
-    resultBox.textContent = '🔄 正在保存配置...';
+    resultBox.textContent = (typeof t === 'function' ? t('ssh.savingConfig') : '正在保存配置...');
     importBtn.disabled = true;
     
     try {
@@ -10053,18 +10050,18 @@ async function confirmSshCommandImport() {
             const data = result.data;
             if (data?.exists && !data?.imported) {
                 resultBox.className = 'result-box warning';
-                resultBox.textContent = `配置 ${data.id} 已存在，请勾选「覆盖」选项`;
+                resultBox.textContent = (typeof t === 'function' ? t('ssh.configExistsCheckOverwrite', {id: data.id}) : `配置 ${data.id} 已存在，请勾选「覆盖」选项`);
                 importBtn.disabled = false;
             } else {
                 resultBox.className = 'result-box success';
-                resultBox.innerHTML = `已保存配置: <code>${escapeHtml(data?.id)}</code><br><small style="color:#666">重启系统后生效</small>`;
-                showToast(`已导入配置，重启后生效`, 'success');
+                resultBox.innerHTML = `${typeof t === 'function' ? t('ssh.savedConfig') : '已保存配置'}: <code>${escapeHtml(data?.id)}</code><br><small style="color:#666">${typeof t === 'function' ? t('ssh.restartToTakeEffect') : '重启系统后生效'}</small>`;
+                showToast((typeof t === 'function' ? t('toast.importedRestartRequired') : '已导入配置，重启后生效'), 'success');
                 // 不刷新列表，因为还没加载
                 setTimeout(() => hideImportSshCommandModal(), 2000);
             }
         } else {
             resultBox.className = 'result-box error';
-            resultBox.textContent = (result.message || '导入失败');
+            resultBox.textContent = (result.message || (typeof t === 'function' ? t('toast.importFailed') : '导入失败'));
             importBtn.disabled = false;
         }
     } catch (e) {
@@ -10491,9 +10488,9 @@ async function executeCommand(idx) {
     }
     
     // 构建状态信息
-    let statusInfo = `⏳ 正在连接: ${cmd.name}\n主机: ${host.username}@${host.host}:${host.port}\n命令: ${actualCommand}\n`;
+    let statusInfo = (typeof t === 'function' ? t('ssh.connecting') : 'Connecting') + `: ${cmd.name}\n` + (typeof t === 'function' ? t('securityPage.hostLabel') : 'Host') + `: ${host.username}@${host.host}:${host.port}\n` + (typeof t === 'function' ? t('common.command') : 'Command') + `: ${actualCommand}\n`;
     if (cmd.nohup) {
-        statusInfo += `\n🚀 后台执行模式: 命令将在服务器后台运行，断开后不受影响\n`;
+        statusInfo += `\n` + (typeof t === 'function' ? t('ssh.nohupMode') : 'Background mode: command runs on server, unaffected by disconnect') + `\n`;
         statusInfo += `日志文件: ${nohupLogFile}\n`;
     } else if (cmd.expectPattern || cmd.failPattern || cmd.extractPattern) {
         statusInfo += `\n模式匹配配置:\n`;
@@ -10857,130 +10854,130 @@ async function loadSecurityPage() {
     content.innerHTML = `
         <div class="page-security">
             <div class="section">
-                <h2>密钥管理</h2>
+                <h2>${t('security.keyManagement')}</h2>
                 <div class="button-group" style="margin-bottom:15px">
-                    <button class="btn btn-sm btn-service-style" onclick="showGenerateKeyModal()"><i class="ri-add-line"></i> 生成新密钥</button>
+                    <button class="btn btn-sm btn-service-style" onclick="showGenerateKeyModal()"><i class="ri-add-line"></i> ${t('ssh.generateNewKey')}</button>
                 </div>
                 <table class="data-table">
                     <thead>
-                        <tr><th>ID</th><th>类型</th><th>备注</th><th>创建时间</th><th>可导出</th><th>操作</th></tr>
+                        <tr><th>${typeof t === 'function' ? t('securityPage.keysTableId') : 'ID'}</th><th>${typeof t === 'function' ? t('securityPage.keysTableType') : '类型'}</th><th>${typeof t === 'function' ? t('securityPage.keysTableComment') : '备注'}</th><th>${typeof t === 'function' ? t('securityPage.keysTableCreated') : '创建时间'}</th><th>${typeof t === 'function' ? t('securityPage.keysTableExportable') : '可导出'}</th><th>${typeof t === 'function' ? t('securityPage.keysTableActions') : '操作'}</th></tr>
                     </thead>
                     <tbody id="keys-table-body"></tbody>
                 </table>
             </div>
             
             <div class="section">
-                <h2>已部署主机</h2>
+                <h2>${t('ssh.deployedHosts')}</h2>
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px">
-                    <p style="color:#666;margin:0"><i class="ri-information-line"></i> 通过上方密钥的「部署」按钮将公钥部署到远程服务器后，主机将自动出现在此列表</p>
-                    <button class="btn btn-sm btn-service-style" onclick="showImportSshHostModal()"><i class="ri-upload-line"></i> 导入主机</button>
+                    <p style="color:#666;margin:0"><i class="ri-information-line"></i> ${typeof t === 'function' ? t('securityPage.hostsHint') : '通过上方密钥的「部署」按钮将公钥部署到远程服务器后，主机将自动出现在此列表'}</p>
+                    <button class="btn btn-sm btn-service-style" onclick="showImportSshHostModal()"><i class="ri-upload-line"></i> ${typeof t === 'function' ? t('securityPage.importHost') : '导入主机'}</button>
                 </div>
                 <table class="data-table">
                     <thead>
-                        <tr><th>主机 ID</th><th>地址</th><th>端口</th><th>用户名</th><th>部署密钥</th><th>操作</th></tr>
+                        <tr><th>${typeof t === 'function' ? t('securityPage.hostId') : '主机 ID'}</th><th>${typeof t === 'function' ? t('securityPage.address') : '地址'}</th><th>${typeof t === 'function' ? t('securityPage.port') : '端口'}</th><th>${typeof t === 'function' ? t('securityPage.username') : '用户名'}</th><th>${typeof t === 'function' ? t('securityPage.deployKey') : '部署密钥'}</th><th>${typeof t === 'function' ? t('securityPage.keysTableActions') : '操作'}</th></tr>
                     </thead>
                     <tbody id="ssh-hosts-table-body"></tbody>
                 </table>
             </div>
             
             <div class="section">
-                <h2>已知主机指纹</h2>
-                <p style="color:#666;margin-bottom:15px;font-size:0.9em"><i class="ri-information-line"></i> SSH 连接时自动记录的服务器指纹，用于防止中间人攻击。如果服务器重装需要更新指纹。</p>
+                <h2>${t('ssh.knownHostFingerprints')}</h2>
+                <p style="color:#666;margin-bottom:15px;font-size:0.9em"><i class="ri-information-line"></i> ${typeof t === 'function' ? t('securityPage.fingerprintHint') : 'SSH 连接时自动记录的服务器指纹，用于防止中间人攻击。如果服务器重装需要更新指纹。'}</p>
                 <table class="data-table">
                     <thead>
-                        <tr><th>主机</th><th>端口</th><th>密钥类型</th><th>指纹 (SHA256)</th><th>添加时间</th><th>操作</th></tr>
+                        <tr><th>${typeof t === 'function' ? t('securityPage.host') : '主机'}</th><th>${typeof t === 'function' ? t('securityPage.port') : '端口'}</th><th>${typeof t === 'function' ? t('securityPage.keyType') : '密钥类型'}</th><th>${typeof t === 'function' ? t('securityPage.fingerprintSha256') : '指纹 (SHA256)'}</th><th>${typeof t === 'function' ? t('securityPage.addedTime') : '添加时间'}</th><th>${typeof t === 'function' ? t('securityPage.keysTableActions') : '操作'}</th></tr>
                     </thead>
                     <tbody id="known-hosts-table-body"></tbody>
                 </table>
             </div>
             
             <div class="section">
-                <h2>HTTPS 证书</h2>
+                <h2>${t('security.httpsCert')}</h2>
                 <div id="cert-status-card" class="info-card" style="margin-bottom:15px">
                     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
                         <span style="font-weight:bold">
                             <span id="cert-status-icon"><i class="ri-refresh-line"></i></span>
-                            <span id="cert-status-text">加载中...</span>
+                            <span id="cert-status-text">${t('common.loading')}</span>
                         </span>
                         <span id="cert-expiry-badge" class="badge" style="display:none"></span>
                     </div>
                     <div id="cert-info-details" style="display:none">
                         <div style="display:grid;grid-template-columns:repeat(2, 1fr);gap:8px">
-                            <div><strong>主体 CN：</strong><span id="cert-subject-cn">-</span></div>
-                            <div><strong>签发者：</strong><span id="cert-issuer-cn">-</span></div>
-                            <div><strong>生效时间：</strong><span id="cert-not-before">-</span></div>
-                            <div><strong>过期时间：</strong><span id="cert-not-after">-</span></div>
-                            <div><strong>序列号：</strong><span id="cert-serial" style="font-family:monospace">-</span></div>
-                            <div><strong>有效状态：</strong><span id="cert-valid-status">-</span></div>
+                            <div><strong>${typeof t === 'function' ? t('securityPage.subjectCN') : '主体 CN'}：</strong><span id="cert-subject-cn">-</span></div>
+                            <div><strong>${typeof t === 'function' ? t('securityPage.issuer') : '签发者'}：</strong><span id="cert-issuer-cn">-</span></div>
+                            <div><strong>${typeof t === 'function' ? t('securityPage.notBefore') : '生效时间'}：</strong><span id="cert-not-before">-</span></div>
+                            <div><strong>${typeof t === 'function' ? t('securityPage.notAfter') : '过期时间'}：</strong><span id="cert-not-after">-</span></div>
+                            <div><strong>${typeof t === 'function' ? t('securityPage.serialNumber') : '序列号'}：</strong><span id="cert-serial" style="font-family:monospace">-</span></div>
+                            <div><strong>${typeof t === 'function' ? t('securityPage.validStatus') : '有效状态'}：</strong><span id="cert-valid-status">-</span></div>
                         </div>
                     </div>
                     <div id="cert-no-key-hint" style="display:none;color:#666;font-style:italic">
-                        尚未生成密钥对，请先点击下方按钮生成
+                        ${typeof t === 'function' ? t('securityPage.noKeyHint') : '尚未生成密钥对，请先点击下方按钮生成'}
                     </div>
                 </div>
                 <div class="button-group" style="display:flex;flex-wrap:wrap;gap:8px">
-                    <button class="btn btn-sm btn-service-style" id="btn-cert-gen-key" onclick="showCertGenKeyModal()"><i class="ri-key-line"></i> 生成密钥对</button>
-                    <button class="btn btn-sm btn-service-style" id="btn-cert-gen-csr" onclick="showCertCSRModal()" disabled><i class="ri-file-text-line"></i> 生成 CSR</button>
-                    <button class="btn btn-sm btn-service-style" id="btn-cert-install" onclick="showCertInstallModal()" disabled><i class="ri-upload-line"></i> 安装证书</button>
-                    <button class="btn btn-sm btn-service-style" id="btn-cert-install-ca" onclick="showCertInstallCAModal()" disabled><i class="ri-shield-keyhole-line"></i> 安装 CA</button>
-                    <button class="btn btn-sm btn-gray" id="btn-cert-view" onclick="showCertViewModal()" disabled><i class="ri-eye-line"></i> 查看证书</button>
-                    <button class="btn btn-sm btn-danger" id="btn-cert-delete" onclick="deleteCertCredentials()" disabled><i class="ri-delete-bin-line"></i> 删除凭证</button>
+                    <button class="btn btn-sm btn-service-style" id="btn-cert-gen-key" onclick="showCertGenKeyModal()"><i class="ri-key-line"></i> ${typeof t === 'function' ? t('securityPage.genKeyPair') : '生成密钥对'}</button>
+                    <button class="btn btn-sm btn-service-style" id="btn-cert-gen-csr" onclick="showCertCSRModal()" disabled><i class="ri-file-text-line"></i> ${typeof t === 'function' ? t('securityPage.genCsr') : '生成 CSR'}</button>
+                    <button class="btn btn-sm btn-service-style" id="btn-cert-install" onclick="showCertInstallModal()" disabled><i class="ri-upload-line"></i> ${typeof t === 'function' ? t('securityPage.installCert') : '安装证书'}</button>
+                    <button class="btn btn-sm btn-service-style" id="btn-cert-install-ca" onclick="showCertInstallCAModal()" disabled><i class="ri-shield-keyhole-line"></i> ${typeof t === 'function' ? t('securityPage.installCa') : '安装 CA'}</button>
+                    <button class="btn btn-sm btn-gray" id="btn-cert-view" onclick="showCertViewModal()" disabled><i class="ri-eye-line"></i> ${typeof t === 'function' ? t('securityPage.viewCert') : '查看证书'}</button>
+                    <button class="btn btn-sm btn-danger" id="btn-cert-delete" onclick="deleteCertCredentials()" disabled><i class="ri-delete-bin-line"></i> ${typeof t === 'function' ? t('securityPage.deleteCredentials') : '删除凭证'}</button>
                 </div>
             </div>
             
             <div class="section">
-                <h2>配置包 (Config Pack)</h2>
+                <h2>${typeof t === 'function' ? t('securityPage.configPack') : '配置包 (Config Pack)'}</h2>
                 <div id="config-pack-status-card" class="info-card" style="margin-bottom:15px">
                     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
                         <span style="font-weight:bold">
                             <span id="pack-status-icon"><i class="ri-refresh-line"></i></span>
-                            <span id="pack-status-text">加载中...</span>
+                            <span id="pack-status-text">${t('common.loading')}</span>
                         </span>
                         <span id="pack-device-type-badge" class="badge" style="display:none"></span>
                     </div>
                     <div id="pack-info-details" style="display:none">
                         <div style="display:grid;grid-template-columns:repeat(2, 1fr);gap:8px">
-                            <div><strong>设备类型：</strong><span id="pack-device-type">-</span></div>
-                            <div><strong>证书 CN：</strong><span id="pack-cert-cn">-</span></div>
-                            <div><strong>证书指纹：</strong><span id="pack-cert-fp" style="font-family:monospace">-</span></div>
-                            <div><strong>格式版本：</strong><span id="pack-version">-</span></div>
+                            <div><strong>${typeof t === 'function' ? t('securityPage.deviceType') : 'Device Type'}:</strong> <span id="pack-device-type">-</span></div>
+                            <div><strong>${typeof t === 'function' ? t('securityPage.certCN') : 'Cert CN'}:</strong> <span id="pack-cert-cn">-</span></div>
+                            <div><strong>${typeof t === 'function' ? t('securityPage.certFingerprintShort') : 'Cert Fingerprint'}:</strong> <span id="pack-cert-fp" style="font-family:monospace">-</span></div>
+                            <div><strong>${typeof t === 'function' ? t('securityPage.formatVersion') : 'Format Version'}:</strong> <span id="pack-version">-</span></div>
                         </div>
                     </div>
                     <p style="color:#666;margin-top:10px">
-                        <i class="ri-information-line"></i> 配置包系统允许安全地加密和签名配置文件，用于设备间配置分发
+                        <i class="ri-information-line"></i> ${typeof t === 'function' ? t('securityPage.configPackDesc') : '配置包系统允许安全地加密和签名配置文件，用于设备间配置分发'}
                     </p>
                 </div>
                 <div class="button-group" style="display:flex;flex-wrap:wrap;gap:8px">
-                    <button class="btn btn-sm btn-service-style" onclick="showConfigPackExportCertModal()"><i class="ri-download-line"></i> 导出设备证书</button>
-                    <button class="btn btn-sm btn-service-style" onclick="showConfigPackImportModal()"><i class="ri-upload-line"></i> 导入配置包</button>
-                    <button class="btn btn-sm btn-service-style" id="btn-pack-export" onclick="showConfigPackExportModal()" disabled><i class="ri-download-line"></i> 导出配置包</button>
-                    <button class="btn btn-sm btn-gray" onclick="showConfigPackListModal()"><i class="ri-file-text-line"></i> 查看配置包列表</button>
+                    <button class="btn btn-sm btn-service-style" onclick="showConfigPackExportCertModal()"><i class="ri-download-line"></i> ${typeof t === 'function' ? t('securityPage.exportDeviceCert') : '导出设备证书'}</button>
+                    <button class="btn btn-sm btn-service-style" onclick="showConfigPackImportModal()"><i class="ri-upload-line"></i> ${typeof t === 'function' ? t('securityPage.importConfigPack') : '导入配置包'}</button>
+                    <button class="btn btn-sm btn-service-style" id="btn-pack-export" onclick="showConfigPackExportModal()" disabled><i class="ri-download-line"></i> ${typeof t === 'function' ? t('securityPage.configPackExport') : '导出配置包'}</button>
+                    <button class="btn btn-sm btn-gray" onclick="showConfigPackListModal()"><i class="ri-file-text-line"></i> ${typeof t === 'function' ? t('securityPage.viewPackList') : '查看配置包列表'}</button>
                 </div>
             </div>
             
             <!-- 配置包：导出设备证书弹窗 -->
             <div class="modal hidden" id="pack-export-cert-modal">
                 <div class="modal-content" style="max-width:600px">
-                    <h2>导出设备证书</h2>
-                    <p style="color:#666;margin-bottom:15px">将此证书发送给需要向您发送加密配置的开发者</p>
-                    <div id="pack-export-cert-loading" style="text-align:center;padding:20px"><i class="ri-refresh-line"></i> 加载中...</div>
+                    <h2>${typeof t === 'function' ? t('securityPage.exportCertTitle') : '导出设备证书'}</h2>
+                    <p style="color:#666;margin-bottom:15px">${typeof t === 'function' ? t('securityPage.exportCertDesc') : '将此证书发送给需要向您发送加密配置的开发者'}</p>
+                    <div id="pack-export-cert-loading" style="text-align:center;padding:20px"><i class="ri-refresh-line"></i> ${typeof t === 'function' ? t('common.loading') : 'Loading...'}</div>
                     <div id="pack-export-cert-content" class="hidden">
                         <div class="form-group">
-                            <label>证书指纹 (SHA256)</label>
+                            <label>${typeof t === 'function' ? t('securityPage.certFingerprint') : '证书指纹 (SHA256)'}</label>
                             <input type="text" id="pack-cert-fingerprint" readonly style="font-family:monospace;background:#f5f5f5">
                         </div>
                         <div class="form-group">
-                            <label>证书 CN</label>
+                            <label>${typeof t === 'function' ? t('securityPage.certCn') : '证书 CN'}</label>
                             <input type="text" id="pack-cert-cn-display" readonly style="background:#f5f5f5">
                         </div>
                         <div class="form-group">
-                            <label>证书 PEM</label>
+                            <label>${typeof t === 'function' ? t('securityPage.certPem') : '证书 PEM'}</label>
                             <textarea id="pack-cert-pem" readonly style="width:100%;height:200px;font-family:monospace"></textarea>
                         </div>
-                        <button class="btn btn-sm btn-service-style" onclick="copyPackCertToClipboard()" style="margin-top:8px"><i class="ri-file-text-line"></i> 复制到剪贴板</button>
+                        <button class="btn btn-sm btn-service-style" onclick="copyPackCertToClipboard()" style="margin-top:8px"><i class="ri-file-text-line"></i> ${typeof t === 'function' ? t('common.copyToClipboard') : '复制到剪贴板'}</button>
                     </div>
                     <div class="form-actions" style="margin-top:15px">
-                        <button class="btn btn-sm" onclick="hideConfigPackExportCertModal()">关闭</button>
+                        <button class="btn btn-sm" onclick="hideConfigPackExportCertModal()">${typeof t === 'function' ? t('common.close') : '关闭'}</button>
                     </div>
                 </div>
             </div>
@@ -10988,25 +10985,25 @@ async function loadSecurityPage() {
             <!-- 配置包：导入弹窗 -->
             <div class="modal hidden" id="pack-import-modal">
                 <div class="modal-content" style="max-width:700px">
-                    <h2>导入配置包</h2>
-                    <p style="color:#666;margin-bottom:15px">上传或粘贴 .tscfg 配置包，验证后保存到设备（加密存储）</p>
+                    <h2>${typeof t === 'function' ? t('securityPage.importPackTitle') : '导入配置包'}</h2>
+                    <p style="color:#666;margin-bottom:15px">${typeof t === 'function' ? t('securityPage.importPackDesc') : '上传或粘贴 .tscfg 配置包，验证后保存到设备（加密存储）'}</p>
                     <div class="form-group">
-                        <label>选择文件</label>
+                        <label>${typeof t === 'function' ? t('common.selectFile') : '选择文件'}</label>
                         <input type="file" id="pack-import-file" accept=".tscfg,.json" onchange="handlePackFileSelect(event)">
                     </div>
                     <div class="form-group">
-                        <label>或粘贴 JSON 内容</label>
+                        <label>${typeof t === 'function' ? t('securityPage.orPasteJson') : '或粘贴 JSON 内容'}</label>
                         <textarea id="pack-import-content" placeholder='{"tscfg_version":"1.0", ...}' style="width:100%;height:150px;font-family:monospace"></textarea>
                     </div>
                     <div id="pack-import-result" class="result-box hidden" style="margin-top:10px"></div>
                     <div id="pack-import-preview" class="hidden" style="margin-top:15px;padding:10px;background:#f8f9fa;border-radius:4px">
-                        <h4 style="margin:0 0 10px">配置包信息</h4>
+                        <h4 style="margin:0 0 10px">${typeof t === 'function' ? t('securityPage.configPackInfo') : '配置包信息'}</h4>
                         <div id="pack-preview-content"></div>
                     </div>
                     <div class="form-actions" style="margin-top:15px">
-                        <button class="btn btn-sm" onclick="hideConfigPackImportModal()">取消</button>
-                        <button class="btn btn-sm btn-gray" onclick="verifyConfigPack()"><i class="ri-search-line"></i> 仅验证</button>
-                        <button class="btn btn-sm btn-service-style" onclick="importConfigPack()"><i class="ri-upload-line"></i> 导入</button>
+                        <button class="btn btn-sm" onclick="hideConfigPackImportModal()">${typeof t === 'function' ? t('common.cancel') : '取消'}</button>
+                        <button class="btn btn-sm btn-gray" onclick="verifyConfigPack()"><i class="ri-search-line"></i> ${typeof t === 'function' ? t('securityPage.verifyOnly') : '仅验证'}</button>
+                        <button class="btn btn-sm btn-service-style" onclick="importConfigPack()"><i class="ri-upload-line"></i> ${typeof t === 'function' ? t('common.import') : '导入'}</button>
                     </div>
                 </div>
             </div>
@@ -11014,80 +11011,79 @@ async function loadSecurityPage() {
             <!-- 配置包：导出弹窗（仅 Developer 可用） -->
             <div class="modal hidden" id="pack-export-modal">
                 <div class="modal-content" style="width:800px;max-width:90vw;height:auto;min-height:600px;max-height:90vh;overflow-y:auto">
-                    <h2>导出加密配置包</h2>
-                    <p style="color:#666;margin-bottom:15px">选择配置文件并加密发送给目标设备（支持多选）</p>
+                    <h2>${typeof t === 'function' ? t('securityPage.exportPackTitle') : '导出加密配置包'}</h2>
+                    <p style="color:#666;margin-bottom:15px">${typeof t === 'function' ? t('securityPage.exportPackDesc') : '选择配置文件并加密发送给目标设备（支持多选）'}</p>
                     
                     <!-- 文件浏览器 -->
                     <div class="form-group">
-                        <label>选择配置文件 <span style="color:#999">(可多选)</span></label>
+                        <label>${typeof t === 'function' ? t('securityPage.selectConfigFiles') : '选择配置文件'} <span style="color:#999">(${typeof t === 'function' ? t('securityPage.multiSelect') : '可多选'})</span></label>
                         <div style="display:flex;gap:8px;margin-bottom:8px">
                             <input type="text" id="pack-export-browse-path" value="/sdcard/config" style="flex:1" readonly>
-                            <button class="btn btn-sm btn-gray" onclick="packExportBrowseUp()"><i class="ri-arrow-up-s-line"></i> 上级</button>
-                            <button class="btn btn-sm btn-gray" onclick="packExportBrowseRefresh()"><i class="ri-refresh-line"></i> 刷新</button>
+                            <button class="btn btn-sm btn-gray" onclick="packExportBrowseUp()"><i class="ri-arrow-up-s-line"></i> ${typeof t === 'function' ? t('files.parentFolder') : '上级'}</button>
+                            <button class="btn btn-sm btn-gray" onclick="packExportBrowseRefresh()"><i class="ri-refresh-line"></i> ${typeof t === 'function' ? t('common.refresh') : '刷新'}</button>
                         </div>
                         <div style="display:flex;gap:8px;margin-bottom:8px">
-                            <button class="btn btn-sm btn-gray" onclick="packExportSelectAll()">全选</button>
-                            <button class="btn btn-sm btn-gray" onclick="packExportDeselectAll()">取消全选</button>
-                            <button class="btn btn-sm btn-gray" onclick="packExportSelectDir()"><i class="ri-folder-open-line"></i> 选择整个目录</button>
+                            <button class="btn btn-sm btn-gray" onclick="packExportSelectAll()">${typeof t === 'function' ? t('common.selectAll') : '全选'}</button>
+                            <button class="btn btn-sm btn-gray" onclick="packExportDeselectAll()">${typeof t === 'function' ? t('common.deselectAll') : '取消全选'}</button>
+                            <button class="btn btn-sm btn-gray" onclick="packExportSelectDir()"><i class="ri-folder-open-line"></i> ${typeof t === 'function' ? t('securityPage.selectDirectory') : '选择整个目录'}</button>
                         </div>
                         <div id="pack-export-file-list" style="border:1px solid #ddd;border-radius:4px;height:180px;overflow-y:auto;background:#f9f9f9">
-                            <div style="padding:20px;text-align:center;color:#666"><i class="ri-refresh-line"></i> 加载中...</div>
+                            <div style="padding:20px;text-align:center;color:#666"><i class="ri-refresh-line"></i> ${typeof t === 'function' ? t('common.loading') : 'Loading...'}</div>
                         </div>
                         <div id="pack-export-selected" style="margin-top:8px;padding:8px;background:#e8f5e9;border-radius:4px;min-height:36px;display:none">
-                            <strong>已选择:</strong> <span id="pack-export-selected-file"></span>
+                            <strong>${typeof t === 'function' ? t('securityPage.selected') : '已选择'}:</strong> <span id="pack-export-selected-file"></span>
                         </div>
                     </div>
                     
                     <div class="form-group">
-                        <label>配置名称</label>
-                        <input type="text" id="pack-export-name" placeholder="自动从文件名获取" required>
+                        <label>${typeof t === 'function' ? t('securityPage.configName') : '配置名称'}</label>
+                        <input type="text" id="pack-export-name" placeholder="${typeof t === 'function' ? t('securityPage.autoFromFilename') : '自动从文件名获取'}" required>
                     </div>
                     <div class="form-group">
-                        <label>描述 (可选)</label>
+                        <label>${typeof t === 'function' ? t('securityPage.descriptionOptional') : '描述 (可选)'}</label>
                         <input type="text" id="pack-export-desc" placeholder="LED 特效配置">
                     </div>
                     <div class="form-group">
-                        <label>目标设备证书 (PEM)</label>
+                        <label>${typeof t === 'function' ? t('securityPage.targetDeviceCert') : '目标设备证书 (PEM)'}</label>
                         <textarea id="pack-export-recipient-cert" placeholder="-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----" style="width:100%;height:100px;font-family:monospace" required></textarea>
-                        <div style="color:#666;margin-top:4px"><i class="ri-information-line"></i> 粘贴目标设备导出的证书</div>
+                        <div style="color:#666;margin-top:4px"><i class="ri-information-line"></i> ${typeof t === 'function' ? t('securityPage.pasteTargetCert') : '粘贴目标设备导出的证书'}</div>
                     </div>
                     <div id="pack-export-result" class="result-box" style="margin-top:10px;min-height:24px;visibility:hidden"></div>
                     <div id="pack-export-output" style="margin-top:15px">
-                        <label>生成的配置包 (.tscfg)</label>
-                        <textarea id="pack-export-tscfg" readonly style="width:100%;height:100px;font-family:monospace" placeholder="配置包将在此显示..."></textarea>
+                        <label>${typeof t === 'function' ? t('securityPage.generatedConfigPack') : '生成的配置包 (.tscfg)'}</label>
+                        <textarea id="pack-export-tscfg" readonly style="width:100%;height:100px;font-family:monospace" placeholder="${typeof t === 'function' ? t('securityPage.packWillShowHere') : '配置包将在此显示...'}"></textarea>
                         <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-                            <button class="btn btn-sm btn-service-style" onclick="copyPackTscfgToClipboard()" id="btn-pack-copy" style="display:none"><i class="ri-file-text-line"></i> 复制到剪贴板</button>
-                            <button class="btn btn-sm btn-service-style" onclick="downloadPackTscfg()" id="btn-pack-download" style="display:none"><i class="ri-download-line"></i> 下载到本地</button>
+                            <button class="btn btn-sm btn-service-style" onclick="copyPackTscfgToClipboard()" id="btn-pack-copy" style="display:none"><i class="ri-file-text-line"></i> ${typeof t === 'function' ? t('common.copyToClipboard') : '复制到剪贴板'}</button>
+                            <button class="btn btn-sm btn-service-style" onclick="downloadPackTscfg()" id="btn-pack-download" style="display:none"><i class="ri-download-line"></i> ${typeof t === 'function' ? t('securityPage.downloadToLocal') : '下载到本地'}</button>
                             <span id="pack-export-saved-path" style="color:#4caf50;display:none"></span>
                         </div>
                     </div>
                     <div class="form-actions" style="margin-top:15px">
-                        <button class="btn btn-sm" onclick="hideConfigPackExportModal()">取消</button>
-                        <button class="btn btn-sm btn-service-style" id="btn-pack-export-generate" onclick="exportConfigPack()" disabled><i class="ri-download-line"></i> 生成配置包</button>
+                        <button class="btn btn-sm" onclick="hideConfigPackExportModal()">${typeof t === 'function' ? t('common.cancel') : '取消'}</button>
+                        <button class="btn btn-sm btn-service-style" id="btn-pack-export-generate" onclick="exportConfigPack()" disabled><i class="ri-download-line"></i> ${typeof t === 'function' ? t('securityPage.generateConfigPack') : '生成配置包'}</button>
                     </div>
                 </div>
             </div>
             
-            <!-- 配置包：列表弹窗 -->
             <div class="modal hidden" id="pack-list-modal">
                 <div class="modal-content" style="max-width:800px">
-                    <h2>配置包列表</h2>
+                    <h2>${typeof t === 'function' ? t('securityPage.packListTitle') : '配置包列表'}</h2>
                     <div class="form-group">
-                        <label>目录路径</label>
+                        <label>${typeof t === 'function' ? t('securityPage.packListDirPath') : '目录路径'}</label>
                         <div style="display:flex;gap:8px">
                             <input type="text" id="pack-list-path" value="/sdcard/config" style="flex:1">
-                            <button class="btn btn-sm btn-service-style" onclick="refreshConfigPackList()"><i class="ri-refresh-line"></i> 刷新</button>
+                            <button class="btn btn-sm btn-service-style" onclick="refreshConfigPackList()"><i class="ri-refresh-line"></i> ${typeof t === 'function' ? t('common.refresh') : '刷新'}</button>
                         </div>
                     </div>
-                    <div id="pack-list-loading" style="text-align:center;padding:20px"><i class="ri-refresh-line"></i> 加载中...</div>
+                    <div id="pack-list-loading" style="text-align:center;padding:20px"><i class="ri-refresh-line"></i> ${t('common.loading')}</div>
                     <table class="data-table hidden" id="pack-list-table">
                         <thead>
-                            <tr><th>文件名</th><th>大小</th><th>签名者</th><th>官方</th><th>状态</th><th>操作</th></tr>
+                            <tr><th>${typeof t === 'function' ? t('securityPage.fileName') : '文件名'}</th><th>${typeof t === 'function' ? t('files.size') : '大小'}</th><th>${typeof t === 'function' ? t('securityPage.signerLabel') : '签名者'}</th><th>${typeof t === 'function' ? t('securityPage.official') : '官方'}</th><th>${typeof t === 'function' ? t('common.status') : '状态'}</th><th>${typeof t === 'function' ? t('common.actions') : '操作'}</th></tr>
                         </thead>
                         <tbody id="pack-list-tbody"></tbody>
                     </table>
                     <div class="form-actions" style="margin-top:15px">
-                        <button class="btn btn-sm" onclick="hideConfigPackListModal()">关闭</button>
+                        <button class="btn btn-sm" onclick="hideConfigPackListModal()">${typeof t === 'function' ? t('securityPage.close') : '关闭'}</button>
                     </div>
                 </div>
             </div>
@@ -11095,40 +11091,40 @@ async function loadSecurityPage() {
             <!-- 生成密钥弹窗 -->
             <div class="modal hidden" id="keygen-modal">
                 <div class="modal-content">
-                    <h2>生成新密钥</h2>
+                    <h2>${typeof t === 'function' ? t('securityPage.generateNewKey') : '生成新密钥'}</h2>
                     <div class="form-group">
-                        <label>密钥 ID</label>
-                        <input type="text" id="keygen-id" placeholder="如: default, mykey" required>
+                        <label>${typeof t === 'function' ? t('securityPage.keyId') : '密钥 ID'}</label>
+                        <input type="text" id="keygen-id" placeholder="${typeof t === 'function' ? t('securityPage.keyIdPlaceholder') : '如: default, mykey'}" required>
                     </div>
                     <div class="form-group">
-                        <label>密钥类型</label>
+                        <label>${typeof t === 'function' ? t('securityPage.keyType') : '密钥类型'}</label>
                         <select id="keygen-type">
-                            <option value="rsa2048" selected>RSA 2048-bit (推荐)</option>
+                            <option value="rsa2048" selected>${typeof t === 'function' ? t('securityPage.rsaRecommended') : 'RSA 2048-bit (推荐)'}</option>
                             <option value="rsa4096">RSA 4096-bit</option>
                             <option value="ec256">ECDSA P-256</option>
                             <option value="ec384">ECDSA P-384</option>
                         </select>
-                        <div class="form-group-hint form-group-hint-warning"><i class="ri-alert-line"></i><span>ECDSA 密钥暂不支持 SSH 公钥认证，请使用 RSA</span></div>
+                        <div class="form-group-hint form-group-hint-warning"><i class="ri-alert-line"></i><span>${typeof t === 'function' ? t('securityPage.ecdsaWarning') : 'ECDSA 密钥暂不支持 SSH 公钥认证，请使用 RSA'}</span></div>
                     </div>
                     <div class="form-group">
-                        <label>备注 (可选)</label>
-                        <input type="text" id="keygen-comment" placeholder="如: TianshanOS@device">
+                        <label>${typeof t === 'function' ? t('securityPage.commentOptional') : '备注 (可选)'}</label>
+                        <input type="text" id="keygen-comment" placeholder="${typeof t === 'function' ? t('securityPage.commentPlaceholder') : '如: TianshanOS@device'}">
                     </div>
                     <div class="form-group">
-                        <label>别名 (可选)</label>
-                        <input type="text" id="keygen-alias" placeholder="用于替代密钥 ID 显示">
-                        <div class="form-group-hint"><i class="ri-information-line"></i><span>启用「隐藏密钥」时建议填写，用于显示</span></div>
+                        <label>${typeof t === 'function' ? t('securityPage.aliasOptional') : '别名 (可选)'}</label>
+                        <input type="text" id="keygen-alias" placeholder="${typeof t === 'function' ? t('securityPage.aliasPlaceholder') : '用于替代密钥 ID 显示'}">
+                        <div class="form-group-hint"><i class="ri-information-line"></i><span>${typeof t === 'function' ? t('securityPage.aliasHint') : '启用「隐藏密钥」时建议填写，用于显示'}</span></div>
                     </div>
                     <div class="form-group form-group-checkbox-row">
-                        <label class="form-group-checkbox-label"><input type="checkbox" id="keygen-exportable"> 允许导出私钥</label>
+                        <label class="form-group-checkbox-label"><input type="checkbox" id="keygen-exportable"> ${typeof t === 'function' ? t('securityPage.allowExportPrivateKey') : '允许导出私钥'}</label>
                     </div>
                     <div class="form-group form-group-checkbox-row">
-                        <label class="form-group-checkbox-label"><input type="checkbox" id="keygen-hidden"> 隐藏密钥 ID</label>
-                        <div class="form-group-hint"><i class="ri-information-line"></i><span>启用后，低权限用户无法看到真实的密钥 ID</span></div>
+                        <label class="form-group-checkbox-label"><input type="checkbox" id="keygen-hidden"> ${typeof t === 'function' ? t('securityPage.hideKeyId') : '隐藏密钥 ID'}</label>
+                        <div class="form-group-hint"><i class="ri-information-line"></i><span>${typeof t === 'function' ? t('securityPage.hideKeyIdHint') : '启用后，低权限用户无法看到真实的密钥 ID'}</span></div>
                     </div>
                     <div class="form-actions">
-                        <button class="btn btn-sm" onclick="hideGenerateKeyModal()">取消</button>
-                        <button class="btn btn-sm btn-service-style" onclick="generateKey()">生成</button>
+                        <button class="btn btn-sm" onclick="hideGenerateKeyModal()">${typeof t === 'function' ? t('common.cancel') : '取消'}</button>
+                        <button class="btn btn-sm btn-service-style" onclick="generateKey()">${typeof t === 'function' ? t('common.generate') : '生成'}</button>
                     </div>
                 </div>
             </div>
@@ -11137,36 +11133,36 @@ async function loadSecurityPage() {
             <div class="modal hidden" id="deploy-key-modal">
                 <div class="modal-content cc-compact" style="max-width:500px">
                     <div class="modal-header">
-                        <h2>部署公钥到远程服务器</h2>
+                        <h2>${typeof t === 'function' ? t('securityPage.deployKeyTitle') : '部署公钥到远程服务器'}</h2>
                         <button class="modal-close" onclick="hideDeployKeyModal()"><i class="ri-close-line"></i></button>
                     </div>
                     <div class="modal-body">
-                        <p style="margin-bottom:15px;color:#666">将公钥 <code id="deploy-key-id"></code> 部署到远程服务器的 authorized_keys</p>
+                        <p style="margin-bottom:15px;color:#666">${typeof t === 'function' ? t('securityPage.deployKeyDescPre') : '将公钥'} <code id="deploy-key-id"></code> ${typeof t === 'function' ? t('securityPage.deployKeyDescPost') : '部署到远程服务器的 authorized_keys'}</p>
                         <div class="form-group">
-                            <label>目标主机</label>
-                            <input type="text" id="deploy-host" placeholder="192.168.55.100 或 hostname" required>
+                            <label>${typeof t === 'function' ? t('securityPage.targetHost') : '目标主机'}</label>
+                            <input type="text" id="deploy-host" placeholder="${typeof t === 'function' ? t('securityPage.hostPlaceholder') : '192.168.55.100 或 hostname'}" required>
                         </div>
                         <div class="form-row">
                             <div class="form-group" style="flex:1">
-                                <label>用户名</label>
+                                <label>${typeof t === 'function' ? t('securityPage.username') : '用户名'}</label>
                                 <input type="text" id="deploy-user" placeholder="root" required>
                             </div>
                             <div class="form-group" style="width:100px">
-                                <label>端口</label>
+                                <label>${typeof t === 'function' ? t('securityPage.port') : '端口'}</label>
                                 <input type="number" id="deploy-port" value="22" min="1" max="65535">
                             </div>
                         </div>
                         <div class="form-group">
-                            <label>认证密码 (首次部署需要)</label>
-                            <input type="password" id="deploy-password" placeholder="输入 SSH 登录密码" required>
+                            <label>${typeof t === 'function' ? t('securityPage.authPassword') : '认证密码 (首次部署需要)'}</label>
+                            <input type="password" id="deploy-password" placeholder="${typeof t === 'function' ? t('securityPage.passwordPlaceholder') : '输入 SSH 登录密码'}" required>
                         </div>
                         <div style="background:#e3f2fd;border:1px solid #2196f3;border-radius:4px;padding:10px;margin:15px 0">
-                            <i class="ri-information-line"></i> 部署成功后，该主机将自动添加到「已部署主机」列表，之后可使用此密钥免密登录
+                            <i class="ri-information-line"></i> ${typeof t === 'function' ? t('securityPage.deployInfoHint') : '部署成功后，该主机将自动添加到「已部署主机」列表，之后可使用此密钥免密登录'}
                         </div>
                         <div id="deploy-result" class="result-box hidden" style="margin-bottom:15px"></div>
                         <div class="form-actions">
-                            <button class="btn btn-sm btn-gray" onclick="hideDeployKeyModal()">取消</button>
-                            <button class="btn btn-sm btn-service-style" id="deploy-btn" onclick="deployKey()"><i class="ri-rocket-line"></i> 开始部署</button>
+                            <button class="btn btn-sm btn-gray" onclick="hideDeployKeyModal()">${typeof t === 'function' ? t('common.cancel') : '取消'}</button>
+                            <button class="btn btn-sm btn-service-style" id="deploy-btn" onclick="deployKey()"><i class="ri-rocket-line"></i> ${typeof t === 'function' ? t('securityPage.startDeploy') : '开始部署'}</button>
                         </div>
                     </div>
                 </div>
@@ -11176,36 +11172,36 @@ async function loadSecurityPage() {
             <div class="modal hidden" id="revoke-key-modal">
                 <div class="modal-content cc-compact" style="max-width:500px">
                     <div class="modal-header">
-                        <h2>撤销公钥</h2>
+                        <h2>${typeof t === 'function' ? t('securityPage.revokeKeyTitle') : '撤销公钥'}</h2>
                         <button class="modal-close" onclick="hideRevokeKeyModal()"><i class="ri-close-line"></i></button>
                     </div>
                     <div class="modal-body">
-                        <p style="margin-bottom:15px;color:#666">从远程服务器移除公钥 <code id="revoke-key-id"></code></p>
+                        <p style="margin-bottom:15px;color:#666">${typeof t === 'function' ? t('securityPage.revokeKeyDescPre') : '从远程服务器移除公钥'} <code id="revoke-key-id"></code></p>
                         <div style="background:#fff3cd;border:1px solid #ffc107;border-radius:4px;padding:10px;margin-bottom:15px">
-                            <strong><i class="ri-alert-line"></i> 警告</strong>：撤销后将无法使用此密钥免密登录该服务器
+                            <strong><i class="ri-alert-line"></i> ${typeof t === 'function' ? t('common.warning') : '警告'}</strong>：${typeof t === 'function' ? t('securityPage.revokeWarning') : '撤销后将无法使用此密钥免密登录该服务器'}
                         </div>
                         <div class="form-group">
-                            <label>目标主机</label>
-                            <input type="text" id="revoke-host" placeholder="192.168.55.100 或 hostname" required>
+                            <label>${typeof t === 'function' ? t('securityPage.targetHost') : '目标主机'}</label>
+                            <input type="text" id="revoke-host" placeholder="${typeof t === 'function' ? t('securityPage.hostPlaceholder') : '192.168.55.100 或 hostname'}" required>
                         </div>
                         <div class="form-row">
                             <div class="form-group" style="flex:1">
-                                <label>用户名</label>
+                                <label>${typeof t === 'function' ? t('securityPage.username') : '用户名'}</label>
                                 <input type="text" id="revoke-user" placeholder="root" required>
                             </div>
                             <div class="form-group" style="width:100px">
-                                <label>端口</label>
+                                <label>${typeof t === 'function' ? t('securityPage.port') : '端口'}</label>
                                 <input type="number" id="revoke-port" value="22" min="1" max="65535">
                             </div>
                         </div>
                         <div class="form-group">
-                            <label>认证密码</label>
-                            <input type="password" id="revoke-password" placeholder="输入 SSH 登录密码" required>
+                            <label>${typeof t === 'function' ? t('securityPage.authPasswordRevoke') : '认证密码'}</label>
+                            <input type="password" id="revoke-password" placeholder="${typeof t === 'function' ? t('securityPage.passwordPlaceholder') : '输入 SSH 登录密码'}" required>
                         </div>
                         <div id="revoke-result" class="result-box hidden" style="margin-bottom:15px"></div>
                         <div class="form-actions">
-                            <button class="btn btn-sm btn-gray" onclick="hideRevokeKeyModal()">取消</button>
-                            <button class="btn btn-sm btn-danger" id="revoke-btn" onclick="revokeKey()"><i class="ri-alert-line"></i> 撤销公钥</button>
+                            <button class="btn btn-sm btn-gray" onclick="hideRevokeKeyModal()">${typeof t === 'function' ? t('common.cancel') : '取消'}</button>
+                            <button class="btn btn-sm btn-danger" id="revoke-btn" onclick="revokeKey()"><i class="ri-alert-line"></i> ${typeof t === 'function' ? t('securityPage.revokeKey') : '撤销公钥'}</button>
                         </div>
                     </div>
                 </div>
@@ -11214,33 +11210,33 @@ async function loadSecurityPage() {
             <!-- 主机指纹不匹配警告弹窗 -->
             <div class="modal hidden" id="host-mismatch-modal">
                 <div class="modal-content">
-                    <h2 style="color:#dc3545"><i class="ri-alert-line"></i> 安全警告：主机指纹不匹配!</h2>
+                    <h2 style="color:#dc3545"><i class="ri-alert-line"></i> ${typeof t === 'function' ? t('securityPage.hostKeyMismatchTitle') : '安全警告：主机指纹不匹配!'}</h2>
                     <div style="background:#f8d7da;border:1px solid #f5c6cb;border-radius:4px;padding:15px;margin:15px 0">
-                        <p style="margin:0 0 10px;font-weight:bold">主机密钥已更改！这可能表明：</p>
+                        <p style="margin:0 0 10px;font-weight:bold">${typeof t === 'function' ? t('securityPage.hostKeyChangedWarning') : '主机密钥已更改！这可能表明：'}</p>
                         <ul style="margin:0;padding-left:20px">
-                            <li>中间人攻击（Man-in-the-Middle Attack）</li>
-                            <li>服务器重新安装或密钥重新生成</li>
-                            <li>IP 地址被分配给了不同的服务器</li>
+                            <li>${typeof t === 'function' ? t('securityPage.mitmAttack') : '中间人攻击（Man-in-the-Middle Attack）'}</li>
+                            <li>${typeof t === 'function' ? t('securityPage.serverReinstalled') : '服务器重新安装或密钥重新生成'}</li>
+                            <li>${typeof t === 'function' ? t('securityPage.ipReassigned') : 'IP 地址被分配给了不同的服务器'}</li>
                         </ul>
                     </div>
                     <div class="form-group">
-                        <label>主机</label>
+                        <label>${typeof t === 'function' ? t('securityPage.hostLabel') : '主机'}</label>
                         <input type="text" id="mismatch-host" readonly style="background:#f5f5f5">
                     </div>
                     <div class="form-group">
-                        <label>存储的指纹</label>
+                        <label>${typeof t === 'function' ? t('securityPage.storedFingerprint') : '存储的指纹'}</label>
                         <input type="text" id="mismatch-stored-fp" readonly style="background:#f5f5f5;font-family:monospace;font-size:12px">
                     </div>
                     <div class="form-group">
-                        <label>当前指纹</label>
+                        <label>${typeof t === 'function' ? t('securityPage.currentFingerprint') : '当前指纹'}</label>
                         <input type="text" id="mismatch-current-fp" readonly style="background:#fff3cd;font-family:monospace;font-size:12px">
                     </div>
                     <p style="color:#856404;background:#fff3cd;padding:10px;border-radius:4px">
-                        <strong>建议</strong>：如果您确认服务器已重装或密钥已更新，可以点击"更新主机密钥"移除旧记录，然后重新连接以信任新密钥。
+                        <strong>${typeof t === 'function' ? t('securityPage.suggestion') : '建议'}</strong>：${typeof t === 'function' ? t('securityPage.hostKeyMismatchSuggestion') : '如果您确认服务器已重装或密钥已更新，可以点击"更新主机密钥"移除旧记录，然后重新连接以信任新密钥。'}
                     </p>
                     <div class="form-actions">
-                        <button class="btn btn-sm btn-gray" onclick="hideHostMismatchModal()">取消</button>
-                        <button class="btn btn-sm btn-warning" onclick="removeAndRetry()"><i class="ri-refresh-line"></i> 更新主机密钥</button>
+                        <button class="btn btn-sm btn-gray" onclick="hideHostMismatchModal()">${typeof t === 'function' ? t('common.cancel') : '取消'}</button>
+                        <button class="btn btn-sm btn-warning" onclick="removeAndRetry()"><i class="ri-refresh-line"></i> ${typeof t === 'function' ? t('securityPage.updateHostKey') : '更新主机密钥'}</button>
                     </div>
                 </div>
             </div>
@@ -11248,15 +11244,15 @@ async function loadSecurityPage() {
             <!-- HTTPS 证书：生成密钥对弹窗 -->
             <div class="modal hidden" id="cert-genkey-modal">
                 <div class="modal-content" style="max-width:450px">
-                    <h2>生成 HTTPS 密钥对</h2>
-                    <p style="color:#666;margin-bottom:15px">为设备生成 ECDSA P-256 密钥对，用于 mTLS 身份验证</p>
+                    <h2>${typeof t === 'function' ? t('securityPage.genHttpsKeyTitle') : '生成 HTTPS 密钥对'}</h2>
+                    <p style="color:#666;margin-bottom:15px">${typeof t === 'function' ? t('securityPage.genHttpsKeyDesc') : '为设备生成 ECDSA P-256 密钥对，用于 mTLS 身份验证'}</p>
                     <div id="cert-genkey-existing-warning" class="hidden" style="background:#fff3cd;border:1px solid #ffc107;border-radius:4px;padding:10px;margin-bottom:15px">
-                        <i class="ri-alert-line"></i> 已存在密钥对，继续将覆盖现有密钥！
+                        <i class="ri-alert-line"></i> ${typeof t === 'function' ? t('securityPage.existingKeyWarning') : '已存在密钥对，继续将覆盖现有密钥！'}
                     </div>
                     <div id="cert-genkey-result" class="result-box hidden" style="margin-bottom:15px"></div>
                     <div class="form-actions">
-                        <button class="btn btn-sm btn-gray" onclick="hideCertGenKeyModal()">取消</button>
-                        <button class="btn btn-sm btn-service-style" id="cert-genkey-btn" onclick="generateCertKeypair()"><i class="ri-key-line"></i> 生成</button>
+                        <button class="btn btn-sm btn-gray" onclick="hideCertGenKeyModal()">${typeof t === 'function' ? t('common.cancel') : '取消'}</button>
+                        <button class="btn btn-sm btn-service-style" id="cert-genkey-btn" onclick="generateCertKeypair()"><i class="ri-key-line"></i> ${typeof t === 'function' ? t('common.generate') : '生成'}</button>
                     </div>
                 </div>
             </div>
@@ -11264,29 +11260,29 @@ async function loadSecurityPage() {
             <!-- HTTPS 证书：生成/查看 CSR 弹窗 -->
             <div class="modal hidden" id="cert-csr-modal">
                 <div class="modal-content" style="max-width:600px">
-                    <h2>证书签名请求 (CSR)</h2>
+                    <h2>${typeof t === 'function' ? t('securityPage.csrTitle') : '证书签名请求 (CSR)'}</h2>
                     <div class="form-group">
-                        <label>设备 ID (CN)</label>
+                        <label>${typeof t === 'function' ? t('securityPage.deviceIdCn') : '设备 ID (CN)'}</label>
                         <input type="text" id="csr-device-id" placeholder="TIANSHAN-RM01-0001">
-                        <div style="color:#666;margin-top:4px">留空则使用默认配置</div>
+                        <div style="color:#666;margin-top:4px">${typeof t === 'function' ? t('securityPage.leaveEmptyForDefault') : '留空则使用默认配置'}</div>
                     </div>
                     <div class="form-group">
-                        <label>组织 (O)</label>
+                        <label>${typeof t === 'function' ? t('securityPage.organization') : '组织 (O)'}</label>
                         <input type="text" id="csr-org" placeholder="HiddenPeak Labs">
                     </div>
                     <div class="form-group">
-                        <label>部门 (OU)</label>
+                        <label>${typeof t === 'function' ? t('securityPage.department') : '部门 (OU)'}</label>
                         <input type="text" id="csr-ou" placeholder="Device">
                     </div>
                     <div id="csr-result-box" class="hidden" style="margin-top:15px">
-                        <label>CSR 内容（复制到 CA 服务器签发）</label>
+                        <label>${typeof t === 'function' ? t('securityPage.csrContentLabel') : 'CSR 内容（复制到 CA 服务器签发）'}</label>
                         <textarea id="csr-pem-output" readonly style="width:100%;height:200px;font-family:monospace"></textarea>
-                        <button class="btn btn-sm btn-service-style" onclick="copyCSRToClipboard()" style="margin-top:8px"><i class="ri-file-text-line"></i> 复制到剪贴板</button>
+                        <button class="btn btn-sm btn-service-style" onclick="copyCSRToClipboard()" style="margin-top:8px"><i class="ri-file-text-line"></i> ${typeof t === 'function' ? t('common.copyToClipboard') : '复制到剪贴板'}</button>
                     </div>
                     <div id="csr-gen-result" class="result-box hidden" style="margin-top:10px"></div>
                     <div class="form-actions" style="margin-top:15px">
-                        <button class="btn btn-sm btn-gray" onclick="hideCertCSRModal()">关闭</button>
-                        <button class="btn btn-sm btn-service-style" id="csr-gen-btn" onclick="generateCSR()"><i class="ri-file-text-line"></i> 生成 CSR</button>
+                        <button class="btn btn-sm btn-gray" onclick="hideCertCSRModal()">${typeof t === 'function' ? t('common.close') : '关闭'}</button>
+                        <button class="btn btn-sm btn-service-style" id="csr-gen-btn" onclick="generateCSR()"><i class="ri-file-text-line"></i> ${typeof t === 'function' ? t('securityPage.generateCsr') : '生成 CSR'}</button>
                     </div>
                 </div>
             </div>
@@ -11294,16 +11290,16 @@ async function loadSecurityPage() {
             <!-- HTTPS 证书：安装证书弹窗 -->
             <div class="modal hidden" id="cert-install-modal">
                 <div class="modal-content" style="max-width:600px">
-                    <h2>安装设备证书</h2>
-                    <p style="color:#666;margin-bottom:15px">粘贴 CA 签发的 PEM 格式证书</p>
+                    <h2>${typeof t === 'function' ? t('securityPage.installCertTitle') : '安装设备证书'}</h2>
+                    <p style="color:#666;margin-bottom:15px">${typeof t === 'function' ? t('securityPage.installCertDesc') : '粘贴 CA 签发的 PEM 格式证书'}</p>
                     <div class="form-group">
-                        <label>证书 PEM</label>
+                        <label>${typeof t === 'function' ? t('securityPage.certPem') : '证书 PEM'}</label>
                         <textarea id="cert-pem-input" placeholder="-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----" style="width:100%;height:200px;font-family:monospace"></textarea>
                     </div>
                     <div id="cert-install-result" class="result-box hidden" style="margin-top:10px"></div>
                     <div class="form-actions" style="margin-top:15px">
-                        <button class="btn btn-sm" onclick="hideCertInstallModal()">取消</button>
-                        <button class="btn btn-sm btn-service-style" onclick="installCertificate()"><i class="ri-upload-line"></i> 安装</button>
+                        <button class="btn btn-sm" onclick="hideCertInstallModal()">${typeof t === 'function' ? t('common.cancel') : '取消'}</button>
+                        <button class="btn btn-sm btn-service-style" onclick="installCertificate()"><i class="ri-upload-line"></i> ${typeof t === 'function' ? t('common.install') : '安装'}</button>
                     </div>
                 </div>
             </div>
@@ -11311,16 +11307,16 @@ async function loadSecurityPage() {
             <!-- HTTPS 证书：安装 CA 链弹窗 -->
             <div class="modal hidden" id="cert-ca-modal">
                 <div class="modal-content" style="max-width:600px">
-                    <h2>安装 CA 证书链</h2>
-                    <p style="color:#666;margin-bottom:15px">粘贴根证书和中间证书（PEM 格式，可拼接多个）</p>
+                    <h2>${typeof t === 'function' ? t('securityPage.installCaTitle') : '安装 CA 证书链'}</h2>
+                    <p style="color:#666;margin-bottom:15px">${typeof t === 'function' ? t('securityPage.installCaDesc') : '粘贴根证书和中间证书（PEM 格式，可拼接多个）'}</p>
                     <div class="form-group">
-                        <label>CA 证书链 PEM</label>
+                        <label>${typeof t === 'function' ? t('securityPage.caCertPem') : 'CA 证书链 PEM'}</label>
                         <textarea id="ca-pem-input" placeholder="-----BEGIN CERTIFICATE-----&#10;(Root CA)&#10;-----END CERTIFICATE-----&#10;-----BEGIN CERTIFICATE-----&#10;(Intermediate CA)&#10;-----END CERTIFICATE-----" style="width:100%;height:200px;font-family:monospace"></textarea>
                     </div>
                     <div id="ca-install-result" class="result-box hidden" style="margin-top:10px"></div>
                     <div class="form-actions" style="margin-top:15px">
-                        <button class="btn btn-sm" onclick="hideCertInstallCAModal()">取消</button>
-                        <button class="btn btn-sm btn-service-style" onclick="installCAChain()"><i class="ri-upload-line"></i> 安装</button>
+                        <button class="btn btn-sm" onclick="hideCertInstallCAModal()">${typeof t === 'function' ? t('common.cancel') : '取消'}</button>
+                        <button class="btn btn-sm btn-service-style" onclick="installCAChain()"><i class="ri-upload-line"></i> ${typeof t === 'function' ? t('common.install') : '安装'}</button>
                     </div>
                 </div>
             </div>
@@ -11328,14 +11324,14 @@ async function loadSecurityPage() {
             <!-- HTTPS 证书：查看证书弹窗 -->
             <div class="modal hidden" id="cert-view-modal">
                 <div class="modal-content" style="max-width:600px">
-                    <h2>查看设备证书</h2>
-                    <div id="cert-view-loading" style="text-align:center;padding:20px"><i class="ri-refresh-line"></i> 加载中...</div>
+                    <h2>${typeof t === 'function' ? t('securityPage.viewCertTitle') : '查看设备证书'}</h2>
+                    <div id="cert-view-loading" style="text-align:center;padding:20px"><i class="ri-refresh-line"></i> ${typeof t === 'function' ? t('common.loading') : 'Loading...'}</div>
                     <div id="cert-view-content" class="hidden">
                         <textarea id="cert-view-pem" readonly style="width:100%;height:250px;font-family:monospace"></textarea>
-                        <button class="btn btn-sm btn-service-style" onclick="copyCertToClipboard()" style="margin-top:8px"><i class="ri-file-text-line"></i> 复制到剪贴板</button>
+                        <button class="btn btn-sm btn-service-style" onclick="copyCertToClipboard()" style="margin-top:8px"><i class="ri-file-text-line"></i> ${typeof t === 'function' ? t('common.copyToClipboard') : '复制到剪贴板'}</button>
                     </div>
                     <div class="form-actions" style="margin-top:15px">
-                        <button class="btn btn-sm" onclick="hideCertViewModal()">关闭</button>
+                        <button class="btn btn-sm" onclick="hideCertViewModal()">${typeof t === 'function' ? t('common.close') : '关闭'}</button>
                     </div>
                 </div>
             </div>
@@ -11387,13 +11383,13 @@ async function refreshSecurityPage() {
                     <td>${escapeHtml(key.type_desc || key.type)}</td>
                     <td><span class="badge badge-service-style">SSH</span> ${escapeHtml(key.comment) || '-'}</td>
                     <td>${formatTimestamp(key.created)}</td>
-                    <td>${key.exportable ? '是' : '否'}</td>
+                    <td>${key.exportable ? (typeof t === 'function' ? t('common.yes') : '是') : (typeof t === 'function' ? t('common.no') : '否')}</td>
                     <td>
-                        <button class="btn btn-sm btn-service-style" onclick="exportKey('${escapeHtml(key.id)}')" ${key.has_pubkey ? '' : 'disabled'}><i class="ri-download-line"></i> 公钥</button>
-                        <button class="btn btn-sm btn-service-style" onclick="exportPrivateKey('${escapeHtml(key.id)}')" ${key.exportable === false ? 'disabled' : ''} title="${key.exportable === false ? '此密钥不可导出私钥' : '导出私钥'}" style="${key.exportable === false ? 'color:#999' : ''}"><i class="ri-key-line"></i> 私钥</button>
-                        <button class="btn btn-sm btn-service-style" onclick="showDeployKeyModal('${escapeHtml(key.id)}')" ${key.has_pubkey ? '' : 'disabled'} title="部署公钥到远程服务器"><i class="ri-rocket-line"></i> 部署</button>
-                        <button class="btn btn-sm btn-warning" onclick="showRevokeKeyModal('${escapeHtml(key.id)}')" ${key.has_pubkey ? '' : 'disabled'} title="从远程服务器撤销公钥"><i class="ri-alert-line"></i> 撤销</button>
-                        <button class="btn btn-sm btn-danger" onclick="deleteKey('${escapeHtml(key.id)}')"><i class="ri-delete-bin-line"></i> 删除</button>
+                        <button class="btn btn-sm btn-service-style" style="white-space:nowrap" onclick="exportKey('${escapeHtml(key.id)}')" ${key.has_pubkey ? '' : 'disabled'}><i class="ri-download-line"></i> ${typeof t === 'function' ? t('securityPage.publicKey') : 'Pub'}</button>
+                        <button class="btn btn-sm btn-service-style" style="white-space:nowrap" onclick="exportPrivateKey('${escapeHtml(key.id)}')" ${key.exportable === false ? 'disabled' : ''} title="${key.exportable === false ? (typeof t === 'function' ? t('securityPage.cannotExportPrivateKey') : 'Cannot export private key') : (typeof t === 'function' ? t('securityPage.exportPrivateKey') : 'Export private key')}" ${key.exportable === false ? 'style="color:#999;white-space:nowrap"' : 'style="white-space:nowrap"'}><i class="ri-key-line"></i> ${typeof t === 'function' ? t('securityPage.privateKey') : 'Priv'}</button>
+                        <button class="btn btn-sm btn-service-style" onclick="showDeployKeyModal('${escapeHtml(key.id)}')" ${key.has_pubkey ? '' : 'disabled'} title="${typeof t === 'function' ? t('securityPage.deployToServer') : '部署公钥到远程服务器'}"><i class="ri-rocket-line"></i> ${typeof t === 'function' ? t('securityPage.deploy') : '部署'}</button>
+                        <button class="btn btn-sm btn-warning" onclick="showRevokeKeyModal('${escapeHtml(key.id)}')" ${key.has_pubkey ? '' : 'disabled'} title="${typeof t === 'function' ? t('securityPage.revokeFromServer') : '从远程服务器撤销公钥'}"><i class="ri-alert-line"></i> ${typeof t === 'function' ? t('securityPage.revoke') : '撤销'}</button>
+                        <button class="btn btn-sm btn-danger" onclick="deleteKey('${escapeHtml(key.id)}')"><i class="ri-delete-bin-line"></i> ${typeof t === 'function' ? t('common.delete') : '删除'}</button>
                     </td>
                 </tr>
                 `;
@@ -11416,22 +11412,22 @@ async function refreshSecurityPage() {
             
             if (hasKeypair) {
                 // 已有密钥对
-                const comment = hasCert ? `CN=${certInfo.subject_cn || 'unknown'}` : '(未安装证书)';
+                const comment = hasCert ? `CN=${certInfo.subject_cn || 'unknown'}` : (typeof t === 'function' ? t('securityPage.noCertInstalled') : '(未安装证书)');
                 
                 allKeysHtml += `
                 <tr style="background:#f0f7ff">
                     <td>
                         <code><i class="ri-key-line"></i> https</code>
-                        <div style="color:#666;margin-top:2px">HTTPS 服务器密钥</div>
+                        <div style="color:#666;margin-top:2px">${typeof t === 'function' ? t('securityPage.httpsServerKey') : 'HTTPS 服务器密钥'}</div>
                     </td>
                     <td>ECDSA P-256</td>
                     <td><span class="badge badge-service-style">HTTPS</span> ${escapeHtml(comment)}</td>
                     <td>-</td>
-                    <td>否</td>
+                    <td>${typeof t === 'function' ? t('common.no') : '否'}</td>
                     <td>
-                        <button class="btn btn-sm btn-service-style" onclick="showCertCSRModal()" title="生成证书签名请求"><i class="ri-file-text-line"></i> CSR</button>
-                        <button class="btn btn-sm btn-gray" onclick="showCertViewModal()" ${hasCert ? '' : 'disabled'} title="查看证书"><i class="ri-eye-line"></i> 证书</button>
-                        <button class="btn btn-sm btn-danger" onclick="deleteCertCredentials()" title="删除 HTTPS 密钥和证书"><i class="ri-delete-bin-line"></i> 删除</button>
+                        <button class="btn btn-sm btn-service-style" onclick="showCertCSRModal()" title="${typeof t === 'function' ? t('securityPage.generateCsrTitle') : '生成证书签名请求'}"><i class="ri-file-text-line"></i> CSR</button>
+                        <button class="btn btn-sm btn-gray" onclick="showCertViewModal()" ${hasCert ? '' : 'disabled'} title="${typeof t === 'function' ? t('securityPage.viewCert') : '查看证书'}"><i class="ri-eye-line"></i> ${typeof t === 'function' ? t('securityPage.cert') : '证书'}</button>
+                        <button class="btn btn-sm btn-danger" onclick="deleteCertCredentials()" title="${typeof t === 'function' ? t('securityPage.deleteHttpsKeyAndCert') : '删除 HTTPS 密钥和证书'}"><i class="ri-delete-bin-line"></i> ${typeof t === 'function' ? t('common.delete') : '删除'}</button>
                     </td>
                 </tr>
                 `;
@@ -11441,14 +11437,14 @@ async function refreshSecurityPage() {
                 <tr style="background:#fff8e1">
                     <td>
                         <code style="color:#888"><i class="ri-lock-line"></i> https</code>
-                        <div style="color:#999;margin-top:2px">HTTPS 服务器密钥</div>
+                        <div style="color:#999;margin-top:2px">${typeof t === 'function' ? t('securityPage.httpsServerKey') : 'HTTPS 服务器密钥'}</div>
                     </td>
                     <td style="color:#888">-</td>
-                    <td><span class="badge badge-service-style">HTTPS</span> <em style="color:#888">未生成密钥</em></td>
+                    <td><span class="badge badge-service-style">HTTPS</span> <em style="color:#888">${typeof t === 'function' ? t('securityPage.noKeyGenerated') : '未生成密钥'}</em></td>
                     <td>-</td>
                     <td>-</td>
                     <td>
-                        <button class="btn btn-sm btn-service-style" onclick="showCertGenKeyModal()" title="生成 HTTPS 密钥对"><i class="ri-key-line"></i> 生成密钥</button>
+                        <button class="btn btn-sm btn-service-style" onclick="showCertGenKeyModal()" title="${typeof t === 'function' ? t('securityPage.generateHttpsKey') : '生成 HTTPS 密钥对'}"><i class="ri-key-line"></i> ${typeof t === 'function' ? t('securityPage.generateKey') : '生成密钥'}</button>
                     </td>
                 </tr>
                 `;
@@ -11462,7 +11458,7 @@ async function refreshSecurityPage() {
     if (allKeysHtml) {
         tbody.innerHTML = allKeysHtml;
     } else {
-        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#888">暂无密钥，点击上方按钮生成新密钥</td></tr>';
+        tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:#888">${typeof t === 'function' ? t('securityPage.noKeysClickToGenerate') : '暂无密钥，点击上方按钮生成新密钥'}</td></tr>`;
     }
     
     // SSH 已部署主机列表（加载数据并渲染到 DOM）
@@ -11508,7 +11504,7 @@ async function refreshSshHostsList() {
         const hosts = Object.values(window._sshHostsData || {});
         
         if (hosts.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="6" class="empty-state">暂无已部署主机，请先在上方密钥管理中点击「部署」</td></tr>';
+            tbody.innerHTML = `<tr><td colspan="6" class="empty-state">${typeof t === 'function' ? t('securityPage.noDeployedHostsHint') : '暂无已部署主机，请先在上方密钥管理中点击「部署」'}</td></tr>`;
             return;
         }
         
@@ -11520,10 +11516,10 @@ async function refreshSshHostsList() {
                 <td>${escapeHtml(h.username)}</td>
                 <td><span class="badge badge-service-style"><i class="ri-key-line"></i> ${escapeHtml(h.keyid || 'default')}</span></td>
                 <td>
-                    <button class="btn btn-sm btn-gray" onclick="testSshHostByIndex(${idx})" title="测试连接"><i class="ri-search-line"></i> 测试</button>
-                    <button class="btn btn-sm btn-service-style" onclick="exportSshHost('${escapeHtml(h.id)}')" title="导出配置为 .tscfg"><i class="ri-download-line"></i> 导出</button>
-                    <button class="btn btn-sm btn-danger" onclick="revokeKeyFromHost(${idx})" title="撤销公钥"><i class="ri-lock-unlock-line"></i> 撤销</button>
-                    <button class="btn btn-sm btn-gray" onclick="removeHostByIndex(${idx})" title="仅移除本地记录"><i class="ri-delete-bin-line"></i> 移除</button>
+                    <button class="btn btn-sm btn-gray" onclick="testSshHostByIndex(${idx})" title="${typeof t === 'function' ? t('securityPage.testConnection') : '测试连接'}"><i class="ri-run-line"></i> ${typeof t === 'function' ? t('common.test') : '测试'}</button>
+                    <button class="btn btn-sm btn-service-style" onclick="exportSshHost('${escapeHtml(h.id)}')" title="${typeof t === 'function' ? t('securityPage.exportAsTscfg') : '导出配置为 .tscfg'}"><i class="ri-download-line"></i> ${typeof t === 'function' ? t('common.export') : '导出'}</button>
+                    <button class="btn btn-sm btn-danger" onclick="revokeKeyFromHost(${idx})" title="${typeof t === 'function' ? t('securityPage.revokePubkey') : '撤销公钥'}"><i class="ri-lock-unlock-line"></i> ${typeof t === 'function' ? t('securityPage.revoke') : '撤销'}</button>
+                    <button class="btn btn-sm btn-gray" onclick="removeHostByIndex(${idx})" title="${typeof t === 'function' ? t('securityPage.removeLocalRecord') : '仅移除本地记录'}"><i class="ri-delete-bin-line"></i> ${typeof t === 'function' ? t('securityPage.remove') : '移除'}</button>
                 </td>
             </tr>
         `).join('');
@@ -11532,7 +11528,7 @@ async function refreshSshHostsList() {
         window._sshHostsList = hosts;
     } catch (e) {
         console.error('Refresh SSH hosts error:', e);
-        tbody.innerHTML = '<tr><td colspan="6" class="error">加载失败</td></tr>';
+        tbody.innerHTML = `<tr><td colspan="6" class="error">${typeof t === 'function' ? t('common.loadFailed') : '加载失败'}</td></tr>`;
     }
 }
 
@@ -11548,7 +11544,7 @@ async function refreshKnownHostsList() {
         const hosts = result.data?.hosts || [];
         
         if (hosts.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="6" class="empty-state">暂无已知主机指纹</td></tr>';
+            tbody.innerHTML = `<tr><td colspan="6" class="empty-state">${typeof t === 'function' ? t('securityPage.noKnownHostFingerprints') : '暂无已知主机指纹'}</td></tr>`;
             return;
         }
         
@@ -11563,14 +11559,14 @@ async function refreshKnownHostsList() {
                 <td><code style="font-size:0.8em;word-break:break-all">${escapeHtml(h.fingerprint.substring(0, 32))}...</code></td>
                 <td>${formatTimestamp(h.added)}</td>
                 <td>
-                    <button class="btn btn-sm btn-gray" onclick="showFullFingerprint(${idx})" title="查看完整指纹"><i class="ri-eye-line"></i> 查看</button>
-                    <button class="btn btn-sm btn-danger" onclick="removeKnownHost(${idx})" title="删除指纹记录"><i class="ri-delete-bin-line"></i> 删除</button>
+                    <button class="btn btn-sm btn-gray" onclick="showFullFingerprint(${idx})" title="${typeof t === 'function' ? t('securityPage.viewFullFingerprint') : 'View full fingerprint'}"><i class="ri-eye-line"></i> ${typeof t === 'function' ? t('common.view') : 'View'}</button>
+                    <button class="btn btn-sm btn-danger" onclick="removeKnownHost(${idx})" title="${typeof t === 'function' ? t('securityPage.deleteFingerprint') : 'Delete fingerprint record'}"><i class="ri-delete-bin-line"></i> ${typeof t === 'function' ? t('common.delete') : 'Delete'}</button>
                 </td>
             </tr>
         `).join('');
     } catch (e) {
         console.error('Refresh known hosts error:', e);
-        tbody.innerHTML = '<tr><td colspan="6" class="error">加载失败</td></tr>';
+        tbody.innerHTML = `<tr><td colspan="6" class="error">${typeof t === 'function' ? t('common.loadFailed') : 'Load failed'}</td></tr>`;
     }
 }
 
@@ -11725,20 +11721,20 @@ function showExportSshHostModal(hostId) {
     modal.innerHTML = `
         <div class="modal-content cc-compact" style="max-width:600px">
             <div class="modal-header">
-                <h2>导出 SSH 主机配置</h2>
+                <h2>${typeof t === 'function' ? t('securityPage.exportSshHostTitle') : 'Export SSH Host Config'}</h2>
                 <button class="modal-close" onclick="hideExportSshHostModal()"><i class="ri-close-line"></i></button>
             </div>
             <div class="modal-body">
-                <p style="color:#666">导出主机 <strong>${escapeHtml(hostId)}</strong> 的配置为加密配置包</p>
+                <p style="color:#666">${typeof t === 'function' ? t('securityPage.exportSshHostDesc', {hostId: escapeHtml(hostId)}) : 'Export host <strong>' + escapeHtml(hostId) + '</strong> config as encrypted package'}</p>
                 <div class="form-group" style="margin-top:15px">
-                    <label>目标设备证书 (PEM)</label>
+                    <label>${typeof t === 'function' ? t('securityPage.targetDeviceCert') : 'Target Device Certificate (PEM)'}</label>
                     <textarea id="export-ssh-host-cert" placeholder="-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----" style="width:100%;height:120px;font-family:monospace"></textarea>
-                    <div style="color:#666;margin-top:4px"><i class="ri-information-line"></i> 粘贴目标设备的证书。留空则使用本机证书（自加密）</div>
+                    <div style="color:#666;margin-top:4px"><i class="ri-information-line"></i> ${typeof t === 'function' ? t('securityPage.exportSshHostCertHint') : 'Paste target device certificate. Leave empty for self-encryption'}</div>
                 </div>
                 <div id="export-ssh-host-result" class="result-box hidden" style="margin-top:10px"></div>
                 <div class="modal-footer cc-compact-footer" style="margin-top:15px;padding-top:15px;border-top:1px solid #eee">
-                    <button class="btn btn-gray" onclick="hideExportSshHostModal()">取消</button>
-                    <button class="btn btn-service-style" id="export-ssh-host-btn" onclick="doExportSshHostFromModal('${escapeHtml(hostId)}')"><i class="ri-download-line"></i> 导出</button>
+                    <button class="btn btn-gray" onclick="hideExportSshHostModal()">${typeof t === 'function' ? t('common.cancel') : 'Cancel'}</button>
+                    <button class="btn btn-service-style" id="export-ssh-host-btn" onclick="doExportSshHostFromModal('${escapeHtml(hostId)}')"><i class="ri-download-line"></i> ${typeof t === 'function' ? t('common.export') : 'Export'}</button>
                 </div>
             </div>
         </div>
@@ -11758,13 +11754,13 @@ async function doExportSshHostFromModal(hostId) {
     const exportBtn = document.getElementById('export-ssh-host-btn');
     
     resultBox.classList.remove('hidden', 'success', 'error');
-    resultBox.textContent = '正在生成配置包...';
+    resultBox.textContent = typeof t === 'function' ? t('securityPage.generatingPack') : 'Generating config pack...';
     exportBtn.disabled = true;
     
     try {
         await doExportSshHost(hostId, certText || null);
         resultBox.className = 'result-box success';
-        resultBox.textContent = '导出成功！';
+        resultBox.textContent = typeof t === 'function' ? t('toast.exportSuccess') : 'Export successful!';
         setTimeout(() => hideExportSshHostModal(), 1000);
     } catch (e) {
         resultBox.className = 'result-box error';
@@ -11807,7 +11803,7 @@ async function doExportSshHost(hostId, recipientCert) {
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
     
-    showToast(`已导出主机配置: ${data.filename}`, 'success');
+    showToast(typeof t === 'function' ? t('sshPage.hostConfigExported', { filename: data.filename }) : '已导出主机配置: ' + data.filename, 'success');
 }
 
 /**
@@ -11824,13 +11820,13 @@ function showImportSshHostModal() {
     
     modal.innerHTML = `
         <div class="modal-content" style="max-width:550px">
-            <h2>导入 SSH 主机配置</h2>
-            <p style="color:#666">选择 .tscfg 配置包文件以导入 SSH 主机配置</p>
+            <h2>${typeof t === 'function' ? t('securityPage.importSshHostTitle') : 'Import SSH Host Config'}</h2>
+            <p style="color:#666">${typeof t === 'function' ? t('securityPage.importSshHostDesc') : 'Select .tscfg config file to import SSH host configuration'}</p>
             
             <!-- 步骤 1: 选择文件 -->
             <div id="import-ssh-host-step1">
                 <div class="form-group" style="margin-top:15px">
-                    <label>选择文件</label>
+                    <label>${typeof t === 'function' ? t('common.selectFile') : 'Select File'}</label>
                     <input type="file" id="import-ssh-host-file" class="form-control" accept=".tscfg" onchange="previewSshHostImport()">
                 </div>
             </div>
@@ -11838,12 +11834,12 @@ function showImportSshHostModal() {
             <!-- 步骤 2: 预览 (默认隐藏) -->
             <div id="import-ssh-host-step2" style="display:none">
                 <div class="info-card" style="background:#f8f9fa;padding:15px;border-radius:8px;margin-top:15px">
-                    <h4 style="margin:0 0 10px 0">配置包内容</h4>
+                    <h4 style="margin:0 0 10px 0">${typeof t === 'function' ? t('securityPage.configPackContent') : 'Config Pack Content'}</h4>
                     <div id="import-ssh-host-preview"></div>
                 </div>
                 <div class="form-group" style="margin-top:15px">
                     <label>
-                        <input type="checkbox" id="import-ssh-host-overwrite"> 覆盖已存在的配置
+                        <input type="checkbox" id="import-ssh-host-overwrite"> ${typeof t === 'function' ? t('securityPage.overwriteExisting') : 'Overwrite existing config'}
                     </label>
                 </div>
             </div>
@@ -11851,8 +11847,8 @@ function showImportSshHostModal() {
             <div id="import-ssh-host-result" class="result-box hidden" style="margin-top:10px"></div>
             
             <div class="form-actions" style="margin-top:15px">
-                <button class="btn" onclick="hideImportSshHostModal()">取消</button>
-                <button class="btn btn-service-style" id="import-ssh-host-btn" onclick="confirmSshHostImport()" disabled><i class="ri-upload-line"></i> 确认导入</button>
+                <button class="btn" onclick="hideImportSshHostModal()">${typeof t === 'function' ? t('common.cancel') : 'Cancel'}</button>
+                <button class="btn btn-service-style" id="import-ssh-host-btn" onclick="confirmSshHostImport()" disabled><i class="ri-upload-line"></i> ${typeof t === 'function' ? t('common.confirmImport') : 'Confirm Import'}</button>
             </div>
         </div>
     `;
@@ -11884,7 +11880,7 @@ async function previewSshHostImport() {
     const file = fileInput.files[0];
     
     resultBox.classList.remove('hidden', 'success', 'error', 'warning');
-    resultBox.textContent = '正在验证配置包...';
+    resultBox.textContent = (typeof t === 'function' ? t('ssh.verifyingPack') : '正在验证配置包...');
     importBtn.disabled = true;
     step2.style.display = 'none';
     
@@ -11959,18 +11955,18 @@ async function confirmSshHostImport() {
             const data = result.data;
             if (data?.exists && !data?.imported) {
                 resultBox.className = 'result-box warning';
-                resultBox.textContent = `配置 ${data.id} 已存在，请勾选「覆盖」选项`;
+                resultBox.textContent = typeof t === 'function' ? t('securityPage.configExistsCheckOverwrite', {id: data.id}) : `Config ${data.id} exists, check "Overwrite" option`;
                 importBtn.disabled = false;
             } else {
                 resultBox.className = 'result-box success';
-                resultBox.innerHTML = `已保存配置: <code>${escapeHtml(data?.id)}</code><br><small style="color:#666">重启系统后生效</small>`;
-                showToast(`已导入配置，重启后生效`, 'success');
+                resultBox.innerHTML = `${typeof t === 'function' ? t('securityPage.savedConfig') : 'Saved config'}: <code>${escapeHtml(data?.id)}</code><br><small style="color:#666">${typeof t === 'function' ? t('securityPage.restartToApply') : 'Restart to apply'}</small>`;
+                showToast(typeof t === 'function' ? t('toast.importedRestartRequired') : 'Imported, restart to apply', 'success');
                 // 不刷新列表，因为还没加载
                 setTimeout(() => hideImportSshHostModal(), 2000);
             }
         } else {
             resultBox.className = 'result-box error';
-            resultBox.textContent = (result.message || '导入失败');
+            resultBox.textContent = (result.message || (typeof t === 'function' ? t('toast.importFailed') : 'Import failed'));
             importBtn.disabled = false;
         }
     } catch (e) {
@@ -12027,20 +12023,20 @@ function revokeKeyFromHost(index) {
     modal.innerHTML = `
         <div class="modal-content cc-compact" style="max-width:500px">
             <div class="modal-header">
-                <h2>撤销并移除主机</h2>
+                <h2>${typeof t === 'function' ? t('securityPage.revokeKeyFromHost') : 'Revoke & Remove Host'}</h2>
                 <button class="modal-close" onclick="hideRevokeHostModal()"><i class="ri-close-line"></i></button>
             </div>
             <div class="modal-body">
-                <p>将从服务器 <strong>${escapeHtml(host.username)}@${escapeHtml(host.host)}:${host.port}</strong> 撤销密钥 <code>${escapeHtml(host.keyid || 'default')}</code></p>
-                <p style="color:#666;margin-top:10px">撤销成功后将自动从列表中移除该主机</p>
+                <p>${typeof t === 'function' ? t('securityPage.revokeKeyFromHostDesc', {host: escapeHtml(host.username) + '@' + escapeHtml(host.host) + ':' + host.port, keyid: escapeHtml(host.keyid || 'default')}) : 'Revoke key <code>' + escapeHtml(host.keyid || 'default') + '</code> from server <strong>' + escapeHtml(host.username) + '@' + escapeHtml(host.host) + ':' + host.port + '</strong>'}</p>
+                <p style="color:#666;margin-top:10px">${typeof t === 'function' ? t('securityPage.revokeHostHint') : 'Host will be removed from list after successful revocation'}</p>
                 <div class="form-group" style="margin-top:15px">
-                    <label>服务器密码</label>
-                    <input type="password" id="revoke-host-password" class="form-control" placeholder="输入 SSH 密码">
+                    <label>${typeof t === 'function' ? t('securityPage.serverPassword') : 'Server Password'}</label>
+                    <input type="password" id="revoke-host-password" class="form-control" placeholder="${typeof t === 'function' ? t('securityPage.serverPasswordPlaceholder') : 'Enter SSH password'}">
                 </div>
                 <div id="revoke-host-result" class="result-box hidden" style="margin-top:10px"></div>
                 <div class="modal-footer cc-compact-footer" style="margin-top:15px;padding-top:15px;border-top:1px solid #eee">
-                    <button class="btn btn-gray" onclick="hideRevokeHostModal()">取消</button>
-                    <button class="btn btn-danger" id="revoke-host-btn" onclick="doRevokeFromHost(${index})"><i class="ri-lock-unlock-line"></i> 撤销并移除</button>
+                    <button class="btn btn-gray" onclick="hideRevokeHostModal()">${typeof t === 'function' ? t('common.cancel') : 'Cancel'}</button>
+                    <button class="btn btn-danger" id="revoke-host-btn" onclick="doRevokeFromHost(${index})"><i class="ri-lock-unlock-line"></i> ${typeof t === 'function' ? t('securityPage.revokeAndRemove') : 'Revoke & Remove'}</button>
                 </div>
             </div>
         </div>
@@ -12061,7 +12057,7 @@ async function doRevokeFromHost(index) {
     
     const password = document.getElementById('revoke-host-password').value;
     if (!password) {
-        showToast('请输入密码', 'error');
+        showToast(typeof t === 'function' ? t('securityPage.enterPassword') : 'Please enter password', 'error');
         return;
     }
     
@@ -12069,43 +12065,43 @@ async function doRevokeFromHost(index) {
     const revokeBtn = document.getElementById('revoke-host-btn');
     
     resultBox.classList.remove('hidden', 'success', 'error');
-    resultBox.textContent = '正在撤销公钥...';
+    resultBox.textContent = typeof t === 'function' ? t('securityPage.revokingKey') : 'Revoking public key...';
     revokeBtn.disabled = true;
     
     try {
         const result = await api.sshRevoke(host.host, host.username, password, host.keyid || 'default', host.port);
         
         if (result.data?.revoked) {
-            resultBox.textContent = `撤销成功！已从服务器移除 ${result.data.removed_count || 1} 个匹配的公钥`;
+            resultBox.textContent = typeof t === 'function' ? t('securityPage.revokeSuccess', {count: result.data.removed_count || 1}) : `Revoked! Removed ${result.data.removed_count || 1} matching public key(s)`;
             resultBox.classList.add('success');
             
             // 自动移除本地记录
             await api.call('ssh.hosts.remove', { id: host.id });
-            showToast('已撤销公钥并移除主机记录', 'success');
+            showToast(typeof t === 'function' ? t('securityPage.revokedAndRemoved') : 'Revoked public key and removed host record', 'success');
             
             setTimeout(() => {
                 hideRevokeHostModal();
                 refreshSshHostsList();
             }, 1000);
         } else if (result.data?.found === false) {
-            resultBox.textContent = '未在服务器上找到匹配的公钥（可能已被移除）\n是否仍要移除本地记录？';
+            resultBox.textContent = typeof t === 'function' ? t('securityPage.keyNotFoundOnServer') : 'No matching public key found on server (may have been removed)\nRemove local record anyway?';
             resultBox.classList.add('error');
             
             // 提供移除本地记录的选项
-            revokeBtn.innerHTML = '<i class="ri-delete-bin-line"></i> 仅移除本地记录';
+            revokeBtn.innerHTML = '<i class="ri-delete-bin-line"></i> ' + (typeof t === 'function' ? t('securityPage.removeLocalRecord') : 'Remove Local Record Only');
             revokeBtn.onclick = async () => {
                 await api.call('ssh.hosts.remove', { id: host.id });
-                showToast('已移除本地主机记录', 'success');
+                showToast(typeof t === 'function' ? t('securityPage.removedLocalRecord') : 'Removed local host record', 'success');
                 hideRevokeHostModal();
                 refreshSshHostsList();
             };
             revokeBtn.disabled = false;
             return;  // 不进入 finally
         } else {
-            throw new Error(result.message || '撤销失败');
+            throw new Error(result.message || (typeof t === 'function' ? t('securityPage.revokeFailed') : 'Revoke failed'));
         }
     } catch (e) {
-        resultBox.textContent = '撤销失败: ' + e.message;
+        resultBox.textContent = (typeof t === 'function' ? t('securityPage.revokeFailed') : 'Revoke failed') + ': ' + e.message;
         resultBox.classList.add('error');
     } finally {
         revokeBtn.disabled = false;
@@ -12188,19 +12184,19 @@ function showPubkeyModal(id, pubkey, type, comment) {
     modal.innerHTML = `
         <div class="modal-content cc-compact" style="max-width:700px">
             <div class="modal-header">
-                <h2>公钥导出 - ${escapeHtml(id)}</h2>
+                <h2>${typeof t === 'function' ? t('securityPage.pubkeyExport') : 'Public Key Export'} - ${escapeHtml(id)}</h2>
                 <button class="modal-close" onclick="closePubkeyModal()"><i class="ri-close-line"></i></button>
             </div>
             <div class="modal-body">
-                <p style="margin-bottom:10px;color:#666">类型: ${escapeHtml(type)}${comment ? ' | 备注: ' + escapeHtml(comment) : ''}</p>
+                <p style="margin-bottom:10px;color:#666">${typeof t === 'function' ? t('securityPage.keyTypeLabel') : 'Type'}: ${escapeHtml(type)}${comment ? ' | ' + (typeof t === 'function' ? t('securityPage.commentLabel') : 'Comment') + ': ' + escapeHtml(comment) : ''}</p>
                 <textarea id="pubkey-content" readonly style="width:100%;height:150px;font-family:monospace;font-size:12px;resize:vertical">${escapeHtml(pubkey)}</textarea>
                 <p style="margin-top:10px;color:#888">
-                    <i class="ri-information-line"></i> 将此公钥添加到远程服务器的 <code>~/.ssh/authorized_keys</code> 文件中即可实现免密登录
+                    <i class="ri-information-line"></i> ${typeof t === 'function' ? t('securityPage.pubkeyHint') : 'Add this public key to the remote server\'s ~/.ssh/authorized_keys file to enable passwordless login'}
                 </p>
                 <div class="modal-footer cc-compact-footer" style="margin-top:15px;padding-top:15px;border-top:1px solid #eee">
-                    <button class="btn btn-gray" onclick="closePubkeyModal()">关闭</button>
-                    <button class="btn btn-service-style" onclick="copyPubkey()"><i class="ri-file-text-line"></i> 复制到剪贴板</button>
-                    <button class="btn btn-service-style" onclick="downloadPubkey('${escapeHtml(id)}')"><i class="ri-download-line"></i> 下载文件</button>
+                    <button class="btn btn-gray" onclick="closePubkeyModal()">${typeof t === 'function' ? t('common.close') : 'Close'}</button>
+                    <button class="btn btn-service-style" onclick="copyPubkey()"><i class="ri-file-text-line"></i> ${typeof t === 'function' ? t('common.copyToClipboard') : 'Copy to Clipboard'}</button>
+                    <button class="btn btn-service-style" onclick="downloadPubkey('${escapeHtml(id)}')"><i class="ri-download-line"></i> ${typeof t === 'function' ? t('common.downloadFile') : 'Download File'}</button>
                 </div>
             </div>
         </div>
@@ -12226,19 +12222,19 @@ function showPrivkeyModal(id, privkey, type, comment) {
     
     modal.innerHTML = `
         <div class="modal-content" style="max-width:700px">
-            <h2>私钥导出 - ${escapeHtml(id)}</h2>
+            <h2>${typeof t === 'function' ? t('securityPage.privkeyExport') : 'Private Key Export'} - ${escapeHtml(id)}</h2>
             <div style="background:#fff3cd;border:1px solid #ffc107;border-radius:4px;padding:10px;margin-bottom:15px">
-                <strong><i class="ri-alert-line"></i> 安全警告</strong>：私钥是敏感信息，请妥善保管！
+                <strong><i class="ri-alert-line"></i> ${typeof t === 'function' ? t('securityPage.securityWarning') : 'Security Warning'}</strong>: ${typeof t === 'function' ? t('securityPage.privkeyWarning') : 'Private key is sensitive information, please keep it safe!'}
             </div>
-            <p style="margin-bottom:10px;color:#666">类型: ${escapeHtml(type)}${comment ? ' | 备注: ' + escapeHtml(comment) : ''}</p>
+            <p style="margin-bottom:10px;color:#666">${typeof t === 'function' ? t('securityPage.keyTypeLabel') : 'Type'}: ${escapeHtml(type)}${comment ? ' | ' + (typeof t === 'function' ? t('securityPage.commentLabel') : 'Comment') + ': ' + escapeHtml(comment) : ''}</p>
             <textarea id="privkey-content" readonly style="width:100%;height:200px;font-family:monospace;resize:vertical;background:#2d2d2d;color:#00ff00">${escapeHtml(privkey)}</textarea>
             <p style="margin-top:10px;color:#888">
-                <i class="ri-information-line"></i> 保存为 <code>~/.ssh/${escapeHtml(id)}</code> 并设置权限 <code>chmod 600</code>
+                <i class="ri-information-line"></i> ${typeof t === 'function' ? t('securityPage.privkeyHint') : 'Save as ~/.ssh/' + escapeHtml(id) + ' and set permissions chmod 600'}
             </p>
             <div class="form-actions" style="margin-top:15px">
-                <button class="btn btn-gray" onclick="closePrivkeyModal()">关闭</button>
-                <button class="btn btn-service-style" onclick="copyPrivkey()"><i class="ri-file-text-line"></i> 复制到剪贴板</button>
-                <button class="btn btn-service-style" onclick="downloadPrivkey('${escapeHtml(id)}')"><i class="ri-download-line"></i> 下载文件</button>
+                <button class="btn btn-gray" onclick="closePrivkeyModal()">${typeof t === 'function' ? t('common.close') : 'Close'}</button>
+                <button class="btn btn-service-style" onclick="copyPrivkey()"><i class="ri-file-text-line"></i> ${typeof t === 'function' ? t('common.copyToClipboard') : 'Copy to Clipboard'}</button>
+                <button class="btn btn-service-style" onclick="downloadPrivkey('${escapeHtml(id)}')"><i class="ri-download-line"></i> ${typeof t === 'function' ? t('common.downloadFile') : 'Download File'}</button>
             </div>
         </div>
     `;
@@ -12531,12 +12527,12 @@ async function refreshConfigPackStatus() {
         const deviceType = data.device_type;
         
         statusIcon.innerHTML = canExport ? '<i class="ri-tools-line"></i>' : '<i class="ri-smartphone-line"></i>';
-        statusText.textContent = canExport ? 'Developer 设备' : 'Device 设备';
+        statusText.textContent = canExport ? (typeof t === 'function' ? t('securityPage.developerDevice') : 'Developer 设备') : (typeof t === 'function' ? t('securityPage.normalDevice') : 'Device 设备');
         
         // 设备类型徽章
         deviceTypeBadge.style.display = 'inline-block';
         deviceTypeBadge.textContent = deviceType;
-        deviceTypeBadge.className = 'badge ' + (canExport ? 'badge-success' : 'badge-info');
+        deviceTypeBadge.className = 'badge ' + (canExport ? 'badge-service-style' : 'badge-info');
         
         // 显示详细信息
         infoDetails.style.display = 'block';
@@ -12550,13 +12546,13 @@ async function refreshConfigPackStatus() {
         // 导出按钮只对 Developer 设备启用
         if (btnExport) {
             btnExport.disabled = !canExport;
-            btnExport.title = canExport ? '' : '仅 Developer 设备可导出配置包';
+            btnExport.title = canExport ? '' : (typeof t === 'function' ? t('securityPage.onlyDeveloperCanExport') : '仅 Developer 设备可导出配置包');
         }
         
     } catch (e) {
         console.error('Refresh config pack status error:', e);
         statusIcon.innerHTML = '<i class="ri-close-line"></i>';
-        statusText.textContent = '加载失败';
+        statusText.textContent = (typeof t === 'function' ? t('common.loadFailed') : '加载失败');
         if (deviceTypeBadge) deviceTypeBadge.style.display = 'none';
         if (infoDetails) infoDetails.style.display = 'none';
     }
@@ -12699,30 +12695,32 @@ async function importConfigPack() {
         
         const data = result.data;
         resultBox.className = 'result-box success';
-        resultBox.innerHTML = `配置包已导入<br><small>保存至: ${data.saved_path || '未知'}</small>`;
+        resultBox.innerHTML = `${typeof t === 'function' ? t('toast.configPackImported') : 'Config pack imported'}<br><small>${typeof t === 'function' ? t('securityPage.savedTo') : 'Saved to'}: ${data.saved_path || '-'}</small>`;
         
         // 显示详细信息（无解密内容）
         const sig = data.signature || {};
+        const yesStr = typeof t === 'function' ? t('common.yes') : 'Yes';
+        const noStr = typeof t === 'function' ? t('common.no') : 'No';
         document.getElementById('pack-preview-content').innerHTML = `
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:0.9em">
-                <div><strong>配置名称：</strong>${data.name || '-'}</div>
-                <div><strong>描述：</strong>${data.description || '-'}</div>
-                <div><strong>目标设备：</strong>${data.target_device || '-'}</div>
-                <div><strong>创建时间：</strong>${data.created_at ? formatTimestamp(data.created_at) : '-'}</div>
-                <div><strong>签名者：</strong>${sig.signer_cn || '-'} (${sig.signer_ou || '-'})</div>
-                <div><strong>签名时间：</strong>${sig.signed_at ? formatTimestamp(sig.signed_at) : '-'}</div>
-                <div><strong>官方签名：</strong>${sig.is_official ? '是' : '否'}</div>
-                <div><strong>保存路径：</strong>${data.saved_path || '-'}</div>
+                <div><strong>${typeof t === 'function' ? t('securityPage.configName') : 'Config Name'}:</strong> ${data.name || '-'}</div>
+                <div><strong>${typeof t === 'function' ? t('common.description') : 'Description'}:</strong> ${data.description || '-'}</div>
+                <div><strong>${typeof t === 'function' ? t('securityPage.targetDevice') : 'Target Device'}:</strong> ${data.target_device || '-'}</div>
+                <div><strong>${typeof t === 'function' ? t('securityPage.createdAt') : 'Created At'}:</strong> ${data.created_at ? formatTimestamp(data.created_at) : '-'}</div>
+                <div><strong>${typeof t === 'function' ? t('securityPage.signer') : 'Signer'}:</strong> ${sig.signer_cn || '-'} (${sig.signer_ou || '-'})</div>
+                <div><strong>${typeof t === 'function' ? t('securityPage.signedAt') : 'Signed At'}:</strong> ${sig.signed_at ? formatTimestamp(sig.signed_at) : '-'}</div>
+                <div><strong>${typeof t === 'function' ? t('securityPage.officialSignature') : 'Official Signature'}:</strong> ${sig.is_official ? yesStr : noStr}</div>
+                <div><strong>${typeof t === 'function' ? t('securityPage.savePath') : 'Save Path'}:</strong> ${data.saved_path || '-'}</div>
             </div>
             <div style="margin-top:10px;padding:8px;background:#e8f5e9;border-radius:4px;font-size:12px">
-                📦 配置包已加密保存，使用 <code>config.pack.content</code> API 可按需解密
+                ${typeof t === 'function' ? t('securityPage.packEncryptedHint') : 'Config pack saved encrypted, use <code>config.pack.content</code> API to decrypt as needed'}
             </div>
         `;
         preview.classList.remove('hidden');
         
     } catch (e) {
         resultBox.className = 'result-box error';
-        resultBox.textContent = '导入失败: ' + e.message;
+        resultBox.textContent = (typeof t === 'function' ? t('toast.importFailed') : 'Import failed') + ': ' + e.message;
     }
 }
 
@@ -12741,24 +12739,24 @@ function showConfigPackApplyConfirm(path, packInfo) {
     dialog.innerHTML = `
         <div class="modal-content" style="max-width:450px">
             <div class="modal-header">
-                <span class="modal-title">📦 配置包已上传</span>
+                <span class="modal-title">${typeof t === 'function' ? t('securityPage.configPackUploaded') : 'Config Pack Uploaded'}</span>
             </div>
             <div class="modal-body">
                 <div style="background:#e8f5e9;padding:12px;border-radius:6px;margin-bottom:15px">
-                    <div style="color:#2e7d32;font-weight:bold;margin-bottom:8px">验证成功</div>
+                    <div style="color:#2e7d32;font-weight:bold;margin-bottom:8px">${typeof t === 'function' ? t('securityPage.verifySuccess') : 'Verification Successful'}</div>
                     <div style="font-size:0.9em;color:#333">
-                        <div>文件: <code>${path.split('/').pop()}</code></div>
-                        <div>🔐 签名者: ${signerInfo}</div>
-                        ${sig.is_official ? '<div style="color:#1976d2">官方签名</div>' : ''}
+                        <div>${typeof t === 'function' ? t('securityPage.fileName') : 'File'}: <code>${path.split('/').pop()}</code></div>
+                        <div>${typeof t === 'function' ? t('securityPage.signer') : 'Signer'}: ${signerInfo}</div>
+                        ${sig.is_official ? '<div style="color:#1976d2">' + (typeof t === 'function' ? t('securityPage.officialSignature') : 'Official Signature') + '</div>' : ''}
                     </div>
                 </div>
                 <p style="margin:0;color:#666;font-size:0.9em">
-                    配置包已保存到设备。是否立即应用此配置？
+                    ${typeof t === 'function' ? t('securityPage.configPackSavedApplyNow') : 'Config pack saved to device. Apply this config now?'}
                 </p>
             </div>
             <div class="modal-footer">
-                <button class="btn" onclick="closeConfigPackApplyConfirm()">稍后应用</button>
-                <button class="btn btn-service-style" onclick="applyConfigPackFromPath('${path}')">🚀 立即应用</button>
+                <button class="btn" onclick="closeConfigPackApplyConfirm()">${typeof t === 'function' ? t('securityPage.applyLater') : 'Apply Later'}</button>
+                <button class="btn btn-service-style" onclick="applyConfigPackFromPath('${path}')">${typeof t === 'function' ? t('securityPage.applyNow') : 'Apply Now'}</button>
             </div>
         </div>
     `;
@@ -12810,7 +12808,7 @@ let packExportCurrentEntries = [];  // 当前目录的条目缓存
 // 配置包：导出弹窗（仅 Developer）
 function showConfigPackExportModal() {
     if (!window._configPackStatus?.can_export) {
-        showToast('仅 Developer 设备可导出配置包', 'error');
+        showToast(typeof t === 'function' ? t('securityPage.onlyDeveloperCanExport') : 'Only Developer devices can export config packs', 'error');
         return;
     }
     document.getElementById('pack-export-modal').classList.remove('hidden');
@@ -12845,7 +12843,7 @@ function hideConfigPackExportModal() {
 // 文件浏览器：刷新当前目录
 async function packExportBrowseRefresh() {
     const fileList = document.getElementById('pack-export-file-list');
-    fileList.innerHTML = '<div style="padding:20px;text-align:center;color:#666"><i class="ri-refresh-line"></i> 加载中...</div>';
+    fileList.innerHTML = '<div style="padding:20px;text-align:center;color:#666"><i class="ri-refresh-line"></i> ' + t('common.loading') + '</div>';
     
     try {
         const result = await api.storageList(packExportCurrentPath);
@@ -12996,7 +12994,7 @@ function packExportUpdateSelectedDisplay() {
     
     let text = `已选择 ${files.length} 个文件`;
     if (loadingFiles.length > 0) {
-        text += ` (${loadingFiles.length} 个加载中...)`;
+        text += ` (${loadingFiles.length} ${t('security.filesLoading')})`;
         selectedDiv.style.background = '#fff3e0';
         generateBtn.disabled = true;
     } else if (errorFiles.length > 0) {
@@ -13226,18 +13224,24 @@ async function refreshConfigPackList() {
         tbody.innerHTML = '';
         
         if (files.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#666">目录中没有 .tscfg 文件</td></tr>';
+            const noFiles = typeof t === 'function' ? t('securityPage.noTscfgInDir') : '目录中没有 .tscfg 文件';
+            tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#666">' + noFiles + '</td></tr>';
         } else {
+            const yesStr = typeof t === 'function' ? t('common.yes') : '是';
+            const noStr = typeof t === 'function' ? t('common.no') : '否';
+            const validStr = typeof t === 'function' ? t('common.valid') : '有效';
+            const invalidStr = typeof t === 'function' ? t('common.invalid') : '无效';
+            const importStr = typeof t === 'function' ? t('securityPage.importBtn') : '导入';
             files.forEach(file => {
                 const tr = document.createElement('tr');
                 tr.innerHTML = `
                     <td>${escapeHtml(file.name)}</td>
                     <td>${formatBytes(file.size || 0)}</td>
                     <td>${escapeHtml(file.signer || '-')}</td>
-                    <td>${file.is_official ? '是' : '否'}</td>
-                    <td>${file.valid ? '<span style="color:green">有效</span>' : '<span style="color:red">无效</span>'}</td>
+                    <td>${file.is_official ? yesStr : noStr}</td>
+                    <td>${file.valid ? '<span style="color:green">' + validStr + '</span>' : '<span style="color:red">' + invalidStr + '</span>'}</td>
                     <td>
-                        <button class="btn btn-small" onclick="importPackFromList('${escapeHtml(path)}/${escapeHtml(file.name)}')"><i class="ri-download-line"></i> 导入</button>
+                        <button class="btn btn-small" onclick="importPackFromList('${escapeHtml(path)}/${escapeHtml(file.name)}')"><i class="ri-download-line"></i> ${importStr}</button>
                     </td>
                 `;
                 tbody.appendChild(tr);
@@ -13248,21 +13252,22 @@ async function refreshConfigPackList() {
         table.classList.remove('hidden');
         
     } catch (e) {
-        loading.textContent = '加载失败: ' + e.message;
+        loading.textContent = (typeof t === 'function' ? t('securityPage.packListLoadFailed') : '加载失败') + ': ' + e.message;
     }
 }
 
 async function importPackFromList(filePath) {
-    if (!confirm(`确定要导入配置包: ${filePath} ?`)) return;
+    const msg = typeof t === 'function' ? t('securityPage.confirmImportPack', { path: filePath }) : '确定要导入配置包: ' + filePath + ' ?';
+    if (!confirm(msg)) return;
     
     try {
         const result = await api.configPackImport(null, filePath, false);
         if (result.code !== 0) throw new Error(result.message || result.error);
         
-        showToast('配置包导入成功', 'success');
+        showToast(typeof t === 'function' ? t('securityPage.importPackSuccess') : '配置包导入成功', 'success');
         hideConfigPackListModal();
     } catch (e) {
-        showToast('导入失败: ' + e.message, 'error');
+        showToast((typeof t === 'function' ? t('securityPage.importPackFailed') : '导入失败') + ': ' + e.message, 'error');
     }
 }
 
@@ -13325,42 +13330,42 @@ async function refreshCertStatus() {
         switch (data.status) {
             case 'not_initialized':
                 statusIcon.innerHTML = '<i class="ri-checkbox-blank-circle-line"></i>';
-                statusText.textContent = '未初始化';
+                statusText.textContent = typeof t === 'function' ? t('securityPage.notInitialized') : 'Not Initialized';
                 noKeyHint.style.display = 'block';
                 infoDetails.style.display = 'none';
                 expiryBadge.style.display = 'none';
                 break;
             case 'key_generated':
                 statusIcon.innerHTML = '<i class="ri-key-line"></i>';
-                statusText.textContent = '密钥已生成，等待 CSR';
+                statusText.textContent = typeof t === 'function' ? t('securityPage.keyGeneratedAwaitCsr') : 'Key Generated, Awaiting CSR';
                 noKeyHint.style.display = 'none';
                 infoDetails.style.display = 'none';
                 expiryBadge.style.display = 'none';
                 break;
             case 'csr_pending':
                 statusIcon.innerHTML = '<i class="ri-file-text-line"></i>';
-                statusText.textContent = 'CSR 已生成，等待签发';
+                statusText.textContent = typeof t === 'function' ? t('securityPage.csrPendingSign') : 'CSR Generated, Awaiting Signing';
                 noKeyHint.style.display = 'none';
                 infoDetails.style.display = 'none';
                 expiryBadge.style.display = 'none';
                 break;
             case 'activated':
                 statusIcon.innerHTML = '<i class="ri-check-line"></i>';
-                statusText.textContent = '已激活';
+                statusText.textContent = typeof t === 'function' ? t('securityPage.activated') : 'Activated';
                 noKeyHint.style.display = 'none';
                 infoDetails.style.display = 'block';
                 updateCertInfoDetails(data.cert_info);
                 break;
             case 'expired':
                 statusIcon.innerHTML = '<i class="ri-close-line"></i>';
-                statusText.textContent = '已过期';
+                statusText.textContent = typeof t === 'function' ? t('securityPage.expired') : 'Expired';
                 noKeyHint.style.display = 'none';
                 infoDetails.style.display = 'block';
                 updateCertInfoDetails(data.cert_info);
                 break;
             case 'error':
                 statusIcon.innerHTML = '<i class="ri-alert-line"></i>';
-                statusText.textContent = '错误';
+                statusText.textContent = typeof t === 'function' ? t('common.error') : 'Error';
                 noKeyHint.style.display = 'none';
                 infoDetails.style.display = 'none';
                 expiryBadge.style.display = 'none';
@@ -13373,7 +13378,7 @@ async function refreshCertStatus() {
     } catch (e) {
         console.error('Refresh cert status error:', e);
         statusIcon.innerHTML = '<i class="ri-close-line"></i>';
-        statusText.textContent = '加载失败';
+        statusText.textContent = typeof t === 'function' ? t('common.loadFailed') : 'Load Failed';
         if (noKeyHint) noKeyHint.style.display = 'none';
         if (infoDetails) infoDetails.style.display = 'none';
         if (expiryBadge) expiryBadge.style.display = 'none';
@@ -13388,21 +13393,21 @@ function updateCertInfoDetails(certInfo) {
     document.getElementById('cert-not-before').textContent = certInfo.not_before ? formatTimestamp(certInfo.not_before) : '-';
     document.getElementById('cert-not-after').textContent = certInfo.not_after ? formatTimestamp(certInfo.not_after) : '-';
     document.getElementById('cert-serial').textContent = certInfo.serial || '-';
-    document.getElementById('cert-valid-status').textContent = certInfo.is_valid ? '有效' : '无效';
+    document.getElementById('cert-valid-status').textContent = certInfo.is_valid ? (typeof t === 'function' ? t('securityPage.valid') : 'Valid') : (typeof t === 'function' ? t('securityPage.invalid') : 'Invalid');
     
     // 更新过期徽章
     const expiryBadge = document.getElementById('cert-expiry-badge');
     if (certInfo.days_until_expiry !== undefined) {
         expiryBadge.style.display = 'inline-block';
         if (certInfo.days_until_expiry < 0) {
-            expiryBadge.textContent = `已过期 ${Math.abs(certInfo.days_until_expiry)} 天`;
+            expiryBadge.textContent = (typeof t === 'function' ? t('securityPage.expiredDays', {days: Math.abs(certInfo.days_until_expiry)}) : `已过期 ${Math.abs(certInfo.days_until_expiry)} 天`);
             expiryBadge.className = 'badge badge-danger';
         } else if (certInfo.days_until_expiry < 30) {
-            expiryBadge.textContent = `${certInfo.days_until_expiry} 天后过期`;
+            expiryBadge.textContent = (typeof t === 'function' ? t('securityPage.expiringDays', {days: certInfo.days_until_expiry}) : `${certInfo.days_until_expiry} 天后过期`);
             expiryBadge.className = 'badge badge-warning';
         } else {
-            expiryBadge.textContent = `剩余 ${certInfo.days_until_expiry} 天`;
-            expiryBadge.className = 'badge badge-success';
+            expiryBadge.textContent = (typeof t === 'function' ? t('securityPage.remainingDays', {days: certInfo.days_until_expiry}) : `剩余 ${certInfo.days_until_expiry} 天`);
+            expiryBadge.className = 'badge badge-service-style';
         }
     } else {
         expiryBadge.style.display = 'none';
@@ -13711,10 +13716,15 @@ function formatUptime(ms) {
     const hours = Math.floor(minutes / 60);
     const days = Math.floor(hours / 24);
     
-    if (days > 0) return `${days}天 ${hours % 24}小时`;
-    if (hours > 0) return `${hours}小时 ${minutes % 60}分钟`;
-    if (minutes > 0) return `${minutes}分钟`;
-    return `${seconds}秒`;
+    const d = typeof t === 'function' ? t('common.days') : 'd';
+    const h = typeof t === 'function' ? t('common.hours') : 'h';
+    const m = typeof t === 'function' ? t('common.minutes') : 'min';
+    const s = typeof t === 'function' ? t('common.seconds') : 's';
+    
+    if (days > 0) return `${days}${d} ${hours % 24}${h}`;
+    if (hours > 0) return `${hours}${h} ${minutes % 60}${m}`;
+    if (minutes > 0) return `${minutes}${m}`;
+    return `${seconds}${s}`;
 }
 
 function formatBytes(bytes) {
@@ -13763,14 +13773,14 @@ async function loadTerminalPage() {
         <div class="terminal-page">
             <div class="terminal-header">
                 <div class="terminal-actions">
-                    <button class="btn btn-sm btn-service-style" onclick="console.log('Button clicked!'); window.showTerminalLogsModal();">日志</button>
-                    <button class="btn btn-sm btn-service-style" onclick="terminalClear()">清屏</button>
-                    <button class="btn btn-sm btn-danger" onclick="terminalDisconnect()">断开</button>
+                    <button class="btn btn-sm btn-service-style" onclick="console.log('Button clicked!'); window.showTerminalLogsModal();">${t('common.logs')}</button>
+                    <button class="btn btn-sm btn-service-style" onclick="terminalClear()">${t('terminal.clearScreen')}</button>
+                    <button class="btn btn-sm btn-danger" onclick="terminalDisconnect()">${t('terminal.disconnect')}</button>
                 </div>
             </div>
             <div class="terminal-container" id="terminal-container"></div>
             <div class="terminal-help">
-                <span><i class="ri-information-line"></i> 提示: 输入 <code>help</code> 查看命令 | <code>Ctrl+C</code> 中断 | <code>Ctrl+L</code> 清屏 | <code>↑↓</code> 历史</span>
+                <span><i class="ri-information-line"></i> ${t('terminal.terminalHint')}</span>
             </div>
         </div>
         
@@ -13778,7 +13788,7 @@ async function loadTerminalPage() {
         <div id="terminal-logs-modal" class="modal" style="display:none" onclick="if(event.target===this) closeTerminalLogsModal()">
             <div class="modal-content" style="width:90%; max-width:1200px; height:85vh">
                 <div class="modal-header">
-                    <h2>系统日志</h2>
+                    <h2>${t('terminal.systemLogTitle')}</h2>
                     <button class="modal-close" onclick="closeTerminalLogsModal()">&times;</button>
                 </div>
                 <div class="modal-body" style="padding:0; display:flex; flex-direction:column; height:calc(100% - 60px)">
@@ -13786,9 +13796,9 @@ async function loadTerminalPage() {
                     <div class="log-toolbar" style="margin:15px; margin-bottom:10px">
                         <div class="toolbar-left">
                             <div class="toolbar-item">
-                                <label>级别</label>
+                                <label>${t('terminal.levelLabel')}</label>
                                 <select id="modal-log-level-filter" class="form-control" onchange="updateModalLogFilter()">
-                                    <option value="5">全部</option>
+                                    <option value="5">${t('terminal.levelAll')}</option>
                                     <option value="1">ERROR</option>
                                     <option value="2">WARN+</option>
                                     <option value="3" selected>INFO+</option>
@@ -13798,25 +13808,25 @@ async function loadTerminalPage() {
                             <div class="toolbar-item">
                                 <label>TAG</label>
                                 <input type="text" id="modal-log-tag-filter" class="form-control" 
-                                       placeholder="过滤TAG..." onkeyup="debounceRenderModalLogs()">
+                                       placeholder="${t('common.filterTag')}" onkeyup="debounceRenderModalLogs()">
                             </div>
                             <div class="toolbar-item search">
-                                <label>搜索</label>
+                                <label>${t('common.search')}</label>
                                 <input type="text" id="modal-log-keyword-filter" class="form-control" 
-                                       placeholder="搜索日志..." onkeyup="debounceRenderModalLogs()">
+                                       placeholder="${t('common.searchLogs')}" onkeyup="debounceRenderModalLogs()">
                             </div>
                         </div>
                         <div class="toolbar-right">
-                            <span id="modal-ws-status" class="ws-status connecting" title="WebSocket 连接状态">
+                            <span id="modal-ws-status" class="ws-status connecting" title="${t('common.wsStatus')}">
                                 <span class="dot"></span>
                             </span>
                             <span id="modal-log-stats" class="log-stats"></span>
                             <label class="auto-scroll-toggle">
                                 <input type="checkbox" id="modal-log-auto-scroll" checked>
-                                <span>自动滚动</span>
+                                <span>${t('terminal.autoScroll')}</span>
                             </label>
-                            <button class="btn btn-small" onclick="loadModalHistoryLogs()" title="刷新日志"><i class="ri-refresh-line"></i></button>
-                            <button class="btn btn-small btn-danger" onclick="clearModalLogs()" title="清空日志"><i class="ri-delete-bin-line"></i></button>
+                            <button class="btn btn-small" onclick="loadModalHistoryLogs()" title="${t('common.refreshLogs')}"><i class="ri-refresh-line"></i></button>
+                            <button class="btn btn-small btn-danger" onclick="clearModalLogs()" title="${t('common.clearLogs')}"><i class="ri-delete-bin-line"></i></button>
                         </div>
                     </div>
                     
@@ -13825,7 +13835,7 @@ async function loadTerminalPage() {
                         <div id="modal-log-container" class="log-viewer">
                             <div class="log-empty">
                                 <div class="icon"><i class="ri-file-list-line"></i></div>
-                                <div class="text">等待日志...</div>
+                                <div class="text">${t('terminal.waitingLogs')}</div>
                             </div>
                         </div>
                     </div>
@@ -14483,25 +14493,25 @@ async function loadOtaPage() {
     const content = document.getElementById('page-content');
     content.innerHTML = `
         <div class="page-ota">
-            <h1>固件升级</h1>
+            <h1>${t('ota.firmwareUpgrade')}</h1>
             
             <!-- 核心信息区：版本 + OTA服务器 -->
             <div class="ota-main-card">
                 <!-- 第一行：版本号（最醒目） -->
                 <div class="ota-current-version">
-                    <span class="version-label">当前版本</span>
+                    <span class="version-label">${t('ota.currentVersion')}</span>
                     <span class="version-number" id="ota-current-version">-</span>
                 </div>
-                <div class="version-meta" id="ota-version-meta">加载中...</div>
+                <div class="version-meta" id="ota-version-meta">${t('common.loading')}</div>
                 
                 <!-- 第二行：OTA服务器 -->
                 <div class="ota-server-row">
-                    <label class="server-label">OTA 服务器</label>
+                    <label class="server-label">${t('ota.serverUrl')}</label>
                     <div class="server-input-group">
                         <input type="text" id="ota-server-input" class="form-input" 
                                placeholder="http://192.168.1.100:57807">
-                        <button class="btn btn-icon btn-gray" onclick="saveOtaServer()" title="保存到设备">保存</button>
-                        <button class="btn btn-service-style" onclick="checkForUpdates()">检查更新</button>
+                        <button class="btn btn-icon btn-gray" onclick="saveOtaServer()" title="${t('ota.saveToDevice')}">${t('ota.saveServer')}</button>
+                        <button class="btn btn-service-style" onclick="checkForUpdates()">${t('ota.checkUpdate')}</button>
                     </div>
                 </div>
                 
@@ -14511,7 +14521,7 @@ async function loadOtaPage() {
                 <!-- 升级进度区（动态显示） -->
                 <div id="ota-progress-section" class="ota-progress-section" style="display:none">
                     <div class="progress-header">
-                        <span class="progress-state" id="ota-state-text">准备中...</span>
+                        <span class="progress-state" id="ota-state-text">${t('ota.preparing')}</span>
                         <span class="progress-percent" id="ota-progress-percent">0%</span>
                     </div>
                     <div class="progress-bar-container">
@@ -14522,44 +14532,44 @@ async function loadOtaPage() {
                         <span id="ota-message"></span>
                     </div>
                     <div class="progress-actions">
-                        <button class="btn btn-danger btn-small" id="ota-abort-btn" onclick="abortOta()">中止</button>
+                        <button class="btn btn-danger btn-small" id="ota-abort-btn" onclick="abortOta()">${t('ota.abort')}</button>
                     </div>
                 </div>
             </div>
             
             <!-- 分区管理（放在升级方式之前，让用户先了解当前状态） -->
             <details class="ota-section" open>
-                <summary>分区管理</summary>
+                <summary>${t('ota.partitionManage')}</summary>
                 <div class="ota-partitions" id="ota-partitions">
-                    <div class="loading">加载中...</div>
+                    <div class="loading">${t('common.loading')}</div>
                 </div>
             </details>
             
             <!-- 手动升级（可折叠） -->
             <details class="ota-section">
-                <summary>手动升级</summary>
+                <summary>${t('ota.manualUpgrade')}</summary>
                 <div class="ota-methods">
                     <div class="ota-method">
-                        <h4>从 URL 升级</h4>
+                        <h4>${t('ota.fromUrl')}</h4>
                         <div class="method-content">
                             <input type="text" id="ota-url-input" class="form-input" 
                                    placeholder="http://example.com/firmware.bin">
                             <div class="method-options">
-                                <label><input type="checkbox" id="ota-url-include-www" checked> 包含 WebUI</label>
-                                <label><input type="checkbox" id="ota-url-skip-verify"> 跳过验证</label>
+                                <label><input type="checkbox" id="ota-url-include-www" checked> ${t('ota.includeWebUI')}</label>
+                                <label><input type="checkbox" id="ota-url-skip-verify"> ${t('ota.skipVerify')}</label>
                             </div>
-                            <button class="btn btn-service-style btn-small" onclick="otaFromUrl()">升级</button>
+                            <button class="btn btn-service-style btn-small" onclick="otaFromUrl()">${t('ota.upgrade')}</button>
                         </div>
                     </div>
                     <div class="ota-method">
-                        <h4>从 SD 卡升级</h4>
+                        <h4>${t('ota.fromSd')}</h4>
                         <div class="method-content">
                             <input type="text" id="ota-file-input" class="form-input" 
                                    placeholder="/sdcard/firmware.bin">
                             <div class="method-options">
-                                <label><input type="checkbox" id="ota-file-include-www" checked> 包含 WebUI</label>
+                                <label><input type="checkbox" id="ota-file-include-www" checked> ${t('ota.includeWebUI')}</label>
                             </div>
-                            <button class="btn btn-service-style btn-small" onclick="otaFromFile()">升级</button>
+                            <button class="btn btn-service-style btn-small" onclick="otaFromFile()">${t('ota.upgrade')}</button>
                         </div>
                     </div>
                 </div>
@@ -14986,17 +14996,17 @@ function displayPartitionsCompact(data) {
             <div class="partition-card running">
                 <div class="partition-header">
                     <span class="partition-name">${p.label}</span>
-                    <span class="partition-badge running">运行中</span>
+                    <span class="partition-badge running">${t('ota.partitionRunning')}</span>
                 </div>
-                <div class="partition-version">${p.version || '未知版本'}</div>
+                <div class="partition-version">${p.version || '—'}</div>
                 <div class="partition-info">
                     0x${p.address.toString(16).toUpperCase().padStart(8,'0')} · ${formatSize(p.size)}
                 </div>
                 <div class="partition-action">
                     <button class="btn btn-success btn-small" onclick="validateOta()">
-                        标记有效
+                        ${t('ota.markValid')}
                     </button>
-                    <div class="partition-action-desc">取消自动回滚保护</div>
+                    <div class="partition-action-desc">${t('ota.disableRollbackDesc')}</div>
                 </div>
             </div>
         `;
@@ -15011,7 +15021,7 @@ function displayPartitionsCompact(data) {
             <div class="partition-card ${p.is_bootable ? 'bootable' : ''}">
                 <div class="partition-header">
                     <span class="partition-name">${p.label}</span>
-                    <span class="partition-badge ${p.is_bootable ? 'bootable' : 'idle'}">${p.is_bootable ? '可启动' : '空闲'}</span>
+                    <span class="partition-badge ${p.is_bootable ? 'bootable' : 'idle'}">${p.is_bootable ? t('ota.partitionBootable') : t('ota.partitionIdle')}</span>
                 </div>
                 <div class="partition-version">${hasVersion ? p.version : (p.is_bootable ? '上一版本' : '无固件')}</div>
                 <div class="partition-info">
@@ -15020,9 +15030,9 @@ function displayPartitionsCompact(data) {
                 ${canRollback ? `
                 <div class="partition-action">
                     <button class="btn btn-warning btn-small" onclick="confirmRollback()">
-                        回滚到此版本
+                        ${t('ota.rollbackToThis')}
                     </button>
-                    <div class="partition-action-desc">重启后加载此分区</div>
+                    <div class="partition-action-desc">${t('ota.loadAfterReboot')}</div>
                 </div>
                 ` : `
                 <div class="partition-action">
@@ -15775,7 +15785,7 @@ async function upgradeFromServer() {
     // 立即显示进度区域，给用户即时反馈
     const progressSection = document.getElementById('ota-progress-section');
     progressSection.style.display = 'block';
-    document.getElementById('ota-state-text').textContent = '⏳ 准备升级...';
+    document.getElementById('ota-state-text').textContent = typeof t === 'function' ? t('otaPage.preparingUpgrade') : 'Preparing upgrade...';
     document.getElementById('ota-progress-bar').style.width = '0%';
     document.getElementById('ota-progress-percent').textContent = '';
     document.getElementById('ota-progress-size').textContent = '正在初始化...';
@@ -16198,12 +16208,12 @@ async function refreshMemoryDetail() {
     const body = document.getElementById('memory-detail-body');
     const timestamp = document.getElementById('memory-detail-timestamp');
     
-    body.innerHTML = '<div class="loading">加载中...</div>';
+    body.innerHTML = '<div class="loading">' + t('common.loading') + '</div>';
     
     try {
         const result = await api.getMemoryDetail();
         if (result.code !== 0 || !result.data) {
-            throw new Error(result.message || '获取数据失败');
+            throw new Error(result.message || (typeof t === 'function' ? t('memoryPage.getDataFailed') : '获取数据失败'));
         }
         
         const data = result.data;
@@ -16238,18 +16248,28 @@ async function refreshMemoryDetail() {
             return '#2e7d32';
         };
         
-        // 构建提示信息 HTML
         let tipsHtml = '';
         if (tips.length > 0) {
+            // Translate tip codes
+            const translateTip = (code) => {
+                const tipMap = {
+                    'dram_fragmented': typeof t === 'function' ? t('memoryPage.dramFragmented') : 'DRAM severely fragmented, recommend system restart',
+                    'psram_sufficient': typeof t === 'function' ? t('memoryPage.psramSufficient') : 'PSRAM space sufficient, available for large buffers',
+                    'dram_low': typeof t === 'function' ? t('memoryPage.dramLow') : 'DRAM running low, consider freeing memory',
+                    'psram_low': typeof t === 'function' ? t('memoryPage.psramLow') : 'PSRAM running low'
+                };
+                return tipMap[code] || code;
+            };
             tipsHtml = `
                 <div class="memory-tips">
-                    <h4>优化建议</h4>
+                    <h4>${typeof t === 'function' ? t('memoryPage.optimizationTips') : 'Optimization Tips'}</h4>
                     ${tips.map(tip => {
                         const [level, msg] = tip.split(':');
+                        const translatedMsg = translateTip(msg);
                         const iconColor = level === 'critical' ? '#ef4444' : level === 'warning' ? '#f59e0b' : '#3b82f6';
                         const icon = `<i class="ri-checkbox-blank-circle-fill" style="color:${iconColor}"></i>`;
                         const bgColor = level === 'critical' ? '#fff5f5' : level === 'warning' ? '#fffbf0' : '#f0f8ff';
-                        return `<div class="memory-tip" style="background:${bgColor}">${icon} ${msg}</div>`;
+                        return `<div class="memory-tip" style="background:${bgColor}">${icon} ${translatedMsg}</div>`;
                     }).join('')}
                 </div>
             `;
@@ -16273,15 +16293,15 @@ async function refreshMemoryDetail() {
                     </div>
                     <div class="gauge-info">
                         <div class="info-row">
-                            <span>总计</span>
+                            <span>${typeof t === 'function' ? t('memoryPage.total') : '总计'}</span>
                             <strong>${formatBytes(dram.total || 0)}</strong>
                         </div>
                         <div class="info-row">
-                            <span>已用</span>
+                            <span>${typeof t === 'function' ? t('memoryPage.used') : '已用'}</span>
                             <strong style="color:${getProgressColor(dram.used_percent || 0)}">${formatBytes(dram.used || 0)}</strong>
                         </div>
                         <div class="info-row">
-                            <span>空闲</span>
+                            <span>${typeof t === 'function' ? t('memoryPage.free') : '空闲'}</span>
                             <strong style="color:#2e7d32">${formatBytes(dram.free || 0)}</strong>
                         </div>
                     </div>
@@ -16303,15 +16323,15 @@ async function refreshMemoryDetail() {
                     </div>
                     <div class="gauge-info">
                         <div class="info-row">
-                            <span>总计</span>
+                            <span>${typeof t === 'function' ? t('memoryPage.total') : '总计'}</span>
                             <strong>${formatBytes(psram.total || 0)}</strong>
                         </div>
                         <div class="info-row">
-                            <span>已用</span>
+                            <span>${typeof t === 'function' ? t('memoryPage.used') : '已用'}</span>
                             <strong>${formatBytes(psram.used || 0)}</strong>
                         </div>
                         <div class="info-row">
-                            <span>空闲</span>
+                            <span>${typeof t === 'function' ? t('memoryPage.free') : '空闲'}</span>
                             <strong style="color:#2e7d32">${formatBytes(psram.free || 0)}</strong>
                         </div>
                     </div>
@@ -16319,80 +16339,76 @@ async function refreshMemoryDetail() {
                 ` : ''}
             </div>
             
-            <!-- 静态内存段 (关键优化信息) -->
             <div class="memory-static-sections">
-                <h4>静态内存占用 (编译时固定)</h4>
+                <h4>${typeof t === 'function' ? t('memoryPage.staticMemory') : '静态内存占用 (编译时固定)'}</h4>
                 <div class="static-grid">
                     <div class="static-item">
                         <span class="static-label">.data</span>
                         <span class="static-value">${formatBytes(staticMem.data_size || 0)}</span>
-                        <span class="static-desc">初始化全局变量</span>
+                        <span class="static-desc">${typeof t === 'function' ? t('memoryPage.dataDesc') : '初始化全局变量'}</span>
                     </div>
                     <div class="static-item">
                         <span class="static-label">.bss</span>
                         <span class="static-value">${formatBytes(staticMem.bss_size || 0)}</span>
-                        <span class="static-desc">未初始化全局变量</span>
+                        <span class="static-desc">${typeof t === 'function' ? t('memoryPage.bssDesc') : '未初始化全局变量'}</span>
                     </div>
                     <div class="static-item">
                         <span class="static-label">.rodata</span>
                         <span class="static-value">${formatBytes(staticMem.rodata_size || 0)}</span>
-                        <span class="static-desc">只读数据 (Flash)</span>
+                        <span class="static-desc">${typeof t === 'function' ? t('memoryPage.rodataDesc') : '只读数据 (Flash)'}</span>
                     </div>
                     <div class="static-item highlight">
-                        <span class="static-label">DRAM 静态总计</span>
+                        <span class="static-label">${typeof t === 'function' ? t('memoryPage.dramStaticTotal') : 'DRAM 静态总计'}</span>
                         <span class="static-value">${formatBytes(staticMem.total_dram_static || 0)}</span>
-                        <span class="static-desc">.data + .bss</span>
+                        <span class="static-desc">${typeof t === 'function' ? t('memoryPage.staticDataBss') : '.data + .bss'}</span>
                     </div>
                 </div>
             </div>
             
-            <!-- IRAM 信息 -->
             <div class="memory-iram">
-                <h4>IRAM (指令内存)</h4>
+                <h4>${typeof t === 'function' ? t('memoryPage.iramTitle') : 'IRAM (指令内存)'}</h4>
                 <div class="iram-grid">
                     <div class="iram-item">
-                        <span class="iram-label">代码段</span>
+                        <span class="iram-label">${typeof t === 'function' ? t('memoryPage.codeSection') : '代码段'}</span>
                         <span class="iram-value">${formatBytes(iram.text_size || 0)}</span>
                     </div>
                     <div class="iram-item">
-                        <span class="iram-label">堆总计</span>
+                        <span class="iram-label">${typeof t === 'function' ? t('memoryPage.heapTotal') : '堆总计'}</span>
                         <span class="iram-value">${formatBytes(iram.heap_total || 0)}</span>
                     </div>
                     <div class="iram-item">
-                        <span class="iram-label">堆空闲</span>
+                        <span class="iram-label">${typeof t === 'function' ? t('memoryPage.heapFree') : '堆空闲'}</span>
                         <span class="iram-value" style="color:#2e7d32">${formatBytes(iram.heap_free || 0)}</span>
                     </div>
                 </div>
             </div>
             
-            <!-- RTC 内存 -->
             ${rtc.total_available ? `
             <div class="memory-rtc">
-                <h4>RTC 内存 (深度睡眠保持)</h4>
+                <h4>${typeof t === 'function' ? t('memoryPage.rtcMemory') : 'RTC 内存 (深度睡眠保持)'}</h4>
                 <div class="rtc-bar">
                     <div class="progress-bar" style="height:12px;background:#f0f0f0">
                         <div class="progress" style="width:${(rtc.total_used / rtc.total_available * 100) || 0}%;background:#9b59b6"></div>
                     </div>
                     <div class="rtc-labels">
-                        <span>已用 ${formatBytes(rtc.total_used || 0)}</span>
-                        <span>总计 ${formatBytes(rtc.total_available)}</span>
+                        <span>${typeof t === 'function' ? t('memoryPage.rtcUsed') : '已用'} ${formatBytes(rtc.total_used || 0)}</span>
+                        <span>${typeof t === 'function' ? t('memoryPage.rtcTotal') : '总计'} ${formatBytes(rtc.total_available)}</span>
                     </div>
                 </div>
             </div>
             ` : ''}
             
-            <!-- 详细数据表格 -->
             <div class="memory-details">
-                <h4>堆内存详细统计</h4>
+                <h4>${typeof t === 'function' ? t('memoryPage.heapDetailStats') : '堆内存详细统计'}</h4>
                 <table class="memory-table">
                     <thead>
                         <tr>
-                            <th>类型</th>
-                            <th>最大块</th>
-                            <th>碎片率</th>
-                            <th>分配块</th>
-                            <th>空闲块</th>
-                            <th>历史最低</th>
+                            <th>${typeof t === 'function' ? t('memoryPage.typeCol') : '类型'}</th>
+                            <th>${typeof t === 'function' ? t('memoryPage.largestBlock') : '最大块'}</th>
+                            <th>${typeof t === 'function' ? t('memoryPage.fragmentation') : '碎片率'}</th>
+                            <th>${typeof t === 'function' ? t('memoryPage.allocBlocks') : '分配块'}</th>
+                            <th>${typeof t === 'function' ? t('memoryPage.freeBlocks') : '空闲块'}</th>
+                            <th>${typeof t === 'function' ? t('memoryPage.minFreeEver') : '历史最低'}</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -16428,62 +16444,60 @@ async function refreshMemoryDetail() {
                 </table>
             </div>
             
-            <!-- 内存能力汇总 -->
             <div class="memory-caps">
-                <h4>内存能力分布</h4>
+                <h4>${typeof t === 'function' ? t('memoryPage.memCapability') : '内存能力分布'}</h4>
                 <table class="memory-table">
                     <thead>
                         <tr>
-                            <th>能力类型</th>
-                            <th>空闲</th>
-                            <th>总计</th>
-                            <th>说明</th>
+                            <th>${typeof t === 'function' ? t('memoryPage.capType') : '能力类型'}</th>
+                            <th>${typeof t === 'function' ? t('memoryPage.free') : '空闲'}</th>
+                            <th>${typeof t === 'function' ? t('memoryPage.total') : '总计'}</th>
+                            <th>${typeof t === 'function' ? t('memoryPage.capDesc') : '说明'}</th>
                         </tr>
                     </thead>
                     <tbody>
                         <tr>
-                            <td>8-bit 可访问</td>
+                            <td>${typeof t === 'function' ? t('memoryPage.cap8bit') : '8-bit 可访问'}</td>
                             <td>${formatBytes(caps.d8_free || 0)}</td>
                             <td>${formatBytes(caps.d8_total || 0)}</td>
-                            <td>char/byte 数组</td>
+                            <td>${typeof t === 'function' ? t('memoryPage.cap8bitDesc') : 'char/byte 数组'}</td>
                         </tr>
                         <tr>
-                            <td>32-bit 可访问</td>
+                            <td>${typeof t === 'function' ? t('memoryPage.cap32bit') : '32-bit 可访问'}</td>
                             <td>${formatBytes(caps.d32_free || 0)}</td>
                             <td>${formatBytes(caps.d32_total || 0)}</td>
-                            <td>int/指针</td>
+                            <td>${typeof t === 'function' ? t('memoryPage.cap32bitDesc') : 'int/指针'}</td>
                         </tr>
                         <tr>
-                            <td>默认 (malloc)</td>
+                            <td>${typeof t === 'function' ? t('memoryPage.capDefault') : '默认 (malloc)'}</td>
                             <td>${formatBytes(caps.default_free || 0)}</td>
                             <td>${formatBytes(caps.default_total || 0)}</td>
-                            <td>普通 malloc()</td>
+                            <td>${typeof t === 'function' ? t('memoryPage.capDefaultDesc') : '普通 malloc()'}</td>
                         </tr>
                         ${dma.total ? `
                         <tr>
-                            <td>DMA 可用</td>
+                            <td>${typeof t === 'function' ? t('memoryPage.capDma') : 'DMA 可用'}</td>
                             <td>${formatBytes(dma.free || 0)}</td>
                             <td>${formatBytes(dma.total || 0)}</td>
-                            <td>DMA 传输缓冲</td>
+                            <td>${typeof t === 'function' ? t('memoryPage.capDmaDesc') : 'DMA 传输缓冲'}</td>
                         </tr>
                         ` : ''}
                     </tbody>
                 </table>
             </div>
             
-            <!-- NVS 使用统计 -->
             ${nvs.total_entries ? `
             <div class="memory-nvs">
-                <h4>NVS 存储使用</h4>
+                <h4>${typeof t === 'function' ? t('memoryPage.nvsStorage') : 'NVS 存储使用'}</h4>
                 <div class="nvs-bar">
                     <div class="progress-bar" style="height:16px;background:#f0f0f0">
                         <div class="progress" style="width:${nvs.used_percent || 0}%;background:${getProgressColor(nvs.used_percent || 0)}"></div>
                     </div>
                     <div class="nvs-stats">
-                        <span>已用条目: <strong>${nvs.used_entries}</strong></span>
-                        <span>空闲条目: <strong>${nvs.free_entries}</strong></span>
-                        <span>命名空间: <strong>${nvs.namespace_count}</strong></span>
-                        <span>使用率: <strong>${nvs.used_percent}%</strong></span>
+                        <span>${typeof t === 'function' ? t('memoryPage.usedEntries') : '已用条目'}: <strong>${nvs.used_entries}</strong></span>
+                        <span>${typeof t === 'function' ? t('memoryPage.freeEntries') : '空闲条目'}: <strong>${nvs.free_entries}</strong></span>
+                        <span>${typeof t === 'function' ? t('memoryPage.namespaceCount') : '命名空间'}: <strong>${nvs.namespace_count}</strong></span>
+                        <span>${typeof t === 'function' ? t('memoryPage.usagePercent') : '使用率'}: <strong>${nvs.used_percent}%</strong></span>
                     </div>
                 </div>
             </div>
@@ -16492,21 +16506,20 @@ async function refreshMemoryDetail() {
             <!-- 优化建议 -->
             ${tipsHtml}
             
-            <!-- 任务内存占用 -->
             ${data.tasks && data.tasks.length > 0 ? `
             <div class="memory-tasks">
-                <h4>任务栈使用 (共 ${data.tasks.length} 个任务) <span style="font-size:0.8em;color:#888;font-weight:normal">点击表头排序</span></h4>
+                <h4>${typeof t === 'function' ? t('memoryPage.taskStackUsage') : '任务栈使用'} (${typeof t === 'function' ? t('memoryPage.taskCountLabel', { count: data.tasks.length }) : '共 ' + data.tasks.length + ' 个任务'}) <span style="font-size:0.8em;color:#888;font-weight:normal">${typeof t === 'function' ? t('memoryPage.clickToSort') : '点击表头排序'}</span></h4>
                 <table class="memory-table task-table sortable-table" id="task-memory-table">
                     <thead>
                         <tr>
-                            <th>任务名</th>
-                            <th data-sort="stack_alloc" class="sortable">分配栈 ⇅</th>
-                            <th data-sort="stack_used" class="sortable">已用栈 ⇅</th>
-                            <th data-sort="stack_hwm" class="sortable">剩余栈 ⇅</th>
-                            <th data-sort="stack_usage_pct" class="sortable">使用率 ⇅</th>
-                            <th data-sort="priority" class="sortable">优先级 ⇅</th>
-                            <th data-sort="state" class="sortable">状态 ⇅</th>
-                            ${data.tasks[0]?.cpu_percent !== undefined ? '<th data-sort="cpu_percent" class="sortable">CPU ⇅</th>' : ''}
+                            <th>${typeof t === 'function' ? t('memoryPage.taskName') : '任务名'}</th>
+                            <th data-sort="stack_alloc" class="sortable">${typeof t === 'function' ? t('memoryPage.allocStack') : '分配栈'} ⇅</th>
+                            <th data-sort="stack_used" class="sortable">${typeof t === 'function' ? t('memoryPage.usedStack') : '已用栈'} ⇅</th>
+                            <th data-sort="stack_hwm" class="sortable">${typeof t === 'function' ? t('memoryPage.remainStack') : '剩余栈'} ⇅</th>
+                            <th data-sort="stack_usage_pct" class="sortable">${typeof t === 'function' ? t('memoryPage.usage') : '使用率'} ⇅</th>
+                            <th data-sort="priority" class="sortable">${typeof t === 'function' ? t('memoryPage.priority') : '优先级'} ⇅</th>
+                            <th data-sort="state" class="sortable">${typeof t === 'function' ? t('memoryPage.state') : '状态'} ⇅</th>
+                            ${data.tasks[0]?.cpu_percent !== undefined ? '<th data-sort="cpu_percent" class="sortable">' + (typeof t === 'function' ? t('memoryPage.cpu') : 'CPU') + ' ⇅</th>' : ''}
                         </tr>
                     </thead>
                     <tbody id="task-table-body">
@@ -16515,26 +16528,25 @@ async function refreshMemoryDetail() {
                 </table>
                 ${data.total_stack_allocated ? `
                 <p style="font-size:0.85em;color:#666;margin-top:8px">
-                    任务栈总分配: <strong>${formatBytes(data.total_stack_allocated)}</strong> | 
-                    任务总数: <strong>${data.task_count}</strong>
+                    ${typeof t === 'function' ? t('memoryPage.taskStackTotal') : '任务栈总分配'}: <strong>${formatBytes(data.total_stack_allocated)}</strong> | 
+                    ${typeof t === 'function' ? t('memoryPage.totalTaskCount') : '任务总数'}: <strong>${data.task_count}</strong>
                 </p>
                 ` : ''}
                 <p style="font-size:0.85em;color:#888;margin-top:4px">
-                    剩余栈 &lt;256B 为危险区域，&lt;512B 为警告区域
+                    ${typeof t === 'function' ? t('memoryPage.stackHint') : '剩余栈 <256B 为危险区域，<512B 为警告区域'}
                 </p>
             </div>
             ` : ''}
             
-            <!-- 历史记录 -->
             <div class="memory-history">
-                <h4>运行时统计</h4>
+                <h4>${typeof t === 'function' ? t('memoryPage.runtimeStats') : '运行时统计'}</h4>
                 <div class="history-stats">
                     <div class="history-item">
-                        <span class="history-label">历史最低空闲堆</span>
+                        <span class="history-label">${typeof t === 'function' ? t('memoryPage.historyMinFreeHeap') : '历史最低空闲堆'}</span>
                         <span class="history-value">${formatBytes(data.history?.min_free_heap_ever || 0)}</span>
                     </div>
                     <div class="history-item">
-                        <span class="history-label">当前运行任务数</span>
+                        <span class="history-label">${typeof t === 'function' ? t('memoryPage.currentTaskCount') : '当前运行任务数'}</span>
                         <span class="history-value">${data.task_count || 0}</span>
                     </div>
                 </div>
@@ -16554,13 +16566,13 @@ async function refreshMemoryDetail() {
             initTaskTableSort();
         }
         
-        timestamp.textContent = '更新时间: ' + new Date().toLocaleTimeString();
+        timestamp.textContent = (typeof t === 'function' ? t('memoryPage.updateTime') : '更新时间: ') + new Date().toLocaleTimeString();
         
     } catch (error) {
         console.error('Memory detail error:', error);
         body.innerHTML = `
             <div class="error-message">
-                <p>获取内存详情失败</p>
+                <p>${typeof t === 'function' ? t('memoryPage.loadFailed') : '获取内存详情失败'}</p>
                 <p style="font-size:0.9em;color:#666">${error.message}</p>
             </div>
         `;
@@ -16601,31 +16613,31 @@ async function loadAutomationPage() {
         <div class="page-automation">
             <div class="page-header-row">
                 <div class="header-actions">
-                    <button class="btn btn-success btn-file-action" onclick="automationControl('start')"><i class="ri-play-line"></i> 启动</button>
-                    <button class="btn btn-danger btn-file-action" onclick="automationControl('stop')"><i class="ri-stop-line"></i> 停止</button>
-                    <button class="btn btn-service-style btn-file-action" onclick="automationControl('pause')"><i class="ri-pause-line"></i> 暂停</button>
-                    <button class="btn btn-service-style btn-file-action" onclick="automationControl('reload')"><i class="ri-refresh-line"></i> 重载</button>
+                    <button class="btn btn-success btn-file-action" onclick="automationControl('start')"><i class="ri-play-line"></i> ${t('common.start')}</button>
+                    <button class="btn btn-danger btn-file-action" onclick="automationControl('stop')"><i class="ri-stop-line"></i> ${t('common.stop')}</button>
+                    <button class="btn btn-service-style btn-file-action" onclick="automationControl('pause')"><i class="ri-pause-line"></i> ${t('common.pause')}</button>
+                    <button class="btn btn-service-style btn-file-action" onclick="automationControl('reload')"><i class="ri-refresh-line"></i> ${t('common.reload')}</button>
                 </div>
             </div>
             
             <!-- 状态卡片 -->
             <div class="status-grid" id="automation-status">
-                <div class="status-card loading">加载中...</div>
+                <div class="status-card loading">${t('common.loading')}</div>
             </div>
             
             <!-- 数据源列表 -->
             <div class="section">
                 <div class="section-header">
-                    <h2>数据源</h2>
+                    <h2>${t('automation.sources')}</h2>
                     <div class="section-actions">
-                        <button class="btn btn-success btn-sm" onclick="showAddSourceModal()"><i class="ri-add-line"></i> 添加</button>
-                        <button class="btn btn-sm btn-gray" onclick="showImportSourceModal()" title="导入配置包"><i class="ri-download-line"></i> 导入</button>
-                        <button type="button" class="btn btn-sm btn-gray automation-refresh-btn" onclick="refreshSources()" title="刷新"><i class="ri-refresh-line"></i></button>
+                        <button class="btn btn-success btn-sm" onclick="showAddSourceModal()"><i class="ri-add-line"></i> ${t('common.add')}</button>
+                        <button class="btn btn-sm btn-gray" onclick="showImportSourceModal()" title="${t('automation.importConfigPack')}"><i class="ri-download-line"></i> ${t('common.import')}</button>
+                        <button type="button" class="btn btn-sm btn-gray automation-refresh-btn" onclick="refreshSources()" title="${t('common.refresh')}"><i class="ri-refresh-line"></i></button>
                     </div>
                 </div>
                 <div class="card compact">
                     <div id="sources-list" class="card-content">
-                        <div class="loading-small">加载中...</div>
+                        <div class="loading-small">${t('common.loading')}</div>
                     </div>
                 </div>
             </div>
@@ -16633,16 +16645,16 @@ async function loadAutomationPage() {
             <!-- 规则列表 -->
             <div class="section">
                 <div class="section-header">
-                    <h2>规则列表</h2>
+                    <h2>${t('automation.rules')}</h2>
                     <div class="section-actions">
-                        <button class="btn btn-success btn-sm" onclick="showAddRuleModal()"><i class="ri-add-line"></i> 添加</button>
-                        <button class="btn btn-sm btn-gray" onclick="showImportRuleModal()" title="导入配置包"><i class="ri-download-line"></i> 导入</button>
-                        <button type="button" class="btn btn-sm btn-gray automation-refresh-btn" onclick="refreshRules()" title="刷新"><i class="ri-refresh-line"></i></button>
+                        <button class="btn btn-success btn-sm" onclick="showAddRuleModal()"><i class="ri-add-line"></i> ${t('common.add')}</button>
+                        <button class="btn btn-sm btn-gray" onclick="showImportRuleModal()" title="${t('automation.importConfigPack')}"><i class="ri-download-line"></i> ${t('common.import')}</button>
+                        <button type="button" class="btn btn-sm btn-gray automation-refresh-btn" onclick="refreshRules()" title="${t('common.refresh')}"><i class="ri-refresh-line"></i></button>
                     </div>
                 </div>
                 <div class="card compact">
                     <div id="rules-list" class="card-content">
-                        <div class="loading-small">加载中...</div>
+                        <div class="loading-small">${t('common.loading')}</div>
                     </div>
                 </div>
             </div>
@@ -16650,16 +16662,16 @@ async function loadAutomationPage() {
             <!-- 动作模板管理 -->
             <div class="section">
                 <div class="section-header">
-                    <h2>动作模板</h2>
+                    <h2>${t('automation.actions')}</h2>
                     <div class="section-actions">
-                        <button class="btn btn-success btn-sm" onclick="showAddActionModal()"><i class="ri-add-line"></i> 添加</button>
-                        <button class="btn btn-sm btn-gray" onclick="showImportActionModal()" title="导入配置包"><i class="ri-download-line"></i> 导入</button>
-                        <button type="button" class="btn btn-sm btn-gray automation-refresh-btn" onclick="refreshActions()" title="刷新"><i class="ri-refresh-line"></i></button>
+                        <button class="btn btn-success btn-sm" onclick="showAddActionModal()"><i class="ri-add-line"></i> ${t('common.add')}</button>
+                        <button class="btn btn-sm btn-gray" onclick="showImportActionModal()" title="${t('automation.importConfigPack')}"><i class="ri-download-line"></i> ${t('common.import')}</button>
+                        <button type="button" class="btn btn-sm btn-gray automation-refresh-btn" onclick="refreshActions()" title="${t('common.refresh')}"><i class="ri-refresh-line"></i></button>
                     </div>
                 </div>
                 <div class="card compact">
                     <div id="actions-list" class="card-content">
-                        <div class="loading-small">加载中...</div>
+                        <div class="loading-small">${t('common.loading')}</div>
                     </div>
                 </div>
             </div>
@@ -16687,9 +16699,8 @@ async function refreshAutomationStatus() {
         if (result.code === 0 && result.data) {
             const d = result.data;
             const stateClass = d.state === 'running' ? 'running' : d.state === 'paused' ? 'paused' : 'stopped';
-            const stateText = d.state === 'running' ? '运行中' : d.state === 'paused' ? '已暂停' : '已停止';
+            const stateText = d.state === 'running' ? (typeof t === 'function' ? t('automationPage.stateRunning') : '运行中') : d.state === 'paused' ? (typeof t === 'function' ? t('automationPage.statePaused') : '已暂停') : (typeof t === 'function' ? t('automationPage.stateStopped') : '已停止');
             
-            // 计算运行时间（API 返回 uptime_ms，转换为秒）
             const uptimeSec = Math.floor((d.uptime_ms || 0) / 1000);
             
             container.innerHTML = `
@@ -16698,45 +16709,45 @@ async function refreshAutomationStatus() {
                         <span class="status-icon state-${stateClass}">●</span>
                         <span class="status-value">${stateText}</span>
                     </div>
-                    <div class="status-label">引擎状态</div>
+                    <div class="status-label">${typeof t === 'function' ? t('automationPage.engineStatus') : '引擎状态'}</div>
                 </div>
                 <div class="status-card">
                     <div class="status-card-value-row">
                         <span class="status-value">${d.rules_count || 0}</span>
                     </div>
-                    <div class="status-label">规则</div>
+                    <div class="status-label">${typeof t === 'function' ? t('automationPage.rulesLabel') : '规则'}</div>
                 </div>
                 <div class="status-card">
                     <div class="status-card-value-row">
                         <span class="status-value">${d.variables_count || 0}</span>
                     </div>
-                    <div class="status-label">变量</div>
+                    <div class="status-label">${typeof t === 'function' ? t('automationPage.variablesLabel') : '变量'}</div>
                 </div>
                 <div class="status-card">
                     <div class="status-card-value-row">
                         <span class="status-value">${d.sources_count || 0}</span>
                     </div>
-                    <div class="status-label">数据源</div>
+                    <div class="status-label">${typeof t === 'function' ? t('automationPage.sourcesLabel') : '数据源'}</div>
                 </div>
                 <div class="status-card">
                     <div class="status-card-value-row">
                         <span class="status-value">${d.rule_triggers || 0}</span>
                     </div>
-                    <div class="status-label">触发次数</div>
+                    <div class="status-label">${typeof t === 'function' ? t('automationPage.triggerCountLabel') : '触发次数'}</div>
                 </div>
                 <div class="status-card">
                     <div class="status-card-value-row">
                         <span class="status-value">${formatUptimeSec(uptimeSec)}</span>
                     </div>
-                    <div class="status-label">运行时长</div>
+                    <div class="status-label">${typeof t === 'function' ? t('automationPage.runtimeLabel') : '运行时长'}</div>
                 </div>
             `;
         } else {
-            container.innerHTML = `<div class="status-card error"><span>${result.message || '获取状态失败'}</span></div>`;
+            container.innerHTML = '<div class="status-card error"><span>' + (result.message || (typeof t === 'function' ? t('automationPage.getStatusFailed') : '获取状态失败')) + '</span></div>';
         }
     } catch (error) {
         const isNetworkError = error.message.includes('fetch') || error.message.includes('network');
-        container.innerHTML = `<div class="status-card error"><span>${isNetworkError ? '网络连接失败' : error.message}</span></div>`;
+        container.innerHTML = '<div class="status-card error"><span>' + (isNetworkError && typeof t === 'function' ? t('automationPage.networkFailed') : error.message) + '</span></div>';
     }
 }
 
@@ -16744,11 +16755,18 @@ async function refreshAutomationStatus() {
  * 格式化运行时长（秒）
  */
 function formatUptimeSec(seconds) {
-    if (seconds < 60) return `${seconds}秒`;
-    if (seconds < 3600) return `${Math.floor(seconds/60)}分${seconds%60}秒`;
-    const h = Math.floor(seconds/3600);
-    const m = Math.floor((seconds%3600)/60);
-    return `${h}时${m}分`;
+    if (typeof t === 'function') {
+        if (seconds < 60) return t('automationPage.uptimeSecsOnly', { n: seconds });
+        if (seconds < 3600) return t('automationPage.uptimeMinSec', { m: Math.floor(seconds / 60), s: seconds % 60 });
+        const h = Math.floor(seconds / 3600);
+        const m = Math.floor((seconds % 3600) / 60);
+        return t('automationPage.uptimeHrMin', { h, m });
+    }
+    if (seconds < 60) return seconds + '秒';
+    if (seconds < 3600) return Math.floor(seconds / 60) + '分' + (seconds % 60) + '秒';
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    return h + '时' + m + '分';
 }
 
 /**
@@ -16778,22 +16796,23 @@ async function refreshRules() {
         if (result.code === 0 && result.data && result.data.rules) {
             const rules = result.data.rules;
             if (rules.length === 0) {
-                container.innerHTML = '<p style="text-align:center;color:var(--text-light)">暂无规则，点击"添加"创建第一条</p>';
+                container.innerHTML = '<p style="text-align:center;color:var(--text-light)">' + (typeof t === 'function' ? t('automationPage.noRules') : '暂无规则，点击"添加"创建第一条') + '</p>';
                 return;
             }
             
+            const ap = typeof t === 'function' ? t : () => '';
             container.innerHTML = `
                 <table class="data-table">
                     <thead>
                         <tr>
                             <th style="width:40px"></th>
                             <th>ID</th>
-                            <th>名称</th>
-                            <th>状态</th>
-                            <th>条件</th>
-                            <th>动作</th>
-                            <th>触发次数</th>
-                            <th>操作</th>
+                            <th>${ap('automationPage.ruleNameHeader') || '名称'}</th>
+                            <th>${ap('automationPage.statusHeader') || '状态'}</th>
+                            <th>${ap('automationPage.conditionHeader') || '条件'}</th>
+                            <th>${ap('automationPage.actionHeader') || '动作'}</th>
+                            <th>${ap('automationPage.triggerHeader') || '触发次数'}</th>
+                            <th>${ap('automationPage.operationHeader') || '操作'}</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -16802,23 +16821,24 @@ async function refreshRules() {
                             const iconHtml = iconValue.startsWith('/sdcard/') 
                                 ? `<img src="/api/v1/file/download?path=${encodeURIComponent(iconValue)}" style="width:24px;height:24px;object-fit:contain" onerror="this.outerHTML='<i class=\\'ri-thunderstorms-line\\' style=\\'font-size:1.2em\\'></i>'">`
                                 : `<i class="${getRuleIconRi(iconValue)}" style="font-size:1.2em"></i>`;
-                            const manualBadge = r.manual_trigger ? '<span class="badge" style="background:#27ae60;font-size:0.7em">手动</span>' : '';
-                            
+                            const manualBadge = r.manual_trigger ? '<span class="badge" style="background:#27ae60;font-size:0.7em">' + (typeof t === 'function' ? t('common.manual') : '手动') + '</span>' : '';
+                            const enabledStr = typeof t === 'function' ? t('common.enabled') : '启用';
+                            const disabledStr = typeof t === 'function' ? t('common.disabled') : '禁用';
                             return `
                             <tr>
                                 <td style="font-size:1.2em;text-align:center">${iconHtml}</td>
                                 <td><code>${r.id}</code></td>
                                 <td>${r.name || r.id} ${manualBadge}</td>
-                                <td><span class="status-badge ${r.enabled ? 'status-running' : 'status-stopped'}">${r.enabled ? '启用' : '禁用'}</span></td>
+                                <td><span class="status-badge ${r.enabled ? 'status-running' : 'status-stopped'}">${r.enabled ? enabledStr : disabledStr}</span></td>
                                 <td>${r.conditions_count || 0}</td>
                                 <td>${r.actions_count || 0}</td>
                                 <td>${r.trigger_count || 0}</td>
                                 <td style="white-space:nowrap">
-                                    <button class="btn btn-sm btn-gray" onclick="toggleRule('${r.id}', ${!r.enabled})" title="${r.enabled ? '禁用' : '启用'}"><i class="${r.enabled ? 'ri-stop-circle-line' : 'ri-play-circle-line'}"></i></button>
-                                    <button class="btn btn-sm btn-gray" onclick="triggerRule('${r.id}')" title="手动触发"><i class="ri-play-line"></i></button>
-                                    <button class="btn btn-sm btn-gray" onclick="editRule('${r.id}')" title="编辑"><i class="ri-edit-line"></i></button>
-                                    <button class="btn btn-sm btn-gray" onclick="showExportRuleModal('${r.id}')" title="导出配置包"><i class="ri-download-line"></i></button>
-                                    <button class="btn btn-sm btn-danger" onclick="deleteRule('${r.id}')" title="删除"><i class="ri-delete-bin-line"></i></button>
+                                    <button class="btn btn-sm btn-gray" onclick="toggleRule('${r.id}', ${!r.enabled})" title="${r.enabled ? disabledStr : enabledStr}"><i class="${r.enabled ? 'ri-stop-circle-line' : 'ri-play-circle-line'}"></i></button>
+                                    <button class="btn btn-sm btn-gray" onclick="triggerRule('${r.id}')" title="${typeof t === 'function' ? t('automation.manualTrigger') : '手动触发'}"><i class="ri-play-line"></i></button>
+                                    <button class="btn btn-sm btn-gray" onclick="editRule('${r.id}')" title="${typeof t === 'function' ? t('common.edit') : '编辑'}"><i class="ri-edit-line"></i></button>
+                                    <button class="btn btn-sm btn-gray" onclick="showExportRuleModal('${r.id}')" title="${typeof t === 'function' ? t('securityPage.exportConfigPack') || '导出配置包' : '导出配置包'}"><i class="ri-download-line"></i></button>
+                                    <button class="btn btn-sm btn-danger" onclick="deleteRule('${r.id}')" title="${typeof t === 'function' ? t('common.delete') : '删除'}"><i class="ri-delete-bin-line"></i></button>
                                 </td>
                             </tr>
                         `}).join('')}
@@ -16826,11 +16846,11 @@ async function refreshRules() {
                 </table>
             `;
         } else {
-            container.innerHTML = `<p style="text-align:center;color:var(--text-light)">${result.message || '获取规则失败'}</p>`;
+            container.innerHTML = '<p style="text-align:center;color:var(--text-light)">' + (result.message || (typeof t === 'function' ? t('automationPage.getRulesFailed') : '获取规则失败')) + '</p>';
         }
     } catch (error) {
         const isNetworkError = error.message.includes('fetch') || error.message.includes('network');
-        container.innerHTML = `<p style="text-align:center;color:var(--danger-color)">${isNetworkError ? '网络连接失败' : error.message}</p>`;
+        container.innerHTML = '<p style="text-align:center;color:var(--danger-color)">' + (isNetworkError && typeof t === 'function' ? t('automationPage.networkFailed') : error.message) + '</p>';
     }
 }
 
@@ -16874,20 +16894,23 @@ async function refreshSources() {
         if (result.code === 0 && result.data && result.data.sources) {
             const sources = result.data.sources;
             if (sources.length === 0) {
-                container.innerHTML = '<p style="text-align:center;color:var(--text-light)">暂无数据源，点击"添加"创建第一个</p>';
+                container.innerHTML = '<p style="text-align:center;color:var(--text-light)">' + (typeof t === 'function' ? t('automationPage.noSources') : '暂无数据源，点击"添加"创建第一个') + '</p>';
                 return;
             }
             
+            const secStr = typeof t === 'function' ? t('time.seconds') : '秒';
+            const enStr = typeof t === 'function' ? t('common.enabled') : '启用';
+            const disStr = typeof t === 'function' ? t('common.disabled') : '禁用';
             container.innerHTML = `
                 <table class="data-table">
                     <thead>
                         <tr>
                             <th>ID</th>
-                            <th>标签</th>
-                            <th>类型</th>
-                            <th>状态</th>
-                            <th>更新间隔</th>
-                            <th>操作</th>
+                            <th>${typeof t === 'function' ? t('automationPage.labelHeader') : '标签'}</th>
+                            <th>${typeof t === 'function' ? t('automationPage.typeHeader') : '类型'}</th>
+                            <th>${typeof t === 'function' ? t('automationPage.statusHeader') : '状态'}</th>
+                            <th>${typeof t === 'function' ? t('automationPage.updateIntervalHeader') : '更新间隔'}</th>
+                            <th>${typeof t === 'function' ? t('automationPage.operationHeader') : '操作'}</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -16896,13 +16919,13 @@ async function refreshSources() {
                                 <td><code>${s.id}</code></td>
                                 <td>${s.label || s.id}</td>
                                 <td><span class="btn-service-style" style="display:inline-block;font-size:0.85em">${s.type || 'unknown'}</span></td>
-                                <td><span class="status-badge ${s.enabled ? 'status-running' : 'status-stopped'}">${s.enabled ? '启用' : '禁用'}</span></td>
-                                <td>${s.poll_interval_ms ? (s.poll_interval_ms / 1000) + '秒' : '-'}</td>
+                                <td><span class="status-badge ${s.enabled ? 'status-running' : 'status-stopped'}">${s.enabled ? enStr : disStr}</span></td>
+                                <td>${s.poll_interval_ms ? (s.poll_interval_ms / 1000) + secStr : '-'}</td>
                                 <td style="white-space:nowrap">
-                                    <button class="btn btn-sm btn-gray" onclick="showSourceVariables('${s.id}')" title="查看变量"><i class="ri-bar-chart-box-line"></i></button>
-                                    <button class="btn btn-sm btn-gray" onclick="toggleSource('${s.id}', ${!s.enabled})" title="${s.enabled ? '禁用' : '启用'}"><i class="${s.enabled ? 'ri-stop-circle-line' : 'ri-play-circle-line'}"></i></button>
-                                    <button class="btn btn-sm btn-gray" onclick="showExportSourceModal('${s.id}')" title="导出配置包"><i class="ri-download-line"></i></button>
-                                    <button class="btn btn-sm btn-danger" onclick="deleteSource('${s.id}')" title="删除"><i class="ri-delete-bin-line"></i></button>
+                                    <button class="btn btn-sm btn-gray" onclick="showSourceVariables('${s.id}')" title="${typeof t === 'function' ? t('automation.viewVariables') : '查看变量'}"><i class="ri-bar-chart-box-line"></i></button>
+                                    <button class="btn btn-sm btn-gray" onclick="toggleSource('${s.id}', ${!s.enabled})" title="${s.enabled ? disStr : enStr}"><i class="${s.enabled ? 'ri-stop-circle-line' : 'ri-play-circle-line'}"></i></button>
+                                    <button class="btn btn-sm btn-gray" onclick="showExportSourceModal('${s.id}')" title="${typeof t === 'function' ? (t('securityPage.exportConfigPack') || '导出配置包') : '导出配置包'}"><i class="ri-download-line"></i></button>
+                                    <button class="btn btn-sm btn-danger" onclick="deleteSource('${s.id}')" title="${typeof t === 'function' ? t('common.delete') : '删除'}"><i class="ri-delete-bin-line"></i></button>
                                 </td>
                             </tr>
                         `).join('')}
@@ -16910,11 +16933,11 @@ async function refreshSources() {
                 </table>
             `;
         } else {
-            container.innerHTML = `<p style="text-align:center;color:var(--text-light)">${result.message || '获取数据源失败'}</p>`;
+            container.innerHTML = '<p style="text-align:center;color:var(--text-light)">' + (result.message || (typeof t === 'function' ? t('automationPage.getSourcesFailed') : '获取数据源失败')) + '</p>';
         }
     } catch (error) {
         const isNetworkError = error.message.includes('fetch') || error.message.includes('network');
-        container.innerHTML = `<p style="text-align:center;color:var(--danger-color)">${isNetworkError ? '网络连接失败' : error.message}</p>`;
+        container.innerHTML = '<p style="text-align:center;color:var(--danger-color)">' + (isNetworkError && typeof t === 'function' ? t('automationPage.networkFailed') : error.message) + '</p>';
     }
 }
 
@@ -16929,7 +16952,7 @@ async function refreshVariables() {
     const countBadge = document.getElementById('variables-count');
     if (!container) return;
     
-    container.innerHTML = '<div class="loading-small">加载中...</div>';
+    container.innerHTML = '<div class="loading-small">' + t('common.loading') + '</div>';
     
     try {
         const result = await api.call('automation.variables.list');
@@ -17084,18 +17107,20 @@ async function refreshActions() {
         const actions = result.data?.templates || [];
         
         if (actions.length === 0) {
-            container.innerHTML = '<p style="text-align:center;color:var(--text-light)">暂无动作模板，点击"添加"创建</p>';
+            container.innerHTML = '<p style="text-align:center;color:var(--text-light)">' + (typeof t === 'function' ? t('automationPage.noActions') : '暂无动作模板，点击"添加"创建') + '</p>';
         } else {
+            const asyncStr = typeof t === 'function' ? t('automation.asyncAction') : '异步';
+            const syncStr = typeof t === 'function' ? (t('automationPage.syncMode') || '同步') : '同步';
             container.innerHTML = `
                 <table class="data-table compact">
                     <thead>
                         <tr>
                             <th>ID</th>
-                            <th>名称</th>
-                            <th>类型</th>
-                            <th>模式</th>
-                            <th>描述</th>
-                            <th>操作</th>
+                            <th>${typeof t === 'function' ? t('automationPage.actionNameHeader') : '名称'}</th>
+                            <th>${typeof t === 'function' ? t('automationPage.actionTypeHeader') : '类型'}</th>
+                            <th>${typeof t === 'function' ? t('automationPage.actionModeHeader') : '模式'}</th>
+                            <th>${typeof t === 'function' ? t('automationPage.descriptionHeader') : '描述'}</th>
+                            <th>${typeof t === 'function' ? t('automationPage.operationHeader') : '操作'}</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -17104,13 +17129,13 @@ async function refreshActions() {
                                 <td><code>${a.id}</code></td>
                                 <td>${a.name || a.id}</td>
                                 <td><span class="badge badge-${getActionTypeBadge(a.type)}">${getActionTypeLabel(a.type)}</span></td>
-                                <td>${a.async ? '<span class="badge badge-warning">异步</span>' : '<span class="badge badge-light">同步</span>'}</td>
+                                <td>${a.async ? '<span class="badge badge-warning">' + asyncStr + '</span>' : '<span class="badge badge-light">' + syncStr + '</span>'}</td>
                                 <td class="text-muted">${a.description || '-'}</td>
                                 <td>
-                                    <button class="btn btn-xs btn-gray" onclick="testAction('${a.id}')" title="测试"><i class="ri-play-line"></i></button>
-                                    <button class="btn btn-xs btn-gray" onclick="editAction('${a.id}')" title="编辑"><i class="ri-edit-line"></i></button>
-                                    <button class="btn btn-xs btn-gray" onclick="showExportActionModal('${a.id}')" title="导出配置包"><i class="ri-download-line"></i></button>
-                                    <button class="btn btn-danger btn-xs" onclick="deleteAction('${a.id}')" title="删除"><i class="ri-delete-bin-line"></i></button>
+                                    <button class="btn btn-xs btn-gray" onclick="testAction('${a.id}')" title="${typeof t === 'function' ? t('common.test') : '测试'}"><i class="ri-play-line"></i></button>
+                                    <button class="btn btn-xs btn-gray" onclick="editAction('${a.id}')" title="${typeof t === 'function' ? t('common.edit') : '编辑'}"><i class="ri-edit-line"></i></button>
+                                    <button class="btn btn-xs btn-gray" onclick="showExportActionModal('${a.id}')" title="${typeof t === 'function' ? (t('securityPage.exportConfigPack') || '导出配置包') : '导出配置包'}"><i class="ri-download-line"></i></button>
+                                    <button class="btn btn-danger btn-xs" onclick="deleteAction('${a.id}')" title="${typeof t === 'function' ? t('common.delete') : '删除'}"><i class="ri-delete-bin-line"></i></button>
                                 </td>
                             </tr>
                         `).join('')}
@@ -17119,7 +17144,7 @@ async function refreshActions() {
             `;
         }
     } catch (error) {
-        container.innerHTML = `<p style="color:var(--danger)">加载失败: ${error.message}</p>`;
+        container.innerHTML = '<p style="color:var(--danger)">' + (typeof t === 'function' ? t('filePage.loadFailed') : '加载失败') + ': ' + error.message + '</p>';
     }
 }
 
@@ -17165,77 +17190,77 @@ function showAddActionModal() {
     modal.innerHTML = `
         <div class="modal-content cc-compact modal-lg" style="max-width:720px">
             <div class="modal-header">
-                <h2>新建动作模板</h2>
+                <h2>${typeof t === 'function' ? t('automation.newActionTemplate') : '新建动作模板'}</h2>
                 <button class="modal-close" onclick="closeModal('action-modal')"><i class="ri-close-line"></i></button>
             </div>
             <div class="modal-body">
                 <div class="action-section">
-                    <div class="section-title">1. 选择动作类型</div>
+                    <div class="section-title">1. ${typeof t === 'function' ? t('automation.selectActionType') : '选择动作类型'}</div>
                     <div class="action-type-grid">
                         <label class="action-type-card" data-type="cli">
                             <input type="radio" name="action-type" value="cli" checked>
                             <div class="card-icon"><i class="ri-terminal-box-line"></i></div>
-                            <div class="card-title">CLI 命令</div>
-                            <div class="card-desc">执行本地控制台命令</div>
+                            <div class="card-title">${typeof t === 'function' ? t('automation.actionTypeCli') : 'CLI 命令'}</div>
+                            <div class="card-desc">${typeof t === 'function' ? t('automation.actionTypeCliDesc') : '执行本地控制台命令'}</div>
                         </label>
                         <label class="action-type-card" data-type="ssh_cmd_ref">
                             <input type="radio" name="action-type" value="ssh_cmd_ref">
                             <div class="card-icon"><i class="ri-shield-keyhole-line"></i></div>
-                            <div class="card-title">SSH 命令</div>
-                            <div class="card-desc">执行已配置的SSH命令</div>
+                            <div class="card-title">${typeof t === 'function' ? t('automation.actionTypeSsh') : 'SSH 命令'}</div>
+                            <div class="card-desc">${typeof t === 'function' ? t('automation.actionTypeSshDesc') : '执行已配置的SSH命令'}</div>
                         </label>
                         <label class="action-type-card" data-type="led">
                             <input type="radio" name="action-type" value="led">
                             <div class="card-icon"><i class="ri-lightbulb-line"></i></div>
-                            <div class="card-title">LED 控制</div>
-                            <div class="card-desc">控制 LED 颜色和效果</div>
+                            <div class="card-title">${typeof t === 'function' ? t('automation.actionTypeLed') : 'LED 控制'}</div>
+                            <div class="card-desc">${typeof t === 'function' ? t('automation.actionTypeLedDesc') : '控制 LED 颜色和效果'}</div>
                         </label>
                         <label class="action-type-card" data-type="log">
                             <input type="radio" name="action-type" value="log">
                             <div class="card-icon"><i class="ri-file-text-line"></i></div>
-                            <div class="card-title">日志记录</div>
-                            <div class="card-desc">输出日志消息</div>
+                            <div class="card-title">${typeof t === 'function' ? t('automation.actionTypeLog') : '日志记录'}</div>
+                            <div class="card-desc">${typeof t === 'function' ? t('automation.actionTypeLogDesc') : '输出日志消息'}</div>
                         </label>
                         <label class="action-type-card" data-type="set_var">
                             <input type="radio" name="action-type" value="set_var">
                             <div class="card-icon"><i class="ri-database-2-line"></i></div>
-                            <div class="card-title">设置变量</div>
-                            <div class="card-desc">修改系统变量值</div>
+                            <div class="card-title">${typeof t === 'function' ? t('automation.actionTypeSetVar') : '设置变量'}</div>
+                            <div class="card-desc">${typeof t === 'function' ? t('automation.actionTypeSetVarDesc') : '修改系统变量值'}</div>
                         </label>
                         <label class="action-type-card" data-type="webhook">
                             <input type="radio" name="action-type" value="webhook">
                             <div class="card-icon"><i class="ri-global-line"></i></div>
-                            <div class="card-title">Webhook</div>
-                            <div class="card-desc">发送 HTTP 请求</div>
+                            <div class="card-title">${typeof t === 'function' ? t('automation.actionTypeWebhook') : 'Webhook'}</div>
+                            <div class="card-desc">${typeof t === 'function' ? t('automation.actionTypeWebhookDesc') : '发送 HTTP 请求'}</div>
                         </label>
                     </div>
                 </div>
                 <div class="action-section">
-                    <div class="section-title">2. 配置参数</div>
+                    <div class="section-title">2. ${typeof t === 'function' ? t('automation.configParams') : '配置参数'}</div>
                     <div id="action-type-fields" class="action-params-container">
                     </div>
                 </div>
                 <div class="action-section">
-                    <div class="section-title">3. 基本信息</div>
+                    <div class="section-title">3. ${typeof t === 'function' ? t('automation.basicInfo') : '基本信息'}</div>
                     <div class="form-row">
                         <div class="form-group" style="flex:1">
-                            <label>动作 ID <span class="required">*</span></label>
-                            <input type="text" id="action-id" class="input" placeholder="唯一标识，如: restart_agx">
-                            <small class="form-hint">用于规则引用，只能包含字母、数字和下划线</small>
+                            <label>${typeof t === 'function' ? t('automation.actionId') : '动作 ID'} <span class="required">*</span></label>
+                            <input type="text" id="action-id" class="input" placeholder="${typeof t === 'function' ? t('automation.actionIdPlaceholder') : '唯一标识，如: restart_agx'}">
+                            <small class="form-hint">${typeof t === 'function' ? t('automation.actionIdHint') : '用于规则引用，只能包含字母、数字和下划线'}</small>
                         </div>
                         <div class="form-group" style="flex:1">
-                            <label>显示名称</label>
-                            <input type="text" id="action-name" class="input" placeholder="如: 重启 AGX">
-                            <small class="form-hint">留空则使用 ID</small>
+                            <label>${typeof t === 'function' ? t('automation.sourceLabel') : '显示名称'}</label>
+                            <input type="text" id="action-name" class="input" placeholder="${typeof t === 'function' ? t('automation.displayNamePlaceholder') : '如: 重启 AGX'}">
+                            <small class="form-hint">${typeof t === 'function' ? t('automation.leaveEmptyUseId') : '留空则使用 ID'}</small>
                         </div>
                     </div>
                     <div class="form-row">
                         <div class="form-group" style="flex:2">
-                            <label>描述</label>
-                            <input type="text" id="action-description" class="input" placeholder="动作说明（可选）">
+                            <label>${typeof t === 'function' ? t('common.description') : '描述'}</label>
+                            <input type="text" id="action-description" class="input" placeholder="${typeof t === 'function' ? t('automation.actionDescPlaceholder') : '动作说明（可选）'}">
                         </div>
                         <div class="form-group" style="flex:1">
-                            <label>执行延迟</label>
+                            <label>${typeof t === 'function' ? t('automation.executionDelay') : '执行延迟'}</label>
                             <div class="input-with-unit">
                                 <input type="number" id="action-delay" class="input" value="0" min="0">
                                 <span class="unit">ms</span>
@@ -17243,21 +17268,20 @@ function showAddActionModal() {
                         </div>
                     </div>
                     
-                    <!-- 执行模式选项 -->
                     <div class="execution-mode-option">
                         <label class="mode-switch">
                             <input type="checkbox" id="action-async">
                             <span class="mode-slider"></span>
                         </label>
                         <div class="mode-info">
-                            <span class="mode-title">异步执行</span>
-                            <span class="mode-desc">API 调用立即返回，动作在后台队列执行</span>
+                            <span class="mode-title">${typeof t === 'function' ? t('automation.asyncExecute') : '异步执行'}</span>
+                            <span class="mode-desc">${typeof t === 'function' ? t('automation.asyncExecuteDesc') : 'API 调用立即返回，动作在后台队列执行'}</span>
                         </div>
                     </div>
                 </div>
             </div>
             <div class="modal-footer cc-compact-footer">
-                <button class="btn btn-gray" onclick="closeModal('action-modal')">取消</button>
+                <button class="btn btn-gray" onclick="closeModal('action-modal')">${typeof t === 'function' ? t('common.cancel') : '取消'}</button>
                 <button class="btn btn-service-style" onclick="submitAction()"><i class="ri-save-line"></i> 保存动作</button>
             </div>
         </div>
@@ -17290,31 +17314,31 @@ function updateActionTypeFields() {
             <div class="params-card">
                 <div class="params-header">
                     <span class="params-icon"><i class="ri-terminal-box-line"></i></span>
-                    <span>CLI 命令配置</span>
+                    <span>${typeof t === 'function' ? t('automation.cliConfig') : 'CLI 命令配置'}</span>
                 </div>
                 <div class="form-group">
-                    <label>命令行 <span class="required">*</span></label>
-                    <input type="text" id="action-cli-command" class="input input-mono" placeholder="如: gpio --set 48 1">
-                    <small class="form-hint">支持所有控制台命令: gpio, device, fan, led, net 等</small>
+                    <label>${typeof t === 'function' ? t('automation.commandLine') : '命令行'} <span class="required">*</span></label>
+                    <input type="text" id="action-cli-command" class="input input-mono" placeholder="${typeof t === 'function' ? t('automation.cliPlaceholder') : '如: gpio --set 48 1'}">
+                    <small class="form-hint">${typeof t === 'function' ? t('automation.cliCmdHint') : '支持所有控制台命令: gpio, device, fan, led, net 等'}</small>
                 </div>
                 <div class="quick-commands">
-                    <span class="quick-label">快捷命令:</span>
+                    <span class="quick-label">${typeof t === 'function' ? t('automation.quickCommands') : '快捷命令:'}</span>
                     <button type="button" class="quick-btn" onclick="setCliPreset('gpio --set 48 1')">GPIO</button>
-                    <button type="button" class="quick-btn" onclick="setCliPreset('device --power-on agx0')">AGX开机</button>
-                    <button type="button" class="quick-btn" onclick="setCliPreset('device --reset agx0')">AGX重启</button>
-                    <button type="button" class="quick-btn" onclick="setCliPreset('fan --set --id 0 --speed 80')">风扇</button>
+                    <button type="button" class="quick-btn" onclick="setCliPreset('device --power-on agx0')">${typeof t === 'function' ? t('automation.agxPowerOn') : 'AGX开机'}</button>
+                    <button type="button" class="quick-btn" onclick="setCliPreset('device --reset agx0')">${typeof t === 'function' ? t('automation.agxRestart') : 'AGX重启'}</button>
+                    <button type="button" class="quick-btn" onclick="setCliPreset('fan --set --id 0 --speed 80')">${typeof t === 'function' ? t('automation.fan') : '风扇'}</button>
                     <button type="button" class="quick-btn" onclick="setCliPreset('led --effect --device board --name fire')">LED</button>
                 </div>
                 <details class="advanced-toggle">
-                    <summary>高级选项</summary>
+                    <summary>${typeof t === 'function' ? t('automation.advancedOptions') : '高级选项'}</summary>
                     <div class="advanced-content">
                         <div class="form-group">
-                            <label>结果变量</label>
-                            <input type="text" id="action-cli-var" class="input" placeholder="如: cli.result">
-                            <small class="form-hint">存储命令输出到变量</small>
+                            <label>${typeof t === 'function' ? t('automation.resultVariable') : '结果变量'}</label>
+                            <input type="text" id="action-cli-var" class="input" placeholder="${typeof t === 'function' ? t('automation.resultVarPlaceholder') : '如: cli.result'}">
+                            <small class="form-hint">${typeof t === 'function' ? t('automation.resultVariableHint') : '存储命令输出到变量'}</small>
                         </div>
                         <div class="form-group">
-                            <label>超时时间</label>
+                            <label>${typeof t === 'function' ? t('automation.timeout') : '超时时间'}</label>
                             <div class="input-with-unit">
                                 <input type="number" id="action-cli-timeout" class="input" value="5000">
                                 <span class="unit">ms</span>
@@ -17328,21 +17352,21 @@ function updateActionTypeFields() {
             <div class="params-card">
                 <div class="params-header">
                     <span class="params-icon"><i class="ri-shield-keyhole-line"></i></span>
-                    <span>SSH 命令配置</span>
+                    <span>${typeof t === 'function' ? t('automation.sshCmdConfig') : 'SSH 命令配置'}</span>
                 </div>
                 <div class="form-group">
-                    <label>选择命令 <span class="required">*</span></label>
+                    <label>${typeof t === 'function' ? t('automation.selectCommand') : '选择命令'} <span class="required">*</span></label>
                     <select id="action-ssh-cmd-id" class="input" onchange="updateSshCmdRefPreview()">
-                        <option value="">-- 加载中 --</option>
+                        <option value="">-- ${typeof t === 'function' ? t('common.loading') : 'Loading...'} --</option>
                     </select>
-                    <small class="form-hint">选择已在 SSH 管理页面配置的命令</small>
+                    <small class="form-hint">${typeof t === 'function' ? t('automation.sshCmdHint') : '选择已在 SSH 管理页面配置的命令'}</small>
                 </div>
                 <div id="ssh-cmd-preview" class="ssh-cmd-preview" style="display:none;">
-                    <div class="preview-title">命令详情</div>
+                    <div class="preview-title">${typeof t === 'function' ? t('automation.commandDetails') : '命令详情'}</div>
                     <div class="preview-content">
-                        <div class="preview-row"><span class="preview-label">主机:</span> <span id="preview-host">-</span></div>
-                        <div class="preview-row"><span class="preview-label">命令:</span> <code id="preview-cmd">-</code></div>
-                        <div class="preview-row"><span class="preview-label">变量:</span> <span id="preview-var">-</span></div>
+                        <div class="preview-row"><span class="preview-label">${typeof t === 'function' ? t('automation.hostLabel') : '主机:'}</span> <span id="preview-host">-</span></div>
+                        <div class="preview-row"><span class="preview-label">${typeof t === 'function' ? t('automation.commandLabel') : '命令:'}</span> <code id="preview-cmd">-</code></div>
+                        <div class="preview-row"><span class="preview-label">${typeof t === 'function' ? t('automation.variableLabel') : '变量:'}</span> <span id="preview-var">-</span></div>
                     </div>
                 </div>
             </div>
@@ -17351,36 +17375,36 @@ function updateActionTypeFields() {
             <div class="params-card">
                 <div class="params-header">
                     <span class="params-icon"><i class="ri-lightbulb-line"></i></span>
-                    <span>LED 控制配置</span>
+                    <span>${typeof t === 'function' ? t('automation.ledConfig') : 'LED 控制配置'}</span>
                 </div>
                 <div class="form-group">
-                    <label>设备 <span class="required">*</span></label>
+                    <label>${typeof t === 'function' ? t('automation.device') : '设备'} <span class="required">*</span></label>
                     <select id="action-led-device" class="input" onchange="updateActionLedOptions()">
-                        <option value="">-- 选择设备 --</option>
+                        <option value="">-- ${typeof t === 'function' ? t('automation.selectDevice') : '选择设备'} --</option>
                     </select>
-                    <small class="form-hint">选择要控制的 LED 设备</small>
+                    <small class="form-hint">${typeof t === 'function' ? t('automation.selectLedDeviceHint') : '选择要控制的 LED 设备'}</small>
                 </div>
                 
                 <!-- 控制类型选择 -->
                 <div class="form-group" id="action-led-type-group" style="display:none;">
-                    <label>控制类型 <span class="required">*</span></label>
+                    <label>${typeof t === 'function' ? t('automation.controlType') : '控制类型'} <span class="required">*</span></label>
                     <select id="action-led-type" class="input" onchange="updateActionLedTypeFields()">
-                        <option value="fill">纯色填充</option>
-                        <option value="effect">程序动画</option>
-                        <option value="brightness">仅调节亮度</option>
-                        <option value="off">关闭</option>
+                        <option value="fill">${typeof t === 'function' ? t('automation.solidFill') : '纯色填充'}</option>
+                        <option value="effect">${typeof t === 'function' ? t('automation.programEffect') : '程序动画'}</option>
+                        <option value="brightness">${typeof t === 'function' ? t('automation.brightnessOnly') : '仅调节亮度'}</option>
+                        <option value="off">${typeof t === 'function' ? t('automation.turnOff') : '关闭'}</option>
                     </select>
                 </div>
                 
                 <!-- Matrix 专属控制类型 -->
                 <div class="form-group" id="action-led-matrix-type-group" style="display:none;">
-                    <label>控制类型 <span class="required">*</span></label>
+                    <label>${typeof t === 'function' ? t('automation.controlType') : '控制类型'} <span class="required">*</span></label>
                     <select id="action-led-matrix-type" class="input" onchange="updateActionLedTypeFields()">
-                        <option value="fill">纯色填充</option>
-                        <option value="effect">程序动画</option>
-                        <option value="text">文本显示</option>
-                        <option value="image">显示图像</option>
-                        <option value="qrcode">显示QR码</option>
+                        <option value="fill">${typeof t === 'function' ? t('automation.solidFill') : '纯色填充'}</option>
+                        <option value="effect">${typeof t === 'function' ? t('automation.programEffect') : '程序动画'}</option>
+                        <option value="text">${typeof t === 'function' ? t('automation.textDisplay') : '文本显示'}</option>
+                        <option value="image">${typeof t === 'function' ? t('automation.displayImage') : '显示图像'}</option>
+                        <option value="qrcode">${typeof t === 'function' ? t('automation.displayQrCode') : '显示QR码'}</option>
                         <option value="filter">后处理滤镜</option>
                         <option value="filter_stop">停止滤镜</option>
                         <option value="text_stop">停止文本</option>
@@ -17463,7 +17487,7 @@ function updateActionTypeFields() {
         `
     };
     
-    container.innerHTML = fields[type] || '<div class="params-card"><p>请选择动作类型</p></div>';
+    container.innerHTML = fields[type] || '<div class="params-card"><p>' + (typeof t === 'function' ? t('automation.pleaseSelectActionType') : '请选择动作类型') + '</p></div>';
     
     // SSH 命令类型时加载命令列表
     if (type === 'ssh_cmd_ref') {
@@ -17501,7 +17525,7 @@ async function submitAction() {
         return;
     }
     if (!type) {
-        showToast('请选择动作类型', 'error');
+        showToast(typeof t === 'function' ? t('automation.pleaseSelectActionType') : '请选择动作类型', 'error');
         return;
     }
     
@@ -18020,7 +18044,7 @@ function updateActionLedTypeFields() {
                     <label>图像路径 <span class="required">*</span></label>
                     <div class="input-with-btn">
                         <input type="text" id="action-led-image-path" class="input" placeholder="/sdcard/images/xxx.png 或 \${变量名}" value="/sdcard/images/">
-                        <button type="button" class="btn btn-sm" onclick="browseActionImages()" title="浏览文件">📁</button>
+                        <button type="button" class="btn btn-sm" onclick="browseActionImages()" title="${typeof t === 'function' ? t('common.browse') : 'Browse'}"><i class="ri-folder-line"></i></button>
                         <button type="button" class="btn btn-sm" onclick="showVariableSelectModal('action-led-image-path')" title="插入变量"><i class="ri-bar-chart-line"></i></button>
                     </div>
                     <small class="form-hint">支持 PNG、JPG、BMP、GIF 格式，路径支持变量</small>
@@ -18059,7 +18083,7 @@ function updateActionLedTypeFields() {
                     <label>背景图（可选）</label>
                     <div class="input-with-btn">
                         <input type="text" id="action-led-qr-bg" class="input" placeholder="无" readonly>
-                        <button type="button" class="btn btn-sm" onclick="browseActionQrBg()">📁 浏览</button>
+                        <button type="button" class="btn btn-sm" onclick="browseActionQrBg()"><i class="ri-folder-line"></i> ${typeof t === 'function' ? t('common.browse') : 'Browse'}</button>
                         <button type="button" class="btn btn-sm" onclick="document.getElementById('action-led-qr-bg').value=''" title="清除">✕</button>
                     </div>
                 </div>
@@ -18151,13 +18175,13 @@ async function showImageSelectModal(title, onSelect) {
     modal.innerHTML = `
         <div class="modal-content" style="max-width:500px;">
             <div class="modal-header">
-                <h3>📁 ${title}</h3>
+                <h3><i class="ri-folder-line"></i> ${title}</h3>
                 <button class="modal-close" onclick="closeModal('image-select-modal')">&times;</button>
             </div>
             <div class="modal-body">
                 <div id="image-select-loading" style="text-align:center;padding:20px;">
                     <div class="spinner"></div>
-                    <p>加载中...</p>
+                    <p>${t('common.loading')}</p>
                 </div>
                 <div id="image-select-list" style="display:none;max-height:400px;overflow-y:auto;"></div>
                 <div id="image-select-empty" style="display:none;text-align:center;padding:30px;color:var(--text-light);">
@@ -18286,17 +18310,17 @@ async function showVariableSelectModal(targetInputId, mode = 'insert') {
     modal.innerHTML = `
         <div class="modal-content" style="max-width:550px;">
             <div class="modal-header">
-                <h3>选择变量</h3>
+                <h3>${typeof t === 'function' ? t('automation.selectVariableTitle') : '选择变量'}</h3>
                 <button class="modal-close" onclick="closeModal('variable-select-modal')">&times;</button>
             </div>
             <div class="modal-body">
                 <div style="margin-bottom:12px;">
-                    <input type="text" id="var-search" class="input" placeholder="搜索变量..." 
+                    <input type="text" id="var-search" class="input" placeholder="${typeof t === 'function' ? t('automation.searchVariable') : '搜索变量...'}" 
                            oninput="filterVariableList(this.value)" style="width:100%;">
                 </div>
                 <div id="variable-select-loading" style="text-align:center;padding:20px;">
                     <div class="spinner"></div>
-                    <p>加载变量列表...</p>
+                    <p>${typeof t === 'function' ? t('automation.loadingVariables') : '加载变量列表...'}</p>
                 </div>
                 <div id="variable-select-list" style="display:none;max-height:400px;overflow-y:auto;"></div>
                 <div id="variable-select-empty" style="display:none;text-align:center;padding:30px;color:var(--text-light);">
@@ -18342,7 +18366,7 @@ async function showVariableSelectModal(targetInputId, mode = 'insert') {
             html += `<div class="var-group" data-source="${sourceId}">
                 <div class="var-group-header" style="padding:10px 12px;background:var(--bg-elevated);font-weight:600;border-bottom:1px solid var(--border);cursor:pointer;display:flex;align-items:center;justify-content:space-between;"
                      onclick="toggleVarGroup('${groupId}')">
-                    <span>📦 ${sourceId === '_system' ? '系统变量' : sourceId} <span style="font-weight:normal;color:var(--text-light);">(${vars.length})</span></span>
+                    <span><i class="ri-archive-line"></i> ${sourceId === '_system' ? (typeof t === 'function' ? t('automation.systemVariables') : 'System Variables') : sourceId} <span style="font-weight:normal;color:var(--text-light);">(${vars.length})</span></span>
                     <span class="var-group-arrow" id="${groupId}-arrow" style="transition:transform 0.2s;">▶</span>
                 </div>
                 <div class="var-group-items" id="${groupId}" style="display:none;">`;
@@ -18911,7 +18935,7 @@ async function showSourceVariables(sourceId) {
     const header = modal.querySelector('.modal-header h2');
     if (header) header.textContent = `${sourceId} 变量`;
     
-    body.innerHTML = '<div class="loading">加载中...</div>';
+    body.innerHTML = '<div class="loading">' + t('common.loading') + '</div>';
     modal.classList.remove('hidden');
     
     try {
@@ -19139,229 +19163,193 @@ function showAddSourceModal() {
     modal.innerHTML = `
         <div class="modal-content cc-compact automation-modal" style="max-width:750px">
             <div class="modal-header">
-                <h2>添加外部数据源</h2>
+                <h2>${typeof t === 'function' ? t('automation.addSourceTitle') : '添加外部数据源'}</h2>
                 <button class="modal-close" onclick="closeModal('add-source-modal')"><i class="ri-close-line"></i></button>
             </div>
             <div class="modal-body">
-                <!-- 数据源类型选择（标签页样式） -->
                 <div class="modal-tabs automation-modal-tabs">
-                    <button type="button" class="modal-tab active" data-type="rest" onclick="switchSourceType('rest')">
-                        REST API
-                    </button>
-                    <button type="button" class="modal-tab" data-type="websocket" onclick="switchSourceType('websocket')">
-                        WebSocket
-                    </button>
-                    <button type="button" class="modal-tab" data-type="socketio" onclick="switchSourceType('socketio')">
-                        Socket.IO
-                    </button>
-                    <button type="button" class="modal-tab" data-type="variable" onclick="switchSourceType('variable')">
-                        指令变量
-                    </button>
+                    <button type="button" class="modal-tab active" data-type="rest" onclick="switchSourceType('rest')">${typeof t === 'function' ? t('automation.restTab') : 'REST API'}</button>
+                    <button type="button" class="modal-tab" data-type="websocket" onclick="switchSourceType('websocket')">${typeof t === 'function' ? t('automation.wsTab') : 'WebSocket'}</button>
+                    <button type="button" class="modal-tab" data-type="socketio" onclick="switchSourceType('socketio')">${typeof t === 'function' ? t('automation.sioTab') : 'Socket.IO'}</button>
+                    <button type="button" class="modal-tab" data-type="variable" onclick="switchSourceType('variable')">${typeof t === 'function' ? t('automation.variableTab') : '指令变量'}</button>
                 </div>
                 <input type="hidden" id="source-type" value="rest">
                 
-                <!-- 基本信息 -->
                 <div class="form-row">
                     <div class="form-group">
-                        <label>数据源 ID <span class="required">*</span></label>
-                        <input type="text" id="source-id" class="input" placeholder="如: agx_temp">
+                        <label>${typeof t === 'function' ? t('automation.sourceId') : '数据源 ID'} <span class="required">*</span></label>
+                        <input type="text" id="source-id" class="input" placeholder="${typeof t === 'function' ? t('automation.sourceIdPlaceholder') : '如: agx_temp'}">
                     </div>
                     <div class="form-group">
-                        <label>显示名称</label>
-                        <input type="text" id="source-label" class="input" placeholder="如: AGX 温度">
+                        <label>${typeof t === 'function' ? t('automation.sourceLabel') : '显示名称'}</label>
+                        <input type="text" id="source-label" class="input" placeholder="${typeof t === 'function' ? t('automation.sourceLabelPlaceholder') : '如: AGX 温度'}">
                     </div>
                 </div>
                 
-                <!-- REST API 配置 -->
                 <div id="source-rest-config" class="config-section">
-                    <div class="config-title">REST API 配置</div>
+                    <div class="config-title">${typeof t === 'function' ? t('automation.restConfigTitle') : 'REST API 配置'}</div>
                     <div class="form-group">
-                        <label>请求地址 <span class="required">*</span></label>
+                        <label>${typeof t === 'function' ? t('automation.requestUrlReq') : '请求地址'} <span class="required">*</span></label>
                         <div class="input-with-btn">
                             <input type="text" id="source-rest-url" class="input" placeholder="http://192.168.1.100/api/status">
-                            <button class="btn btn-sm btn-warning" onclick="testRestConnection()" id="btn-test-rest">测试</button>
+                            <button class="btn btn-sm btn-warning" onclick="testRestConnection()" id="btn-test-rest">${typeof t === 'function' ? t('automation.testBtn') : '测试'}</button>
                         </div>
                     </div>
                     <div class="form-row">
                         <div class="form-group" style="flex:0 0 100px">
-                            <label>方法</label>
+                            <label>${typeof t === 'function' ? t('sshPage.method') : '方法'}</label>
                             <select id="source-rest-method" class="input">
                                 <option value="GET">GET</option>
                                 <option value="POST">POST</option>
                             </select>
                         </div>
                         <div class="form-group" style="flex:0 0 120px">
-                            <label>轮询间隔 (ms)</label>
+                            <label>${typeof t === 'function' ? t('automation.pollIntervalMs') : '轮询间隔 (ms)'}</label>
                             <input type="number" id="source-interval" class="input" value="5000" min="500">
                         </div>
                         <div class="form-group">
-                            <label>Authorization 头（可选）</label>
-                            <input type="text" id="source-rest-auth" class="input" placeholder="Bearer token">
+                            <label>${typeof t === 'function' ? t('automation.authHeaderOptional') : 'Authorization 头（可选）'}</label>
+                            <input type="text" id="source-rest-auth" class="input" placeholder="${typeof t === 'function' ? t('automation.authPlaceholder') : 'Bearer token'}">
                         </div>
                     </div>
                     
-                    <!-- 测试结果 & 变量选择 -->
                     <div id="rest-test-result" class="test-result-panel" style="display:none">
                         <div class="test-result-header">
                             <span class="test-status"></span>
-                            <button class="btn btn-sm btn-gray" onclick="toggleJsonPreview()"><i class="ri-file-text-line"></i> 原始数据</button>
+                            <button class="btn btn-sm btn-gray" onclick="toggleJsonPreview()"><i class="ri-file-text-line"></i> ${typeof t === 'function' ? t('sshPage.rawData') : '原始数据'}</button>
                         </div>
                         <div id="rest-json-preview" class="json-preview" style="display:none"></div>
                         <div id="rest-var-selector" class="var-selector">
-                            <div class="var-selector-title">选择要提取的字段：</div>
+                            <div class="var-selector-title">${typeof t === 'function' ? t('automation.selectFieldsToExtract') : '选择要提取的字段：'}</div>
                             <div class="var-list"></div>
                         </div>
                     </div>
                     
                     <div class="form-group">
-                        <label>JSON 数据路径 <span style="color:var(--text-light);font-weight:normal">(点击上方字段自动填入)</span></label>
-                        <input type="text" id="source-rest-path" class="input" placeholder="如: data.temperature（留空取整个响应）">
+                        <label>${typeof t === 'function' ? t('automation.jsonPathLabel') : 'JSON 数据路径'} <span style="color:var(--text-light);font-weight:normal">${typeof t === 'function' ? t('automation.jsonPathHint') : '(点击上方字段自动填入)'}</span></label>
+                        <input type="text" id="source-rest-path" class="input" placeholder="${typeof t === 'function' ? t('automation.jsonPathPlaceholderRest') : '如: data.temperature（留空取整个响应）'}">
                     </div>
                 </div>
                 
-                <!-- WebSocket 配置 -->
                 <div id="source-websocket-config" class="config-section" style="display:none">
-                    <div class="config-title">WebSocket 配置</div>
+                    <div class="config-title">${typeof t === 'function' ? t('automation.wsConfigTitle') : 'WebSocket 配置'}</div>
                     <div class="form-group">
-                        <label>WebSocket 地址 <span class="required">*</span></label>
+                        <label>${typeof t === 'function' ? t('automation.wsAddressReq') : 'WebSocket 地址'} <span class="required">*</span></label>
                         <div class="input-with-btn">
-                            <input type="text" id="source-ws-uri" class="input" placeholder="ws://192.168.1.100:8080/ws">
-                            <button class="btn btn-sm btn-warning" onclick="testWsConnection()" id="btn-test-ws">测试</button>
+                            <input type="text" id="source-ws-uri" class="input" placeholder="${typeof t === 'function' ? t('automation.wsPlaceholder') : 'ws://192.168.1.100:8080/ws'}">
+                            <button class="btn btn-sm btn-warning" onclick="testWsConnection()" id="btn-test-ws">${typeof t === 'function' ? t('automation.testBtn') : '测试'}</button>
                         </div>
                     </div>
-                    
-                    <!-- WebSocket 测试结果 -->
                     <div id="ws-test-result" class="test-result-panel" style="display:none">
                         <div class="test-result-header">
                             <span class="test-status"></span>
-                            <button class="btn btn-sm btn-gray" onclick="toggleWsJsonPreview()"><i class="ri-file-text-line"></i> 原始数据</button>
+                            <button class="btn btn-sm btn-gray" onclick="toggleWsJsonPreview()"><i class="ri-file-text-line"></i> ${typeof t === 'function' ? t('sshPage.rawData') : '原始数据'}</button>
                         </div>
                         <div id="ws-json-preview" class="json-preview" style="display:none"></div>
                         <div id="ws-var-selector" class="var-selector">
-                            <div class="var-selector-title">选择要提取的字段：</div>
+                            <div class="var-selector-title">${typeof t === 'function' ? t('automation.selectFieldsToExtract') : '选择要提取的字段：'}</div>
                             <div class="var-list"></div>
                         </div>
                     </div>
-                    
                     <div class="form-group">
-                        <label>JSON 数据路径</label>
-                        <input type="text" id="source-ws-path" class="input" placeholder="如: data.temperature（留空取整个消息）">
+                        <label>${typeof t === 'function' ? t('automation.jsonPathLabel') : 'JSON 数据路径'}</label>
+                        <input type="text" id="source-ws-path" class="input" placeholder="${typeof t === 'function' ? t('automation.jsonPathPlaceholderWs') : '如: data.temperature（留空取整个消息）'}">
                     </div>
                     <div class="form-group">
-                        <label>断线重连间隔 (ms)</label>
+                        <label>${typeof t === 'function' ? t('automation.reconnectIntervalMs') : '断线重连间隔 (ms)'}</label>
                         <input type="number" id="source-ws-reconnect" class="input" value="5000" min="1000">
                     </div>
                 </div>
                 
-                <!-- Socket.IO 配置 -->
                 <div id="source-socketio-config" class="config-section" style="display:none">
-                    <div class="config-title">Socket.IO 配置</div>
+                    <div class="config-title">${typeof t === 'function' ? t('automation.sioConfigTitle') : 'Socket.IO 配置'}</div>
                     <div class="form-group">
-                        <label>服务器地址 <span class="required">*</span></label>
+                        <label>${typeof t === 'function' ? t('automation.sioServerReq') : '服务器地址'} <span class="required">*</span></label>
                         <div class="input-with-btn">
-                            <input type="text" id="source-sio-url" class="input" placeholder="http://10.10.99.99:59090">
-                            <button class="btn btn-sm btn-warning" onclick="testSioConnection()" id="btn-test-sio">测试</button>
+                            <input type="text" id="source-sio-url" class="input" placeholder="${typeof t === 'function' ? t('automation.sioPlaceholder') : 'http://10.10.99.99:59090'}">
+                            <button class="btn btn-sm btn-warning" onclick="testSioConnection()" id="btn-test-sio">${typeof t === 'function' ? t('automation.testBtn') : '测试'}</button>
                         </div>
-                        <small style="color:var(--text-light)">Socket.IO v4 协议，使用 HTTP/HTTPS 地址</small>
+                        <small style="color:var(--text-light)">${typeof t === 'function' ? t('automation.sioV4Hint') : 'Socket.IO v4 协议，使用 HTTP/HTTPS 地址'}</small>
                     </div>
                     <div class="form-row">
                         <div class="form-group">
-                            <label>事件名称 <span style="color:var(--text-light);font-weight:normal">(留空自动发现)</span></label>
-                            <input type="text" id="source-sio-event" class="input" placeholder="测试时留空可自动发现事件">
+                            <label>${typeof t === 'function' ? t('automation.eventNameLabel') : '事件名称'} <span style="color:var(--text-light);font-weight:normal">${typeof t === 'function' ? t('automation.eventNameHint') : '(留空自动发现)'}</span></label>
+                            <input type="text" id="source-sio-event" class="input" placeholder="${typeof t === 'function' ? t('automation.eventNamePlaceholder') : '测试时留空可自动发现事件'}">
                         </div>
                         <div class="form-group" style="flex:0 0 150px">
-                            <label>超时时间 (ms)</label>
+                            <label>${typeof t === 'function' ? t('automation.timeoutMs') : '超时时间 (ms)'}</label>
                             <input type="number" id="source-sio-timeout" class="input" value="15000" min="5000">
                         </div>
                     </div>
-                    
-                    <!-- Socket.IO 测试结果 -->
                     <div id="sio-test-result" class="test-result-panel" style="display:none">
                         <div class="test-result-header">
                             <span class="test-status"></span>
-                            <button class="btn btn-sm btn-gray" onclick="toggleSioJsonPreview()"><i class="ri-file-text-line"></i> 原始数据</button>
+                            <button class="btn btn-sm btn-gray" onclick="toggleSioJsonPreview()"><i class="ri-file-text-line"></i> ${typeof t === 'function' ? t('sshPage.rawData') : '原始数据'}</button>
                         </div>
                         <div id="sio-json-preview" class="json-preview" style="display:none"></div>
                         <div id="sio-var-selector" class="var-selector">
-                            <div class="var-selector-title">选择要提取的字段：</div>
+                            <div class="var-selector-title">${typeof t === 'function' ? t('automation.selectFieldsToExtract') : '选择要提取的字段：'}</div>
                             <div class="var-list"></div>
                         </div>
                     </div>
-                    
                     <div class="form-group">
-                        <label>JSON 数据路径</label>
-                        <input type="text" id="source-sio-path" class="input" placeholder="如: cpu.avg_usage（留空取整个事件数据）">
+                        <label>${typeof t === 'function' ? t('automation.jsonPathLabel') : 'JSON 数据路径'}</label>
+                        <input type="text" id="source-sio-path" class="input" placeholder="${typeof t === 'function' ? t('automation.jsonPathPlaceholderSio') : '如: cpu.avg_usage（留空取整个事件数据）'}">
                     </div>
-                    
-                    <!-- Socket.IO 自动发现开关 -->
                     <label class="checkbox-label">
                         <input type="checkbox" id="source-sio-auto-discover" checked>
-                        <span>自动发现所有 JSON 字段为变量</span>
+                        <span>${typeof t === 'function' ? t('automation.autoDiscoverFields') : '自动发现所有 JSON 字段为变量'}</span>
                     </label>
-                    <small style="color:var(--text-light);display:block;margin-top:-10px;margin-bottom:10px;padding-left:24px">
-                        关闭后仅使用上方选中的字段作为变量
-                    </small>
+                    <small style="color:var(--text-light);display:block;margin-top:-10px;margin-bottom:10px;padding-left:24px">${typeof t === 'function' ? t('automation.autoDiscoverHint') : '关闭后仅使用上方选中的字段作为变量'}</small>
                 </div>
                 
-                <!-- 指令变量数据源配置 -->
                 <div id="source-variable-config" class="config-section" style="display:none">
-                    <div class="config-title">SSH 指令变量</div>
-                    
-                    <!-- SSH 主机选择 -->
+                    <div class="config-title">${typeof t === 'function' ? t('automation.variableConfigTitle') : 'SSH 指令变量'}</div>
                     <div class="form-group">
-                        <label>SSH 主机 <span class="required">*</span></label>
+                        <label>${typeof t === 'function' ? t('automation.sshHostReq') : 'SSH 主机'} <span class="required">*</span></label>
                         <select id="source-ssh-host" class="input" onchange="onSshHostChangeForSource()">
-                            <option value="">-- 加载中... --</option>
+                            <option value="">-- ${t('common.loading')} --</option>
                         </select>
-                        <small style="color:var(--text-light)">选择已配置的 SSH 主机（在 SSH 页面添加）</small>
+                        <small style="color:var(--text-light)">${typeof t === 'function' ? t('automation.sshHostHint') : '选择已配置的 SSH 主机（在 SSH 页面添加）'}</small>
                     </div>
-                    
-                    <!-- 选择已创建的命令 -->
                     <div class="form-group">
-                        <label>选择指令 <span class="required">*</span></label>
+                        <label>${typeof t === 'function' ? t('automation.selectCmdReq') : '选择指令'} <span class="required">*</span></label>
                         <select id="source-ssh-cmd" class="input" onchange="onSshCmdChange()">
-                            <option value="">-- 先选择主机 --</option>
+                            <option value="">${typeof t === 'function' ? t('automation.selectHostFirst') : '-- 先选择主机 --'}</option>
                         </select>
-                        <small style="color:var(--text-light)">选择要监视的指令（在 SSH 页面创建）</small>
+                        <small style="color:var(--text-light)">${typeof t === 'function' ? t('automation.selectCmdHint') : '选择要监视的指令（在 SSH 页面创建）'}</small>
                     </div>
-                    
-                    <!-- 选中命令的详情预览 -->
                     <div id="source-ssh-cmd-preview" class="ssh-cmd-preview" style="display:none">
-                        <div class="preview-title">指令详情</div>
+                        <div class="preview-title">${typeof t === 'function' ? t('automation.cmdPreviewTitle') : '指令详情'}</div>
                         <div class="preview-content">
-                            <div class="preview-row"><span class="preview-label">命令:</span> <code id="preview-command">-</code></div>
-                            <div class="preview-row"><span class="preview-label">描述:</span> <span id="preview-desc">-</span></div>
-                            <div class="preview-row"><span class="preview-label">超时:</span> <span id="preview-timeout">30</span> 秒</div>
+                            <div class="preview-row"><span class="preview-label">${typeof t === 'function' ? t('automation.commandLabel') : '命令:'}</span> <code id="preview-command">-</code></div>
+                            <div class="preview-row"><span class="preview-label">${typeof t === 'function' ? t('automation.descLabel') : '描述:'}</span> <span id="preview-desc">-</span></div>
+                            <div class="preview-row"><span class="preview-label">${typeof t === 'function' ? t('automation.timeoutLabel') : '超时:'}</span> <span id="preview-timeout">30</span> ${typeof t === 'function' ? t('automation.seconds') : '秒'}</div>
                         </div>
                     </div>
-                    
-                    <!-- 变量预览 -->
                     <div class="form-group">
                         <div class="ssh-vars-preview">
-                            <div class="preview-title">将监视以下变量（需先执行指令）：</div>
+                            <div class="preview-title">${typeof t === 'function' ? t('automation.varsPreviewTitle') : '将监视以下变量（需先执行指令）：'}</div>
                             <div id="ssh-vars-list" class="ssh-vars-list">
-                                <span class="text-muted">请先选择 SSH 主机和指令</span>
+                                <span class="text-muted">${typeof t === 'function' ? t('automation.selectHostCmdFirst') : '请先选择 SSH 主机和指令'}</span>
                             </div>
                         </div>
                     </div>
-                    
-                    <!-- 检测间隔 -->
                     <div class="form-group">
-                        <label>检测间隔 (秒)</label>
+                        <label>${typeof t === 'function' ? t('automation.pollIntervalSec') : '检测间隔 (秒)'}</label>
                         <input type="number" id="source-var-interval" class="input" value="5" min="1" max="3600">
-                        <small style="color:var(--text-light)">定期读取变量值的间隔</small>
+                        <small style="color:var(--text-light)">${typeof t === 'function' ? t('automation.pollIntervalHint') : '定期读取变量值的间隔'}</small>
                     </div>
                 </div>
                 
-                <!-- 启用选项 -->
                 <label class="checkbox-label">
                     <input type="checkbox" id="source-enabled" checked>
-                    <span>创建后立即启用</span>
+                    <span>${typeof t === 'function' ? t('automation.enableAfterCreate') : '创建后立即启用'}</span>
                 </label>
             </div>
             <div class="modal-footer cc-compact-footer">
-                <button class="btn btn-gray" onclick="closeModal('add-source-modal')">取消</button>
-                <button class="btn btn-service-style" onclick="submitAddSource()"><i class="ri-database-2-line"></i> 添加数据源</button>
+                <button class="btn btn-gray" onclick="closeModal('add-source-modal')">${typeof t === 'function' ? t('common.cancel') : '取消'}</button>
+                <button class="btn btn-service-style" onclick="submitAddSource()"><i class="ri-database-2-line"></i> ${typeof t === 'function' ? t('automation.addSource') : '添加数据源'}</button>
             </div>
         </div>
     `;
@@ -19730,7 +19718,7 @@ function switchSourceType(type) {
             // 指令变量类型：ID 由选择的命令决定，设为只读
             sourceIdInput.readOnly = true;
             sourceIdInput.style.backgroundColor = 'var(--bg-color)';
-            sourceIdInput.placeholder = '由选择的指令自动填入';
+            sourceIdInput.placeholder = typeof t === 'function' ? t('automationPage.autoFilledByCmd') : '由选择的指令自动填入';
         } else {
             // 其他类型：允许手动输入
             sourceIdInput.readOnly = false;
@@ -19758,12 +19746,12 @@ async function loadSshHostsForSource() {
     const hostSelect = document.getElementById('source-ssh-host');
     if (!hostSelect) return;
     
-    hostSelect.innerHTML = '<option value="">-- 加载中... --</option>';
+    hostSelect.innerHTML = '<option value="">-- ' + t('common.loading') + ' --</option>';
     
     // 重置命令选择
     const cmdSelect = document.getElementById('source-ssh-cmd');
     if (cmdSelect) {
-        cmdSelect.innerHTML = '<option value="">-- 先选择主机 --</option>';
+        cmdSelect.innerHTML = '<option value="">' + (typeof t === 'function' ? t('automation.selectHostFirst') : '-- 先选择主机 --') + '</option>';
     }
     
     // 隐藏命令预览
@@ -19772,7 +19760,7 @@ async function loadSshHostsForSource() {
     
     // 重置变量预览
     const varsListDiv = document.getElementById('ssh-vars-list');
-    if (varsListDiv) varsListDiv.innerHTML = '<span class="text-muted">请先选择 SSH 主机和指令</span>';
+    if (varsListDiv) varsListDiv.innerHTML = `<span class="text-muted">${typeof t === 'function' ? t('automation.selectHostCmdFirst') : 'Please select SSH host and command first'}</span>`;
     
     try {
         const result = await api.call('ssh.hosts.list');
@@ -19784,7 +19772,7 @@ async function loadSshHostsForSource() {
                 return;
             }
             
-            let html = '<option value="">-- 请选择主机 --</option>';
+            let html = '<option value="">' + (typeof t === 'function' ? t('automationPage.selectHostPrompt') : '-- 请选择主机 --') + '</option>';
             hosts.forEach(h => {
                 const label = `${h.id} (${h.username}@${h.host}:${h.port || 22})`;
                 html += `<option value="${h.id}">${label}</option>`;
@@ -19816,13 +19804,13 @@ async function onSshHostChangeForSource() {
     if (varsListDiv) varsListDiv.innerHTML = '<span class="text-muted">请先选择指令</span>';
     
     if (!hostId) {
-        cmdSelect.innerHTML = '<option value="">-- 先选择主机 --</option>';
+        cmdSelect.innerHTML = '<option value="">' + (typeof t === 'function' ? t('automation.selectHostFirst') : '-- 先选择主机 --') + '</option>';
         return;
     }
     
     // 确保 sshCommands 已加载（异步操作）
     if (typeof sshCommands === 'undefined' || Object.keys(sshCommands).length === 0) {
-        cmdSelect.innerHTML = '<option value="">-- 加载中... --</option>';
+        cmdSelect.innerHTML = '<option value="">-- ' + t('common.loading') + ' --</option>';
         await loadSshCommands();
     }
     
@@ -20050,43 +20038,42 @@ function showAddRuleModal(ruleData = null) {
     modal.innerHTML = `
         <div class="modal-content cc-compact automation-modal wide" style="max-width:750px">
             <div class="modal-header">
-                <h2>${isEdit ? '编辑规则' : '添加规则'}</h2>
+                <h2>${isEdit ? (typeof t === 'function' ? t('automation.editRule') : '编辑规则') : (typeof t === 'function' ? t('automation.addRule') : '添加规则')}</h2>
                 <button class="modal-close" onclick="closeModal('add-rule-modal')"><i class="ri-close-line"></i></button>
             </div>
             <div class="modal-body">
                 <!-- 基本信息 -->
                 <div class="form-row three-col">
                     <div class="form-group">
-                        <label>规则 ID <span class="required">*</span></label>
-                        <input type="text" id="rule-id" class="input" placeholder="唯一标识符" ${isEdit ? 'readonly style="background:var(--bg-color)"' : ''}>
+                        <label>${typeof t === 'function' ? t('automation.ruleId') : '规则 ID'} <span class="required">*</span></label>
+                        <input type="text" id="rule-id" class="input" placeholder="${typeof t === 'function' ? t('automation.ruleIdPlaceholder') : '唯一标识符'}" ${isEdit ? 'readonly style="background:var(--bg-color)"' : ''}>
                     </div>
                     <div class="form-group" style="flex:2">
-                        <label>规则名称 <span class="required">*</span></label>
-                        <input type="text" id="rule-name" class="input" placeholder="规则显示名称">
+                        <label>${typeof t === 'function' ? t('automation.ruleName') : '规则名称'} <span class="required">*</span></label>
+                        <input type="text" id="rule-name" class="input" placeholder="${typeof t === 'function' ? t('automation.ruleNamePlaceholder') : '规则显示名称'}">
                     </div>
                 </div>
                 
-                <!-- 图标选择 -->
                 <div class="form-group">
-                    <label>图标</label>
+                    <label>${typeof t === 'function' ? t('automation.iconLabel') : '图标'}</label>
                     <div class="icon-type-tabs">
-                        <button type="button" class="icon-tab active" onclick="switchRuleIconType('emoji')">图标</button>
-                        <button type="button" class="icon-tab" onclick="switchRuleIconType('image')">图片</button>
+                        <button type="button" class="icon-tab active" onclick="switchRuleIconType('emoji')">${typeof t === 'function' ? t('automation.iconTab') : '图标'}</button>
+                        <button type="button" class="icon-tab" onclick="switchRuleIconType('image')">${typeof t === 'function' ? t('automation.imageTab') : '图片'}</button>
                     </div>
                     <div id="rule-icon-emoji-picker" class="icon-picker">
                         <div class="emoji-custom-input">
-                            <input type="text" id="rule-emoji-input" class="input" placeholder="自定义" maxlength="8" onchange="selectRuleIconFromInput()" style="width:100px;text-align:center;font-size:1.2em">
+                            <input type="text" id="rule-emoji-input" class="input" placeholder="${typeof t === 'function' ? t('automation.customPlaceholder') : '自定义'}" maxlength="8" onchange="selectRuleIconFromInput()" style="width:100px;text-align:center;font-size:1.2em">
                         </div>
                         ${iconPickerHtml}
                     </div>
                     <div id="rule-icon-image-picker" class="icon-image-picker hidden">
                         <div class="icon-preview-row">
                             <div id="rule-icon-preview" class="icon-image-preview">
-                                <span class="preview-placeholder">无</span>
+                                <span class="preview-placeholder">${typeof t === 'function' ? t('automation.previewNone') : '无'}</span>
                             </div>
                             <div class="icon-path-input">
-                                <input type="text" id="rule-icon-path" readonly placeholder="选择图片...">
-                                <button type="button" class="btn btn-sm btn-gray" onclick="browseRuleIconImage()"><i class="ri-folder-open-line"></i> 浏览</button>
+                                <input type="text" id="rule-icon-path" readonly placeholder="${typeof t === 'function' ? t('automation.selectImagePlaceholder') : '选择图片...'}">
+                                <button type="button" class="btn btn-sm btn-gray" onclick="browseRuleIconImage()"><i class="ri-folder-open-line"></i> ${typeof t === 'function' ? t('common.browse') : '浏览'}</button>
                                 <button type="button" class="btn btn-sm btn-gray" onclick="clearRuleIconImage()"><i class="ri-close-line"></i></button>
                             </div>
                         </div>
@@ -20097,58 +20084,56 @@ function showAddRuleModal(ruleData = null) {
                 
                 <div class="form-row three-col">
                     <div class="form-group form-group-logic">
-                        <label>条件逻辑</label>
+                        <label>${typeof t === 'function' ? t('automation.conditionLogic') : '条件逻辑'}</label>
                         <select id="rule-logic" class="input">
                             <option value="and">AND</option>
                             <option value="or">OR</option>
                         </select>
                     </div>
                     <div class="form-group">
-                        <label>冷却时间 (ms)</label>
+                        <label>${typeof t === 'function' ? t('automation.cooldownMs') : '冷却时间 (ms)'}</label>
                         <input type="number" id="rule-cooldown" class="input" value="0" min="0">
                     </div>
                     <label class="checkbox-label" style="padding-top:24px">
                         <input type="checkbox" id="rule-enabled" checked>
-                        <span>立即启用</span>
+                        <span>${typeof t === 'function' ? t('automation.enableImmediately') : '立即启用'}</span>
                     </label>
                 </div>
                 
-                <!-- 条件配置 -->
                 <div class="config-section">
                     <div class="config-header">
-                        <span class="config-title">触发条件</span>
+                        <span class="config-title">${typeof t === 'function' ? t('automation.triggerConditions') : '触发条件'}</span>
                         <div style="display:flex;gap:8px;align-items:center">
                             <label class="checkbox-label" style="margin:0;padding:0">
                                 <input type="checkbox" id="rule-manual-only" onchange="toggleManualOnly()">
-                                <span>仅手动触发</span>
+                                <span>${typeof t === 'function' ? t('automation.manualOnly') : '仅手动触发'}</span>
                             </label>
-                            <button class="btn btn-sm btn-success" id="add-condition-btn" onclick="addConditionRow()"><i class="ri-add-line"></i> 添加</button>
+                            <button class="btn btn-sm btn-success" id="add-condition-btn" onclick="addConditionRow()"><i class="ri-add-line"></i> ${typeof t === 'function' ? t('common.add') : '添加'}</button>
                         </div>
                     </div>
                     <div id="conditions-container">
-                        <p class="empty-hint">点击"添加"创建触发条件，或勾选"仅手动触发"作为快捷动作</p>
+                        <p class="empty-hint">${typeof t === 'function' ? t('automation.addConditionHint') : '点击"添加"创建触发条件，或勾选"仅手动触发"作为快捷动作'}</p>
                     </div>
                 </div>
                 
-                <!-- 动作配置 -->
                 <div class="config-section">
                     <div class="config-header">
-                        <span class="config-title">执行动作</span>
-                        <button class="btn btn-sm btn-success" onclick="addActionTemplateRow()"><i class="ri-add-line"></i> 添加</button>
+                        <span class="config-title">${typeof t === 'function' ? t('automation.executionActions') : '执行动作'}</span>
+                        <button class="btn btn-sm btn-success" onclick="addActionTemplateRow()"><i class="ri-add-line"></i> ${typeof t === 'function' ? t('common.add') : '添加'}</button>
                     </div>
                     <div class="actions-hint-block">
                         <div id="actions-container">
-                            <p class="empty-hint">从已创建的动作模板中选择要执行的动作</p>
+                            <p class="empty-hint">${typeof t === 'function' ? t('automation.selectFromTemplatesHint') : '从已创建的动作模板中选择要执行的动作'}</p>
                         </div>
                         <small class="form-hint" style="display:block;margin-top:8px;">
-                            <i class="ri-information-line"></i> 请先在"动作模板"区域创建动作，然后在这里选择使用
+                            <i class="ri-information-line"></i> ${typeof t === 'function' ? t('automation.createActionFirstHint') : '请先在"动作模板"区域创建动作，然后在这里选择使用'}
                         </small>
                     </div>
                 </div>
             </div>
             <div class="modal-footer cc-compact-footer">
-                <button class="btn btn-gray" onclick="closeModal('add-rule-modal')">取消</button>
-                <button class="btn btn-service-style" onclick="submitAddRule(${isEdit ? "'" + ruleData.id + "'" : ''})">${isEdit ? '<i class="ri-save-line"></i> 保存修改' : '<i class="ri-add-line"></i> 添加规则'}</button>
+                <button class="btn btn-gray" onclick="closeModal('add-rule-modal')">${typeof t === 'function' ? t('common.cancel') : '取消'}</button>
+                <button class="btn btn-service-style" onclick="submitAddRule(${isEdit ? "'" + ruleData.id + "'" : ''})">${isEdit ? '<i class="ri-save-line"></i> ' + (typeof t === 'function' ? (t('automationPage.saveRuleChanges') || '保存修改') : '保存修改') : '<i class="ri-add-line"></i> ' + (typeof t === 'function' ? t('automation.addRule') : '添加规则')}</button>
             </div>
         </div>
     `;
@@ -20226,7 +20211,7 @@ function toggleManualOnly() {
         // 启用添加条件按钮
         addBtn.disabled = false;
         addBtn.style.opacity = '1';
-        container.innerHTML = '<p class="empty-hint">点击"添加"创建触发条件</p>';
+        container.innerHTML = '<p class="empty-hint">' + (typeof t === 'function' ? t('automation.addConditionHintShort') : '点击"添加"创建触发条件') + '</p>';
     }
 }
 
@@ -20342,9 +20327,9 @@ function addConditionRow(variable = '', operator = 'eq', value = '') {
     row.innerHTML = `
         <button class="btn btn-sm btn-secondary cond-variable-btn" 
                 onclick="openConditionVarSelector(${rowId})" 
-                title="选择变量"
+                title="${typeof t === 'function' ? t('automation.selectVariable') : '选择变量'}"
                 style="min-width:140px;text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
-            ${variable || '📊 选择变量'}
+            ${variable || (typeof t === 'function' ? t('automation.selectVariable') : '选择变量')}
         </button>
         <input type="hidden" class="cond-variable" value="${variable}">
         <select class="input cond-operator">
@@ -20388,26 +20373,26 @@ async function openConditionVarSelector(rowId) {
     modal.innerHTML = `
         <div class="modal-content" style="max-width:550px;">
             <div class="modal-header">
-                <h3>📊 选择触发条件变量</h3>
+                <h3><i class="ri-bar-chart-line"></i> ${typeof t === 'function' ? t('automation.selectTriggerVarTitle') : 'Select Trigger Variable'}</h3>
                 <button class="modal-close" onclick="closeModal('variable-select-modal')">&times;</button>
             </div>
             <div class="modal-body">
                 <div style="margin-bottom:12px;">
-                    <input type="text" id="var-search" class="input" placeholder="搜索变量..." 
+                    <input type="text" id="var-search" class="input" placeholder="${typeof t === 'function' ? t('automation.searchVarPlaceholder') : '搜索变量...'}" 
                            oninput="filterVariableList(this.value)" style="width:100%;">
                 </div>
                 <div id="variable-select-loading" style="text-align:center;padding:20px;">
                     <div class="spinner"></div>
-                    <p>加载变量列表...</p>
+                    <p>${typeof t === 'function' ? t('automation.loadingVarList') : '加载变量列表...'}</p>
                 </div>
                 <div id="variable-select-list" style="display:none;max-height:400px;overflow-y:auto;"></div>
                 <div id="variable-select-empty" style="display:none;text-align:center;padding:30px;color:var(--text-light);">
                     <div style="font-size:48px;margin-bottom:10px;">📭</div>
-                    <p>没有可用的变量</p>
+                    <p>${typeof t === 'function' ? t('automation.noVariablesAvailable') : '没有可用的变量'}</p>
                 </div>
             </div>
             <div class="modal-footer">
-                <button class="btn btn-sm" onclick="closeModal('variable-select-modal')">关闭</button>
+                <button class="btn btn-sm" onclick="closeModal('variable-select-modal')">${typeof t === 'function' ? t('common.close') : '关闭'}</button>
             </div>
         </div>
     `;
@@ -20443,7 +20428,7 @@ async function openConditionVarSelector(rowId) {
             html += `<div class="var-group" data-source="${sourceId}">
                 <div class="var-group-header" style="padding:10px 12px;background:var(--bg-elevated);font-weight:600;border-bottom:1px solid var(--border);cursor:pointer;display:flex;align-items:center;justify-content:space-between;"
                      onclick="toggleVarGroup('${groupId}')">
-                    <span>📦 ${sourceId === '_system' ? '系统变量' : sourceId} <span style="font-weight:normal;color:var(--text-light);">(${vars.length})</span></span>
+                    <span><i class="ri-archive-line"></i> ${sourceId === '_system' ? (typeof t === 'function' ? t('automation.systemVariables') : 'System Variables') : sourceId} <span style="font-weight:normal;color:var(--text-light);">(${vars.length})</span></span>
                     <span class="var-group-arrow" id="${groupId}-arrow" style="transition:transform 0.2s;">▶</span>
                 </div>
                 <div class="var-group-items" id="${groupId}" style="display:none;">`;
@@ -20610,9 +20595,9 @@ async function addActionTemplateRow(templateId = '', delayMs = 0, repeatMode = '
                 <span class="action-condition-fields" id="action-condition-${rowId}" style="display:${hasCondition ? 'flex' : 'none'};gap:6px;align-items:center;">
                     <button class="btn btn-xs btn-secondary action-condition-var-btn" 
                             onclick="openActionConditionVarSelector(${rowId})" 
-                            title="选择变量"
+                            title="${typeof t === 'function' ? t('automation.selectVariable') : '选择变量'}"
                             style="padding:2px 6px;font-size:11px;">
-                        ${hasCondition && condition.variable ? condition.variable : '选择变量'}
+                        ${hasCondition && condition.variable ? condition.variable : (typeof t === 'function' ? t('automation.selectVariable') : '选择变量')}
                     </button>
                     <input type="hidden" class="action-condition-variable" value="${hasCondition ? condition.variable : ''}">
                     <select class="input action-condition-operator" style="padding:4px 6px;width:80px;">
@@ -20740,7 +20725,7 @@ async function showVariableSelectModalForCondition() {
     modal.innerHTML = `
         <div class="modal-content" style="max-width:550px;">
             <div class="modal-header">
-                <h3>📊 选择条件变量</h3>
+                <h3><i class="ri-bar-chart-line"></i> ${typeof t === 'function' ? t('automation.selectConditionVar') : 'Select Condition Variable'}</h3>
                 <button class="modal-close" onclick="closeModal('variable-select-modal')">&times;</button>
             </div>
             <div class="modal-body">
@@ -20795,7 +20780,7 @@ async function showVariableSelectModalForCondition() {
             html += `<div class="var-group" data-source="${sourceId}">
                 <div class="var-group-header" style="padding:10px 12px;background:var(--bg-elevated);font-weight:600;border-bottom:1px solid var(--border);cursor:pointer;display:flex;align-items:center;justify-content:space-between;"
                      onclick="toggleVarGroup('${groupId}')">
-                    <span>📦 ${sourceId === '_system' ? '系统变量' : sourceId} <span style="font-weight:normal;color:var(--text-light);">(${vars.length})</span></span>
+                    <span><i class="ri-archive-line"></i> ${sourceId === '_system' ? (typeof t === 'function' ? t('automation.systemVariables') : 'System Variables') : sourceId} <span style="font-weight:normal;color:var(--text-light);">(${vars.length})</span></span>
                     <span class="var-group-arrow" id="${groupId}-arrow" style="transition:transform 0.2s;">▶</span>
                 </div>
                 <div class="var-group-items" id="${groupId}" style="display:none;">`;
@@ -20959,11 +20944,11 @@ async function submitAddRule(originalId = null) {
     const manualTrigger = document.getElementById('rule-manual-only')?.checked || false;
     
     if (!id) {
-        alert('请输入规则 ID');
+        alert(typeof t === 'function' ? t('automation.pleaseEnterRuleId') : '请输入规则 ID');
         return;
     }
     if (!name) {
-        alert('请输入规则名称');
+        alert(typeof t === 'function' ? t('automation.pleaseEnterRuleName') : '请输入规则名称');
         return;
     }
     
@@ -21164,20 +21149,20 @@ function showExportSourceModal(sourceId) {
     modal.innerHTML = `
         <div class="modal-content cc-compact" style="max-width:600px">
             <div class="modal-header">
-                <h2>导出数据源配置</h2>
+                <h2>${typeof t === 'function' ? t('automation.exportSourceTitle') : '导出数据源配置'}</h2>
                 <button class="modal-close" onclick="hideExportSourceModal()"><i class="ri-close-line"></i></button>
             </div>
             <div class="modal-body">
-                <p style="color:#666;font-size:0.9rem;margin-top:0">导出数据源 <strong>${escapeHtml(sourceId)}</strong> 的配置为加密配置包</p>
+                <p style="color:#666;font-size:0.9rem;margin-top:0">${typeof t === 'function' ? t('automation.exportSourceDesc', {id: escapeHtml(sourceId)}) : `导出数据源 <strong>${escapeHtml(sourceId)}</strong> 的配置为加密配置包`}</p>
                 <div class="form-group">
-                    <label>目标设备证书 (PEM)</label>
+                    <label>${typeof t === 'function' ? t('securityPage.targetDeviceCert') : '目标设备证书 (PEM)'}</label>
                     <textarea id="export-source-cert" placeholder="-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----" style="width:100%;height:120px;font-family:monospace;font-size:11px"></textarea>
-                    <div style="font-size:0.85em;color:#666;margin-top:4px"><i class="ri-information-line"></i> 粘贴目标设备的证书。留空则使用本机证书（自加密）</div>
+                    <div style="font-size:0.85em;color:#666;margin-top:4px"><i class="ri-information-line"></i> ${typeof t === 'function' ? t('securityPage.targetCertHint') : '粘贴目标设备的证书。留空则使用本机证书（自加密）'}</div>
                 </div>
                 <div id="export-source-result" class="result-box hidden" style="margin-top:10px"></div>
                 <div class="modal-footer cc-compact-footer" style="margin-top:15px;padding-top:15px;border-top:1px solid #eee">
-                    <button class="btn btn-gray" onclick="hideExportSourceModal()">取消</button>
-                    <button class="btn btn-service-style" id="export-source-btn" onclick="doExportSource('${escapeHtml(sourceId)}')"><i class="ri-download-line"></i> 导出</button>
+                    <button class="btn btn-gray" onclick="hideExportSourceModal()">${typeof t === 'function' ? t('common.cancel') : '取消'}</button>
+                    <button class="btn btn-service-style" id="export-source-btn" onclick="doExportSource('${escapeHtml(sourceId)}')"><i class="ri-download-line"></i> ${typeof t === 'function' ? t('common.export') : '导出'}</button>
                 </div>
             </div>
         </div>
@@ -21197,7 +21182,7 @@ async function doExportSource(sourceId) {
     const exportBtn = document.getElementById('export-source-btn');
     
     resultBox.classList.remove('hidden', 'success', 'error');
-    resultBox.textContent = '正在生成配置包...';
+    resultBox.textContent = (typeof t === 'function' ? t('securityPage.generatingPack') : '正在生成配置包...');
     exportBtn.disabled = true;
     
     try {
@@ -21205,10 +21190,10 @@ async function doExportSource(sourceId) {
         if (certText) params.recipient_cert = certText;
         
         const result = await api.call('automation.sources.export', params);
-        if (result.code !== 0) throw new Error(result.message || '导出失败');
+        if (result.code !== 0) throw new Error(result.message || (typeof t === 'function' ? t('toast.exportFailed') : '导出失败'));
         
         const data = result.data;
-        if (!data?.tscfg) throw new Error('无效的响应数据');
+        if (!data?.tscfg) throw new Error(typeof t === 'function' ? t('toast.invalidResponse') : '无效的响应数据');
         
         // 下载文件
         const blob = new Blob([data.tscfg], { type: 'application/json' });
@@ -21222,8 +21207,8 @@ async function doExportSource(sourceId) {
         URL.revokeObjectURL(url);
         
         resultBox.className = 'result-box success';
-        resultBox.textContent = '导出成功';
-        showToast(`已导出数据源配置: ${data.filename}`, 'success');
+        resultBox.textContent = (typeof t === 'function' ? t('toast.exportSuccess') : '导出成功');
+        showToast((typeof t === 'function' ? t('toast.exportedSourceConfig', {filename: data.filename}) : `已导出数据源配置: ${data.filename}`), 'success');
         setTimeout(() => hideExportSourceModal(), 1000);
     } catch (e) {
         resultBox.className = 'result-box error';
@@ -21248,32 +21233,32 @@ function showImportSourceModal() {
     modal.innerHTML = `
         <div class="modal-content cc-compact" style="max-width:600px">
             <div class="modal-header">
-                <h2>导入数据源配置</h2>
+                <h2>${typeof t === 'function' ? t('automation.importSourceTitle') : '导入数据源配置'}</h2>
                 <button class="modal-close" onclick="hideImportSourceModal()"><i class="ri-close-line"></i></button>
             </div>
             <div class="modal-body">
-                <p style="color:#666;font-size:0.9rem;margin-top:0">选择 .tscfg 配置包文件以导入数据源</p>
+                <p style="color:#666;font-size:0.9rem;margin-top:0">${typeof t === 'function' ? t('automation.importSourceDesc') : '选择 .tscfg 配置包文件以导入数据源'}</p>
                 <div id="import-source-step1">
                     <div class="form-group" style="margin-top:15px">
-                        <label>选择文件</label>
+                        <label>${typeof t === 'function' ? t('ssh.selectFile') : '选择文件'}</label>
                         <input type="file" id="import-source-file" class="form-control" accept=".tscfg" onchange="previewSourceImport()">
                     </div>
                 </div>
                 <div id="import-source-step2" style="display:none">
                     <div class="info-card" style="background:#fff;padding:15px;border-radius:8px;margin-top:15px;border:1px solid #eee">
-                        <h4 style="margin:0 0 10px 0;font-size:0.95rem">配置包内容</h4>
+                        <h4 style="margin:0 0 10px 0;font-size:0.95rem">${typeof t === 'function' ? t('ssh.configPackContent') : '配置包内容'}</h4>
                         <div id="import-source-preview"></div>
                     </div>
                     <div class="form-group" style="margin-top:15px">
                         <label>
-                            <input type="checkbox" id="import-source-overwrite"> 覆盖已存在的配置
+                            <input type="checkbox" id="import-source-overwrite"> ${typeof t === 'function' ? t('ssh.overwriteExisting') : '覆盖已存在的配置'}
                         </label>
                     </div>
                 </div>
                 <div id="import-source-result" class="result-box hidden" style="margin-top:10px"></div>
                 <div class="modal-footer cc-compact-footer" style="margin-top:15px;padding-top:15px;border-top:1px solid #eee">
-                    <button class="btn btn-gray" onclick="hideImportSourceModal()">取消</button>
-                    <button class="btn btn-service-style" id="import-source-btn" onclick="confirmSourceImport()" disabled><i class="ri-download-line"></i> 确认导入</button>
+                    <button class="btn btn-gray" onclick="hideImportSourceModal()">${typeof t === 'function' ? t('common.cancel') : '取消'}</button>
+                    <button class="btn btn-service-style" id="import-source-btn" onclick="confirmSourceImport()" disabled><i class="ri-upload-line"></i> ${typeof t === 'function' ? t('ssh.confirmImport') : '确认导入'}</button>
                 </div>
             </div>
         </div>
@@ -21301,7 +21286,7 @@ async function previewSourceImport() {
     const file = fileInput.files[0];
     
     resultBox.classList.remove('hidden', 'success', 'error');
-    resultBox.textContent = '正在验证配置包...';
+    resultBox.textContent = (typeof t === 'function' ? t('ssh.verifyingPack') : '正在验证配置包...');
     importBtn.disabled = true;
     step2.style.display = 'none';
     
@@ -21375,7 +21360,7 @@ async function confirmSourceImport() {
                 importBtn.disabled = false;
             } else {
                 resultBox.className = 'result-box success';
-                resultBox.innerHTML = `已保存配置: <code>${escapeHtml(data?.id)}</code><br><small style="color:#666">重启系统后生效</small>`;
+                resultBox.innerHTML = `${typeof t === 'function' ? t('securityPage.savedConfig') : 'Saved config'}: <code>${escapeHtml(data?.id)}</code><br><small style="color:#666">${typeof t === 'function' ? t('securityPage.restartToApply') : 'Restart to apply'}</small>`;
                 showToast(`已导入配置，重启后生效`, 'success');
                 setTimeout(() => hideImportSourceModal(), 2000);
             }
@@ -21490,32 +21475,32 @@ function showImportRuleModal() {
     modal.innerHTML = `
         <div class="modal-content cc-compact" style="max-width:600px">
             <div class="modal-header">
-                <h2>导入规则配置</h2>
+                <h2>${typeof t === 'function' ? t('automation.importRuleTitle') : '导入规则配置'}</h2>
                 <button class="modal-close" onclick="hideImportRuleModal()"><i class="ri-close-line"></i></button>
             </div>
             <div class="modal-body">
-                <p style="color:#666;font-size:0.9rem;margin-top:0">选择 .tscfg 配置包文件以导入规则</p>
+                <p style="color:#666;font-size:0.9rem;margin-top:0">${typeof t === 'function' ? t('automation.importRuleDesc') : '选择 .tscfg 配置包文件以导入规则'}</p>
                 <div id="import-rule-step1">
                     <div class="form-group" style="margin-top:15px">
-                        <label>选择文件</label>
+                        <label>${typeof t === 'function' ? t('ssh.selectFile') : '选择文件'}</label>
                         <input type="file" id="import-rule-file" class="form-control" accept=".tscfg" onchange="previewRuleImport()">
                     </div>
                 </div>
                 <div id="import-rule-step2" style="display:none">
                     <div class="info-card" style="background:#fff;padding:15px;border-radius:8px;margin-top:15px;border:1px solid #eee">
-                        <h4 style="margin:0 0 10px 0;font-size:0.95rem">配置包内容</h4>
+                        <h4 style="margin:0 0 10px 0;font-size:0.95rem">${typeof t === 'function' ? t('ssh.configPackContent') : '配置包内容'}</h4>
                         <div id="import-rule-preview"></div>
                     </div>
                     <div class="form-group" style="margin-top:15px">
                         <label>
-                            <input type="checkbox" id="import-rule-overwrite"> 覆盖已存在的配置
+                            <input type="checkbox" id="import-rule-overwrite"> ${typeof t === 'function' ? t('ssh.overwriteExisting') : '覆盖已存在的配置'}
                         </label>
                     </div>
                 </div>
                 <div id="import-rule-result" class="result-box hidden" style="margin-top:10px"></div>
                 <div class="modal-footer cc-compact-footer" style="margin-top:15px;padding-top:15px;border-top:1px solid #eee">
-                    <button class="btn btn-gray" onclick="hideImportRuleModal()">取消</button>
-                    <button class="btn btn-service-style" id="import-rule-btn" onclick="confirmRuleImport()" disabled><i class="ri-download-line"></i> 确认导入</button>
+                    <button class="btn btn-gray" onclick="hideImportRuleModal()">${typeof t === 'function' ? t('common.cancel') : '取消'}</button>
+                    <button class="btn btn-service-style" id="import-rule-btn" onclick="confirmRuleImport()" disabled><i class="ri-upload-line"></i> ${typeof t === 'function' ? t('ssh.confirmImport') : '确认导入'}</button>
                 </div>
             </div>
         </div>
@@ -21543,7 +21528,7 @@ async function previewRuleImport() {
     const file = fileInput.files[0];
     
     resultBox.classList.remove('hidden', 'success', 'error');
-    resultBox.textContent = '正在验证配置包...';
+    resultBox.textContent = (typeof t === 'function' ? t('ssh.verifyingPack') : '正在验证配置包...');
     importBtn.disabled = true;
     step2.style.display = 'none';
     
@@ -21617,7 +21602,7 @@ async function confirmRuleImport() {
                 importBtn.disabled = false;
             } else {
                 resultBox.className = 'result-box success';
-                resultBox.innerHTML = `已保存配置: <code>${escapeHtml(data?.id)}</code><br><small style="color:#666">重启系统后生效</small>`;
+                resultBox.innerHTML = `${typeof t === 'function' ? t('securityPage.savedConfig') : 'Saved config'}: <code>${escapeHtml(data?.id)}</code><br><small style="color:#666">${typeof t === 'function' ? t('securityPage.restartToApply') : 'Restart to apply'}</small>`;
                 showToast(`已导入配置，重启后生效`, 'success');
                 setTimeout(() => hideImportRuleModal(), 2000);
             }
@@ -21648,20 +21633,20 @@ function showExportActionModal(actionId) {
     modal.innerHTML = `
         <div class="modal-content cc-compact" style="max-width:600px">
             <div class="modal-header">
-                <h2>导出动作模板</h2>
+                <h2>${typeof t === 'function' ? t('automation.exportActionTitle') : '导出动作模板'}</h2>
                 <button class="modal-close" onclick="hideExportActionModal()"><i class="ri-close-line"></i></button>
             </div>
             <div class="modal-body">
-                <p style="color:#666;font-size:0.9rem;margin-top:0">导出动作模板 <strong>${escapeHtml(actionId)}</strong> 的配置为加密配置包</p>
+                <p style="color:#666;font-size:0.9rem;margin-top:0">${typeof t === 'function' ? t('automation.exportActionDesc', {actionId: escapeHtml(actionId)}) : `导出动作模板 <strong>${escapeHtml(actionId)}</strong> 的配置为加密配置包`}</p>
                 <div class="form-group">
-                    <label>目标设备证书 (PEM)</label>
+                    <label>${typeof t === 'function' ? t('securityPage.targetDeviceCert') : '目标设备证书 (PEM)'}</label>
                     <textarea id="export-action-cert" placeholder="-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----" style="width:100%;height:120px;font-family:monospace;font-size:11px"></textarea>
-                    <div style="font-size:0.85em;color:#666;margin-top:4px"><i class="ri-information-line"></i> 粘贴目标设备的证书。留空则使用本机证书（自加密）</div>
+                    <div style="font-size:0.85em;color:#666;margin-top:4px"><i class="ri-information-line"></i> ${typeof t === 'function' ? t('securityPage.targetCertHint') : '粘贴目标设备的证书。留空则使用本机证书（自加密）'}</div>
                 </div>
                 <div id="export-action-result" class="result-box hidden" style="margin-top:10px"></div>
                 <div class="modal-footer cc-compact-footer" style="margin-top:15px;padding-top:15px;border-top:1px solid #eee">
-                    <button class="btn btn-gray" onclick="hideExportActionModal()">取消</button>
-                    <button class="btn btn-service-style" id="export-action-btn" onclick="doExportAction('${escapeHtml(actionId)}')"><i class="ri-download-line"></i> 导出</button>
+                    <button class="btn btn-gray" onclick="hideExportActionModal()">${typeof t === 'function' ? t('common.cancel') : '取消'}</button>
+                    <button class="btn btn-service-style" id="export-action-btn" onclick="doExportAction('${escapeHtml(actionId)}')"><i class="ri-download-line"></i> ${typeof t === 'function' ? t('common.export') : '导出'}</button>
                 </div>
             </div>
         </div>
@@ -21681,7 +21666,7 @@ async function doExportAction(actionId) {
     const exportBtn = document.getElementById('export-action-btn');
     
     resultBox.classList.remove('hidden', 'success', 'error');
-    resultBox.textContent = '正在生成配置包...';
+    resultBox.textContent = (typeof t === 'function' ? t('securityPage.generatingPack') : '正在生成配置包...');
     exportBtn.disabled = true;
     
     try {
@@ -21689,10 +21674,10 @@ async function doExportAction(actionId) {
         if (certText) params.recipient_cert = certText;
         
         const result = await api.call('automation.actions.export', params);
-        if (result.code !== 0) throw new Error(result.message || '导出失败');
+        if (result.code !== 0) throw new Error(result.message || (typeof t === 'function' ? t('toast.exportFailed') : '导出失败'));
         
         const data = result.data;
-        if (!data?.tscfg) throw new Error('无效的响应数据');
+        if (!data?.tscfg) throw new Error(typeof t === 'function' ? t('toast.invalidResponse') : '无效的响应数据');
         
         // 下载文件
         const blob = new Blob([data.tscfg], { type: 'application/json' });
@@ -21706,8 +21691,8 @@ async function doExportAction(actionId) {
         URL.revokeObjectURL(url);
         
         resultBox.className = 'result-box success';
-        resultBox.textContent = '导出成功';
-        showToast(`已导出动作模板: ${data.filename}`, 'success');
+        resultBox.textContent = (typeof t === 'function' ? t('toast.exportSuccess') : '导出成功');
+        showToast((typeof t === 'function' ? t('toast.exportedActionTemplate', {filename: data.filename}) : `已导出动作模板: ${data.filename}`), 'success');
         setTimeout(() => hideExportActionModal(), 1000);
     } catch (e) {
         resultBox.className = 'result-box error';
@@ -21732,32 +21717,32 @@ function showImportActionModal() {
     modal.innerHTML = `
         <div class="modal-content cc-compact" style="max-width:600px">
             <div class="modal-header">
-                <h2>导入动作模板</h2>
+                <h2>${typeof t === 'function' ? t('automation.importActionTitle') : '导入动作模板'}</h2>
                 <button class="modal-close" onclick="hideImportActionModal()"><i class="ri-close-line"></i></button>
             </div>
             <div class="modal-body">
-                <p style="color:#666;font-size:0.9rem;margin-top:0">选择 .tscfg 配置包文件以导入动作模板</p>
+                <p style="color:#666;font-size:0.9rem;margin-top:0">${typeof t === 'function' ? t('automation.importActionDesc') : '选择 .tscfg 配置包文件以导入动作模板'}</p>
                 <div id="import-action-step1">
                     <div class="form-group" style="margin-top:15px">
-                        <label>选择文件</label>
+                        <label>${typeof t === 'function' ? t('ssh.selectFile') : '选择文件'}</label>
                         <input type="file" id="import-action-file" class="form-control" accept=".tscfg" onchange="previewActionImport()">
                     </div>
                 </div>
                 <div id="import-action-step2" style="display:none">
                     <div class="info-card" style="background:#fff;padding:15px;border-radius:8px;margin-top:15px;border:1px solid #eee">
-                        <h4 style="margin:0 0 10px 0;font-size:0.95rem">配置包内容</h4>
+                        <h4 style="margin:0 0 10px 0;font-size:0.95rem">${typeof t === 'function' ? t('ssh.configPackContent') : '配置包内容'}</h4>
                         <div id="import-action-preview"></div>
                     </div>
                     <div class="form-group" style="margin-top:15px">
                         <label>
-                            <input type="checkbox" id="import-action-overwrite"> 覆盖已存在的配置
+                            <input type="checkbox" id="import-action-overwrite"> ${typeof t === 'function' ? t('ssh.overwriteExisting') : '覆盖已存在的配置'}
                         </label>
                     </div>
                 </div>
                 <div id="import-action-result" class="result-box hidden" style="margin-top:10px"></div>
                 <div class="modal-footer cc-compact-footer" style="margin-top:15px;padding-top:15px;border-top:1px solid #eee">
-                    <button class="btn btn-gray" onclick="hideImportActionModal()">取消</button>
-                    <button class="btn btn-service-style" id="import-action-btn" onclick="confirmActionImport()" disabled><i class="ri-download-line"></i> 确认导入</button>
+                    <button class="btn btn-gray" onclick="hideImportActionModal()">${typeof t === 'function' ? t('common.cancel') : '取消'}</button>
+                    <button class="btn btn-service-style" id="import-action-btn" onclick="confirmActionImport()" disabled><i class="ri-upload-line"></i> ${typeof t === 'function' ? t('ssh.confirmImport') : '确认导入'}</button>
                 </div>
             </div>
         </div>
@@ -21785,7 +21770,7 @@ async function previewActionImport() {
     const file = fileInput.files[0];
     
     resultBox.classList.remove('hidden', 'success', 'error');
-    resultBox.textContent = '正在验证配置包...';
+    resultBox.textContent = (typeof t === 'function' ? t('ssh.verifyingPack') : '正在验证配置包...');
     importBtn.disabled = true;
     step2.style.display = 'none';
     
@@ -21859,7 +21844,7 @@ async function confirmActionImport() {
                 importBtn.disabled = false;
             } else {
                 resultBox.className = 'result-box success';
-                resultBox.innerHTML = `已保存配置: <code>${escapeHtml(data?.id)}</code><br><small style="color:#666">重启系统后生效</small>`;
+                resultBox.innerHTML = `${typeof t === 'function' ? t('securityPage.savedConfig') : 'Saved config'}: <code>${escapeHtml(data?.id)}</code><br><small style="color:#666">${typeof t === 'function' ? t('securityPage.restartToApply') : 'Restart to apply'}</small>`;
                 showToast(`已导入配置，重启后生效`, 'success');
                 setTimeout(() => hideImportActionModal(), 2000);
             }

@@ -65,7 +65,7 @@ class Router {
             }
             if (access.reason === 'root_required') {
                 // 需要 root 权限
-                showToast('此页面需要 root 权限', 'error');
+                showToast(t('toast.rootRequired'), 'error');
                 window.location.hash = '/';  // 重定向到首页
                 return;
             }
@@ -90,6 +90,17 @@ class Router {
             this.currentPage = loader;
             loader();
         }
+    }
+    
+    /**
+     * 获取当前 hash 对应的 loader，供语言切换后重新渲染当前页
+     * @returns {function|null} 当前页的 loader 或 null
+     */
+    getCurrentLoader() {
+        const hash = window.location.hash.slice(1) || '/';
+        const access = this.checkAccess(hash);
+        if (!access.allowed) return null;
+        return this.routes[hash] || this.routes['/'] || null;
     }
     
     /**

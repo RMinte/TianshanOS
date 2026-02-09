@@ -19,6 +19,16 @@
                 <img src="/images/tslogo-48.png" alt="TianshanOS Logo" class="logo-icon">
                 <span class="logo-text">TianshanOS</span>
             </div>
+            <div class="lang-switch" id="lang-switch" title="切换语言 / Switch Language">
+                <button class="btn btn-sm lang-btn btn-service-style" onclick="toggleLanguageMenu()">
+                    <span id="lang-name">中文</span>
+                    <span class="lang-arrow">▼</span>
+                </button>
+                <div id="lang-menu" class="lang-menu hidden">
+                    <!-- 动态填充语言列表 -->
+                </div>
+            </div>
+            <div class="header-separator"></div>
             <nav class="nav">
                 <a href="#/" class="nav-link active" data-i18n="nav.system">系统</a>
                 <a href="#/network" class="nav-link" data-i18n="nav.network">网络</a>
@@ -28,19 +38,10 @@
                 <a href="#/commands" class="nav-link" data-requires-root data-i18n="ssh.commands">指令</a>
                 <a href="#/security" class="nav-link" data-i18n="nav.security">安全</a>
             </nav>
-            <div class="ws-status" id="ws-status" data-i18n-title="network.connected"></div>
-            <div class="lang-switch" id="lang-switch" title="切换语言 / Switch Language">
-                <button class="btn btn-sm lang-btn" onclick="toggleLanguageMenu()">
-                    <span id="lang-name">中文</span>
-                    <span class="lang-arrow">▼</span>
-                </button>
-                <div id="lang-menu" class="lang-menu hidden">
-                    <!-- 动态填充语言列表 -->
-                </div>
-            </div>
             <div class="user-menu">
+                <div class="ws-status" id="ws-status" data-i18n-title="network.connected"></div>
                 <span id="user-name" data-i18n="ui.notLoggedIn">未登录</span>
-                <button id="login-btn" class="btn btn-primary" data-i18n="security.login">登录</button>
+                <button id="login-btn" class="btn btn-service-style" data-i18n="security.login">登录</button>
             </div>
         </header>
         
@@ -49,7 +50,7 @@
                 <!-- 动态页面内容由 SPA 路由器加载 -->
                 <div class="loading">
                     <i class="ri-refresh-line loading-icon"></i>
-                    <p data-i18n="common.loading">加载中...</p>
+                    <p data-i18n="common.loading">Loading...</p>
                 </div>
             </div>
         </main>
@@ -81,7 +82,7 @@
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn" onclick="closeLoginModal()" data-i18n="common.cancel">取消</button>
-                    <button type="submit" class="btn btn-primary" data-i18n="login.loginButton">登录</button>
+                    <button type="submit" class="btn btn-service-style" data-i18n="login.loginButton">登录</button>
                 </div>
             </form>
         </div>
@@ -113,7 +114,7 @@
                 <span id="file-picker-current-path">/sdcard/images</span>
             </div>
             <div class="file-picker-list" id="file-picker-list">
-                <div class="loading" data-i18n="common.loading">加载中...</div>
+                <div class="loading" data-i18n="common.loading">Loading...</div>
             </div>
             <div class="file-picker-selected">
                 <span data-i18n="files.fileName">已选择</span>: <span id="file-picker-selected-name">-</span>
@@ -133,7 +134,7 @@
                 <button class="modal-close" onclick="hideMemoryDetailModal()"><i class="ri-close-line"></i></button>
             </div>
             <div class="modal-body" id="memory-detail-body">
-                <div class="loading" data-i18n="common.loading">加载中...</div>
+                <div class="loading" data-i18n="common.loading">Loading...</div>
             </div>
             <div class="modal-footer" style="margin-top:16px;padding-top:12px;border-top:1px solid var(--border-color);display:flex;justify-content:space-between;align-items:center">
                 <span id="memory-detail-timestamp" style="font-size:0.8em;color:#888">-</span>
@@ -150,7 +151,7 @@
                 <button class="modal-close" onclick="closeSourceVariablesModal()"><i class="ri-close-line"></i></button>
             </div>
             <div class="modal-body" id="source-variables-body">
-                <div class="loading" data-i18n="common.loading">加载中...</div>
+                <div class="loading" data-i18n="common.loading">Loading...</div>
             </div>
             <div class="modal-footer cc-compact-footer">
                 <button class="btn" onclick="closeSourceVariablesModal()" style="color:#666" data-i18n="common.close">关闭</button>
@@ -205,8 +206,99 @@
         </div>
     </div>
     
-    <!-- i18n 国际化 -->
-    <script src="/js/i18n.js"></script>
+    <!-- i18n 国际化（内联避免 ERR_CONNECTION_RESET 导致 i18n 未定义） -->
+    <script>
+    (function(){
+    var i18n = (function() {
+        var currentLang = 'zh-CN';
+        var languages = {};
+        var supportedLanguages = { 'zh-CN': { name: '简体中文', flag: '' }, 'en-US': { name: 'English', flag: '' } };
+        function registerLanguage(code, translations) { languages[code] = translations; }
+        function setLanguage(lang) {
+            if (languages[lang]) {
+                currentLang = lang;
+                try { localStorage.setItem('ts_language', lang); } catch(e) {}
+                document.documentElement.lang = lang;
+                window.dispatchEvent(new CustomEvent('languageChanged', { detail: { language: lang } }));
+                return true;
+            }
+            return false;
+        }
+        function getLanguage() { return currentLang; }
+        function translate(key, params) {
+            params = params || {};
+            var translations = languages[currentLang] || languages['zh-CN'] || {};
+            var value = key.split('.').reduce(function(obj, k) { return obj && obj[k]; }, translations);
+            if (value === undefined && currentLang !== 'en-US' && languages['en-US'])
+                value = key.split('.').reduce(function(obj, k) { return obj && obj[k]; }, languages['en-US']);
+            if (value === undefined) return key;
+            if (typeof value === 'string' && Object.keys(params).length > 0)
+                value = value.replace(/\{(\w+)\}/g, function(m, p) { return params[p] !== undefined ? params[p] : m; });
+            return value;
+        }
+        function init() {
+            try {
+                var saved = localStorage.getItem('ts_language');
+                if (saved && languages[saved]) currentLang = saved;
+                else currentLang = (navigator.language || '').indexOf('zh') === 0 ? 'zh-CN' : 'en-US';
+            } catch(e) {}
+            document.documentElement.lang = currentLang;
+        }
+        function translateDOM(root) {
+            root = root || document;
+            root.querySelectorAll('[data-i18n]').forEach(function(el) {
+                var key = el.getAttribute('data-i18n');
+                var params = el.dataset.i18nParams ? JSON.parse(el.dataset.i18nParams) : {};
+                el.textContent = translate(key, params);
+            });
+            root.querySelectorAll('[data-i18n-placeholder]').forEach(function(el) { el.placeholder = translate(el.getAttribute('data-i18n-placeholder')); });
+            root.querySelectorAll('[data-i18n-title]').forEach(function(el) { el.title = translate(el.getAttribute('data-i18n-title')); });
+        }
+        return { registerLanguage: registerLanguage, setLanguage: setLanguage, getLanguage: getLanguage, translate: translate, init: init, getSupportedLanguages: function() { return supportedLanguages; }, translateDOM: translateDOM };
+    })();
+    window.i18n = i18n;
+    window.t = i18n.translate;
+    window.setLanguage = i18n.setLanguage;
+    window.getLanguage = i18n.getLanguage;
+    window.translateDOM = i18n.translateDOM;
+    window.toggleLanguageMenu = function() {
+        var menu = document.getElementById('lang-menu');
+        if (!menu) return;
+        if (menu.classList.contains('hidden')) {
+            var langs = i18n.getSupportedLanguages(), cur = i18n.getLanguage();
+            menu.innerHTML = Object.keys(langs).map(function(code) {
+                var info = langs[code];
+                return '<div class="lang-menu-item' + (code === cur ? ' active' : '') + '" onclick="selectLanguage(\'' + code + '\')"><span class="lang-menu-name">' + info.name + '</span>' + (code === cur ? '<span class="lang-menu-check">✓</span>' : '') + '</div>';
+            }).join('');
+            menu.classList.remove('hidden');
+            setTimeout(function() { document.addEventListener('click', window.closeLangMenuOnClickOutside); }, 10);
+        } else menu.classList.add('hidden');
+    };
+    window.closeLangMenuOnClickOutside = function(e) {
+        var sw = document.getElementById('lang-switch');
+        if (sw && !sw.contains(e.target)) {
+            var m = document.getElementById('lang-menu');
+            if (m) m.classList.add('hidden');
+            document.removeEventListener('click', window.closeLangMenuOnClickOutside);
+        }
+    };
+    window.selectLanguage = function(lang) {
+        if (i18n.setLanguage(lang)) {
+            var langs = i18n.getSupportedLanguages(), nameEl = document.getElementById('lang-name');
+            if (nameEl && langs[lang]) nameEl.textContent = langs[lang].name.split(' ')[0];
+            i18n.translateDOM();
+            var m = document.getElementById('lang-menu');
+            if (m) m.classList.add('hidden');
+        }
+    };
+    document.addEventListener('DOMContentLoaded', function() {
+        i18n.init();
+        var langs = i18n.getSupportedLanguages(), cur = i18n.getLanguage(), nameEl = document.getElementById('lang-name');
+        if (nameEl && langs[cur]) nameEl.textContent = cur === 'zh-CN' ? '中文' : 'EN';
+        i18n.translateDOM();
+    });
+    })();
+    </script>
     <script src="/js/lang/zh-CN.js"></script>
     <script src="/js/lang/en-US.js"></script>
     

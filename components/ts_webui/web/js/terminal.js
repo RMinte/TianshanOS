@@ -87,7 +87,7 @@ class WebTerminal {
         this.writeln('\x1b[1;36m║\x1b[0m     \x1b[1;33m⛰️  TianshanOS Web Terminal\x1b[0m          \x1b[1;36m║\x1b[0m');
         this.writeln('\x1b[1;36m╚══════════════════════════════════════════╝\x1b[0m');
         this.writeln('');
-        this.writeln('正在连接到设备...');
+        this.writeln(typeof t === 'function' ? t('terminal.connecting') : '正在连接到设备...');
 
         return true;
     }
@@ -319,8 +319,8 @@ class WebTerminal {
             case 'connected':
                 this.connected = true;
                 this.prompt = msg.prompt || 'tianshan> ';
-                this.writeln('\x1b[1;32m已连接到设备\x1b[0m');
-                this.writeln('输入 \x1b[1;33mhelp\x1b[0m 查看可用命令');
+                this.writeln('\x1b[1;32m' + (typeof t === 'function' ? t('terminal.connected') : '已连接到设备') + '\x1b[0m');
+                this.writeln(typeof t === 'function' ? t('terminal.helpHint', { help: '\x1b[1;33mhelp\x1b[0m' }) : '输入 \x1b[1;33mhelp\x1b[0m 查看可用命令');
                 this.writeln('');
                 this.writePrompt();
                 break;

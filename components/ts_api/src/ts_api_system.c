@@ -697,7 +697,7 @@ static esp_err_t api_system_memory_detail(const cJSON *params, ts_api_result_t *
         if (dram_free > 0) {
             float frag = 100.0f * (1.0f - (float)dram_largest / (float)dram_free);
             if (frag > 60) {
-                cJSON_AddItemToArray(tips, cJSON_CreateString("warning:DRAM 碎片化严重，建议重启系统"));
+                cJSON_AddItemToArray(tips, cJSON_CreateString("warning:dram_fragmented"));
             }
         }
     }
@@ -705,7 +705,7 @@ static esp_err_t api_system_memory_detail(const cJSON *params, ts_api_result_t *
     if (psram_total > 0) {
         int psram_used_pct = 100 * (psram_total - psram_free) / psram_total;
         if (psram_used_pct < 50) {
-            cJSON_AddItemToArray(tips, cJSON_CreateString("info:PSRAM 空间充足，可用于大型缓冲区"));
+            cJSON_AddItemToArray(tips, cJSON_CreateString("info:psram_sufficient"));
         }
     }
     

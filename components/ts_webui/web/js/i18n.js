@@ -208,7 +208,7 @@ function selectLanguage(lang) {
     }
 }
 
-// 页面加载时初始化语言按钮
+// 页面加载时初始化语言按钮，并翻译整页（使刷新后导航栏等按当前语言显示）
 document.addEventListener('DOMContentLoaded', function() {
     i18n.init();
     const langs = i18n.getSupportedLanguages();
@@ -217,4 +217,5 @@ document.addEventListener('DOMContentLoaded', function() {
     if (nameEl && langs[currentLang]) {
         nameEl.textContent = currentLang === 'zh-CN' ? '中文' : 'EN';
     }
+    i18n.translateDOM();
 });
