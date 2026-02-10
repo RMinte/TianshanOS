@@ -13786,12 +13786,12 @@ async function loadTerminalPage() {
         
         <!-- 日志模态框 -->
         <div id="terminal-logs-modal" class="modal" style="display:none" onclick="if(event.target===this) closeTerminalLogsModal()">
-            <div class="modal-content" style="width:90%; max-width:1200px; height:85vh">
+            <div class="modal-content cc-compact" style="width:90%; max-width:1200px; height:85vh">
                 <div class="modal-header">
                     <h2>${t('terminal.systemLogTitle')}</h2>
-                    <button class="modal-close" onclick="closeTerminalLogsModal()">&times;</button>
+                    <button class="modal-close" onclick="closeTerminalLogsModal()"><i class="ri-close-line"></i></button>
                 </div>
-                <div class="modal-body" style="padding:0; display:flex; flex-direction:column; height:calc(100% - 60px)">
+                <div class="modal-body" style="padding:0; display:flex; flex-direction:column; height:calc(100% - 60px); max-height:none">
                     <!-- 工具栏 -->
                     <div class="log-toolbar" style="margin:15px; margin-bottom:10px">
                         <div class="toolbar-left">
