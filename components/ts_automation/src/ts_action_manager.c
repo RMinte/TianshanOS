@@ -1233,8 +1233,8 @@ esp_err_t ts_action_exec_ssh_ref(const ts_auto_action_ssh_ref_t *ssh_ref,
     }
     if (cmd_config.nohup) {
         /* Generate safe name from command name for log/pid files
-         * Use cmd.name (user-readable identifier) for consistency
-         * varName is only for service mode status variables
+         * Priority: cmd.name alphanumeric chars -> cmd_id alphanumeric chars -> "cmd"
+         * Pure Chinese names produce empty string, so fallback to cmd_id
          */
         char safe_name[32] = {0};
         const char *src = cmd_config.name;
@@ -1247,17 +1247,29 @@ esp_err_t ts_action_exec_ssh_ref(const ts_auto_action_ssh_ref_t *ssh_ref,
             }
         }
         if (j == 0) {
+            /* Fallback to cmd_id (e.g. "emb-pull-up" -> "embpullup") */
+            const char *id_src = ssh_ref->cmd_id;
+            for (int i = 0; id_src[i] && j < 20; i++) {
+                if ((id_src[i] >= 'a' && id_src[i] <= 'z') || 
+                    (id_src[i] >= 'A' && id_src[i] <= 'Z') || 
+                    (id_src[i] >= '0' && id_src[i] <= '9')) {
+                    safe_name[j++] = id_src[i];
+                }
+            }
+        }
+        if (j == 0) {
             strcpy(safe_name, "cmd");
         }
-        ESP_LOGI(TAG, "nohup safe_name='%s' (from name='%s')", safe_name, cmd_config.name);
+        ESP_LOGI(TAG, "nohup safe_name='%s' (from name='%s', id='%s')", safe_name, cmd_config.name, ssh_ref->cmd_id);
         
         /* nohup command with PID file for process tracking
-         * Format: nohup <cmd> > <log> 2>&1 & echo $! > <pid>
-         * The echo $! captures the background process PID
+         * Format: nohup <cmd> > <log> 2>&1 & echo $! > <pid>; sleep 0.3; cat <pid>
+         * 注意：$! 可能获取中间 shell PID 而非真实进程 PID（差 1），
+         * 前端已通过 PID-1 fallback 处理此情况
          */
         snprintf(nohup_cmd, TS_SSH_CMD_COMMAND_MAX + 128,
-                 "nohup %s > /tmp/ts_nohup_%s.log 2>&1 & echo $! > /tmp/ts_nohup_%s.pid",
-                 expanded_cmd, safe_name, safe_name);
+                 "nohup %s > /tmp/ts_nohup_%s.log 2>&1 & echo $! > /tmp/ts_nohup_%s.pid; sleep 0.3; cat /tmp/ts_nohup_%s.pid",
+                 expanded_cmd, safe_name, safe_name, safe_name);
         ESP_LOGI(TAG, "SSH nohup mode: %s", nohup_cmd);
     }
     
@@ -1382,7 +1394,7 @@ esp_err_t ts_action_exec_ssh_ref(const ts_auto_action_ssh_ref_t *ssh_ref,
             cmd_config.ready_pattern[0] && cmd_config.var_name[0]) {
             
             /* Generate safe name (same logic as nohup wrapper above)
-             * Use cmd.name for file paths, var_name only for status variables
+             * Priority: cmd.name -> cmd_id -> "cmd"
              */
             char safe_name[32] = {0};
             const char *src = cmd_config.name;
@@ -1392,6 +1404,16 @@ esp_err_t ts_action_exec_ssh_ref(const ts_auto_action_ssh_ref_t *ssh_ref,
                     (src[i] >= 'A' && src[i] <= 'Z') || 
                     (src[i] >= '0' && src[i] <= '9')) {
                     safe_name[j++] = src[i];
+                }
+            }
+            if (j == 0) {
+                const char *id_src = ssh_ref->cmd_id;
+                for (int i = 0; id_src[i] && j < 20; i++) {
+                    if ((id_src[i] >= 'a' && id_src[i] <= 'z') || 
+                        (id_src[i] >= 'A' && id_src[i] <= 'Z') || 
+                        (id_src[i] >= '0' && id_src[i] <= '9')) {
+                        safe_name[j++] = id_src[i];
+                    }
                 }
             }
             if (j == 0) {

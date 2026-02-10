@@ -362,7 +362,7 @@ button.btn-gray:hover,
     background: var(--bg-card);
     padding: 24px;
     border-radius: var(--radius-lg);
-    min-width: 320px;
+    min-width: 360px;
     max-width: 90%;
     transform: translateY(0);
     transition: transform 0.3s ease;
@@ -418,6 +418,7 @@ button.btn-gray:hover,
     width: 32px;
     height: 32px;
     min-width: 32px;
+    margin-left: auto;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -739,12 +740,12 @@ button.btn-gray:hover,
 
 .config-row input[type="text"],
 .config-row input[type="number"] {
-    padding: 7px 10px;
+    padding: 9px 12px;
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     color: var(--text-primary);
-    font-size: 0.8rem;
+    font-size: 0.875rem;
     font-family: inherit;
     box-shadow: var(--shadow-sm);
 }
@@ -761,12 +762,12 @@ button.btn-gray:hover,
 }
 
 .config-row select {
-    padding: 7px 10px;
+    padding: 9px 12px;
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     color: var(--text-primary);
-    font-size: 0.8rem;
+    font-size: 0.875rem;
     font-family: inherit;
     box-shadow: var(--shadow-sm);
 }
@@ -1046,22 +1047,29 @@ button.btn-gray:hover,
 
 .form-group label {
     display: block;
-    margin-bottom: 4px;
+    margin-bottom: 6px;
     font-weight: 500;
+    font-size: 0.875rem;
 }
 
 .form-group input:not([type="checkbox"]):not([type="radio"]),
 .form-group select,
 .form-group textarea {
+    display: block;
     width: 100%;
-    padding: 7px 12px;
+    padding: 9px 12px;
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
-    font-size: 0.8rem;
+    font-size: 0.875rem;
     font-family: inherit;
     background: var(--bg-card);
     color: var(--text-primary);
     box-shadow: var(--shadow-sm);
+}
+
+.form-group small {
+    display: block;
+    margin-top: 4px;
 }
 
 .form-group input[type="checkbox"] {
@@ -1107,6 +1115,28 @@ button.btn-gray:hover,
 .form-group input:focus,
 .form-group select:focus,
 .form-group textarea:focus {
+    outline: none;
+    border-color: var(--blue-500);
+    box-shadow: 0 0 0 3px var(--blue-50);
+}
+
+/* Base .input / .form-control class — consistent sizing for inputs outside .form-group */
+.input,
+.form-control {
+    width: 100%;
+    padding: 9px 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    font-size: 0.875rem;
+    font-family: inherit;
+    background: var(--bg-card);
+    color: var(--text-primary);
+    box-shadow: var(--shadow-sm);
+    box-sizing: border-box;
+}
+
+.input:focus,
+.form-control:focus {
     outline: none;
     border-color: var(--blue-500);
     box-shadow: 0 0 0 3px var(--blue-50);
@@ -2192,7 +2222,8 @@ button.btn-gray:hover,
     width: 80px;
     height: 4px;
     -webkit-appearance: none;
-    background: var(--card-bg);
+    appearance: none;
+    background: var(--border-color);
     border-radius: 2px;
 }
 
@@ -2316,7 +2347,8 @@ button.btn-gray:hover,
     width: 100%;
     height: 6px;
     -webkit-appearance: none;
-    background: var(--card-bg);
+    appearance: none;
+    background: var(--border-color);
     border-radius: 3px;
     cursor: pointer;
 }
@@ -2454,7 +2486,8 @@ button.btn-gray:hover,
     flex: 1;
     height: 6px;
     -webkit-appearance: none;
-    background: var(--card-bg);
+    appearance: none;
+    background: var(--border-color);
     border-radius: 3px;
 }
 
@@ -2557,12 +2590,12 @@ button.btn-gray:hover,
 }
 
 .matrix-controls select {
-    padding: 6px 8px;
+    padding: 8px 10px;
     background: var(--bg-color);
     border: 1px solid var(--border-color);
     border-radius: 6px;
     color: var(--text-color);
-    font-size: 0.8rem;
+    font-size: 0.875rem;
     cursor: pointer;
 }
 
@@ -2671,7 +2704,8 @@ button.btn-gray:hover,
     flex: 1;
     height: 6px;
     -webkit-appearance: none;
-    background: var(--card-bg);
+    appearance: none;
+    background: var(--border-color);
     border-radius: 3px;
 }
 
@@ -2691,10 +2725,19 @@ button.btn-gray:hover,
     color: var(--text-color);
 }
 
-/* 小按钮 */
-.btn-sm {
-    padding: 6px 12px;
-    font-size: 0.85rem;
+/* 小按钮（全站统一） */
+.btn-sm,
+.btn.btn-sm {
+    padding: 5px 10px;
+    font-size: 0.8rem;
+    box-shadow: none !important;   /* 消除 btn-gray 与 btn-danger 的阴影差异 */
+}
+/* btn-sm 内图标固定宽度 — 不同 RemixIcon 字符宽度不同，
+   固定 1em 后所有图标占据相同空间，按钮宽度完全一致 */
+.btn.btn-sm > i {
+    display: inline-block;
+    width: 1em;
+    text-align: center;
 }
 
 .btn-success {
@@ -3299,8 +3342,8 @@ button.btn-gray:hover,
 /* 安全页按钮统一为 btn-sm 尺寸 */
 .page-security .btn,
 .page-security .btn-sm {
-    padding: 5px 12px;
-    font-size: 0.85rem;
+    padding: 5px 10px;
+    font-size: 0.8rem;
 }
 /* 安全页按钮 icon 与文字间距统一（与其他页面一致） */
 .page-security .btn {
@@ -3331,8 +3374,8 @@ button.btn-gray:hover,
 
 .page-security .form-actions .btn,
 .page-security .form-actions .btn-sm {
-    padding: 5px 12px;
-    font-size: 0.85rem;
+    padding: 5px 10px;
+    font-size: 0.8rem;
 }
 
 .page-security h1,
@@ -3432,11 +3475,7 @@ button.btn-gray:hover,
     font-family: monospace;
 }
 
-/* 小按钮 */
-.btn-sm {
-    padding: 5px 12px;
-    font-size: 0.85rem;
-}
+/* 小按钮 → 已合并到全站统一 .btn-sm */
 
 /* =========================================================================
    文件管理页面样式
@@ -3733,9 +3772,6 @@ button.btn-gray:hover,
 }
 
 .file-actions-cell .btn-sm {
-    padding: 4px 8px;
-    font-size: 0.8rem;
-    display: inline-block;
     margin: 0 2px;
 }
 
@@ -3995,9 +4031,9 @@ button.btn-gray:hover,
 .config-item input[type="number"],
 .config-item input[type="password"],
 .config-item select {
-    padding: 8px 12px;
+    padding: 9px 12px;
     border: 1px solid var(--border-color);
-    border-radius: 6px;
+    border-radius: var(--radius-sm);
     background: var(--bg-color);
     color: var(--text-color);
     font-size: 0.9rem;
@@ -4315,9 +4351,9 @@ button.btn-gray:hover,
 
 .wifi-mode-selector select {
     flex: 1;
-    padding: 6px 10px;
+    padding: 8px 12px;
     border: 1px solid var(--border-color);
-    border-radius: 4px;
+    border-radius: var(--radius-sm);
     font-size: 0.9rem;
 }
 
@@ -4396,10 +4432,10 @@ button.btn-gray:hover,
 
 .service-config .input-sm {
     flex: 1;
-    padding: 6px 10px;
+    padding: 8px 10px;
     border: 1px solid var(--border-color);
-    border-radius: 4px;
-    font-size: 0.85rem;
+    border-radius: var(--radius-sm);
+    font-size: 0.875rem;
 }
 
 .service-actions {
@@ -4599,18 +4635,14 @@ button.btn-gray:hover,
     font-size: 0.9rem;
 }
 
-/* 小型按钮 */
-.btn-sm {
-    padding: 4px 10px;
-    font-size: 0.85rem;
-}
+/* 小型按钮 → 已合并到全站统一 .btn-sm */
 
 /* 小型选择框 */
 .select-sm {
-    padding: 4px 8px;
+    padding: 6px 10px;
     font-size: 0.85rem;
     border: 1px solid var(--border-color);
-    border-radius: 4px;
+    border-radius: var(--radius-sm);
 }
 
 /* 小型模态框 */
@@ -4634,7 +4666,7 @@ button.btn-gray:hover,
     gap: 8px;
     cursor: pointer;
     height: 100%;
-    padding-top: 20px;
+    padding-top: 24px;
 }
 
 .checkbox-label input[type="checkbox"] {
@@ -5205,7 +5237,8 @@ button.btn-gray:hover,
 
 /* Section 通用样式 */
 .page-automation .section {
-    margin-bottom: 24px;
+    margin-bottom: 20px;
+    margin-top: 12px;
 }
 
 .page-automation .section-header {
@@ -5395,11 +5428,12 @@ button.btn-gray:hover,
     width: 100%;
     border-collapse: collapse;
     font-size: 0.9rem;
+    table-layout: auto;
 }
 
 .page-automation .data-table th {
     background: var(--bg-color);
-    padding: 10px 12px;
+    padding: 10px 14px;
     text-align: left;
     font-weight: 600;
     font-size: 0.85rem;
@@ -5409,7 +5443,7 @@ button.btn-gray:hover,
 }
 
 .page-automation .data-table td {
-    padding: 10px 12px;
+    padding: 10px 14px;
     border-bottom: 1px solid var(--border-color);
     vertical-align: middle;
 }
@@ -5536,6 +5570,17 @@ button.btn-gray:hover,
     min-width: 0;
 }
 
+/* 确保自动化模态框内所有输入框和选择框填满容器 */
+.automation-modal .form-group input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]),
+.automation-modal .form-group select,
+.automation-modal .form-group textarea,
+.automation-modal .config-section input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]),
+.automation-modal .config-section select {
+    width: 100%;
+    display: block;
+    box-sizing: border-box;
+}
+
 .automation-modal .form-group label {
     display: block;
     margin-bottom: 6px;
@@ -5630,12 +5675,12 @@ button.btn-gray:hover,
 
 /* 条件逻辑缩短，避免与冷却时间、立即启用挤在一起 */
 #add-rule-modal .form-row.three-col .form-group-logic {
-    flex: 0 0 120px;
+    flex: 0 0 130px;
     min-width: 0;
 }
 
 #add-rule-modal .form-row.three-col .form-group:nth-of-type(2) {
-    flex: 0 0 120px;
+    flex: 0 0 140px;
     min-width: 0;
 }
 
@@ -5656,7 +5701,7 @@ button.btn-gray:hover,
 }
 
 .condition-row .cond-operator {
-    flex: 0 0 110px;
+    flex: 0 0 130px;
 }
 
 .condition-row .btn {
@@ -5920,6 +5965,19 @@ button.btn-gray:hover,
     padding-bottom: 0;
 }
 
+/* 动作模板表单行：确保并排布局不折行 */
+.action-section .form-row {
+    display: flex;
+    gap: 12px;
+    flex-wrap: nowrap;
+    align-items: flex-start;
+    margin-bottom: 16px;
+}
+
+.action-section .form-row .form-group {
+    min-width: 0;
+}
+
 .section-title {
     display: flex;
     align-items: center;
@@ -6077,12 +6135,24 @@ button.btn-gray:hover,
 .input-with-unit input {
     flex: 1;
     border: none;
-    padding: 8px 12px;
-    font-size: 0.95rem;
+    padding: 9px 12px;
+    font-size: 0.9rem;
     outline: none;
 }
 
+/* 覆盖 .form-group input 的高优先级规则，避免双重边框和阴影 */
+.form-group .input-with-unit input:not([type="checkbox"]):not([type="radio"]) {
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+    width: auto;
+}
+
 .input-with-unit input:focus {
+    box-shadow: inset 0 0 0 2px rgba(59, 130, 246, 0.2);
+}
+
+.form-group .input-with-unit input:focus {
     box-shadow: inset 0 0 0 2px rgba(59, 130, 246, 0.2);
 }
 
@@ -6568,6 +6638,22 @@ button.btn-gray:hover,
     .page-automation .data-table {
         display: block;
         overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+    
+    .page-automation .data-table th,
+    .page-automation .data-table td {
+        padding: 8px 10px;
+        white-space: nowrap;
+    }
+    
+    .page-automation .section {
+        padding: 16px;
+        margin-bottom: 16px;
+    }
+    
+    .page-automation .card.compact .card-content {
+        padding: 8px;
     }
     
     .automation-modal {
@@ -6991,7 +7077,11 @@ button.btn-gray:hover,
 
 /* 小型加载指示器 */
 .spinner-small {
-    display: inline-block;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1em;
+    height: 1em;
     animation: spin 1s linear infinite;
 }
 
@@ -7298,6 +7388,7 @@ button.btn-gray:hover,
 .dw-card-label {
     font-size: 0.85em;
     font-weight: 500;
+    font-style: normal;
     color: var(--text-light);
 }
 
@@ -7725,11 +7816,14 @@ button.btn-gray:hover,
     flex-wrap: nowrap;
     gap: 8px;
     padding: 8px 10px;
+    padding-right: 80px;
     background: var(--card-bg);
     border: 1px solid var(--border-color);
     border-radius: 6px;
     cursor: pointer;
     transition: all 0.2s;
+    position: relative;
+    overflow: hidden;
 }
 
 .dw-manager-item:hover {
@@ -7742,6 +7836,7 @@ button.btn-gray:hover,
 }
 
 .dw-manager-item-icon {
+    flex-shrink: 0;
     font-size: 1.1em;
 }
 
@@ -7749,6 +7844,7 @@ button.btn-gray:hover,
     flex: 1;
     min-width: 0;
     font-weight: 500;
+    font-style: normal;
     font-size: 0.9em;
     white-space: nowrap;
     overflow: hidden;
@@ -7756,6 +7852,8 @@ button.btn-gray:hover,
 }
 
 .dw-manager-item-type {
+    flex-shrink: 0;
+    white-space: nowrap;
     font-size: 0.7em;
     color: var(--text-light);
     background: var(--bg-color);
@@ -7764,11 +7862,21 @@ button.btn-gray:hover,
 }
 
 .dw-manager-item-actions {
-    flex-shrink: 0;
-    margin-left: auto;
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    transform: translateY(-50%);
     display: flex;
     gap: 2px;
     opacity: 0;
+    background: var(--card-bg);
+    padding: 2px 4px;
+    border-radius: 4px;
+    transition: opacity 0.2s;
+}
+
+.dw-manager-item.active .dw-manager-item-actions {
+    background: var(--blue-100);
 }
 
 .dw-manager-item:hover .dw-manager-item-actions {
@@ -8444,8 +8552,8 @@ button.btn-gray:hover,
     gap: 4px;
     padding: 4px 8px;
     font-size: 0.75em;
-    background: rgba(0, 0, 0, 0.05);
-    border-top: 1px solid rgba(0, 0, 0, 0.1);
+    background: transparent;
+    border-top: 1px solid rgba(0, 0, 0, 0.08);
 }
 
 .quick-action-service-status .service-label {
@@ -8457,28 +8565,28 @@ button.btn-gray:hover,
 }
 
 .quick-action-service-status.status-ready {
-    background: var(--emerald-100);
+    background: transparent;
     color: var(--emerald-600);
 }
 
 .quick-action-service-status.status-checking {
-    background: var(--blue-100);
+    background: transparent;
     color: var(--blue-500);
     animation: service-checking 1.5s ease-in-out infinite;
 }
 
 .quick-action-service-status.status-timeout {
-    background: var(--amber-100);
+    background: transparent;
     color: var(--amber-500);
 }
 
 .quick-action-service-status.status-failed {
-    background: var(--rose-100);
+    background: transparent;
     color: var(--rose-500);
 }
 
 .quick-action-service-status.status-idle {
-    background: rgba(149, 165, 166, 0.15);
+    background: transparent;
     color: var(--text-secondary);
 }
 

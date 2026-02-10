@@ -400,8 +400,6 @@ function handleEvent(msg) {
     
     // 处理日志消息
     if (msg.type === 'log') {
-        console.log('[Debug] Received log message, type:', msg.type);
-        
         // 日志页面处理
         if (typeof window.handleLogMessage === 'function') {
             window.handleLogMessage(msg);
@@ -409,17 +407,10 @@ function handleEvent(msg) {
         
         // 模态框实时日志处理
         const modal = document.getElementById('terminal-logs-modal');
-        console.log('[Debug] Modal check - exists:', !!modal, 'display:', modal?.style.display);
-        
         if (modal && modal.style.display === 'flex') {
-            console.log('[Debug] Modal is visible, calling handleModalLogMessage');
             if (typeof window.handleModalLogMessage === 'function') {
                 window.handleModalLogMessage(msg);
-            } else {
-                console.error('[Debug] handleModalLogMessage function not found!');
             }
-        } else {
-            console.log('[Debug] Modal not visible or not found');
         }
         return;
     }
@@ -447,12 +438,8 @@ function handleEvent(msg) {
         
         // 终端页面的日志模态框
         const modal = document.getElementById('terminal-logs-modal');
-        console.log('[Modal] log_history received, modal:', modal, 'display:', modal?.style.display);
-        console.log('[Modal] logs count:', logs.length);
-        
         if (modal && modal.style.display === 'flex') {
-            console.log('[Modal] Updating modalLogEntries...');
-            modalLogEntries.length = 0;  // 清空数组但保持引用
+            modalLogEntries.length = 0;
             modalLogEntries.push(...logs.map(log => ({
                 level: log.level || 3,
                 levelName: getLevelName(log.level || 3),
@@ -461,10 +448,7 @@ function handleEvent(msg) {
                 timestamp: log.timestamp || Date.now(),
                 task: log.task || ''
             })));
-            console.log('[Modal] After push, modalLogEntries length:', modalLogEntries.length);
             renderModalLogs();
-        } else {
-            console.log('[Modal] Modal not visible, skipping update');
         }
         
         return;
@@ -2638,6 +2622,8 @@ async function loadDataWidgets() {
                     await saveDataWidgets();
                 }
             }
+            // 修复已损坏的图标数据
+            _repairCorruptedWidgetIcons();
             return;
         }
     } catch (e) {
@@ -2651,6 +2637,33 @@ async function loadDataWidgets() {
         console.log('从 localStorage 加载数据组件配置');
     } else {
         dataWidgets = [];
+    }
+    
+    // 3. 修复已损坏的图标数据（旧版编辑面板未转义 HTML 属性导致 icon 被截断）
+    _repairCorruptedWidgetIcons();
+}
+
+/**
+ * 修复损坏的组件图标数据
+ * 旧版编辑面板未对 icon 值进行 HTML 转义，导致 <i class="..."></i> 中的引号
+ * 截断了 input value 属性，保存后 icon 变成 '<i class=' 等残缺值
+ */
+function _repairCorruptedWidgetIcons() {
+    let repaired = false;
+    dataWidgets.forEach(w => {
+        if (w.icon && typeof w.icon === 'string') {
+            const trimmed = w.icon.trim();
+            // 检测损坏：以 <i 开始但不以 </i> 结束
+            if (trimmed.startsWith('<i') && !trimmed.endsWith('</i>')) {
+                console.warn(`修复损坏的图标 (组件 "${w.label}"):`, JSON.stringify(w.icon), '→ 恢复为类型默认图标');
+                w.icon = WIDGET_TYPES[w.type]?.icon || '';
+                repaired = true;
+            }
+        }
+    });
+    if (repaired) {
+        // 异步保存修复后的数据
+        saveDataWidgets();
     }
 }
 
@@ -2830,6 +2843,22 @@ function formatDisplayValue(value, config) {
 }
 
 /**
+ * 校验并安全化组件图标 HTML
+ * 防止损坏的 <i> 标签吞噬后续文本（如标签名称）
+ */
+function sanitizeWidgetIcon(iconHtml) {
+    if (!iconHtml || typeof iconHtml !== 'string') return '';
+    const trimmed = iconHtml.trim();
+    // 有效图标：以 <i 开始，以 </i> 结束（正确闭合）
+    if (trimmed.startsWith('<i ') && trimmed.endsWith('</i>')) return trimmed + ' ';
+    if (trimmed === '<i></i>') return '';
+    // 如果只是 remixicon 类名（旧格式），包装成完整标签
+    if (/^ri-[\w-]+$/.test(trimmed)) return `<i class="${trimmed}"></i> `;
+    // 无效或损坏的图标 HTML — 丢弃，防止破坏 DOM
+    return '';
+}
+
+/**
  * 渲染单个组件的 HTML
  */
 function renderWidgetHtml(widget) {
@@ -2874,7 +2903,7 @@ function renderWidgetHtml(widget) {
         case 'number':
             contentHtml = `
                 <div class="dw-number-container">
-                    <div class="dw-number-icon" style="color: ${color};">${icon || '<i class="ri-dashboard-line"></i>'}</div>
+                    <div class="dw-number-icon" style="color: ${color};">${sanitizeWidgetIcon(icon) || '<i class="ri-dashboard-line"></i>'}</div>
                     <div class="dw-number-value">
                         <span class="dw-number-num" id="dw-${id}-value" style="color: ${color};">-</span>
                         <span class="dw-number-unit">${unit || ''}</span>
@@ -2959,7 +2988,7 @@ function renderWidgetHtml(widget) {
         default:
             contentHtml = `
                 <div class="dw-text-container">
-                    <div class="dw-text-icon">${icon || '<i class="ri-file-text-line"></i>'}</div>
+                    <div class="dw-text-icon">${sanitizeWidgetIcon(icon) || '<i class="ri-file-text-line"></i>'}</div>
                     <div class="dw-text-value" id="dw-${id}-value" style="color: ${color};">-</div>
                 </div>`;
             break;
@@ -2972,7 +3001,7 @@ function renderWidgetHtml(widget) {
     return `
         <div class="dw-card ${layoutClass}" data-widget-id="${id}" data-layout="${layout}" onclick="event.target.closest('.dw-card-actions') || event.target.closest('.dw-log-toolbar') || showWidgetManager('${id}')">
             <div class="dw-card-header">
-                <span class="dw-card-label">${icon ? icon + ' ' : ''}${label}</span>
+                <span class="dw-card-label">${sanitizeWidgetIcon(icon)}${escapeHtml(label)}</span>
             </div>
             ${contentHtml}
         </div>
@@ -3515,15 +3544,13 @@ function renderWidgetManagerList() {
     }
     
     list.innerHTML = dataWidgets.map((w, idx) => {
-        const typeName = (typeof t === 'function' && w.type) ? (t('dataWidget.widgetType' + w.type.charAt(0).toUpperCase() + w.type.slice(1)) || WIDGET_TYPES[w.type]?.name) : (WIDGET_TYPES[w.type]?.name || w.type);
         const moveUpTitle = typeof t === 'function' ? t('dataWidget.moveUp') : '上移';
         const moveDownTitle = typeof t === 'function' ? t('dataWidget.moveDown') : '下移';
         const deleteTitle = typeof t === 'function' ? t('dataWidget.delete') : '删除';
         return `
         <div class="dw-manager-item" data-id="${w.id}" onclick="showWidgetEditPanel('${w.id}')">
-            <span class="dw-manager-item-icon">${w.icon || WIDGET_TYPES[w.type]?.icon || '<i class="ri-dashboard-line"></i>'}</span>
-            <span class="dw-manager-item-label">${w.label}</span>
-            <span class="dw-manager-item-type">${typeName}</span>
+            <span class="dw-manager-item-icon">${sanitizeWidgetIcon(w.icon) || sanitizeWidgetIcon(WIDGET_TYPES[w.type]?.icon) || '<i class="ri-dashboard-line"></i>'}</span>
+            <span class="dw-manager-item-label">${escapeHtml(w.label)}</span>
             <div class="dw-manager-item-actions">
                 <button class="dw-btn-icon" onclick="event.stopPropagation();moveWidget('${w.id}',-1)" title="${moveUpTitle}" ${idx === 0 ? 'disabled' : ''}><i class="ri-arrow-up-line"></i></button>
                 <button class="dw-btn-icon" onclick="event.stopPropagation();moveWidget('${w.id}',1)" title="${moveDownTitle}" ${idx === dataWidgets.length - 1 ? 'disabled' : ''}><i class="ri-arrow-down-line"></i></button>
@@ -3698,7 +3725,7 @@ function showWidgetEditPanel(widgetId) {
         extraConfigHtml = `
             <div class="form-group">
                 <label>${typeof t === 'function' ? t('dataWidget.secondaryExpression') : '副值表达式'}</label>
-                <input type="text" id="edit-expression2" class="input" value="${widget.expression2 || ''}" 
+                <input type="text" id="edit-expression2" class="input" value="${escapeHtml(widget.expression2 || '')}" 
                        placeholder="${typeof t === 'function' ? t('dataWidget.secondaryExpressionPlaceholder') : '例如: ${max_value}'}">
                 <small class="form-hint">${typeof t === 'function' ? t('dataWidget.secondaryExpressionHint') : '显示在主值右侧的副值'}</small>
             </div>`;
@@ -3718,7 +3745,7 @@ function showWidgetEditPanel(widgetId) {
             <div class="form-group dw-expression-group">
                 <label>${typeof t === 'function' ? t('dataWidget.logVariable') : '日志变量'} <span class="badge">${typeof t === 'function' ? t('common.core') : '核心'}</span></label>
                 <div class="dw-expression-input">
-                    <input type="text" id="edit-expression" class="input" value="${widget.expression || ''}" 
+                    <input type="text" id="edit-expression" class="input" value="${escapeHtml(widget.expression || '')}" 
                            placeholder="${typeof t === 'function' ? t('dataWidget.logVariablePlaceholder') : '选择包含日志文本的变量'}">
                     <button class="btn" onclick="selectVariableForWidget()">${typeof t === 'function' ? t('dataWidget.selectVariable') : '选择变量'}</button>
                 </div>
@@ -3734,13 +3761,13 @@ function showWidgetEditPanel(widgetId) {
             
             <div class="form-group">
                 <label>${typeof t === 'function' ? t('dataWidget.labelName') : '标签名称'}</label>
-                <input type="text" id="edit-label" class="input" value="${widget.label}" placeholder="${typeof t === 'function' ? t('dataWidget.labelPlaceholder') : '组件名称'}">
+                <input type="text" id="edit-label" class="input" value="${escapeHtml(widget.label)}" placeholder="${typeof t === 'function' ? t('dataWidget.labelPlaceholder') : '组件名称'}">
             </div>
             
             <div class="form-row">
                 <div class="form-group">
                     <label>${typeof t === 'function' ? t('dataWidget.icon') : '图标'}</label>
-                    <input type="text" id="edit-icon" class="input" value="${widget.icon || ''}" placeholder="${typeof t === 'function' ? t('dataWidget.iconPlaceholder') || 'emoji' : 'emoji'}">
+                    <input type="text" id="edit-icon" class="input" value="${escapeHtml(widget.icon || '')}" placeholder="${typeof t === 'function' ? t('dataWidget.iconPlaceholder') || 'emoji' : 'emoji'}">
                 </div>
                 <div class="form-group">
                     <label>${typeof t === 'function' ? t('dataWidget.color') : '颜色'}</label>
@@ -3775,7 +3802,7 @@ function showWidgetEditPanel(widgetId) {
             <div class="form-row">
                 <div class="form-group">
                     <label>${typeof t === 'function' ? t('dataWidget.unit') : '单位'}</label>
-                    <input type="text" id="edit-unit" class="input" value="${widget.unit || ''}" placeholder="%、°C、W">
+                    <input type="text" id="edit-unit" class="input" value="${escapeHtml(widget.unit || '')}" placeholder="%、°C、W">
                 </div>
                 <div class="form-group">
                     <label>${typeof t === 'function' ? t('dataWidget.decimals') : '小数位'}</label>
@@ -3803,7 +3830,7 @@ function showWidgetEditPanel(widgetId) {
             <div class="form-group dw-expression-group">
                 <label>${typeof t === 'function' ? t('dataWidget.dataExpression') : '数据表达式'} <span class="badge">${typeof t === 'function' ? t('common.core') : '核心'}</span></label>
                 <div class="dw-expression-input">
-                    <input type="text" id="edit-expression" class="input" value="${widget.expression || ''}" 
+                    <input type="text" id="edit-expression" class="input" value="${escapeHtml(widget.expression || '')}" 
                            placeholder="${typeof t === 'function' ? t('dataWidget.dataExpressionPlaceholder') : '点击选择变量或输入表达式'}">
                     <button class="btn" onclick="selectVariableForWidget()">${typeof t === 'function' ? t('dataWidget.selectVariable') : '选择变量'}</button>
                 </div>
@@ -3937,43 +3964,42 @@ async function refreshQuickActions() {
     }
     
     try {
-        console.log('refreshQuickActions: Fetching rules...');
-        
         // 确保 SSH 主机数据已加载（用于 nohup 按钮）
         if (!window._sshHostsData || Object.keys(window._sshHostsData).length === 0) {
             await loadSshHostsData();
         }
         
+        // 强制刷新 SSH 命令缓存，确保 nohup/serviceMode 等字段为最新
+        await loadSshCommands();
+        
         const result = await api.call('automation.rules.list');
-        console.log('refreshQuickActions: API result:', result);
         
         if (result.code === 0 && result.data && result.data.rules) {
             // 过滤出启用且标记为可手动触发的规则
             const allRules = result.data.rules;
-            console.log('refreshQuickActions: All rules:', allRules.map(r => ({ id: r.id, enabled: r.enabled, manual_trigger: r.manual_trigger })));
             const manualRules = allRules.filter(r => r.enabled && r.manual_trigger);
-            console.log('refreshQuickActions: Manual rules count:', manualRules.length);
             
             if (manualRules.length > 0) {
-                // 检查每个规则是否包含 nohup SSH 命令
-                const cardsHtml = await Promise.all(manualRules.map(async rule => {
-                    const iconValue = rule.icon || '⚡';
-                    const iconHtml = iconValue.startsWith('/sdcard/') 
-                        ? `<img src="/api/v1/file/download?path=${encodeURIComponent(iconValue)}" alt="icon" onerror="this.textContent='⚡'">`
-                        : iconValue;
+                // 串行检查每个规则的 nohup 状态并生成卡片，避免多路 ssh.exec 并发导致后端串行/覆盖、结果错位
+                const cardsHtml = [];
+                for (const rule of manualRules) {
+                    const iconValue = rule.icon || 'ri-thunderstorms-line';
+                    let iconHtml;
+                    if (iconValue.startsWith('/sdcard/')) {
+                        iconHtml = `<img src="/api/v1/file/download?path=${encodeURIComponent(iconValue)}" alt="icon" onerror="this.outerHTML='<i class=\\'ri-thunderstorms-line\\'></i>'">`;
+                    } else if (iconValue.startsWith('ri-')) {
+                        iconHtml = `<i class="${iconValue}"></i>`;
+                    } else {
+                        iconHtml = `<i class="${getRuleIconRi(iconValue)}"></i>`;
+                    }
                     
-                    // 检查是否有 nohup SSH 命令动作
                     const nohupInfo = await checkRuleHasNohupSsh(rule);
-                    
-                    // 基础卡片 + nohup 控制按钮（带运行状态）
                     let nohupBtns = '';
                     let isRunning = false;
                     if (nohupInfo) {
-                        // 检测进程是否正在运行
                         try {
                             const host = window._sshHostsData?.[nohupInfo.hostId];
                             if (host) {
-                                console.log('Checking process status:', nohupInfo.checkCmd);
                                 const checkResult = await api.call('ssh.exec', {
                                     host: host.host,
                                     port: host.port,
@@ -3982,36 +4008,24 @@ async function refreshQuickActions() {
                                     command: nohupInfo.checkCmd,
                                     timeout_ms: 5000
                                 });
-                                const stdout = checkResult.data?.stdout?.trim() || '';
-                                console.log('Process check result:', stdout, 'code:', checkResult.code, 'full result:', checkResult);
-                                // 检查 stdout 是否包含 'running'（兼容可能的额外输出）
+                                const stdout = (checkResult.data?.stdout || '').trim();
                                 isRunning = stdout.includes('running');
                             }
                         } catch (e) {
-                            console.warn('Check process status failed:', e);
+                            console.warn('Check process status failed for rule', rule.id, e);
                             isRunning = false;
                         }
                         
                         const statusIcon = isRunning ? '<i class="ri-record-circle-fill" style="color:#059669"></i>' : '<i class="ri-record-circle-line" style="color:#9ca3af"></i>';
                         const statusTitle = isRunning ? '进程运行中' : '进程未运行';
-                        
-                        // 服务模式状态显示（只有进程运行时才显示服务状态栏）
                         let serviceStatusHtml = '';
                         if (nohupInfo.serviceMode && nohupInfo.varName && isRunning) {
-                            const serviceStatusId = `service-status-${escapeHtml(rule.id)}`;
                             serviceStatusHtml = `
-                                <div class="quick-action-service-status" id="${serviceStatusId}" data-var="${escapeHtml(nohupInfo.varName)}" data-running="true">
+                                <div class="quick-action-service-status" id="service-status-${escapeHtml(rule.id)}" data-var="${escapeHtml(nohupInfo.varName)}" data-running="true">
                                     <span class="service-value">...</span>
                                 </div>
                             `;
                         }
-                        
-                        // 停止按钮：进程未运行时禁用
-                        const stopBtnDisabled = isRunning ? '' : 'disabled';
-                        const stopBtnClass = isRunning ? 'btn-stop' : 'btn-stop btn-disabled';
-                        
-                        // 状态徽章 + 底部操作栏（传递 pidFile 用于精确停止）
-                        // 日志文件路径统一使用 nohupInfo.logFile（基于 cmd.name）
                         nohupBtns = `
                             <span class="nohup-status-badge" title="${statusTitle}">${statusIcon}</span>
                             ${serviceStatusHtml}
@@ -4019,22 +4033,18 @@ async function refreshQuickActions() {
                                 <button onclick="quickActionViewLog('${escapeHtml(nohupInfo.logFile)}', '${escapeHtml(nohupInfo.hostId)}')" title="查看日志">
                                     <i class="ri-file-text-line"></i> 日志
                                 </button>
-                                <button class="${stopBtnClass}" onclick="quickActionStopProcess('${escapeHtml(nohupInfo.pidFile)}', '${escapeHtml(nohupInfo.hostId)}', '${escapeHtml(nohupInfo.cmdName)}')" title="终止进程" ${stopBtnDisabled}>
+                                <button class="btn-stop" onclick="quickActionStopProcess('${escapeHtml(nohupInfo.pidFile)}', '${escapeHtml(nohupInfo.hostId)}', '${escapeHtml(nohupInfo.cmdName)}', '${escapeHtml(nohupInfo.varName || '')}')" title="终止进程">
                                     <i class="ri-stop-line"></i> 停止
                                 </button>
                             </div>
                         `;
                     }
                     
-                    // 如果进程正在运行，点击卡片时提示而不是触发
                     const cardOnClick = (nohupInfo && isRunning) 
                         ? `showToast('进程正在运行中，请先停止', 'warning')`
                         : `triggerQuickAction('${escapeHtml(rule.id)}')`;
-                    
-                    // 移除名称开头的emoji (包括常见emoji和零宽字符)
                     const cleanName = rule.name.replace(/^[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{FE00}-\u{FE0F}\u{1F1E0}-\u{1F1FF}\u200D]+\s*/gu, '').trim();
-                    
-                    return `
+                    cardsHtml.push(`
                         <div class="quick-action-card${nohupInfo ? ' has-nohup' : ''}${nohupInfo?.serviceMode ? ' has-service' : ''}${isRunning ? ' is-running' : ''}" 
                              id="quick-action-${escapeHtml(rule.id)}"
                              data-rule-id="${escapeHtml(rule.id)}"
@@ -4044,8 +4054,8 @@ async function refreshQuickActions() {
                             <div class="quick-action-name">${escapeHtml(cleanName)}</div>
                             ${nohupBtns}
                         </div>
-                    `;
-                }));
+                    `);
+                }
                 container.innerHTML = cardsHtml.join('');
                 
                 // 更新服务状态
@@ -4136,12 +4146,15 @@ async function updateQuickActionServiceStatus() {
     }
 }
 
+// 触发快捷操作后的冷却时间（毫秒），避免连续触发导致后端只执行最后一个
+let _quickActionTriggerCooldownUntil = 0;
+let _quickActionLastTriggeredId = '';
+
 /**
  * 触发快捷操作
  * @param {string} ruleId - 规则 ID
  */
 async function triggerQuickAction(ruleId) {
-    // 获取卡片元素
     const card = event?.currentTarget || document.getElementById(`quick-action-${ruleId}`);
     if (!card) {
         console.error('triggerQuickAction: card not found for ruleId=', ruleId);
@@ -4149,9 +4162,14 @@ async function triggerQuickAction(ruleId) {
         return;
     }
     
-    // 检查是否已经在执行中（防止重复点击）
     if (card.classList.contains('triggering')) {
         showToast(typeof t === 'function' ? t('toast.processing') : 'Operation in progress...', 'warning');
+        return;
+    }
+    
+    const now = Date.now();
+    if (now < _quickActionTriggerCooldownUntil && ruleId !== _quickActionLastTriggeredId) {
+        showToast('请等待几秒后再触发其他模型', 'warning');
         return;
     }
     
@@ -4164,19 +4182,18 @@ async function triggerQuickAction(ruleId) {
         const iconEl = card.querySelector('.quick-action-icon');
         const originalIcon = iconEl?.innerHTML;
         if (iconEl) {
-            iconEl.innerHTML = '<span class="spinner-small"><i class="ri-time-line"></i></span>';
+            iconEl.innerHTML = '<span class="spinner-small"><i class="ri-refresh-line"></i></span>';
         }
         
-        console.log('triggerQuickAction: calling API for ruleId=', ruleId);
         const result = await api.call('automation.rules.trigger', { id: ruleId });
-        console.log('triggerQuickAction: result=', result);
         
         if (result.code === 0) {
             showToast('操作已执行', 'success');
-            // 对于 nohup 命令，需要等待更长时间让进程启动并创建 PID 文件
-            // 先显示执行中状态，然后延迟刷新获取实际状态
+            _quickActionLastTriggeredId = ruleId;
+            _quickActionTriggerCooldownUntil = Date.now() + 5000;  // 5 秒内勿触发其他规则，避免后端串行导致第二个未执行
             card.classList.add('is-running');
-            setTimeout(() => refreshQuickActions(), 2500);  // 等待 2.5 秒让进程启动
+            card.style.pointerEvents = '';
+            setTimeout(() => refreshQuickActions(), 2500);
         } else {
             showToast((result.message || '执行失败'), 'error');
             card.style.pointerEvents = '';  // 失败时恢复点击
@@ -4205,7 +4222,6 @@ async function triggerQuickAction(ruleId) {
 async function checkRuleHasNohupSsh(rule) {
     // 列表 API 只返回 actions_count，需要获取完整规则
     if (!rule.actions_count || rule.actions_count === 0) {
-        console.log('checkRuleHasNohupSsh: rule', rule.id, 'has no actions');
         return null;
     }
     
@@ -4213,12 +4229,10 @@ async function checkRuleHasNohupSsh(rule) {
     try {
         const detailResult = await api.call('automation.rules.get', { id: rule.id });
         if (detailResult.code !== 0 || !detailResult.data || !detailResult.data.actions) {
-            console.log('checkRuleHasNohupSsh: failed to get rule details for', rule.id);
             return null;
         }
         
         const actions = detailResult.data.actions;
-        console.log('checkRuleHasNohupSsh: rule', rule.id, 'actions=', actions);
         
         // 确保 SSH 命令已加载
         if (Object.keys(sshCommands).length === 0) {
@@ -4229,45 +4243,45 @@ async function checkRuleHasNohupSsh(rule) {
         for (const action of actions) {
             let sshCmdId = null;
             
-            // 方式1: 动作本身是 ssh_cmd_ref 类型
-            if (action.type === 'ssh_cmd_ref' && action.ssh_ref?.cmd_id) {
-                sshCmdId = action.ssh_ref.cmd_id;
+            // 方式1: 动作本身是 ssh_cmd_ref 类型（兼容两种 API 返回格式）
+            // rules.get 返回 action.cmd_id（直接字段），actions.get 返回 action.ssh_ref.cmd_id（嵌套）
+            if (action.type === 'ssh_cmd_ref' && (action.ssh_ref?.cmd_id || action.cmd_id)) {
+                sshCmdId = action.ssh_ref?.cmd_id || action.cmd_id;
             }
             // 方式2: 动作有 template_id，需要查询模板获取实际类型
             else if (action.template_id) {
                 try {
                     const tplResult = await api.call('automation.actions.get', { id: action.template_id });
                     if (tplResult.code === 0 && tplResult.data) {
-                        console.log('checkRuleHasNohupSsh: template', action.template_id, '=', tplResult.data);
                         if (tplResult.data.type === 'ssh_cmd_ref' && tplResult.data.ssh_ref?.cmd_id) {
                             sshCmdId = tplResult.data.ssh_ref.cmd_id;
                         }
                     }
                 } catch (e) {
-                    console.warn('checkRuleHasNohupSsh: failed to get template', action.template_id);
+                    // template fetch failed, skip
                 }
             }
             
             if (sshCmdId) {
                 const cmdId = String(sshCmdId);
-                console.log('checkRuleHasNohupSsh: looking for cmdId=', cmdId);
                 // 在所有主机的命令中查找
                 for (const [hostId, cmds] of Object.entries(sshCommands)) {
                     const cmd = cmds.find(c => String(c.id) === cmdId);
                     if (cmd) {
-                        console.log('checkRuleHasNohupSsh: found cmd=', cmd.name, 'nohup=', cmd.nohup, 'serviceMode=', cmd.serviceMode);
                         if (cmd.nohup) {
                             // 找到了 nohup 命令
-                            // 文件名统一使用 cmd.name（用户可读的命令名称）
-                            // varName 只用于服务模式的状态变量
-                            const safeName = cmd.name.replace(/[^a-zA-Z0-9]/g, '').slice(0, 20) || 'cmd';
+                            // safeName：优先从 cmd.name 提取英文数字，fallback 到 cmd.id
+                            // （纯中文名如"嵌入模型拉起"提取不到任何字符，需要用 id）
+                            const safeName = cmd.name.replace(/[^a-zA-Z0-9]/g, '').slice(0, 20) || String(cmd.id).replace(/[^a-zA-Z0-9]/g, '').slice(0, 20) || 'cmd';
                             const logFile = `/tmp/ts_nohup_${safeName}.log`;
                             const pidFile = `/tmp/ts_nohup_${safeName}.pid`;
                             const varName = cmd.varName || '';  // 服务模式变量名
                             
-                            // 使用 PID 文件检测进程状态（最可靠）
-                            // 检查 PID 文件存在且进程仍在运行
-                            const checkCmd = `[ -f ${pidFile} ] && kill -0 $(cat ${pidFile}) 2>/dev/null && echo 'running' || echo 'stopped'`;
+                            // 检测进程状态：多重 fallback 策略
+                            // 问题：nohup cmd & 的 $! 获取到的 PID 可能是中间 shell 进程，
+                            // 真实主进程 PID 往往是 $! - 1（如 vLLM 等多进程服务）
+                            // 策略：1) kill -0 PID  2) kill -0 PID-1  3) pgrep 按日志文件名兜底
+                            const checkCmd = `if [ -f ${pidFile} ]; then PID=$(cat ${pidFile}); if kill -0 $PID 2>/dev/null; then echo running; elif kill -0 $((PID-1)) 2>/dev/null; then echo running; else echo stopped; fi; else echo stopped; fi`;
                             
                             return {
                                 logFile: logFile,
@@ -4364,29 +4378,26 @@ async function quickActionRefreshLog(logFile, hostId) {
     if (!contentEl) return;
     
     try {
-        // 使用 tail -n 200 限制行数，避免日志过大
         const result = await api.call('ssh.exec', {
             host: host.host,
             port: host.port,
             user: host.username,
             keyid: host.keyid,
-            command: `if [ -f ${logFile} ]; then tail -n 200 ${logFile}; else echo '[日志文件不存在或为空]'; fi`,
-            timeout_ms: 10000
+            command: `if [ -f ${logFile} ]; then cat ${logFile}; else echo '[日志文件不存在或为空]'; fi`,
+            timeout_ms: 15000
         });
-        
-        if (result.code === 0 && result.data) {
-            const output = result.data.stdout || result.data.stderr || '[空]';
-            // 只有内容变化时才更新（避免闪烁）
-            if (output !== quickActionLastContent) {
-                contentEl.textContent = output;
-                contentEl.scrollTop = contentEl.scrollHeight;
-                quickActionLastContent = output;
-            }
-        } else {
-            contentEl.textContent = '[获取失败] ' + (result.message || '');
+        if (result.code !== 0 || !result.data) {
+            contentEl.textContent = '[获取失败] ' + (result.message || 'code=' + result.code);
+            return;
+        }
+        const output = (result.data.stdout || result.data.stderr || '').trim() || '[空]';
+        if (output !== quickActionLastContent) {
+            contentEl.textContent = output;
+            contentEl.scrollTop = contentEl.scrollHeight;
+            quickActionLastContent = output;
         }
     } catch (e) {
-        contentEl.textContent = '[错误] ' + e.message;
+        contentEl.textContent = '[错误] ' + e.message + '\n\n若设备繁忙可稍后重试。';
     }
 }
 
@@ -4500,8 +4511,9 @@ function closeQuickLogModal() {
 
 /**
  * 快捷操作 - 终止进程（基于 PID 文件精确停止）
+ * 支持杀进程组（vLLM 等多进程服务），SIGTERM → 等待 → SIGKILL 回退
  */
-async function quickActionStopProcess(pidFile, hostId, cmdName) {
+async function quickActionStopProcess(pidFile, hostId, cmdName, varName) {
     const host = window._sshHostsData?.[hostId];
     if (!host) {
         showToast('主机不存在', 'error');
@@ -4514,21 +4526,66 @@ async function quickActionStopProcess(pidFile, hostId, cmdName) {
     
     try {
         showToast('正在终止进程...', 'info');
-        // 使用 PID 文件精确终止进程
+        
+        // 终止进程：支持 PID 和 PID-1 双重检测
+        // 原因：nohup cmd & 的 $! 可能记录了中间 shell PID，真实主进程 PID = $! - 1
+        // 逻辑：读取 PID 文件 → 找到活着的真实 PID → SIGTERM 进程组 → 等待 → SIGKILL 回退
+        const killCmd = `if [ -f ${pidFile} ]; then ` +
+            `RAW_PID=$(cat ${pidFile}); ` +
+            // 确定真实 PID：先检查 RAW_PID，再检查 RAW_PID-1
+            `if kill -0 $RAW_PID 2>/dev/null; then PID=$RAW_PID; ` +
+            `elif kill -0 $((RAW_PID-1)) 2>/dev/null; then PID=$((RAW_PID-1)); ` +
+            `else rm -f ${pidFile}; echo "ALREADY_STOPPED"; exit 0; fi; ` +
+            // 先尝试 SIGTERM 进程组（kill 负 PID），回退到单进程 kill
+            `kill -- -$PID 2>/dev/null; kill $PID 2>/dev/null; ` +
+            // 等待最多 3 秒
+            `for i in 1 2 3 4 5 6; do sleep 0.5; kill -0 $PID 2>/dev/null || break; done; ` +
+            // 检查是否还活着
+            `if kill -0 $PID 2>/dev/null; then ` +
+                // 仍在运行，SIGKILL 进程组
+                `kill -9 -- -$PID 2>/dev/null; kill -9 $PID 2>/dev/null; ` +
+                `sleep 0.5; ` +
+                `if kill -0 $PID 2>/dev/null; then ` +
+                    `echo "STILL_RUNNING"; ` +
+                `else ` +
+                    `rm -f ${pidFile}; echo "FORCE_KILLED"; ` +
+                `fi; ` +
+            `else ` +
+                `rm -f ${pidFile}; echo "TERMINATED"; ` +
+            `fi; ` +
+        `else echo "NO_PID_FILE"; fi`;
+        
         const result = await api.call('ssh.exec', {
             host: host.host,
             port: host.port,
             user: host.username,
             keyid: host.keyid,
-            command: `if [ -f ${pidFile} ]; then kill $(cat ${pidFile}) 2>/dev/null && rm -f ${pidFile} && echo "已终止进程" || echo "进程已不存在"; else echo "PID 文件不存在"; fi`,
-            timeout_ms: 10000
+            command: killCmd,
+            timeout_ms: 15000
         });
         
         if (result.code === 0 && result.data) {
-            const output = result.data.stdout || result.data.stderr || '操作完成';
-            showToast(output.trim(), output.includes('已终止') ? 'success' : 'info');
+            const output = (result.data.stdout || '').trim();
+            const msgMap = {
+                'TERMINATED': '服务已停止',
+                'FORCE_KILLED': '服务已强制终止',
+                'ALREADY_STOPPED': '进程已不在运行，已清理 PID 文件',
+                'NO_PID_FILE': 'PID 文件不存在',
+                'STILL_RUNNING': '无法终止进程，请手动处理'
+            };
+            const msg = msgMap[output] || (output || '操作完成');
+            const isSuccess = ['TERMINATED', 'FORCE_KILLED', 'ALREADY_STOPPED'].includes(output);
+            showToast(msg, isSuccess ? 'success' : (output === 'STILL_RUNNING' ? 'error' : 'info'));
+            // 停止成功后，清除服务模式状态变量（否则"就绪"标签会残留）
+            if (isSuccess && varName) {
+                try {
+                    await api.call('automation.variables.set', { name: `${varName}.status`, value: 'stopped' });
+                } catch (e) {
+                    console.warn('Failed to clear service status variable:', e);
+                }
+            }
             // 刷新状态
-            setTimeout(() => refreshQuickActions(), 1000);
+            setTimeout(() => refreshQuickActions(), 1500);
         } else {
             showToast((result.message || '操作失败'), 'error');
         }
@@ -9105,7 +9162,7 @@ function refreshCommandsList() {
         const varBtnHtml = cmd.varName ? `<button class="btn btn-sm" onclick="showCommandVariables('${escapeHtml(cmd.varName)}')" title="查看变量: ${escapeHtml(cmd.varName)}.*"><i class="ri-bar-chart-line"></i></button>` : '';
         
         // 服务模式按钮（日志、停止）
-        const safeName = cmd.name.replace(/[^a-zA-Z0-9]/g, '').slice(0, 20) || 'cmd';
+        const safeName = cmd.name.replace(/[^a-zA-Z0-9]/g, '').slice(0, 20) || String(cmd.id).replace(/[^a-zA-Z0-9]/g, '').slice(0, 20) || 'cmd';
         const serviceActionsHtml = (cmd.nohup && cmd.serviceMode) ? `
             <button class="btn btn-sm" onclick="viewServiceLog(${idx}, '${escapeHtml(safeName)}')" title="查看日志"><i class="ri-file-text-line"></i></button>
             <button class="btn btn-sm" onclick="stopServiceProcess(${idx}, '${escapeHtml(safeName)}')" title="停止服务" style="background:#f43f5e;color:white"><i class="ri-stop-line"></i></button>
@@ -9159,23 +9216,17 @@ async function updateServiceStatusInList() {
     const serviceModeTags = document.querySelectorAll('.service-mode-status');
     if (serviceModeTags.length === 0) return;
     
-    console.log(`[ServiceStatus] Updating ${serviceModeTags.length} service status tags`);
-    
     for (const tag of serviceModeTags) {
         const varName = tag.dataset.var;
         const statusId = tag.dataset.statusId;
         const statusEl = document.getElementById(statusId);
         
-        console.log(`[ServiceStatus] Processing: varName=${varName}, statusId=${statusId}, statusEl=${statusEl ? 'found' : 'NOT FOUND'}`);
-        
         if (!varName || !statusEl) {
-            console.warn(`[ServiceStatus] Skipping: varName=${varName}, statusEl=${!!statusEl}`);
             continue;
         }
         
         try {
             const result = await api.call('automation.variables.get', { name: `${varName}.status` });
-            console.log(`[ServiceStatus] ${varName}.status =`, result?.data?.value);
             
             if (result && result.data && result.data.value !== undefined) {
                 const status = result.data.value;
@@ -9542,7 +9593,7 @@ function validateCommandId(input) {
         return false;
     }
     
-    input.style.borderColor = 'var(--success-color)';
+    input.style.borderColor = '';
     errorSpan.style.display = 'none';
     return true;
 }
@@ -9550,7 +9601,7 @@ function validateCommandId(input) {
 async function saveCommand() {
     const cmdId = document.getElementById('cmd-edit-id').value.trim();
     const name = document.getElementById('cmd-name').value.trim();
-    const command = document.getElementById('cmd-command').value.trim();
+    let command = document.getElementById('cmd-command').value.trim();
     const desc = document.getElementById('cmd-desc').value.trim();
     const icon = document.getElementById('cmd-icon').value;
     const nohup = document.getElementById('cmd-nohup')?.checked || false;
@@ -9572,6 +9623,24 @@ async function saveCommand() {
     if (!name || !command) {
         showToast('请填写指令名称和命令', 'warning');
         return;
+    }
+    
+    /* nohup 模式下自动检测并剥离用户多余的 nohup 包装。
+     * 后端会在 nohup=true 时自动添加 nohup/重定向/PID 追踪，
+     * 如果用户的命令里已经包含这些，会导致双重包装，日志只能读到 PID。 */
+    if (nohup && command) {
+        let cleaned = command;
+        // 去掉开头的 nohup（后端会自己加）
+        cleaned = cleaned.replace(/^\s*nohup\s+/, '');
+        // 去掉尾部的 > /tmp/... 2>&1 & echo $! > /tmp/... 等 nohup 尾巴
+        cleaned = cleaned.replace(/\s*>\s*\/tmp\/ts_nohup_\S+\.log\s+2>&1\s*&\s*echo\s+\$!\s*>\s*\/tmp\/ts_nohup_\S+\.pid\s*$/, '');
+        // 更宽泛：去掉尾部的 > 任意路径.log 2>&1 & echo $! > 任意路径.pid
+        cleaned = cleaned.replace(/\s*>\s*\S+\.log\s+2>&1\s*&\s*echo\s+\$!\s*>\s*\S+\.pid\s*$/, '');
+        if (cleaned !== command) {
+            document.getElementById('cmd-command').value = cleaned;
+            command = cleaned;
+            showToast('已自动去除命令中多余的 nohup 包装（后端会自动添加）', 'info');
+        }
     }
     
     /* ID 验证（必填） */
@@ -10469,8 +10538,8 @@ async function executeCommand(idx) {
     let nohupLogFile = null;
     let nohupPidFile = null;
     if (cmd.nohup) {
-        // 基于命令名生成固定文件名（每次执行会覆盖）
-        const safeName = cmd.name.replace(/[^a-zA-Z0-9]/g, '').slice(0, 20) || 'cmd';
+        // 基于命令名生成固定文件名（每次执行会覆盖），纯中文名 fallback 到 cmd.id
+        const safeName = cmd.name.replace(/[^a-zA-Z0-9]/g, '').slice(0, 20) || String(cmd.id).replace(/[^a-zA-Z0-9]/g, '').slice(0, 20) || 'cmd';
         nohupLogFile = `/tmp/ts_nohup_${safeName}.log`;
         nohupPidFile = `/tmp/ts_nohup_${safeName}.pid`;
         
@@ -14044,26 +14113,12 @@ let modalLogSubscribed = false;
 const MAX_MODAL_LOG_ENTRIES = 1000;
 
 function showTerminalLogsModal() {
-    console.log('[Modal] showTerminalLogsModal called - START');
     const modal = document.getElementById('terminal-logs-modal');
-    console.log('[Modal] showTerminalLogsModal called, modal:', modal);
-    
-    if (!modal) {
-        console.error('[Modal] Modal element not found!');
-        return;
-    }
+    if (!modal) return;
     
     modal.style.display = 'flex';
-    console.log('[Modal] Modal display set to flex');
-    modalLogEntries.length = 0;  // 清空但保持引用
-    
-    console.log('[Modal] About to call subscribeToModalLogs...');
-    console.log('[Modal] typeof subscribeToModalLogs:', typeof subscribeToModalLogs);
-    
-    // 启动实时订阅
+    modalLogEntries.length = 0;
     subscribeToModalLogs();
-    
-    console.log('[Modal] showTerminalLogsModal - END');
 }
 
 function closeTerminalLogsModal() {
@@ -14077,24 +14132,18 @@ function closeTerminalLogsModal() {
 
 // 订阅模态框日志
 function subscribeToModalLogs() {
-    console.log('[Modal] subscribeToModalLogs called');
     const levelFilter = document.getElementById('modal-log-level-filter')?.value || '3';
     const minLevel = parseInt(levelFilter);
-    console.log('[Modal] Level filter:', minLevel);
     
     if (window.ws && window.ws.readyState === WebSocket.OPEN) {
-        console.log('[Modal] WebSocket is open, sending log_subscribe...');
         window.ws.send({
             type: 'log_subscribe',
             minLevel: minLevel
         });
         modalLogSubscribed = true;
         updateModalWsStatus(true);
-        console.log('[Modal] Subscription sent, loading history...');
-        // 订阅成功后加载历史日志
         loadModalHistoryLogs();
     } else {
-        console.warn('[Modal] WebSocket not ready, readyState:', window.ws?.readyState);
         updateModalWsStatus(false);
         setTimeout(subscribeToModalLogs, 1000);
     }
@@ -14102,9 +14151,7 @@ function subscribeToModalLogs() {
 
 // 取消订阅模态框日志
 function unsubscribeFromModalLogs() {
-    console.log('[Modal] unsubscribeFromModalLogs called, subscribed:', modalLogSubscribed);
     if (window.ws && window.ws.readyState === WebSocket.OPEN && modalLogSubscribed) {
-        console.log('[Modal] Sending log_unsubscribe...');
         window.ws.send({ type: 'log_unsubscribe' });
     }
     modalLogSubscribed = false;
@@ -14113,10 +14160,7 @@ function unsubscribeFromModalLogs() {
 
 // 加载历史日志
 async function loadModalHistoryLogs() {
-    if (!window.ws || window.ws.readyState !== WebSocket.OPEN) {
-        console.error('[Modal] WebSocket 未连接');
-        return;
-    }
+    if (!window.ws || window.ws.readyState !== WebSocket.OPEN) return;
     
     const levelFilter = document.getElementById('modal-log-level-filter')?.value || '3';
     
@@ -14166,13 +14210,7 @@ function debounceRenderModalLogs() {
 
 function renderModalLogs() {
     const container = document.getElementById('modal-log-container');
-    console.log('[Modal] renderModalLogs called, container:', container);
-    console.log('[Modal] modalLogEntries length:', modalLogEntries.length);
-    
-    if (!container) {
-        console.error('[Modal] Container not found!');
-        return;
-    }
+    if (!container) return;
     
     // 获取过滤条件
     const levelFilter = parseInt(document.getElementById('modal-log-level-filter')?.value || '3');
@@ -14245,8 +14283,6 @@ function clearModalLogs() {
 
 // 处理模态框实时日志消息
 function handleModalLogMessage(msg) {
-    console.log('[Modal] Received log message:', msg);
-    
     const logEntry = {
         level: msg.level || 3,
         levelName: getLevelName(msg.level || 3),
@@ -14256,9 +14292,7 @@ function handleModalLogMessage(msg) {
         task: msg.task || ''
     };
     
-    // 追加日志（限制最大数量）
     modalLogEntries.push(logEntry);
-    console.log('[Modal] Added log, total entries:', modalLogEntries.length);
     
     if (modalLogEntries.length > MAX_MODAL_LOG_ENTRIES) {
         modalLogEntries.shift();  // 移除最旧的日志
@@ -16816,10 +16850,15 @@ async function refreshRules() {
                     </thead>
                     <tbody>
                         ${rules.map(r => {
-                            const iconValue = r.icon || '⚡';
-                            const iconHtml = iconValue.startsWith('/sdcard/') 
-                                ? `<img src="/api/v1/file/download?path=${encodeURIComponent(iconValue)}" style="width:24px;height:24px;object-fit:contain" onerror="this.outerHTML='<i class=\\'ri-thunderstorms-line\\' style=\\'font-size:1.2em\\'></i>'">`
-                                : `<i class="${getRuleIconRi(iconValue)}" style="font-size:1.2em"></i>`;
+                            const iconValue = r.icon || 'ri-thunderstorms-line';
+                            let iconHtml;
+                            if (iconValue.startsWith('/sdcard/')) {
+                                iconHtml = `<img src="/api/v1/file/download?path=${encodeURIComponent(iconValue)}" style="width:24px;height:24px;object-fit:contain" onerror="this.outerHTML='<i class=\\'ri-thunderstorms-line\\' style=\\'font-size:1.2em\\'></i>'">`
+                            } else if (iconValue.startsWith('ri-')) {
+                                iconHtml = `<i class="${iconValue}" style="font-size:1.2em"></i>`;
+                            } else {
+                                iconHtml = `<i class="${getRuleIconRi(iconValue)}" style="font-size:1.2em"></i>`;
+                            }
                             const manualBadge = r.manual_trigger ? '<span class="badge" style="background:#10b981;font-size:0.7em">' + (typeof t === 'function' ? t('common.manual') : '手动') + '</span>' : '';
                             const enabledStr = typeof t === 'function' ? t('common.enabled') : '启用';
                             const disabledStr = typeof t === 'function' ? t('common.disabled') : '禁用';
@@ -17130,11 +17169,11 @@ async function refreshActions() {
                                 <td><span class="badge badge-${getActionTypeBadge(a.type)}">${getActionTypeLabel(a.type)}</span></td>
                                 <td>${a.async ? '<span class="badge badge-warning">' + asyncStr + '</span>' : '<span class="badge badge-light">' + syncStr + '</span>'}</td>
                                 <td class="text-muted">${a.description || '-'}</td>
-                                <td>
-                                    <button class="btn btn-xs btn-gray" onclick="testAction('${a.id}')" title="${typeof t === 'function' ? t('common.test') : '测试'}"><i class="ri-play-line"></i></button>
-                                    <button class="btn btn-xs btn-gray" onclick="editAction('${a.id}')" title="${typeof t === 'function' ? t('common.edit') : '编辑'}"><i class="ri-edit-line"></i></button>
-                                    <button class="btn btn-xs btn-gray" onclick="showExportActionModal('${a.id}')" title="${typeof t === 'function' ? (t('securityPage.exportConfigPack') || '导出配置包') : '导出配置包'}"><i class="ri-download-line"></i></button>
-                                    <button class="btn btn-danger btn-xs" onclick="deleteAction('${a.id}')" title="${typeof t === 'function' ? t('common.delete') : '删除'}"><i class="ri-delete-bin-line"></i></button>
+                                <td style="white-space:nowrap">
+                                    <button class="btn btn-sm btn-gray" onclick="testAction('${a.id}')" title="${typeof t === 'function' ? t('common.test') : '测试'}"><i class="ri-play-line"></i></button>
+                                    <button class="btn btn-sm btn-gray" onclick="editAction('${a.id}')" title="${typeof t === 'function' ? t('common.edit') : '编辑'}"><i class="ri-edit-line"></i></button>
+                                    <button class="btn btn-sm btn-gray" onclick="showExportActionModal('${a.id}')" title="${typeof t === 'function' ? (t('securityPage.exportConfigPack') || '导出配置包') : '导出配置包'}"><i class="ri-download-line"></i></button>
+                                    <button class="btn btn-sm btn-danger" onclick="deleteAction('${a.id}')" title="${typeof t === 'function' ? t('common.delete') : '删除'}"><i class="ri-delete-bin-line"></i></button>
                                 </td>
                             </tr>
                         `).join('')}
@@ -19195,14 +19234,14 @@ function showAddSourceModal() {
                         </div>
                     </div>
                     <div class="form-row">
-                        <div class="form-group" style="flex:0 0 100px">
+                        <div class="form-group" style="flex:0 0 120px">
                             <label>${typeof t === 'function' ? t('sshPage.method') : '方法'}</label>
                             <select id="source-rest-method" class="input">
                                 <option value="GET">GET</option>
                                 <option value="POST">POST</option>
                             </select>
                         </div>
-                        <div class="form-group" style="flex:0 0 120px">
+                        <div class="form-group" style="flex:0 0 140px">
                             <label>${typeof t === 'function' ? t('automation.pollIntervalMs') : '轮询间隔 (ms)'}</label>
                             <input type="number" id="source-interval" class="input" value="5000" min="500">
                         </div>
@@ -19998,19 +20037,32 @@ async function submitAddSource() {
     }
 }
 
-// 规则图标：后端仍存 emoji，前端显示用 RemixIcon
+// 规则图标：直接存储 RemixIcon 类名（ri-xxx），保留旧 emoji 映射以兼容历史数据
 const RULE_ICON_LIST = [
-    { emoji: '⚡', ri: 'ri-thunderstorms-line' }, { emoji: '🔔', ri: 'ri-notification-line' }, { emoji: '💡', ri: 'ri-lightbulb-line' },
-    { emoji: '🔌', ri: 'ri-plug-line' }, { emoji: '🌡️', ri: 'ri-temp-hot-line' }, { emoji: '⏰', ri: 'ri-timer-line' },
-    { emoji: '📊', ri: 'ri-bar-chart-line' }, { emoji: '🎯', ri: 'ri-focus-line' }, { emoji: '🚀', ri: 'ri-rocket-line' },
-    { emoji: '⚙️', ri: 'ri-settings-line' }, { emoji: '🔧', ri: 'ri-tools-line' }, { emoji: '🎵', ri: 'ri-music-line' },
-    { emoji: '📱', ri: 'ri-smartphone-line' }, { emoji: '🖥️', ri: 'ri-computer-line' }, { emoji: '🌐', ri: 'ri-global-line' },
-    { emoji: '🔒', ri: 'ri-lock-line' }, { emoji: '🛡️', ri: 'ri-shield-line' }, { emoji: '📝', ri: 'ri-file-text-line' },
-    { emoji: '🎬', ri: 'ri-movie-line' }, { emoji: '🔄', ri: 'ri-refresh-line' }
+    'ri-thunderstorms-line', 'ri-notification-line', 'ri-lightbulb-line',
+    'ri-plug-line', 'ri-temp-hot-line', 'ri-timer-line',
+    'ri-bar-chart-line', 'ri-focus-line', 'ri-rocket-line',
+    'ri-settings-line', 'ri-tools-line', 'ri-music-line',
+    'ri-smartphone-line', 'ri-computer-line', 'ri-global-line',
+    'ri-lock-line', 'ri-shield-line', 'ri-file-text-line',
+    'ri-movie-line', 'ri-refresh-line'
 ];
-function getRuleIconRi(emoji) {
-    const o = RULE_ICON_LIST.find(x => x.emoji === emoji);
-    return o ? o.ri : 'ri-thunderstorms-line';
+// 旧版 emoji → ri 映射（向后兼容历史数据）
+const _EMOJI_TO_RI = {
+    '⚡': 'ri-thunderstorms-line', '🔔': 'ri-notification-line', '💡': 'ri-lightbulb-line',
+    '🔌': 'ri-plug-line', '🌡️': 'ri-temp-hot-line', '⏰': 'ri-timer-line',
+    '📊': 'ri-bar-chart-line', '🎯': 'ri-focus-line', '🚀': 'ri-rocket-line',
+    '⚙️': 'ri-settings-line', '🔧': 'ri-tools-line', '🎵': 'ri-music-line',
+    '📱': 'ri-smartphone-line', '🖥️': 'ri-computer-line', '🌐': 'ri-global-line',
+    '🔒': 'ri-lock-line', '🛡️': 'ri-shield-line', '📝': 'ri-file-text-line',
+    '🎬': 'ri-movie-line', '🔄': 'ri-refresh-line'
+};
+function getRuleIconRi(icon) {
+    if (!icon) return 'ri-thunderstorms-line';
+    // 已经是 ri-xxx 格式，直接返回
+    if (icon.startsWith('ri-')) return icon;
+    // 旧版 emoji → ri 映射
+    return _EMOJI_TO_RI[icon] || 'ri-thunderstorms-line';
 }
 
 /**
@@ -20031,8 +20083,8 @@ function showAddRuleModal(ruleData = null) {
     const modal = document.createElement('div');
     modal.id = 'add-rule-modal';
     modal.className = 'modal';
-    const iconPickerHtml = RULE_ICON_LIST.map((x, i) =>
-        `<button type="button" class="icon-btn${i === 0 ? ' selected' : ''}" data-emoji="${x.emoji.replace(/"/g, '&quot;')}" onclick="selectRuleIcon(this.getAttribute('data-emoji'))"><i class="${x.ri}"></i></button>`
+    const iconPickerHtml = RULE_ICON_LIST.map((ri, i) =>
+        `<button type="button" class="icon-btn${i === 0 ? ' selected' : ''}" data-icon="${ri}" onclick="selectRuleIcon('${ri}')"><i class="${ri}"></i></button>`
     ).join('');
     modal.innerHTML = `
         <div class="modal-content cc-compact automation-modal wide" style="max-width:750px">
@@ -20061,7 +20113,7 @@ function showAddRuleModal(ruleData = null) {
                     </div>
                     <div id="rule-icon-emoji-picker" class="icon-picker">
                         <div class="emoji-custom-input">
-                            <input type="text" id="rule-emoji-input" class="input" placeholder="${typeof t === 'function' ? t('automation.customPlaceholder') : '自定义'}" maxlength="8" onchange="selectRuleIconFromInput()" style="width:100px;text-align:center;font-size:1.2em">
+                            <input type="text" id="rule-emoji-input" class="input" placeholder="ri-xxx" maxlength="40" onchange="selectRuleIconFromInput()" style="width:140px;text-align:center;font-size:0.85em">
                         </div>
                         ${iconPickerHtml}
                     </div>
@@ -20077,7 +20129,7 @@ function showAddRuleModal(ruleData = null) {
                             </div>
                         </div>
                     </div>
-                    <input type="hidden" id="rule-icon" value="⚡">
+                    <input type="hidden" id="rule-icon" value="ri-thunderstorms-line">
                     <input type="hidden" id="rule-icon-type" value="emoji">
                 </div>
                 
@@ -20148,15 +20200,16 @@ function showAddRuleModal(ruleData = null) {
         document.getElementById('rule-cooldown').value = ruleData.cooldown_ms || 0;
         document.getElementById('rule-enabled').checked = ruleData.enabled !== false;
         
-        // 填充图标
-        const icon = ruleData.icon || '⚡';
-        document.getElementById('rule-icon').value = icon;
+        // 填充图标（兼容旧 emoji 和新 ri-xxx）
+        const icon = ruleData.icon || 'ri-thunderstorms-line';
         if (icon.startsWith('/sdcard/')) {
+            document.getElementById('rule-icon').value = icon;
             document.getElementById('rule-icon-type').value = 'image';
             document.getElementById('rule-icon-path').value = icon;
             switchRuleIconType('image');
             updateRuleIconPreview(icon);
         } else {
+            // selectRuleIcon 内部会自动将旧 emoji 转换为 ri-xxx
             document.getElementById('rule-icon-type').value = 'emoji';
             selectRuleIcon(icon);
         }
@@ -20237,12 +20290,15 @@ function switchRuleIconType(type) {
 }
 
 function selectRuleIcon(icon) {
-    document.getElementById('rule-icon').value = icon;
+    // icon 可以是 ri-xxx 或旧版 emoji，统一转为 ri-xxx
+    const riIcon = getRuleIconRi(icon);
+    document.getElementById('rule-icon').value = riIcon;
     document.getElementById('rule-icon-type').value = 'emoji';
+    // 预览输入框显示图标类名
     const input = document.getElementById('rule-emoji-input');
-    if (input) input.value = icon;
+    if (input) input.value = riIcon;
     document.querySelectorAll('#add-rule-modal .icon-btn').forEach(btn => {
-        btn.classList.toggle('selected', btn.getAttribute('data-emoji') === icon);
+        btn.classList.toggle('selected', btn.getAttribute('data-icon') === riIcon);
     });
 }
 
@@ -20250,11 +20306,13 @@ function selectRuleIconFromInput() {
     const input = document.getElementById('rule-emoji-input');
     const icon = input.value.trim();
     if (icon) {
-        document.getElementById('rule-icon').value = icon;
+        // 如果用户输入了 ri-xxx 类名则直接使用，否则通过映射转换
+        const riIcon = icon.startsWith('ri-') ? icon : getRuleIconRi(icon);
+        document.getElementById('rule-icon').value = riIcon;
         document.getElementById('rule-icon-type').value = 'emoji';
-        // 取消预设按钮的选中状态
+        // 更新按钮选中状态
         document.querySelectorAll('#add-rule-modal .icon-btn').forEach(btn => {
-            btn.classList.remove('selected');
+            btn.classList.toggle('selected', btn.getAttribute('data-icon') === riIcon);
         });
     }
 }
@@ -20281,7 +20339,7 @@ function updateRuleIconPreview(path) {
 }
 
 function clearRuleIconImage() {
-    document.getElementById('rule-icon').value = '⚡';
+    document.getElementById('rule-icon').value = 'ri-thunderstorms-line';
     document.getElementById('rule-icon-path').value = '';
     document.getElementById('rule-icon-type').value = 'emoji';
     updateRuleIconPreview(null);
@@ -20936,7 +20994,7 @@ async function submitAddRule(originalId = null) {
     const isEdit = !!originalId;
     const id = document.getElementById('rule-id').value.trim();
     const name = document.getElementById('rule-name').value.trim();
-    const icon = document.getElementById('rule-icon').value || '⚡';
+    const icon = document.getElementById('rule-icon').value || 'ri-thunderstorms-line';
     const logic = document.getElementById('rule-logic').value;
     const cooldown = parseInt(document.getElementById('rule-cooldown').value) || 0;
     const enabled = document.getElementById('rule-enabled').checked;

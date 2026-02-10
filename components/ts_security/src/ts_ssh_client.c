@@ -620,15 +620,21 @@ esp_err_t ts_ssh_exec(ts_ssh_session_t session, const char *command, ts_ssh_exec
     result->stdout_len = 0;
     result->stderr_len = 0;
 
-    /* 循环读取直到完成 */
+    /* 循环读取直到 channel EOF。
+     * 内层 do-while 批量 drain 当前所有可用数据（rc > 0 时持续读）。
+     * 外层用 libssh2_channel_eof() 判断是否结束。
+     * 原来的 bug：drain 后 rc==0，走 else break 过早退出，丢失后续数据。
+     * 安全措施：非 EAGAIN 错误立即返回，防止无限循环；最多等 300 轮（约 5 分钟）。 */
+    int wait_rounds = 0;
     for (;;) {
         char buffer[512];
-        
-        /* 读取 stdout */
+        int got_data = 0;
+
+        /* Drain stdout —— 一次性读完当前所有可用数据 */
         do {
             rc = libssh2_channel_read(channel, buffer, sizeof(buffer));
             if (rc > 0) {
-                /* 扩展缓冲区 */
+                got_data = 1;
                 while (result->stdout_len + rc >= stdout_capacity) {
                     stdout_capacity *= 2;
                     char *new_buf = TS_REALLOC_PSRAM(result->stdout_data, stdout_capacity);
@@ -642,14 +648,19 @@ esp_err_t ts_ssh_exec(ts_ssh_session_t session, const char *command, ts_ssh_exec
                 }
                 memcpy(result->stdout_data + result->stdout_len, buffer, rc);
                 result->stdout_len += rc;
+            } else if (rc < 0 && rc != LIBSSH2_ERROR_EAGAIN) {
+                set_error(session, "Channel read error: %d", rc);
+                ts_ssh_exec_result_free(result);
+                libssh2_channel_free(channel);
+                return ESP_FAIL;
             }
         } while (rc > 0);
 
-        /* 读取 stderr */
+        /* Drain stderr —— 同理 */
         do {
             rc = libssh2_channel_read_stderr(channel, buffer, sizeof(buffer));
             if (rc > 0) {
-                /* 扩展缓冲区 */
+                got_data = 1;
                 while (result->stderr_len + rc >= stderr_capacity) {
                     stderr_capacity *= 2;
                     char *new_buf = TS_REALLOC_PSRAM(result->stderr_data, stderr_capacity);
@@ -663,15 +674,32 @@ esp_err_t ts_ssh_exec(ts_ssh_session_t session, const char *command, ts_ssh_exec
                 }
                 memcpy(result->stderr_data + result->stderr_len, buffer, rc);
                 result->stderr_len += rc;
+            } else if (rc < 0 && rc != LIBSSH2_ERROR_EAGAIN) {
+                set_error(session, "Channel stderr read error: %d", rc);
+                ts_ssh_exec_result_free(result);
+                libssh2_channel_free(channel);
+                return ESP_FAIL;
             }
         } while (rc > 0);
 
-        /* 检查是否完成 */
-        if (rc == LIBSSH2_ERROR_EAGAIN) {
-            wait_socket(session->sock, session->session, 1000);
-        } else {
+        /* 用 channel EOF 判断是否结束（不再依赖 rc 的值） */
+        if (libssh2_channel_eof(channel)) {
             break;
         }
+
+        /* 收到数据则重置等待计数；无数据则累计，超过 300 轮（~5 分钟）视为超时 */
+        if (got_data) {
+            wait_rounds = 0;
+        } else {
+            wait_rounds++;
+            if (wait_rounds > 300) {
+                set_error(session, "Read timeout: no EOF after %d wait rounds", wait_rounds);
+                break;  /* 不返回错误，保留已读数据 */
+            }
+        }
+
+        /* 未 EOF：等待更多数据到达后再循环 */
+        wait_socket(session->sock, session->session, 1000);
     }
 
     /* 添加字符串终止符 */
