@@ -90,10 +90,31 @@ class TianShanAPI {
         try {
             const response = await fetch(getApiUrl(endpoint), options);
             clearTimeout(timeoutId);
-            const json = await response.json();
+            const text = await response.text();
+            let json;
+            try {
+                json = JSON.parse(text);
+            } catch (parseErr) {
+                // 响应可能被 WebSocket 等数据污染（如 ~{"type"...），尝试从某处解析出带 code 的 API 格式
+                if (parseErr instanceof SyntaxError && text) {
+                    let idx = 0;
+                    while ((idx = text.indexOf('{', idx)) >= 0) {
+                        try {
+                            const parsed = JSON.parse(text.slice(idx));
+                            if (parsed != null && typeof parsed === 'object' && 'code' in parsed) {
+                                json = parsed;
+                                break;
+                            }
+                        } catch (_) {}
+                        idx += 1;
+                    }
+                    if (json === undefined) throw parseErr;
+                } else {
+                    throw parseErr;
+                }
+            }
             
             // 返回 JSON 响应，即使是错误码也返回（让调用者决定如何处理）
-            // 只有真正的 HTTP 错误（如网络错误）才抛出异常
             if (!response.ok && !json.code) {
                 throw new Error(json.message || json.error || 'Request failed');
             }
@@ -101,7 +122,6 @@ class TianShanAPI {
             return json;
         } catch (error) {
             clearTimeout(timeoutId);
-            // 只对非预期错误打印日志
             if (error.name === 'AbortError') {
                 console.error(`API Timeout: ${endpoint} (>${timeout}ms)`);
                 throw new Error('Request timeout');
