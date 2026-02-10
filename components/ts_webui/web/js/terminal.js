@@ -3,6 +3,47 @@
  * 基于 xterm.js 的 Web 终端实现
  */
 
+/**
+ * 按需加载 xterm.js 及其插件（从 CDN）
+ * 仅在首次打开终端页面时触发，后续调用直接返回
+ */
+const _xtermReady = (function() {
+    let _promise = null;
+
+    function loadCSS(href) {
+        return new Promise(function(resolve, reject) {
+            if (document.querySelector('link[href="' + href + '"]')) { resolve(); return; }
+            var link = document.createElement('link');
+            link.rel = 'stylesheet';
+            link.href = href;
+            link.onload = resolve;
+            link.onerror = reject;
+            document.head.appendChild(link);
+        });
+    }
+    function loadScript(src) {
+        return new Promise(function(resolve, reject) {
+            if (document.querySelector('script[src="' + src + '"]')) { resolve(); return; }
+            var s = document.createElement('script');
+            s.src = src;
+            s.onload = resolve;
+            s.onerror = reject;
+            document.head.appendChild(s);
+        });
+    }
+
+    return function ensureXtermLoaded() {
+        if (_promise) return _promise;
+        if (typeof Terminal !== 'undefined' && typeof FitAddon !== 'undefined') {
+            return (_promise = Promise.resolve());
+        }
+        _promise = loadCSS('https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css')
+            .then(function() { return loadScript('https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js'); })
+            .then(function() { return loadScript('https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.min.js'); });
+        return _promise;
+    };
+})();
+
 class WebTerminal {
     constructor(containerId) {
         this.containerId = containerId;
@@ -30,6 +71,9 @@ class WebTerminal {
             console.error('Terminal container not found:', this.containerId);
             return false;
         }
+
+        // 按需加载 xterm.js（首次访问终端页面时从 CDN 拉取）
+        await _xtermReady();
 
         // 创建 xterm.js 终端
         this.terminal = new Terminal({

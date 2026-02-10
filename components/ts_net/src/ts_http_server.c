@@ -218,16 +218,33 @@ esp_err_t ts_http_send_json(ts_http_request_t *req, int status, const char *json
     return ts_http_send_response(req, status, "application/json", json);
 }
 
+/**
+ * @brief 检查客户端是否支持 gzip 编码
+ */
+static bool client_accepts_gzip(httpd_req_t *req)
+{
+    char buf[128];
+    if (httpd_req_get_hdr_value_str(req, "Accept-Encoding", buf, sizeof(buf)) == ESP_OK) {
+        return (strstr(buf, "gzip") != NULL);
+    }
+    return false;
+}
+
+/**
+ * @brief 判断文件是否为可 gzip 压缩的文本资源
+ */
+static bool is_compressible(const char *ext)
+{
+    if (!ext) return false;
+    return (strcmp(ext, ".js") == 0 || strcmp(ext, ".css") == 0 ||
+            strcmp(ext, ".html") == 0 || strcmp(ext, ".json") == 0);
+}
+
 esp_err_t ts_http_send_file(ts_http_request_t *req, const char *filepath)
 {
     if (!req || !filepath) return ESP_ERR_INVALID_ARG;
     
-    ssize_t size = ts_storage_size(filepath);
-    if (size < 0) {
-        return ts_http_send_error(req, 404, "File not found");
-    }
-    
-    // Detect content type
+    /* ===== Content-Type 检测 ===== */
     const char *ext = strrchr(filepath, '.');
     const char *content_type = "application/octet-stream";
     if (ext) {
@@ -239,18 +256,61 @@ esp_err_t ts_http_send_file(ts_http_request_t *req, const char *filepath)
         else if (strcmp(ext, ".jpg") == 0 || strcmp(ext, ".jpeg") == 0) content_type = "image/jpeg";
         else if (strcmp(ext, ".svg") == 0) content_type = "image/svg+xml";
         else if (strcmp(ext, ".ico") == 0) content_type = "image/x-icon";
+        else if (strcmp(ext, ".woff2") == 0) content_type = "font/woff2";
+        else if (strcmp(ext, ".woff") == 0) content_type = "font/woff";
     }
     
+    /* ===== 尝试发送 gzip 预压缩版本 ===== */
+    const char *actual_filepath = filepath;
+    char gz_path[140];
+    bool use_gzip = false;
+    
+    if (is_compressible(ext) && client_accepts_gzip(req->req)) {
+        snprintf(gz_path, sizeof(gz_path), "%s.gz", filepath);
+        if (ts_storage_exists(gz_path)) {
+            actual_filepath = gz_path;
+            use_gzip = true;
+        }
+    }
+    
+    ssize_t size = ts_storage_size(actual_filepath);
+    if (size < 0) {
+        /* .gz 不存在时回退到原始文件 */
+        actual_filepath = filepath;
+        use_gzip = false;
+        size = ts_storage_size(filepath);
+        if (size < 0) {
+            return ts_http_send_error(req, 404, "File not found");
+        }
+    }
+    
+    /* ===== 设置响应头 ===== */
     httpd_resp_set_type(req->req, content_type);
     
-    // 对于小文件（<32KB），直接发送
+    if (use_gzip) {
+        httpd_resp_set_hdr(req->req, "Content-Encoding", "gzip");
+        httpd_resp_set_hdr(req->req, "Vary", "Accept-Encoding");
+    }
+    
+    /* Cache-Control：index.html 不缓存（确保更新），其他静态资源长期缓存 */
+    const char *basename = strrchr(filepath, '/');
+    if (basename && strcmp(basename, "/index.html") == 0) {
+        httpd_resp_set_hdr(req->req, "Cache-Control", "no-cache");
+    } else if (ext) {
+        /* JS/CSS/字体/图片：缓存 7 天 */
+        httpd_resp_set_hdr(req->req, "Cache-Control", "public, max-age=604800, immutable");
+    }
+    
+    /* ===== 发送文件内容 ===== */
+    
+    /* 对于小文件（<32KB），直接发送 */
     if (size < 32 * 1024) {
         char *buf = TS_MALLOC_PSRAM(size);
         if (!buf) {
             return ts_http_send_error(req, 500, "Memory allocation failed");
         }
         
-        if (ts_storage_read_file(filepath, buf, size) != size) {
+        if (ts_storage_read_file(actual_filepath, buf, size) != size) {
             free(buf);
             return ts_http_send_error(req, 500, "Failed to read file");
         }
@@ -260,13 +320,12 @@ esp_err_t ts_http_send_file(ts_http_request_t *req, const char *filepath)
         return ret;
     }
     
-    // 对于大文件，使用分块传输（chunked transfer）
-    FILE *f = fopen(filepath, "r");
+    /* 对于大文件，使用分块传输（chunked transfer） */
+    FILE *f = fopen(actual_filepath, "r");
     if (!f) {
         return ts_http_send_error(req, 500, "Failed to open file");
     }
     
-    // 分块大小：8KB
     #define CHUNK_SIZE 8192
     char *chunk = TS_MALLOC_PSRAM(CHUNK_SIZE);
     if (!chunk) {
@@ -288,7 +347,7 @@ esp_err_t ts_http_send_file(ts_http_request_t *req, const char *filepath)
         }
     } while (read_len == CHUNK_SIZE && ret == ESP_OK);
     
-    // 发送结束标记（空块）
+    /* 发送结束标记（空块） */
     if (ret == ESP_OK) {
         httpd_resp_send_chunk(req->req, NULL, 0);
     }

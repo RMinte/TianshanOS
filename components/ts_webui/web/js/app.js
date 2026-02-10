@@ -8171,13 +8171,13 @@ async function deleteFile(path) {
 
 // 模块描述信息
 const CONFIG_MODULE_INFO = {
-    net: { name: '网络', icon: '🌐', description: '以太网和主机名配置' },
-    dhcp: { name: 'DHCP', icon: '📡', description: 'DHCP 服务器配置' },
-    wifi: { name: 'WiFi', icon: '📶', description: 'WiFi AP 配置' },
-    led: { name: 'LED', icon: '💡', description: 'LED 亮度和效果配置' },
-    fan: { name: '风扇', icon: '🌀', description: '风扇控制配置' },
-    device: { name: '设备', icon: '🖥️', description: 'AGX 设备控制配置' },
-    system: { name: '系统', icon: '⚙️', description: '系统和控制台配置' }
+    net: { name: '网络', icon: 'ri-global-line', description: '以太网和主机名配置' },
+    dhcp: { name: 'DHCP', icon: 'ri-router-line', description: 'DHCP 服务器配置' },
+    wifi: { name: 'WiFi', icon: 'ri-wifi-line', description: 'WiFi AP 配置' },
+    led: { name: 'LED', icon: 'ri-lightbulb-line', description: 'LED 亮度和效果配置' },
+    fan: { name: '风扇', icon: 'ri-tornado-line', description: '风扇控制配置' },
+    device: { name: '设备', icon: 'ri-computer-line', description: 'AGX 设备控制配置' },
+    system: { name: '系统', icon: 'ri-settings-line', description: '系统和控制台配置' }
 };
 
 // 配置项的用户友好描述
@@ -10205,7 +10205,7 @@ async function nohupCheckProcess() {
         return;
     }
     // 使用 PID 文件检查进程状态，并显示进程详情
-    await executeNohupHelperCommand(`if [ -f ${currentNohupInfo.pidFile} ]; then PID=$(cat ${currentNohupInfo.pidFile}); if kill -0 $PID 2>/dev/null; then echo "进程运行中 (PID: $PID)"; ps -p $PID -o pid,user,%cpu,%mem,etime,args --no-headers 2>/dev/null || ps -p $PID 2>/dev/null; else echo "进程已退出 (PID: $PID)"; fi; else echo "❌ PID 文件不存在"; fi`);
+    await executeNohupHelperCommand(`if [ -f ${currentNohupInfo.pidFile} ]; then PID=$(cat ${currentNohupInfo.pidFile}); if kill -0 $PID 2>/dev/null; then echo "进程运行中 (PID: $PID)"; ps -p $PID -o pid,user,%cpu,%mem,etime,args --no-headers 2>/dev/null || ps -p $PID 2>/dev/null; else echo "进程已退出 (PID: $PID)"; fi; else echo "PID 文件不存在"; fi`);
 }
 
 /* nohup 快捷操作：停止进程（使用 PID 文件） */
@@ -10227,7 +10227,7 @@ async function nohupStopProcess() {
     await executeNohupHelperCommand(`if [ -f ${currentNohupInfo.pidFile} ]; then kill $(cat ${currentNohupInfo.pidFile}) 2>/dev/null && rm -f ${currentNohupInfo.pidFile} && echo "进程已停止"; else echo "PID 文件不存在"; fi`);
     
     // 再次检查进程状态
-    await executeNohupHelperCommand(`[ -f ${currentNohupInfo.pidFile} ] && kill -0 $(cat ${currentNohupInfo.pidFile}) 2>/dev/null && echo "⚠️ 进程仍在运行" || echo "✅ 确认：进程已停止"`);
+    await executeNohupHelperCommand(`[ -f ${currentNohupInfo.pidFile} ] && kill -0 $(cat ${currentNohupInfo.pidFile}) 2>/dev/null && echo "进程仍在运行" || echo "确认：进程已停止"`);
 }
 
 /* 执行 nohup 辅助命令 */
@@ -10357,7 +10357,7 @@ async function stopServiceProcess(idx, safeName) {
     document.getElementById('cancel-exec-btn').style.display = 'none';
     document.getElementById('nohup-actions').style.display = 'none';
     
-    resultPre.textContent = `🛑 停止服务: ${cmd.name}\n\n`;
+    resultPre.textContent = `停止服务: ${cmd.name}\n\n`;
     resultSection.scrollIntoView({ behavior: 'smooth' });
     
     try {
@@ -12637,7 +12637,7 @@ async function verifyConfigPack() {
     }
     
     resultBox.className = 'result-box';
-    resultBox.textContent = '🔄 验证中...';
+    resultBox.textContent = '验证中...';
     resultBox.classList.remove('hidden');
     preview.classList.add('hidden');
     
@@ -12686,7 +12686,7 @@ async function importConfigPack() {
     }
     
     resultBox.className = 'result-box';
-    resultBox.textContent = '🔄 导入中...';
+    resultBox.textContent = '导入中...';
     resultBox.classList.remove('hidden');
     
     try {
@@ -12776,7 +12776,7 @@ function closeConfigPackApplyConfirm() {
  */
 async function applyConfigPackFromPath(path) {
     closeConfigPackApplyConfirm();
-    showToast('🔄 正在应用配置...', 'info');
+    showToast('正在应用配置...', 'info');
     
     try {
         const result = await api.call('config.pack.apply', { path }, 'POST');
@@ -13113,7 +13113,7 @@ async function exportConfigPack() {
     
     resultBox.className = 'result-box';
     resultBox.style.visibility = 'visible';
-    resultBox.textContent = `🔄 生成配置包中 (${okFiles.length} 个文件)...`;
+    resultBox.textContent = `生成配置包中 (${okFiles.length} 个文件)...`;
     document.getElementById('pack-export-tscfg').value = '';
     
     try {
@@ -13443,7 +13443,7 @@ async function generateCertKeypair() {
     const force = window._certPkiStatus?.has_private_key;
     
     resultBox.classList.remove('hidden', 'success', 'error');
-    resultBox.textContent = '🔄 正在生成密钥对...';
+    resultBox.textContent = '正在生成密钥对...';
     btn.disabled = true;
     
     try {
@@ -13490,7 +13490,7 @@ async function generateCSR() {
     const btn = document.getElementById('csr-gen-btn');
     
     resultBox.classList.remove('hidden', 'success', 'error');
-    resultBox.textContent = '🔄 正在生成 CSR...';
+    resultBox.textContent = '正在生成 CSR...';
     btn.disabled = true;
     
     try {
@@ -13545,7 +13545,7 @@ async function installCertificate() {
     
     const resultBox = document.getElementById('cert-install-result');
     resultBox.classList.remove('hidden', 'success', 'error');
-    resultBox.textContent = '🔄 正在安装证书...';
+    resultBox.textContent = '正在安装证书...';
     
     try {
         const result = await api.certInstall(certPem);
@@ -13587,7 +13587,7 @@ async function installCAChain() {
     
     const resultBox = document.getElementById('ca-install-result');
     resultBox.classList.remove('hidden', 'success', 'error');
-    resultBox.textContent = '🔄 正在安装 CA 证书链...';
+    resultBox.textContent = '正在安装 CA 证书链...';
     
     try {
         const result = await api.certInstallCA(caPem);
@@ -15713,11 +15713,11 @@ async function checkForUpdates() {
             const localParts = parseVersion(localVersion);
             const serverParts = parseVersion(serverVersion);
             if (serverParts.major > localParts.major) {
-                updateType = '<span style="color:#f43f5e;font-weight:bold">🔴 主版本更新</span>';
+                updateType = '<span style="color:#f43f5e;font-weight:bold">主版本更新</span>';
             } else if (serverParts.minor > localParts.minor) {
-                updateType = '<span style="color:#f39c12;font-weight:bold">🟡 功能更新</span>';
+                updateType = '<span style="color:#f39c12;font-weight:bold">功能更新</span>';
             } else {
-                updateType = '<span style="color:#059669;font-weight:bold">🟢 补丁更新</span>';
+                updateType = '<span style="color:#059669;font-weight:bold">补丁更新</span>';
             }
         }
         
@@ -18184,7 +18184,7 @@ async function showImageSelectModal(title, onSelect) {
                 </div>
                 <div id="image-select-list" style="display:none;max-height:400px;overflow-y:auto;"></div>
                 <div id="image-select-empty" style="display:none;text-align:center;padding:30px;color:var(--text-light);">
-                    <div style="font-size:48px;margin-bottom:10px;">📭</div>
+                    <i class="ri-inbox-line" style="font-size:48px;margin-bottom:10px;display:block;"></i>
                     <p>没有找到图像文件</p>
                     <small>支持 PNG、JPG、BMP、GIF 格式</small>
                 </div>
@@ -18323,7 +18323,7 @@ async function showVariableSelectModal(targetInputId, mode = 'insert') {
                 </div>
                 <div id="variable-select-list" style="display:none;max-height:400px;overflow-y:auto;"></div>
                 <div id="variable-select-empty" style="display:none;text-align:center;padding:30px;color:var(--text-light);">
-                    <div style="font-size:48px;margin-bottom:10px;">📭</div>
+                    <i class="ri-inbox-line" style="font-size:48px;margin-bottom:10px;display:block;"></i>
                     <p>没有可用的变量</p>
                     <small>请先配置数据源并启用</small>
                 </div>
@@ -19381,7 +19381,7 @@ async function testRestConnection() {
     btn.disabled = true;
     btn.innerHTML = '<i class="ri-hourglass-line"></i> 测试中...';
     resultPanel.style.display = 'block';
-    statusSpan.innerHTML = '<span style="color:var(--warning-color)">🔄 正在请求...</span>';
+    statusSpan.innerHTML = '<span style="color:var(--warning-color)"><i class="ri-loader-4-line"></i> 正在请求...</span>';
     
     try {
         // 通过 ESP32 代理请求（避免 CORS）
@@ -19499,7 +19499,7 @@ async function testSioConnection() {
 
     // 显示连接阶段状态
     const statusText = event ? `正在连接并等待事件: ${event}` : '正在连接并自动发现事件...';
-    statusSpan.innerHTML = `<span style="color:var(--warning-color)">🔄 ${statusText}</span>`;
+    statusSpan.innerHTML = `<span style="color:var(--warning-color)"><i class="ri-loader-4-line"></i> ${statusText}</span>`;
     
     try {
         // 通过 ESP32 测试 Socket.IO 连接
@@ -20386,7 +20386,7 @@ async function openConditionVarSelector(rowId) {
                 </div>
                 <div id="variable-select-list" style="display:none;max-height:400px;overflow-y:auto;"></div>
                 <div id="variable-select-empty" style="display:none;text-align:center;padding:30px;color:var(--text-light);">
-                    <div style="font-size:48px;margin-bottom:10px;">📭</div>
+                    <i class="ri-inbox-line" style="font-size:48px;margin-bottom:10px;display:block;"></i>
                     <p>${typeof t === 'function' ? t('automation.noVariablesAvailable') : '没有可用的变量'}</p>
                 </div>
             </div>
@@ -20562,12 +20562,12 @@ async function addActionTemplateRow(templateId = '', delayMs = 0, repeatMode = '
             </div>
             <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
                 <label style="display:flex;align-items:center;gap:4px;font-size:12px;color:var(--text-light);">
-                    ⏱️ 延迟
+                    延迟
                     <input type="number" class="input action-delay" placeholder="0" value="${delayMs}" min="0" style="width:70px;padding:4px 6px;">
                     <span>ms</span>
                 </label>
                 <label style="display:flex;align-items:center;gap:4px;font-size:12px;color:var(--text-light);">
-                    🔄 执行
+                    执行
                     <select class="input action-repeat-mode" onchange="toggleRepeatOptions(${rowId})" style="padding:4px 6px;">
                         <option value="once" ${repeatMode === 'once' ? 'selected' : ''}>单次</option>
                         <option value="while_true" ${repeatMode === 'while_true' ? 'selected' : ''}>条件持续时重复</option>
@@ -20589,7 +20589,7 @@ async function addActionTemplateRow(templateId = '', delayMs = 0, repeatMode = '
             <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
                 <label style="display:flex;align-items:center;gap:4px;font-size:12px;color:var(--text-light);">
                     <input type="checkbox" class="action-has-condition" onchange="toggleActionCondition(${rowId})" ${hasCondition ? 'checked' : ''}>
-                    🎯 执行条件
+                    执行条件
                 </label>
                 <span class="action-condition-fields" id="action-condition-${rowId}" style="display:${hasCondition ? 'flex' : 'none'};gap:6px;align-items:center;">
                     <button class="btn btn-xs btn-secondary action-condition-var-btn" 
@@ -20738,7 +20738,7 @@ async function showVariableSelectModalForCondition() {
                 </div>
                 <div id="variable-select-list" style="display:none;max-height:400px;overflow-y:auto;"></div>
                 <div id="variable-select-empty" style="display:none;text-align:center;padding:30px;color:var(--text-light);">
-                    <div style="font-size:48px;margin-bottom:10px;">📭</div>
+                    <i class="ri-inbox-line" style="font-size:48px;margin-bottom:10px;display:block;"></i>
                     <p>没有可用的变量</p>
                 </div>
             </div>
