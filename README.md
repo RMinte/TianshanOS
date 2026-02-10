@@ -3,6 +3,7 @@
 [English](README_EN.md) | [中文](README.md)
 
 [![Build Status](https://github.com/thomas-hiddenpeak/TianshanOS/actions/workflows/build.yml/badge.svg)](https://github.com/thomas-hiddenpeak/TianshanOS/actions/workflows/build.yml)
+![Lighthouse Performance](https://img.shields.io/badge/Lighthouse-97-brightgreen?logo=lighthouse&logoColor=white)
 [![License](https://img.shields.io/github/license/thomas-hiddenpeak/TianshanOS)](LICENSE)
 ![ESP-IDF](https://img.shields.io/badge/ESP--IDF-v5.5+-green?logo=espressif)
 ![C](https://img.shields.io/badge/C-99-blue?logo=c)

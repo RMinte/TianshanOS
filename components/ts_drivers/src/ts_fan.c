@@ -514,13 +514,34 @@ esp_err_t ts_fan_set_mode(ts_fan_id_t fan, ts_fan_mode_t mode)
     if (fan >= TS_FAN_MAX) return ESP_ERR_INVALID_ARG;
     if (!s_fans[fan].initialized) return ESP_ERR_INVALID_STATE;
     
+    ts_fan_mode_t old_mode = s_fans[fan].mode;
     s_fans[fan].mode = mode;
     
     if (mode == TS_FAN_MODE_OFF) {
         update_pwm(&s_fans[fan], 0);
     }
     
-    TS_LOGI(TAG, "Fan %d mode set to %d", fan, mode);
+    /* 切换到曲线/自动模式时，重置迟滞状态以允许立即生效 */
+    if ((mode == TS_FAN_MODE_CURVE || mode == TS_FAN_MODE_AUTO) && old_mode != mode) {
+        /* 将 last_stable_temp 设为一个远离实际温度的值，确保首次评估通过迟滞检查 */
+        s_fans[fan].last_stable_temp = -1000;   /* -100.0°C，远低于任何实际温度 */
+        s_fans[fan].last_speed_change_time = 0;  /* 允许立即调速 */
+        
+        /* 立即获取当前温度 */
+        if (s_auto_temp_enabled) {
+            ts_temp_data_t temp_data;
+            int16_t current_temp = ts_temp_get_effective(&temp_data);
+            if (current_temp > TS_TEMP_MIN_VALID) {
+                s_fans[fan].temperature = current_temp;
+            }
+        }
+        
+        TS_LOGI(TAG, "Fan %d mode -> %d: hysteresis reset, temp=%d", 
+                fan, mode, s_fans[fan].temperature);
+    } else {
+        TS_LOGI(TAG, "Fan %d mode set to %d", fan, mode);
+    }
+    
     return ESP_OK;
 }
 

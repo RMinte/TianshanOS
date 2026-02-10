@@ -231,6 +231,16 @@ static esp_err_t api_system_tasks(const cJSON *params, ts_api_result_t *result)
 /**
  * @brief system.cpu - Get CPU core statistics
  */
+/**
+ * CPU 使用率采用增量计算（delta）：
+ * 记录上一次采样的 IDLE 任务运行时间和总运行时间，
+ * 通过两次采样的差值计算出当前（最近一个周期）的 CPU 使用率，
+ * 而非自启动以来的累计平均值。
+ */
+static uint32_t s_prev_total_runtime = 0;
+static uint32_t s_prev_idle_runtime[2] = {0, 0};  /* ESP32-S3 最多 2 核 */
+static bool s_cpu_prev_valid = false;
+
 static esp_err_t api_system_cpu(const cJSON *params, ts_api_result_t *result)
 {
     cJSON *data = cJSON_CreateObject();
@@ -257,21 +267,14 @@ static esp_err_t api_system_cpu(const cJSON *params, ts_api_result_t *result)
     uint32_t total_runtime;
     UBaseType_t actual_count = uxTaskGetSystemState(task_array, task_count, &total_runtime);
     
-    /* Calculate per-core CPU usage */
-    uint32_t core_runtime[2] = {0, 0};  /* ESP32-S3 has max 2 cores */
+    /* 只需要每个核心的 IDLE 任务运行时间 */
     uint32_t idle_runtime[2] = {0, 0};
     
-    /* Sum up runtime for each core and track idle tasks */
     for (UBaseType_t i = 0; i < actual_count; i++) {
-        BaseType_t core_id = task_array[i].xCoreID;
-        uint32_t task_runtime = task_array[i].ulRunTimeCounter;
-        
-        if (core_id >= 0 && core_id < num_cores) {
-            core_runtime[core_id] += task_runtime;
-            
-            /* Check if this is an IDLE task */
-            if (strncmp(task_array[i].pcTaskName, "IDLE", 4) == 0) {
-                idle_runtime[core_id] = task_runtime;
+        if (strncmp(task_array[i].pcTaskName, "IDLE", 4) == 0) {
+            BaseType_t core_id = task_array[i].xCoreID;
+            if (core_id >= 0 && core_id < num_cores) {
+                idle_runtime[core_id] = task_array[i].ulRunTimeCounter;
             }
         }
     }
@@ -279,25 +282,38 @@ static esp_err_t api_system_cpu(const cJSON *params, ts_api_result_t *result)
     cJSON *cores = cJSON_AddArrayToObject(data, "cores");
     uint32_t total_usage_sum = 0;
     
+    /* 增量计算：使用两次采样的差值 */
+    uint32_t delta_total = total_runtime - s_prev_total_runtime;
+    
     for (int i = 0; i < num_cores; i++) {
         cJSON *core = cJSON_CreateObject();
         cJSON_AddNumberToObject(core, "id", i);
         
-        /* Calculate CPU usage percentage (100% - idle%) */
         uint32_t cpu_percent = 0;
-        if (core_runtime[i] > 0) {
-            /* Usage = (total - idle) / total * 100 */
-            uint32_t busy_time = core_runtime[i] - idle_runtime[i];
-            cpu_percent = (busy_time * 100) / core_runtime[i];
+        
+        if (s_cpu_prev_valid && delta_total > 0) {
+            /* 每个核心可用时间 = 总时间增量（timer 对所有核心公用） */
+            uint32_t delta_idle = idle_runtime[i] - s_prev_idle_runtime[i];
+            
+            /* 使用率 = 100% - 空闲率 */
+            if (delta_idle < delta_total) {
+                cpu_percent = ((delta_total - delta_idle) * 100) / delta_total;
+            }
+            /* 限幅保护（避免计数器回绕时出错） */
+            if (cpu_percent > 100) cpu_percent = 100;
         }
         
         cJSON_AddNumberToObject(core, "usage", cpu_percent);
-        cJSON_AddNumberToObject(core, "runtime", core_runtime[i]);
-        cJSON_AddNumberToObject(core, "idle_runtime", idle_runtime[i]);
-        
         cJSON_AddItemToArray(cores, core);
         total_usage_sum += cpu_percent;
     }
+    
+    /* 保存本次采样数据，供下次增量计算使用 */
+    s_prev_total_runtime = total_runtime;
+    for (int i = 0; i < num_cores && i < 2; i++) {
+        s_prev_idle_runtime[i] = idle_runtime[i];
+    }
+    s_cpu_prev_valid = true;
     
     /* Overall CPU usage (average across cores) */
     cJSON_AddNumberToObject(data, "total_usage", num_cores > 0 ? total_usage_sum / num_cores : 0);
