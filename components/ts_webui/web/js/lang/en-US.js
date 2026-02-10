@@ -2647,7 +2647,7 @@ if (typeof i18n !== 'undefined') i18n.registerLanguage('en-US', {
         minute1: '1 min',
         noWidgets: 'No widgets',
         addedWidgets: 'Added Widgets',
-        addNewWidget: '+ Add New Widget',
+        addNewWidget: 'Add New Widget',
         selectWidgetHint: 'Select a widget to edit<br>or add a new one',
         moveUp: 'Move Up',
         moveDown: 'Move Down',

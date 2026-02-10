@@ -2652,7 +2652,7 @@ if (typeof i18n !== 'undefined') i18n.registerLanguage('zh-CN', {
         minute1: '1 分钟',
         noWidgets: '暂无组件',
         addedWidgets: '已添加组件',
-        addNewWidget: '+ 添加新组件',
+        addNewWidget: '添加新组件',
         selectWidgetHint: '选择左侧组件进行编辑<br>或添加新组件',
         moveUp: '上移',
         moveDown: '下移',
