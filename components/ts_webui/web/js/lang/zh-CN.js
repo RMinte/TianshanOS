@@ -342,7 +342,9 @@ if (typeof i18n !== 'undefined') i18n.registerLanguage('zh-CN', {
         invalidCurve: '最小占空比不能大于最大占空比',
         minCurvePoints: '至少需要 2 个曲线点',
         maxCurvePoints: '最多支持 10 个曲线点',
-        statusUnavailable: '风扇状态不可用'
+        statusUnavailable: '风扇状态不可用',
+        importConfig: '导入配置',
+        exportConfig: '导出配置'
     },
     
     // LED 控制
@@ -2783,6 +2785,7 @@ if (typeof i18n !== 'undefined') i18n.registerLanguage('zh-CN', {
         display: '显示',
         // Modal - Filter
         filterTitle: '后处理滤镜',
+        selectFilter: '请先选择一个滤镜',
         filterPulse: '脉冲',
         filterBreathing: '呼吸',
         filterBlink: '闪烁',

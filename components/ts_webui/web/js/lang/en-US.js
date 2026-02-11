@@ -338,7 +338,9 @@ if (typeof i18n !== 'undefined') i18n.registerLanguage('en-US', {
         invalidCurve: 'Min duty cannot be greater than max duty',
         minCurvePoints: 'At least 2 curve points required',
         maxCurvePoints: 'Maximum 10 curve points supported',
-        statusUnavailable: 'Fan status unavailable'
+        statusUnavailable: 'Fan status unavailable',
+        importConfig: 'Import Config',
+        exportConfig: 'Export Config'
     },
     
     // LED Control
@@ -2778,6 +2780,7 @@ if (typeof i18n !== 'undefined') i18n.registerLanguage('en-US', {
         display: 'Display',
         // Modal - Filter
         filterTitle: 'Post-processing Filter',
+        selectFilter: 'Please select a filter first',
         filterPulse: 'Pulse',
         filterBreathing: 'Breathing',
         filterBlink: 'Blink',

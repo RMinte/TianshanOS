@@ -674,6 +674,35 @@ button.btn-gray:hover,
     color: white;
 }
 
+/* Matrix 后处理滤镜模态框：滑块样式与程序动画 cc-section 完全一致 */
+#modal-filter-config input[type="range"] {
+    flex: 1;
+    height: 6px;
+    border-radius: var(--radius-full);
+    background: var(--bg-muted);
+    -webkit-appearance: none;
+    appearance: none;
+}
+#modal-filter-config input[type="range"]::-webkit-slider-runnable-track {
+    width: 100%;
+    height: 6px;
+    background: var(--bg-muted);
+    border-radius: var(--radius-full);
+    cursor: pointer;
+}
+#modal-filter-config input[type="range"]::-webkit-slider-thumb {
+    appearance: none;
+    -webkit-appearance: none;
+    width: 16px;
+    height: 16px;
+    margin-top: -5px; /* 垂直居中：16px 手柄对齐 6px 轨道 */
+    border-radius: 50%;
+    background: var(--violet-500);
+    box-shadow: var(--shadow);
+    cursor: pointer;
+    border: 2.5px solid var(--bg-card);
+}
+
 /* 特效/滤镜配置区 */
 .effect-config-modal,
 .filter-config-modal {
@@ -696,6 +725,35 @@ button.btn-gray:hover,
     border-radius: var(--radius-full);
     display: inline-block;
     align-self: flex-start;
+}
+
+/* 后处理滤镜滑块：与程序动画 cc-section 一致，灰色轨道线用 var(--bg-muted) */
+.filter-config-modal .config-row input[type="range"] {
+    flex: 1;
+    height: 6px;
+    -webkit-appearance: none;
+    appearance: none;
+    background: var(--bg-muted);
+    border-radius: var(--radius-full);
+}
+.filter-config-modal .config-row input[type="range"]::-webkit-slider-runnable-track {
+    width: 100%;
+    height: 6px;
+    background: var(--bg-muted);
+    border-radius: var(--radius-full);
+    cursor: pointer;
+}
+.filter-config-modal .config-row input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 16px;
+    height: 16px;
+    margin-top: -5px;
+    border-radius: 50%;
+    background: var(--violet-500);
+    box-shadow: var(--shadow);
+    cursor: pointer;
+    border: 2.5px solid var(--bg-card);
 }
 
 .config-row {
@@ -732,10 +790,20 @@ button.btn-gray:hover,
 .config-row input[type="color"] {
     width: 36px;
     height: 36px;
-    border: none;
-    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
     cursor: pointer;
+    padding: 2px;
+    box-shadow: var(--shadow-sm);
+}
+.config-row input[type="color"]::-webkit-color-swatch-wrapper {
     padding: 0;
+    border-radius: calc(var(--radius-sm) - 2px);
+    overflow: hidden;
+}
+.config-row input[type="color"]::-webkit-color-swatch {
+    border: none;
+    border-radius: calc(var(--radius-sm) - 2px);
 }
 
 .config-row input[type="text"],
@@ -873,6 +941,7 @@ button.btn-gray:hover,
     -webkit-appearance: none;
     width: 16px;
     height: 16px;
+    margin-top: -5px; /* 垂直居中：16px 手柄对齐 6px 轨道 */
     border-radius: 50%;
     background: var(--violet-500);
     box-shadow: var(--shadow);
@@ -1033,7 +1102,7 @@ button.btn-gray:hover,
 }
 
 .file-picker-list .error {
-    color: var(--danger-color);
+    color: var(--rose-500);
 }
 
 .modal-content h2 {
@@ -2371,10 +2440,20 @@ button.btn-gray:hover,
 .basic-controls .color-control input[type="color"] {
     width: 50px;
     height: 32px;
-    border: none;
-    border-radius: 6px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
     cursor: pointer;
+    padding: 2px;
+    box-shadow: var(--shadow-sm);
+}
+.basic-controls .color-control input[type="color"]::-webkit-color-swatch-wrapper {
     padding: 0;
+    border-radius: calc(var(--radius-sm) - 2px);
+    overflow: hidden;
+}
+.basic-controls .color-control input[type="color"]::-webkit-color-swatch {
+    border: none;
+    border-radius: calc(var(--radius-sm) - 2px);
 }
 
 /* 预设颜色 */
@@ -2503,9 +2582,18 @@ button.btn-gray:hover,
 .effect-config .config-row input[type="color"] {
     width: 36px;
     height: 28px;
-    border: none;
-    border-radius: 4px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
     cursor: pointer;
+    padding: 2px;
+    box-shadow: var(--shadow-sm);
+}
+.effect-config .config-row input[type="color"]::-webkit-color-swatch-wrapper,
+.effect-config .config-row input[type="color"]::-webkit-color-swatch {
+    border-radius: calc(var(--radius-sm) - 2px);
+}
+.effect-config .config-row input[type="color"]::-webkit-color-swatch {
+    border: none;
 }
 
 .effect-config .checkbox-label {
@@ -2602,10 +2690,20 @@ button.btn-gray:hover,
 .matrix-controls input[type="color"] {
     width: 32px;
     height: 28px;
-    border: none;
-    border-radius: 4px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
     cursor: pointer;
+    padding: 2px;
+    box-shadow: var(--shadow-sm);
+}
+.matrix-controls input[type="color"]::-webkit-color-swatch-wrapper {
     padding: 0;
+    border-radius: calc(var(--radius-sm) - 2px);
+    overflow: hidden;
+}
+.matrix-controls input[type="color"]::-webkit-color-swatch {
+    border: none;
+    border-radius: calc(var(--radius-sm) - 2px);
 }
 
 .matrix-controls input[type="number"] {
@@ -2642,29 +2740,29 @@ button.btn-gray:hover,
 .filter-btn {
     padding: 5px 10px;
     font-size: 0.75rem;
-    background: var(--bg-color);
-    border: 1px solid var(--border-color);
-    border-radius: 6px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
     cursor: pointer;
-    transition: all 0.15s ease;
+    transition: all var(--t-fast);
 }
 
 .filter-btn:hover {
-    background: var(--primary-color);
-    border-color: var(--primary-color);
+    background: var(--blue-500);
+    border-color: var(--blue-500);
     color: white;
 }
 
 .filter-btn.active {
-    background: var(--primary-color);
-    border-color: var(--primary-color);
+    background: var(--blue-500);
+    border-color: var(--blue-500);
     color: white;
 }
 
 .filter-btn.selected {
-    background: var(--card-bg);
-    border-color: var(--primary-color);
-    box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.3);
+    background: var(--bg-card);
+    border-color: var(--blue-500);
+    box-shadow: 0 0 0 2px var(--blue-100);
 }
 
 /* 滤镜分类 */
@@ -2682,9 +2780,9 @@ button.btn-gray:hover,
 
 /* 滤镜参数区域 */
 .filter-params {
-    background: var(--bg-color);
+    background: var(--bg-muted);
     padding: 12px;
-    border-radius: 8px;
+    border-radius: var(--radius);
     margin-top: 10px;
 }
 
@@ -2705,15 +2803,15 @@ button.btn-gray:hover,
     height: 6px;
     -webkit-appearance: none;
     appearance: none;
-    background: var(--border-color);
-    border-radius: 3px;
+    background: var(--border);
+    border-radius: var(--radius-sm);
 }
 
 .filter-param-row input[type="range"]::-webkit-slider-thumb {
     -webkit-appearance: none;
     width: 16px;
     height: 16px;
-    background: var(--primary-color);
+    background: var(--blue-500);
     border-radius: 50%;
     cursor: pointer;
 }
@@ -2722,7 +2820,7 @@ button.btn-gray:hover,
     min-width: 30px;
     text-align: right;
     font-size: 0.85rem;
-    color: var(--text-color);
+    color: var(--text-primary);
 }
 
 /* 小按钮（全站统一） */
@@ -2977,8 +3075,8 @@ button.btn-gray:hover,
 /* 滑块区域 */
 .fan-slider-wrap {
     padding: 12px;
-    background: var(--bg-elevated);
-    border-radius: 8px;
+    background: var(--bg-muted);
+    border-radius: var(--radius);
     margin-bottom: 12px;
 }
 
@@ -2996,16 +3094,16 @@ button.btn-gray:hover,
 
 .fan-slider-value {
     font-weight: 600;
-    color: var(--primary-color);
+    color: var(--blue-500);
 }
 
 .fan-slider {
     width: 100%;
     height: 8px;
-    border-radius: 4px;
+    border-radius: var(--radius-sm);
     -webkit-appearance: none;
     appearance: none;
-    background: var(--border-color);
+    background: var(--border);
     outline: none;
 }
 
@@ -3014,10 +3112,10 @@ button.btn-gray:hover,
     width: 24px;
     height: 24px;
     border-radius: 50%;
-    background: var(--primary-color);
+    background: var(--blue-500);
     cursor: pointer;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.2);
-    transition: transform 0.15s;
+    box-shadow: var(--shadow);
+    transition: transform var(--t-fast);
 }
 
 .fan-slider::-webkit-slider-thumb:hover {
@@ -3033,7 +3131,7 @@ button.btn-gray:hover,
 }
 
 .fan-slider:disabled::-webkit-slider-thumb {
-    background: var(--text-light);
+    background: var(--text-muted);
     cursor: not-allowed;
 }
 
@@ -3043,11 +3141,11 @@ button.btn-gray:hover,
     padding: 10px;
     background: var(--blue-50);
     border: 1px solid transparent;
-    border-radius: 8px;
+    border-radius: var(--radius);
     color: var(--blue-600);
     font-size: 0.9rem;
     cursor: pointer;
-    transition: all 0.2s;
+    transition: all var(--t-normal);
     margin-bottom: 8px;
 }
 
@@ -3061,9 +3159,9 @@ button.btn-gray:hover,
 .fan-temp-info {
     text-align: center;
     font-size: 0.85rem;
-    color: var(--text-light);
+    color: var(--text-secondary);
     padding-top: 8px;
-    border-top: 1px solid var(--border-color);
+    border-top: 1px solid var(--border);
 }
 
 /* 风扇曲线编辑器 */
@@ -3072,9 +3170,9 @@ button.btn-gray:hover,
     flex-direction: column;
     gap: 8px;
     padding: 12px;
-    background: var(--bg-elevated);
-    border-radius: 8px;
-    border: 1px solid var(--border-color);
+    background: var(--bg-muted);
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
     max-height: 200px;
     overflow-y: auto;
 }
@@ -3084,13 +3182,13 @@ button.btn-gray:hover,
     align-items: center;
     gap: 10px;
     padding: 8px;
-    background: var(--bg-color);
-    border-radius: 6px;
-    transition: background 0.2s;
+    background: var(--bg-card);
+    border-radius: var(--radius-sm);
+    transition: background var(--t-normal);
 }
 
 .curve-point-row:hover {
-    background: var(--bg-hover);
+    background: var(--bg-muted);
 }
 
 .curve-point-inputs {
@@ -3118,7 +3216,7 @@ button.btn-gray:hover,
 
 .curve-point-field .field-unit {
     font-size: 12px;
-    color: var(--text-light);
+    color: var(--text-secondary);
     min-width: 20px;
 }
 
@@ -3139,15 +3237,15 @@ button.btn-gray:hover,
 
 /* 曲线预览画布 */
 .fan-curve-preview {
-    background: var(--bg-elevated);
-    border-radius: 8px;
+    background: var(--bg-muted);
+    border-radius: var(--radius);
     padding: 10px;
-    border: 1px solid var(--border-color);
+    border: 1px solid var(--border);
 }
 
 .fan-curve-preview canvas {
     width: 100%;
-    border-radius: 4px;
+    border-radius: var(--radius-sm);
 }
 
 /* 输入框带按钮 */
@@ -3182,23 +3280,23 @@ button.btn-gray:hover,
 }
 
 .fan-mode-badge.mode-manual {
-    background: rgba(251, 191, 36, 0.2);
-    color: #fbbf24;
+    background: var(--amber-50);
+    color: var(--amber-600);
 }
 
 .fan-mode-badge.mode-auto {
-    background: rgba(52, 211, 153, 0.2);
-    color: #34d399;
+    background: var(--emerald-50);
+    color: var(--emerald-600);
 }
 
 .fan-mode-badge.mode-curve {
-    background: rgba(79, 195, 247, 0.2);
-    color: #4fc3f7;
+    background: var(--blue-50);
+    color: var(--blue-600);
 }
 
 .fan-mode-badge.mode-off {
-    background: rgba(156, 163, 175, 0.2);
-    color: #9ca3af;
+    background: var(--bg-muted);
+    color: var(--text-muted);
 }
 
 /* 设备状态样式 */
@@ -3431,7 +3529,7 @@ button.btn-gray:hover,
     justify-content: space-between;
     align-items: center;
     padding-bottom: 10px;
-    border-bottom: 1px solid var(--border-color);
+    border-bottom: 1px solid var(--border);
     margin-bottom: 10px;
 }
 
@@ -3448,7 +3546,7 @@ button.btn-gray:hover,
 .terminal-container {
     flex: 1;
     background: #1e293b;
-    border-radius: 8px;
+    border-radius: var(--radius);
     overflow: hidden;
     min-height: 400px;
 }
@@ -3464,14 +3562,14 @@ button.btn-gray:hover,
 
 .terminal-help {
     padding: 10px 0;
-    color: var(--text-light);
+    color: var(--text-secondary);
     font-size: 0.85rem;
 }
 
 .terminal-help code {
-    background: var(--bg-color);
+    background: var(--bg-muted);
     padding: 2px 6px;
-    border-radius: 3px;
+    border-radius: var(--radius-sm);
     font-family: monospace;
 }
 
@@ -3503,7 +3601,7 @@ button.btn-gray:hover,
     padding: 10px 15px;
     background: var(--blue-50);
     border: 1px solid transparent;
-    border-radius: 8px;
+    border-radius: var(--radius);
     margin-bottom: 15px;
     animation: slideDown 0.2s ease-out;
 }
@@ -3525,7 +3623,7 @@ button.btn-gray:hover,
 
 .batch-toolbar #selected-count {
     font-weight: bold;
-    color: var(--primary-dark);
+    color: var(--blue-600);
     margin-right: 10px;
 }
 
@@ -3539,14 +3637,14 @@ button.btn-gray:hover,
     width: 16px;
     height: 16px;
     cursor: pointer;
-    accent-color: var(--primary-color);
+    accent-color: var(--blue-500);
 }
 
 #select-all-cb {
     width: 16px;
     height: 16px;
     cursor: pointer;
-    accent-color: var(--primary-color);
+    accent-color: var(--blue-500);
 }
 
 .breadcrumb {
@@ -3554,25 +3652,25 @@ button.btn-gray:hover,
     align-items: center;
     gap: 5px;
     font-size: 0.95rem;
-    color: var(--text-light);
+    color: var(--text-secondary);
     flex-wrap: wrap;
 }
 
 .breadcrumb-item {
     cursor: pointer;
     padding: 2px 6px;
-    border-radius: 4px;
-    transition: all 0.2s;
+    border-radius: var(--radius-sm);
+    transition: all var(--t-normal);
 }
 
 .breadcrumb-item:hover {
     background: var(--blue-100);
-    color: var(--primary-color);
+    color: var(--blue-500);
 }
 
 .breadcrumb-item.current {
     font-weight: bold;
-    color: var(--text-color);
+    color: var(--text-primary);
 }
 
 .file-actions {
@@ -3599,8 +3697,8 @@ button.btn-gray:hover,
 
 /* 文件页面白色卡片容器 */
 .file-card {
-    background: var(--card-bg);
-    border-radius: 8px;
+    background: var(--bg-card);
+    border-radius: var(--radius);
     padding: 20px;
     box-shadow: var(--shadow);
 }
@@ -3692,7 +3790,7 @@ button.btn-gray:hover,
 }
 
 .tab-btn.btn-gray.active {
-    background: #666;
+    background: var(--text-secondary);
     color: white;
     border-color: var(--text-secondary);
 }
@@ -3700,27 +3798,27 @@ button.btn-gray:hover,
 .tab-btn {
     padding: 4px 12px;
     font-size: 0.85rem;
-    border: 1px solid var(--border-color);
-    background: var(--card-bg);
+    border: 1px solid var(--border);
+    background: var(--bg-card);
     cursor: pointer;
-    border-radius: 4px;
-    transition: all 0.2s;
+    border-radius: var(--radius-sm);
+    transition: all var(--t-normal);
 }
 
 .tab-btn:hover {
-    background: var(--bg-color);
+    background: var(--bg-muted);
 }
 
 .tab-btn.active {
-    background: var(--primary-color);
+    background: var(--blue-500);
     color: white;
-    border-color: var(--primary-color);
+    border-color: var(--blue-500);
 }
 
 .file-list {
-    background: var(--card-bg);
-    border-radius: 8px;
-    border: 1px solid var(--border-color);
+    background: var(--bg-card);
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
     overflow: hidden;
 }
 
@@ -3730,16 +3828,16 @@ button.btn-gray:hover,
 }
 
 .file-table th {
-    background: var(--bg-color);
+    background: var(--bg-muted);
     padding: 12px 15px;
     text-align: left;
     font-weight: 600;
-    border-bottom: 1px solid var(--border-color);
+    border-bottom: 1px solid var(--border);
 }
 
 .file-table td {
     padding: 10px 15px;
-    border-bottom: 1px solid var(--border-color);
+    border-bottom: 1px solid var(--border);
     vertical-align: middle;
 }
 
@@ -3753,7 +3851,7 @@ button.btn-gray:hover,
 
 .file-name.clickable {
     cursor: pointer;
-    color: var(--primary-color);
+    color: var(--blue-500);
 }
 
 .file-name.clickable:hover {
@@ -3761,7 +3859,7 @@ button.btn-gray:hover,
 }
 
 .file-size {
-    color: var(--text-light);
+    color: var(--text-secondary);
     font-size: 0.9rem;
     text-align: center;
 }
@@ -3778,7 +3876,7 @@ button.btn-gray:hover,
 .empty-folder {
     padding: 40px;
     text-align: center;
-    color: var(--text-light);
+    color: var(--text-secondary);
     font-size: 1.1rem;
 }
 
@@ -3799,16 +3897,16 @@ button.btn-gray:hover,
 
 .unmounted-text {
     font-size: 1.2rem;
-    color: var(--text-light);
+    color: var(--text-secondary);
     margin-bottom: 20px;
 }
 
 .storage-status {
     margin-top: 15px;
     padding: 10px 15px;
-    background: var(--card-bg);
-    border-radius: 8px;
-    border: 1px solid var(--border-color);
+    background: var(--bg-card);
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
 }
 
 .storage-info {
@@ -3821,27 +3919,27 @@ button.btn-gray:hover,
     color: var(--emerald-600);
     background: var(--emerald-50);
     padding: 2px 8px;
-    border-radius: 4px;
+    border-radius: var(--radius-sm);
     font-size: 0.85em;
 }
 
 .storage-info .unmounted {
-    color: var(--text-light);
+    color: var(--text-secondary);
 }
 
 /* 上传区域样式 */
 .upload-area {
-    border: 2px dashed var(--border-color);
-    border-radius: 8px;
+    border: 2px dashed var(--border);
+    border-radius: var(--radius);
     padding: 40px;
     text-align: center;
     cursor: pointer;
-    transition: all 0.2s;
+    transition: all var(--t-normal);
     margin-bottom: 15px;
 }
 
 .upload-area:hover, .upload-area.drag-over {
-    border-color: var(--primary-color);
+    border-color: var(--blue-500);
     background: var(--blue-50);
 }
 
@@ -3850,21 +3948,21 @@ button.btn-gray:hover,
     justify-content: space-between;
     align-items: center;
     padding: 8px 12px;
-    background: var(--bg-color);
-    border-radius: 4px;
+    background: var(--bg-muted);
+    border-radius: var(--radius-sm);
     margin-bottom: 8px;
 }
 
 .upload-item .uploading {
-    color: var(--primary-color);
+    color: var(--blue-500);
 }
 
 .upload-item .success {
-    color: var(--secondary-color);
+    color: var(--emerald-500);
 }
 
 .upload-item .error {
-    color: var(--danger-color);
+    color: var(--rose-500);
 }
 
 /* 响应式调整 */
@@ -4748,7 +4846,7 @@ button.btn-gray:hover,
     margin-bottom: 24px;
     padding: 20px;
     background: var(--bg-subtle);
-    border-radius: 12px;
+    border-radius: var(--radius-lg);
 }
 
 .memory-gauge {
@@ -4814,18 +4912,24 @@ button.btn-gray:hover,
 }
 
 .memory-details {
+    margin-top: 20px;
     margin-bottom: 20px;
 }
 
 .memory-details h4,
 .memory-dma-info h4,
+.memory-rtc h4,
+.memory-caps h4,
+.memory-nvs h4,
 .memory-tips h4,
+.memory-tasks h4,
 .memory-history h4 {
     font-size: 0.95rem;
+    font-weight: 600;
     margin-bottom: 12px;
-    color: var(--text-color);
+    color: var(--text-primary);
     padding-bottom: 6px;
-    border-bottom: 1px solid var(--border-color);
+    border-bottom: 1px solid var(--border);
 }
 
 .memory-table {
@@ -4839,11 +4943,11 @@ button.btn-gray:hover,
 .memory-table td {
     padding: 10px 12px;
     text-align: left;
-    border-bottom: 1px solid var(--border-color);
+    border-bottom: 1px solid var(--border);
 }
 
 .memory-table th {
-    background: var(--bg-color);
+    background: var(--bg-muted);
     font-weight: 600;
     color: var(--text-secondary);
     font-size: 0.8rem;
@@ -4859,10 +4963,10 @@ button.btn-gray:hover,
 }
 
 .dma-bar {
-    background: var(--card-bg);
+    background: var(--bg-card);
     padding: 12px;
-    border-radius: 8px;
-    border: 1px solid var(--border-color);
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
 }
 
 .dma-labels {
@@ -4870,30 +4974,31 @@ button.btn-gray:hover,
     justify-content: space-between;
     margin-top: 8px;
     font-size: 0.8rem;
-    color: var(--text-light);
+    color: var(--text-secondary);
 }
 
 .memory-tips {
+    margin-top: 20px;
     margin-bottom: 20px;
 }
 
 .memory-tip {
     padding: 10px 14px;
     margin-bottom: 8px;
-    border-radius: 6px;
+    border-radius: var(--radius-sm);
     font-size: 0.85rem;
     border-left: 3px solid currentColor;
 }
 
 /* 任务内存统计 */
 .memory-tasks {
-    margin-top: 16px;
+    margin-top: 20px;
 }
 
 .memory-tasks .task-table code {
     background: var(--bg-muted);
     padding: 2px 6px;
-    border-radius: 3px;
+    border-radius: var(--radius-sm);
     font-size: 0.9em;
 }
 
@@ -4913,7 +5018,7 @@ button.btn-gray:hover,
     margin-top: 16px;
     padding: 12px 16px;
     background: var(--blue-50);
-    border-radius: 8px;
+    border-radius: var(--radius);
     border: 1px solid transparent;
 }
 
@@ -4927,9 +5032,9 @@ button.btn-gray:hover,
 .static-item {
     background: var(--bg-card);
     padding: 10px 12px;
-    border-radius: 6px;
+    border-radius: var(--radius-sm);
     text-align: center;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    box-shadow: var(--shadow);
 }
 
 .static-item.highlight {
@@ -4964,7 +5069,7 @@ button.btn-gray:hover,
     margin-top: 16px;
     padding: 12px 16px;
     background: var(--amber-50);
-    border-radius: 8px;
+    border-radius: var(--radius);
     border: 1px solid transparent;
 }
 
@@ -4998,10 +5103,10 @@ button.btn-gray:hover,
 
 /* RTC 内存 */
 .memory-rtc {
-    margin-top: 16px;
+    margin-top: 20px;
     padding: 12px 16px;
     background: var(--amber-50);
-    border-radius: 8px;
+    border-radius: var(--radius);
     border: 1px solid transparent;
 }
 
@@ -5015,15 +5120,15 @@ button.btn-gray:hover,
 
 /* 内存能力分布 */
 .memory-caps {
-    margin-top: 16px;
+    margin-top: 20px;
 }
 
 /* NVS 存储 */
 .memory-nvs {
-    margin-top: 16px;
+    margin-top: 20px;
     padding: 12px 16px;
     background: var(--bg-muted);
-    border-radius: 8px;
+    border-radius: var(--radius);
 }
 
 .nvs-stats {
@@ -5046,8 +5151,8 @@ button.btn-gray:hover,
 .memory-history {
     padding: 12px 16px;
     background: var(--bg-subtle);
-    border-radius: 8px;
-    margin-top: 16px;
+    border-radius: var(--radius);
+    margin-top: 20px;
 }
 
 .history-stats {
@@ -5149,11 +5254,11 @@ button.btn-gray:hover,
 }
 
 .status-card {
-    background: var(--card-bg);
-    border-radius: 8px;
+    background: var(--bg-card);
+    border-radius: var(--radius);
     padding: 16px;
     text-align: center;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    box-shadow: var(--shadow-sm);
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -5182,7 +5287,7 @@ button.btn-gray:hover,
 }
 
 .status-card.error {
-    background: #fee;
+    background: var(--rose-50);
     color: var(--danger-color);
     grid-column: 1 / -1;
 }
@@ -5204,7 +5309,7 @@ button.btn-gray:hover,
 
 .status-card.loading {
     grid-column: 1 / -1;
-    color: var(--text-light);
+    color: var(--text-secondary);
 }
 
 .status-card .status-icon {
@@ -5222,7 +5327,7 @@ button.btn-gray:hover,
 
 .status-card .status-label {
     font-size: 0.8rem;
-    color: var(--text-light);
+    color: var(--text-secondary);
 }
 
 .status-card .status-info {
@@ -5289,9 +5394,9 @@ button.btn-gray:hover,
     align-items: center;
     gap: 8px;
     padding: 12px;
-    border-top: 1px solid var(--border-color);
-    background: var(--bg-color);
-    border-radius: 0 0 8px 8px;
+    border-top: 1px solid var(--border);
+    background: var(--bg-muted);
+    border-radius: 0 0 var(--radius) var(--radius);
 }
 
 /* 测试面板 */
@@ -5302,10 +5407,10 @@ button.btn-gray:hover,
 }
 
 .test-panel {
-    background: var(--card-bg);
-    border-radius: 8px;
+    background: var(--bg-card);
+    border-radius: var(--radius);
     overflow: hidden;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    box-shadow: var(--shadow-sm);
 }
 
 .test-panel.wide {
@@ -5316,8 +5421,8 @@ button.btn-gray:hover,
     padding: 10px 14px;
     font-weight: 600;
     font-size: 0.95rem;
-    background: var(--bg-color);
-    border-bottom: 1px solid var(--border-color);
+    background: var(--bg-muted);
+    border-bottom: 1px solid var(--border);
 }
 
 .test-panel-body {
@@ -5341,14 +5446,14 @@ button.btn-gray:hover,
     font-size: 0.85rem;
     background: #1e293b;
     color: #e8e8e8;
-    border-top: 1px solid var(--border-color);
+    border-top: 1px solid var(--border);
     max-height: 200px;
     overflow-y: auto;
 }
 
 .test-result-output.loading {
-    background: var(--bg-color);
-    color: var(--text-light);
+    background: var(--bg-muted);
+    color: var(--text-secondary);
     text-align: center;
 }
 
@@ -5391,7 +5496,7 @@ button.btn-gray:hover,
 
 .result-log .empty-state {
     text-align: center;
-    color: var(--text-light);
+    color: var(--text-secondary);
     padding: 20px;
     margin: 0;
 }
@@ -5399,7 +5504,7 @@ button.btn-gray:hover,
 .result-log .log-item {
     padding: 8px 10px;
     margin-bottom: 4px;
-    border-radius: 4px;
+    border-radius: var(--radius-sm);
     font-family: monospace;
     font-size: 0.85em;
     display: flex;
@@ -5409,16 +5514,16 @@ button.btn-gray:hover,
 
 .result-log .log-item.success {
     background: var(--emerald-50);
-    border-left: 3px solid var(--secondary-color);
+    border-left: 3px solid var(--emerald-500);
 }
 
 .result-log .log-item.error {
     background: var(--rose-50);
-    border-left: 3px solid var(--danger-color);
+    border-left: 3px solid var(--rose-500);
 }
 
 .result-log .log-time {
-    color: var(--text-light);
+    color: var(--text-secondary);
     font-size: 0.85em;
     white-space: nowrap;
 }
@@ -5432,30 +5537,30 @@ button.btn-gray:hover,
 }
 
 .page-automation .data-table th {
-    background: var(--bg-color);
+    background: var(--bg-muted);
     padding: 10px 14px;
     text-align: left;
     font-weight: 600;
     font-size: 0.85rem;
-    color: var(--text-light);
-    border-bottom: 2px solid var(--border-color);
+    color: var(--text-secondary);
+    border-bottom: 2px solid var(--border);
     white-space: nowrap;
 }
 
 .page-automation .data-table td {
     padding: 10px 14px;
-    border-bottom: 1px solid var(--border-color);
+    border-bottom: 1px solid var(--border);
     vertical-align: middle;
 }
 
 .page-automation .data-table tr:hover {
-    background: var(--bg-color);
+    background: var(--bg-muted);
 }
 
 .page-automation .data-table code {
-    background: var(--bg-color);
+    background: var(--bg-muted);
     padding: 2px 6px;
-    border-radius: 3px;
+    border-radius: var(--radius-sm);
     font-size: 0.85em;
 }
 
@@ -5493,7 +5598,7 @@ button.btn-gray:hover,
 /* 空状态 */
 .empty-state {
     text-align: center;
-    color: var(--text-light);
+    color: var(--text-secondary);
     padding: 24px;
 }
 
@@ -5523,7 +5628,7 @@ button.btn-gray:hover,
 /* 模态框标签页 */
 .automation-modal .modal-tabs {
     display: flex;
-    border-bottom: 2px solid var(--border-color);
+    border-bottom: 2px solid var(--border);
     margin-bottom: 16px;
 }
 
@@ -5534,15 +5639,15 @@ button.btn-gray:hover,
     background: transparent;
     cursor: pointer;
     font-size: 0.95em;
-    color: var(--text-light);
+    color: var(--text-secondary);
     border-bottom: 2px solid transparent;
     margin-bottom: -2px;
     transition: all 0.2s;
 }
 
 .automation-modal .modal-tab:hover {
-    color: var(--text-color);
-    background: var(--bg-color);
+    color: var(--text-primary);
+    background: var(--bg-muted);
 }
 
 /* 与 OTA/btn-service-style 一致：浅蓝底、蓝色字、蓝边框 */
@@ -5589,7 +5694,7 @@ button.btn-gray:hover,
 }
 
 .automation-modal .form-group label .required {
-    color: var(--danger-color);
+    color: var(--rose-500);
 }
 
 .automation-modal .checkbox-label {
@@ -5602,11 +5707,11 @@ button.btn-gray:hover,
 
 /* 配置区块 */
 .automation-modal .config-section {
-    border: 1px solid var(--border-color);
-    border-radius: 8px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
     padding: 14px;
     margin-bottom: 16px;
-    background: var(--bg-color);
+    background: var(--bg-muted);
 }
 
 .automation-modal .config-section .config-title {
@@ -5625,7 +5730,7 @@ button.btn-gray:hover,
 
 .automation-modal .empty-hint {
     text-align: center;
-    color: var(--text-light);
+    color: var(--text-secondary);
     padding: 16px;
     margin: 0;
     font-size: 0.9rem;
@@ -5956,7 +6061,7 @@ button.btn-gray:hover,
 .action-section {
     margin-bottom: 24px;
     padding-bottom: 20px;
-    border-bottom: 1px solid var(--border-color);
+    border-bottom: 1px solid var(--border);
 }
 
 .action-section:last-of-type {
@@ -5995,7 +6100,7 @@ button.btn-gray:hover,
     width: 26px;
     height: 26px;
     border-radius: 50%;
-    background: var(--primary-color);
+    background: var(--blue-500);
     color: white;
     font-size: 0.85rem;
     font-weight: 700;
@@ -6019,8 +6124,8 @@ button.btn-gray:hover,
     flex-direction: column;
     align-items: center;
     padding: 14px 10px;
-    border: 2px solid var(--border-color);
-    border-radius: 10px;
+    border: 2px solid var(--border);
+    border-radius: var(--radius-lg);
     cursor: pointer;
     transition: all 0.2s ease;
     background: white;
@@ -6028,16 +6133,16 @@ button.btn-gray:hover,
 }
 
 .action-type-card:hover {
-    border-color: var(--primary-color);
+    border-color: var(--blue-500);
     background: var(--blue-50);
     transform: translateY(-2px);
 }
 
 .action-type-card.selected,
 .action-type-card:has(input:checked) {
-    border-color: var(--primary-color);
+    border-color: var(--blue-500);
     background: var(--blue-100);
-    box-shadow: 0 4px 12px rgba(59, 130, 246, 0.2);
+    box-shadow: 0 4px 12px var(--blue-100);
 }
 
 .action-type-card input[type="radio"] {
@@ -6061,15 +6166,15 @@ button.btn-gray:hover,
 
 .action-type-card .card-desc {
     font-size: 0.75rem;
-    color: var(--text-light);
+    color: var(--text-secondary);
     line-height: 1.3;
 }
 
 /* 参数配置卡片 */
 .params-card {
-    background: var(--bg-color);
-    border: 1px solid var(--border-color);
-    border-radius: 10px;
+    background: var(--bg-muted);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
     padding: 16px;
 }
 
@@ -7038,8 +7143,8 @@ button.btn-gray:hover,
     align-items: center;
     justify-content: flex-start;
     padding: 14px 10px 38px;  /* 统一底部 padding，为操作栏留出空间 */
-    background: var(--card-bg);
-    border: 1px solid var(--border-color);
+    background: var(--bg-card);
+    border: 1px solid var(--border);
     border-radius: 12px;
     cursor: pointer;
     transition: all 0.2s ease;
@@ -7121,7 +7226,7 @@ button.btn-gray:hover,
 /* 设备面板分隔线 */
 .device-panel-divider {
     height: 1px;
-    background: linear-gradient(90deg, transparent, var(--border-color) 20%, var(--border-color) 80%, transparent);
+    background: linear-gradient(90deg, transparent, var(--border) 20%, var(--border) 80%, transparent);
     margin: 16px 0;
 }
 
@@ -7168,7 +7273,7 @@ button.btn-gray:hover,
     display: flex;
     align-items: center;
     gap: 16px;
-    padding: 12px 0;
+    padding: 12px 16px;
     background: var(--bg-elevated);
     border-radius: 10px;
     margin-bottom: 16px;
@@ -7178,12 +7283,12 @@ button.btn-gray:hover,
 .temp-status-item {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 12px;
 }
 
 .temp-status-item .temp-label {
     font-size: 0.85rem;
-    color: var(--text-light);
+    color: var(--text-secondary);
 }
 
 .temp-status-item .temp-value {
@@ -7201,7 +7306,7 @@ button.btn-gray:hover,
 .test-temp-input-wrap {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
 }
 
 .test-temp-input-wrap .input-sm {
@@ -7346,7 +7451,7 @@ button.btn-gray:hover,
 .data-widgets-empty {
     text-align: center;
     padding: 30px 20px;
-    color: var(--text-light);
+    color: var(--text-secondary);
 }
 
 .data-widgets-empty .empty-icon {
@@ -7362,9 +7467,9 @@ button.btn-gray:hover,
 
 /* 组件卡片 */
 .dw-card {
-    background: var(--card-bg);
-    border: 1px solid var(--border-color);
-    border-radius: 12px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
     padding: 12px;
     text-align: center;
     transition: all 0.2s;
@@ -7374,7 +7479,7 @@ button.btn-gray:hover,
 }
 
 .dw-card:hover {
-    border-color: var(--primary-color);
+    border-color: var(--blue-500);
     box-shadow: 0 2px 8px var(--blue-100);
 }
 
@@ -7389,7 +7494,7 @@ button.btn-gray:hover,
     font-size: 0.85em;
     font-weight: 500;
     font-style: normal;
-    color: var(--text-light);
+    color: var(--text-secondary);
 }
 
 .dw-card-actions {
@@ -7419,10 +7524,10 @@ button.btn-gray:hover,
 
 .dw-card-var {
     font-size: 0.7em;
-    color: var(--text-light);
-    background: var(--bg-color);
+    color: var(--text-secondary);
+    background: var(--bg-muted);
     padding: 4px 8px;
-    border-radius: 4px;
+    border-radius: var(--radius-sm);
     cursor: pointer;
     transition: all 0.2s;
     white-space: nowrap;
@@ -7432,12 +7537,12 @@ button.btn-gray:hover,
 }
 
 .dw-card-var:hover {
-    background: var(--primary-color);
+    background: var(--blue-500);
     color: white;
 }
 
 .dw-card-var.bound {
-    color: var(--primary-color);
+    color: var(--blue-500);
     background: var(--blue-100);
 }
 
@@ -7457,7 +7562,7 @@ button.btn-gray:hover,
 
 .dw-ring-bg {
     fill: none;
-    stroke: var(--border-color);
+    stroke: var(--border);
     stroke-width: 8;
 }
 
@@ -7477,7 +7582,7 @@ button.btn-gray:hover,
     transform: translate(-50%, -50%);
     font-size: 1.2em;
     font-weight: 600;
-    color: var(--text-color);
+    color: var(--text-primary);
 }
 
 /* 仪表盘 */
@@ -7495,7 +7600,7 @@ button.btn-gray:hover,
 
 .dw-gauge-bg {
     fill: none;
-    stroke: var(--border-color);
+    stroke: var(--border);
     stroke-width: 8;
     stroke-linecap: round;
 }
@@ -7516,7 +7621,7 @@ button.btn-gray:hover,
     transform: translateX(-50%);
     font-size: 1.1em;
     font-weight: 600;
-    color: var(--text-color);
+    color: var(--text-primary);
 }
 
 /* 温度计 */
@@ -7533,10 +7638,10 @@ button.btn-gray:hover,
     position: relative;
     width: 22px;
     height: 65px;
-    background: var(--bg-color);
+    background: var(--bg-muted);
     border-radius: 11px;
     overflow: hidden;
-    border: 2px solid var(--border-color);
+    border: 2px solid var(--border);
 }
 
 .dw-temp-fill {
@@ -7559,13 +7664,13 @@ button.btn-gray:hover,
     flex-direction: column;
     justify-content: space-between;
     font-size: 0.55em;
-    color: var(--text-light);
+    color: var(--text-secondary);
 }
 
 .dw-temp-value {
     font-size: 1.4em;
     font-weight: 600;
-    color: var(--text-color);
+    color: var(--text-primary);
     min-width: 45px;
 }
 
@@ -7603,7 +7708,7 @@ button.btn-gray:hover,
 
 .dw-number-unit {
     font-size: 0.85em;
-    color: var(--text-light);
+    color: var(--text-secondary);
     font-weight: 500;
 }
 
@@ -7621,8 +7726,8 @@ button.btn-gray:hover,
 .dw-bar-track {
     width: 100%;
     height: 12px;
-    background: var(--bg-color);
-    border-radius: 6px;
+    background: var(--bg-muted);
+    border-radius: var(--radius-sm);
     overflow: hidden;
     margin-bottom: 8px;
 }
@@ -7630,14 +7735,14 @@ button.btn-gray:hover,
 .dw-bar-fill {
     height: 100%;
     width: 0%;
-    border-radius: 6px;
+    border-radius: var(--radius-sm);
     transition: width 0.5s ease;
 }
 
 .dw-bar-value {
     font-size: 1.2em;
     font-weight: 600;
-    color: var(--text-color);
+    color: var(--text-primary);
 }
 
 /* 文本显示 */
@@ -7670,10 +7775,10 @@ button.btn-gray:hover,
 
 .dw-add-section h4 {
     font-size: 0.9em;
-    color: var(--text-light);
+    color: var(--text-secondary);
     margin-bottom: 10px;
     padding-bottom: 6px;
-    border-bottom: 1px solid var(--border-color);
+    border-bottom: 1px solid var(--border);
 }
 
 .dw-presets-grid {
@@ -7687,16 +7792,16 @@ button.btn-gray:hover,
     flex-direction: column;
     align-items: center;
     padding: 12px 8px;
-    background: var(--bg-color);
-    border-radius: 8px;
+    background: var(--bg-card);
+    border-radius: var(--radius);
     cursor: pointer;
     transition: all 0.2s;
     border: 1px solid transparent;
 }
 
 .dw-preset-item:hover {
-    background: var(--bg-hover);
-    border-color: var(--primary-color);
+    background: var(--bg-muted);
+    border-color: var(--blue-500);
 }
 
 .dw-preset-icon {
@@ -7711,7 +7816,7 @@ button.btn-gray:hover,
 
 .dw-preset-type {
     font-size: 0.7em;
-    color: var(--text-light);
+    color: var(--text-secondary);
 }
 
 .dw-types-list {
@@ -7725,16 +7830,16 @@ button.btn-gray:hover,
     align-items: center;
     gap: 12px;
     padding: 10px 12px;
-    background: var(--bg-color);
-    border-radius: 8px;
+    background: var(--bg-card);
+    border-radius: var(--radius);
     cursor: pointer;
     transition: all 0.2s;
     border: 1px solid transparent;
 }
 
 .dw-type-item:hover {
-    background: var(--bg-hover);
-    border-color: var(--primary-color);
+    background: var(--bg-muted);
+    border-color: var(--blue-500);
 }
 
 .dw-type-icon {
@@ -7752,7 +7857,7 @@ button.btn-gray:hover,
 
 .dw-type-desc {
     font-size: 0.75em;
-    color: var(--text-light);
+    color: var(--text-secondary);
 }
 
 /* 表单行 */
@@ -7783,15 +7888,15 @@ button.btn-gray:hover,
 .dw-manager-sidebar {
     width: 280px;
     flex-shrink: 0;
-    border-right: 1px solid var(--border-color);
+    border-right: 1px solid var(--border);
     padding: 16px;
-    background: var(--bg-color);
+    background: var(--bg-muted);
     overflow-y: auto;
 }
 
 .dw-manager-section h4 {
     font-size: 0.85em;
-    color: var(--text-light);
+    color: var(--text-secondary);
     margin-bottom: 12px;
     text-transform: uppercase;
     letter-spacing: 0.5px;
@@ -7806,7 +7911,7 @@ button.btn-gray:hover,
 .dw-manager-empty-list {
     text-align: center;
     padding: 30px 10px;
-    color: var(--text-light);
+    color: var(--text-secondary);
     font-size: 0.9em;
 }
 
@@ -7817,9 +7922,9 @@ button.btn-gray:hover,
     gap: 8px;
     padding: 8px 10px;
     padding-right: 80px;
-    background: var(--card-bg);
-    border: 1px solid var(--border-color);
-    border-radius: 6px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
     cursor: pointer;
     transition: all 0.2s;
     position: relative;
@@ -7827,11 +7932,11 @@ button.btn-gray:hover,
 }
 
 .dw-manager-item:hover {
-    border-color: var(--primary-color);
+    border-color: var(--blue-500);
 }
 
 .dw-manager-item.active {
-    border-color: var(--primary-color);
+    border-color: var(--blue-500);
     background: var(--blue-100);
 }
 
@@ -7855,10 +7960,10 @@ button.btn-gray:hover,
     flex-shrink: 0;
     white-space: nowrap;
     font-size: 0.7em;
-    color: var(--text-light);
-    background: var(--bg-color);
+    color: var(--text-secondary);
+    background: var(--bg-muted);
     padding: 2px 6px;
-    border-radius: 3px;
+    border-radius: var(--radius-sm);
 }
 
 .dw-manager-item-actions {
@@ -7869,14 +7974,14 @@ button.btn-gray:hover,
     display: flex;
     gap: 2px;
     opacity: 0;
-    background: var(--card-bg);
+    background: transparent;
     padding: 2px 4px;
-    border-radius: 4px;
+    border-radius: var(--radius-sm);
     transition: opacity 0.2s;
 }
 
 .dw-manager-item.active .dw-manager-item-actions {
-    background: var(--blue-100);
+    background: transparent;
 }
 
 .dw-manager-item:hover .dw-manager-item-actions {
@@ -7886,6 +7991,11 @@ button.btn-gray:hover,
 .dw-manager-item-actions .dw-btn-icon {
     padding: 2px 4px;
     font-size: 11px;
+    border-radius: var(--radius-sm);
+}
+
+.dw-manager-item-actions .dw-btn-icon:hover {
+    background: var(--bg-muted);
 }
 
 .dw-manager-item-actions .dw-btn-icon:disabled {
@@ -7905,16 +8015,16 @@ button.btn-gray:hover,
     align-items: center;
     justify-content: center;
     height: 100%;
-    color: var(--text-light);
+    color: var(--text-secondary);
     text-align: center;
 }
 
 /* 添加面板 */
 .dw-add-panel h4 {
     font-size: 0.9em;
-    color: var(--text-light);
+    color: var(--text-secondary);
     margin-bottom: 12px;
-    border-bottom: 1px solid var(--border-color);
+    border-bottom: 1px solid var(--border);
     padding-bottom: 8px;
 }
 
@@ -7935,17 +8045,16 @@ button.btn-gray:hover,
     flex-direction: column;
     align-items: center;
     padding: 12px;
-    background: var(--bg-color);
-    border: 1px solid var(--border-color);
-    border-radius: 8px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
     cursor: pointer;
     transition: all 0.2s;
     text-align: center;
 }
 
 .dw-type-card:hover {
-    border-color: var(--primary-color);
-    background: var(--bg-hover);
+    border-color: var(--blue-500);
 }
 
 .dw-type-card .dw-type-icon {
@@ -7961,7 +8070,7 @@ button.btn-gray:hover,
 
 .dw-type-card .dw-type-desc {
     font-size: 0.7em;
-    color: var(--text-light);
+    color: var(--text-secondary);
 }
 
 /* 编辑面板 */
@@ -7978,6 +8087,7 @@ button.btn-gray:hover,
     min-width: 0;
 }
 
+
 /* 仅第一行（图标+颜色）：图标占剩余宽度，颜色固定一列，避免拥挤不对齐 */
 .dw-edit-panel .form-row:first-of-type .form-group:first-child {
     flex: 1;
@@ -7987,10 +8097,22 @@ button.btn-gray:hover,
     flex: 0 0 100px;
 }
 
-.dw-edit-panel .form-row:first-of-type .form-group:last-child .input-color {
-    width: 100%;
-    min-width: 56px;
-    max-width: 80px;
+.dw-edit-panel .form-row:first-of-type .form-group:last-child .input-color,
+.dw-edit-panel .input-color {
+    width: 36px !important;
+    height: 36px !important;
+    min-width: 36px !important;
+    max-width: 36px !important;
+    flex: 0 0 36px !important;
+}
+.dw-edit-panel .input-color::-webkit-color-swatch-wrapper {
+    padding: 0;
+    border-radius: calc(var(--radius-sm) - 2px);
+    overflow: hidden;
+}
+.dw-edit-panel .input-color::-webkit-color-swatch {
+    border: none;
+    border-radius: calc(var(--radius-sm) - 2px);
 }
 
 .dw-edit-header {
@@ -8008,9 +8130,9 @@ button.btn-gray:hover,
 }
 
 .dw-expression-group {
-    background: var(--bg-color);
-    padding: 12px;
-    border-radius: 8px;
+    background: var(--bg-muted);
+    padding: 16px;
+    border-radius: var(--radius);
     margin-top: 16px;
 }
 
@@ -8018,6 +8140,7 @@ button.btn-gray:hover,
     display: flex;
     align-items: center;
     gap: 8px;
+    margin-bottom: 10px;
 }
 
 .dw-expression-group .badge {
@@ -8032,7 +8155,10 @@ button.btn-gray:hover,
 .dw-expression-input {
     display: flex;
     gap: 8px;
-    margin-top: 6px;
+}
+
+.dw-expression-group .form-hint {
+    margin-top: 10px;
 }
 
 .dw-expression-input .input {
@@ -8042,34 +8168,34 @@ button.btn-gray:hover,
 .form-hint {
     display: block;
     font-size: 0.75em;
-    color: var(--text-light);
+    color: var(--text-secondary);
     margin-top: 6px;
 }
 
 .form-hint code {
-    background: var(--card-bg);
+    background: var(--bg-card);
     padding: 1px 4px;
-    border-radius: 3px;
+    border-radius: var(--radius-sm);
     font-family: 'Consolas', monospace;
 }
 
 .dw-edit-preview {
     margin-top: 20px;
     padding-top: 16px;
-    border-top: 1px solid var(--border-color);
+    border-top: 1px solid var(--border);
 }
 
 .dw-edit-preview label {
     font-size: 0.85em;
-    color: var(--text-light);
+    color: var(--text-secondary);
     margin-bottom: 8px;
     display: block;
 }
 
 .dw-preview-card {
-    background: var(--bg-color);
+    background: var(--bg-muted);
     padding: 12px;
-    border-radius: 8px;
+    border-radius: var(--radius);
 }
 
 .dw-preview-card .dw-card {
@@ -8082,7 +8208,7 @@ button.btn-gray:hover,
     justify-content: space-between;
     margin-top: 20px;
     padding-top: 16px;
-    border-top: 1px solid var(--border-color);
+    border-top: 1px solid var(--border);
 }
 
 /* 新组件类型样式 */
@@ -8109,7 +8235,7 @@ button.btn-gray:hover,
 .dw-status-label {
     font-size: 0.9em;
     font-weight: 500;
-    color: var(--text-color);
+    color: var(--text-primary);
 }
 
 /* 图标状态 */
@@ -8129,7 +8255,7 @@ button.btn-gray:hover,
 
 .dw-icon-label {
     font-size: 0.85em;
-    color: var(--text-light);
+    color: var(--text-secondary);
 }
 
 /* 双数值 */
@@ -8148,19 +8274,19 @@ button.btn-gray:hover,
 
 .dw-dual-sep {
     font-size: 1.2em;
-    color: var(--text-light);
+    color: var(--text-secondary);
     margin: 0 2px;
 }
 
 .dw-dual-sub {
     font-size: 1.2em;
-    color: var(--text-light);
+    color: var(--text-secondary);
     font-weight: 500;
 }
 
 .dw-dual-unit {
     font-size: 0.9em;
-    color: var(--text-light);
+    color: var(--text-secondary);
     margin-left: 4px;
 }
 
@@ -8180,7 +8306,7 @@ button.btn-gray:hover,
 .dw-percent-symbol {
     font-size: 1.4em;
     font-weight: 500;
-    color: var(--text-light);
+    color: var(--text-secondary);
     margin-left: 2px;
 }
 
@@ -8189,7 +8315,7 @@ button.btn-gray:hover,
     height: 160px;
     overflow-y: auto;
     background: #1e293b;
-    border-radius: 6px;
+    border-radius: var(--radius-sm);
     font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
     font-size: 11px;
     line-height: 1.4;
@@ -8282,7 +8408,7 @@ button.btn-gray:hover,
 /* 日志组件卡片尺寸调整 */
 .dw-card .dw-log-container {
     margin: 0 -12px -12px -12px;
-    border-radius: 0 0 8px 8px;
+    border-radius: 0 0 var(--radius) var(--radius);
     height: 200px;
 }
 
@@ -8320,20 +8446,20 @@ button.btn-gray:hover,
     align-items: center;
     padding: 8px 12px;
     border: 2px solid var(--border);
-    border-radius: 8px;
+    border-radius: var(--radius);
     cursor: pointer;
     transition: all 0.2s;
     min-width: 70px;
 }
 
 .dw-layout-option:hover {
-    border-color: var(--primary);
-    background: rgba(77, 171, 247, 0.05);
+    border-color: var(--blue-500);
+    background: var(--blue-50);
 }
 
 .dw-layout-option.active {
-    border-color: var(--primary);
-    background: rgba(77, 171, 247, 0.1);
+    border-color: var(--blue-500);
+    background: var(--blue-50);
 }
 
 .dw-layout-option input[type="radio"] {
@@ -8347,7 +8473,7 @@ button.btn-gray:hover,
 
 .dw-layout-desc {
     font-size: 11px;
-    color: var(--text-light);
+    color: var(--text-secondary);
     margin-top: 2px;
 }
 
@@ -8356,7 +8482,19 @@ button.btn-gray:hover,
     width: 60px;
     height: 36px;
     padding: 2px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    box-shadow: var(--shadow-sm);
     cursor: pointer;
+}
+.input-color::-webkit-color-swatch-wrapper {
+    padding: 0;
+    border-radius: calc(var(--radius-sm) - 2px);
+    overflow: hidden;
+}
+.input-color::-webkit-color-swatch {
+    border: none;
+    border-radius: calc(var(--radius-sm) - 2px);
 }
 
 /* 按钮块级 */

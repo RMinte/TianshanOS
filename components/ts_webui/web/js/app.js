@@ -535,7 +535,7 @@ async function loadSystemPage() {
                                 <div class="loading-small">${t('common.loading')}</div>
                             </div>
                         </div>
-                        <div style="flex:1;border-left:1px solid #e0e0e0;padding-left:20px">
+                        <div style="flex:1;border-left:1px solid var(--border);padding-left:20px">
                             <div style="display:flex;justify-content:space-between;align-items:center">
                                 <p><strong>${t('system.memory')}</strong></p>
                                 <button class="btn btn-sm btn-gray" onclick="showMemoryDetailModal()" style="font-size:0.75em;padding:2px 8px" title="${t('system.memoryDetail')}">${t('system.detail')}</button>
@@ -557,26 +557,26 @@ async function loadSystemPage() {
                     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
                         <h3 style="margin:0">${t('system.title')}</h3>
                         <div style="display:flex;gap:8px">
-                            <button class="btn btn-small btn-gray" onclick="showShutdownSettingsModal()" style="font-size:0.85em" title="${t('system.shutdownSettings')}"><i class="ri-flashlight-line"></i> ${t('system.shutdownSettings')}</button>
+                            <button class="btn btn-small btn-gray" onclick="showShutdownSettingsModal()" style="font-size:0.85em" title="${t('system.shutdownSettings')}"><i class="ri-shut-down-line"></i> ${t('system.shutdownSettings')}</button>
                             <button id="usb-mux-btn" class="btn btn-small btn-gray" onclick="toggleUsbMux()" style="font-size:0.85em"><i class="ri-usb-line"></i> USB: <span id="usb-mux-target">-</span></button>
                             <button class="btn btn-small btn-service-style" onclick="confirmReboot()" style="font-size:0.85em"><i class="ri-restart-line"></i> ${t('system.reboot')}</button>
                         </div>
                     </div>
                     <div class="card-content" style="display:flex;gap:20px">
                         <div style="flex:1">
-                            <p style="font-size:0.9em;color:#9ca3af;margin-bottom:5px">${t('system.overview')}</p>
+                            <p style="font-size:0.9em;color:var(--text-muted);margin-bottom:5px">${t('system.overview')}</p>
                             <p><strong>${t('system.chip')}:</strong> <span id="sys-chip">-</span></p>
-                            <p><strong>${t('system.firmware')}:</strong> <span id="sys-version">-</span> / <span id="sys-idf" style="font-size:0.85em;color:#9ca3af">-</span></p>
+                            <p><strong>${t('system.firmware')}:</strong> <span id="sys-version">-</span> / <span id="sys-idf" style="font-size:0.85em;color:var(--text-muted)">-</span></p>
                             <p><strong>${t('system.uptime')}:</strong> <span id="sys-uptime">-</span></p>
-                            <p style="font-size:0.8em;color:#9ca3af;margin-top:5px" id="sys-compile">-</p>
+                            <p style="font-size:0.8em;color:var(--text-muted);margin-top:5px" id="sys-compile">-</p>
                         </div>
-                        <div style="flex:1;border-left:1px solid #e0e0e0;padding-left:20px">
-                            <p style="font-size:0.9em;color:#9ca3af;margin-bottom:5px">${t('system.power')}</p>
-                            <p><strong>${t('system.inputVoltage')}:</strong> <span id="voltage">-</span> <span style="font-size:0.85em;color:#9ca3af">/ ${t('system.internal')} <span id="internal-voltage">-</span></span></p>
+                        <div style="flex:1;border-left:1px solid var(--border);padding-left:20px">
+                            <p style="font-size:0.9em;color:var(--text-muted);margin-bottom:5px">${t('system.power')}</p>
+                            <p><strong>${t('system.inputVoltage')}:</strong> <span id="voltage">-</span> <span style="font-size:0.85em;color:var(--text-muted)">/ ${t('system.internal')} <span id="internal-voltage">-</span></span></p>
                             <p><strong>${t('system.current')}:</strong> <span id="current">-</span></p>
                             <p><strong>${t('system.wattage')}:</strong> <span id="power-watts">-</span></p>
                             <p style="display:flex;align-items:center;gap:6px"><strong>${t('system.protection')}:</strong> 
-                                <i id="protection-toggle-icon" class="ri-toggle-line" onclick="toggleProtection()" title="${t('system.toggleProtectionTitle')}" style="color:#6b7280;cursor:pointer;font-size:1.2em"></i>
+                                <i id="protection-toggle-icon" class="ri-toggle-line" onclick="toggleProtection()" title="${t('system.toggleProtectionTitle')}" style="color:var(--text-secondary);cursor:pointer;font-size:1.2em"></i>
                                 <span id="protection-status" style="font-size:0.85em">-</span>
                             </p>
                         </div>
@@ -591,15 +591,15 @@ async function loadSystemPage() {
                     </div>
                     <div class="card-content" style="display:flex;gap:20px">
                         <div style="flex:1">
-                            <p style="font-size:0.9em;color:#9ca3af;margin-bottom:5px">${t('network.connection')}</p>
+                            <p style="font-size:0.9em;color:var(--text-muted);margin-bottom:5px">${t('network.connection')}</p>
                             <p><strong>${t('system.ethernet')}:</strong> <span id="eth-status">-</span></p>
                             <p><strong>${t('system.wifi')}:</strong> <span id="wifi-status">-</span></p>
                             <p><strong>${t('system.ipAddress')}:</strong> <span id="ip-addr" style="font-size:0.9em">-</span></p>
                         </div>
-                        <div style="flex:1;border-left:1px solid #e0e0e0;padding-left:20px">
-                            <p style="font-size:0.9em;color:#9ca3af;margin-bottom:5px">${t('system.timeSync')}</p>
+                        <div style="flex:1;border-left:1px solid var(--border);padding-left:20px">
+                            <p style="font-size:0.9em;color:var(--text-muted);margin-bottom:5px">${t('system.timeSync')}</p>
                             <p><strong>${t('system.currentTime')}:</strong> <span id="sys-datetime" style="font-size:0.9em">-</span></p>
-                            <p><strong>${t('system.timeStatus')}:</strong> <span id="sys-time-status">-</span> <span style="font-size:0.85em;color:#9ca3af">(<span id="sys-time-source">-</span>)</span></p>
+                            <p><strong>${t('system.timeStatus')}:</strong> <span id="sys-time-status">-</span> <span style="font-size:0.85em;color:var(--text-muted)">(<span id="sys-time-source">-</span>)</span></p>
                             <p><strong>${t('system.timezone')}:</strong> <span id="sys-timezone">-</span></p>
                             <div style="margin-top:8px;display:flex;gap:5px">
                                 <button type="button" class="btn btn-small btn-gray time-sync-btn" onclick="syncTimeFromBrowser()" style="font-size:0.85em;padding:4px 8px"><i class="ri-refresh-line"></i> ${t('system.syncTime')}</button>
@@ -617,7 +617,7 @@ async function loadSystemPage() {
                     <div class="section-header">
                         <h2>${t('system.devicePanel')}</h2>
                         <div class="section-actions">
-                            <button id="agx-power-btn" class="btn btn-sm btn-danger" onclick="toggleAgxPower()"><i class="ri-checkbox-blank-circle-fill" style="color:#e11d48"></i> ${t('system.agxStopped')}</button>
+                            <button id="agx-power-btn" class="btn btn-sm btn-danger" onclick="toggleAgxPower()"><i class="ri-checkbox-blank-circle-fill" style="color:var(--rose-500)"></i> ${t('system.agxStopped')}</button>
                             <button id="lpmu-power-btn" class="btn btn-sm btn-warning" onclick="toggleLpmuPower()"><i class="ri-alert-line"></i> ${t('system.lpmuDetecting')}</button>
                             <button class="btn btn-sm btn-service-style" onclick="showWidgetManager()"><i class="ri-apps-line"></i> ${t('system.widgetManager')}</button>
                         </div>
@@ -890,11 +890,11 @@ function updateProtectionUI(running) {
     
     if (icon) {
         icon.className = running ? 'ri-toggle-fill' : 'ri-toggle-line';
-        icon.style.color = running ? '#059669' : '#6b7280';
+        icon.style.color = running ? 'var(--emerald-600)' : 'var(--text-secondary)';
     }
     if (statusSpan) {
         statusSpan.textContent = running ? t('status.enabled') : t('status.disabled');
-        statusSpan.style.color = running ? '#059669' : '#6b7280';
+        statusSpan.style.color = running ? 'var(--emerald-600)' : 'var(--text-secondary)';
     }
 }
 
@@ -1659,22 +1659,22 @@ async function showFanCurveModal(fanId = 0) {
                         <option value="3">${t('fanPage.fanN', { id: 3 })}</option>
                     </select>
                 </div>
-                <div class="form-group" style="background:var(--bg-tertiary); border-radius:8px; padding:12px 0;">
-                    <label style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                <div class="form-group fan-curve-bind-temp" style="background:var(--bg-muted); border-radius:var(--radius); padding:16px;">
+                    <label style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
                         <span>${t('fanPage.bindTempVar')}</span>
-                        <div style="display:flex; gap:8px; align-items:center;">
-                            <span id="variable-bind-status" class="badge" style="background:rgba(59,130,246,0.06);color:#2563eb;border:1px solid transparent;">${t('fanPage.unbound')}</span>
-                            <div id="fan-curve-temp-current" style="padding:4px 12px; background:var(--bg-secondary); border-radius:6px; font-size:16px; font-weight:bold; color:var(--primary);">--°C</div>
+                        <div style="display:flex; gap:10px; align-items:center;">
+                            <span id="variable-bind-status" class="badge" style="background:var(--blue-50);color:var(--blue-600);border:1px solid transparent;">${t('fanPage.unbound')}</span>
+                            <div id="fan-curve-temp-current" style="padding:6px 12px; background:var(--bg-card); border-radius:var(--radius-sm); font-size:16px; font-weight:bold; color:var(--blue-500);">--°C</div>
                         </div>
                     </label>
-                    <div style="display:flex; gap:8px; align-items:center;">
-                        <select id="temp-variable-select" class="input" style="flex:1;">
+                    <div style="display:flex; gap:10px; align-items:center;">
+                        <select id="temp-variable-select" class="input" style="flex:1; min-width:0;">
                             <option value="">${t('fanPage.selectVariable')}</option>
                         </select>
                         <button class="btn btn-sm btn-service-style" onclick="bindTempVariable()">${t('fanPage.bind')}</button>
                         <button class="btn btn-sm btn-secondary" onclick="unbindTempVariable()"><i class="ri-delete-bin-line"></i></button>
                     </div>
-                    <small class="form-hint" id="temp-source-hint" style="margin-top:4px;">${t('fanPage.selectVariableHint')}</small>
+                    <small class="form-hint" id="temp-source-hint" style="margin-top:10px;">${t('fanPage.selectVariableHint')}</small>
                 </div>
                 <div class="form-group">
                     <label style="display:flex;justify-content:space-between;align-items:center;">
@@ -4330,7 +4330,7 @@ async function quickActionViewLog(logFile, hostId) {
         <div id="quick-log-modal" class="modal">
             <div class="modal-content" style="max-width:1400px;width:90%">
                 <div class="modal-header">
-                    <h2><i class="ri-file-text-line"></i> 日志 - <small style="font-weight:normal;font-size:0.7em;color:#9ca3af">${escapeHtml(logFile)}</small></h2>
+                    <h2><i class="ri-file-text-line"></i> 日志 - <small style="font-weight:normal;font-size:0.7em;color:var(--text-muted)">${escapeHtml(logFile)}</small></h2>
                     <button class="modal-close" onclick="closeQuickLogModal()">&times;</button>
                 </div>
                 <div class="modal-body" style="padding:0">
@@ -4339,9 +4339,9 @@ async function quickActionViewLog(logFile, hostId) {
                 <div class="modal-footer" style="display:flex;gap:10px;padding:10px 15px;justify-content:space-between;align-items:center">
                     <div style="display:flex;gap:8px;align-items:center">
                         <button class="btn btn-danger" id="quick-log-tail-btn" onclick="toggleQuickLogTail('${escapeHtml(logFile)}', '${escapeHtml(hostId)}')"><i class="ri-stop-line"></i> 停止跟踪</button>
-                        <label style="display:flex;align-items:center;gap:4px;font-size:0.85em;color:#9ca3af">
+                        <label style="display:flex;align-items:center;gap:4px;font-size:0.85em;color:var(--text-muted)">
                             间隔
-                            <select id="quick-log-interval" onchange="updateQuickLogInterval('${escapeHtml(logFile)}', '${escapeHtml(hostId)}')" style="padding:2px 6px;border-radius:4px;border:1px solid var(--border-color);background:var(--bg-color);color:var(--text-color);font-size:0.9em">
+                            <select id="quick-log-interval" onchange="updateQuickLogInterval('${escapeHtml(logFile)}', '${escapeHtml(hostId)}')" style="padding:2px 6px;border-radius:4px;border:1px solid var(--border);background:var(--bg-muted);color:var(--text-primary);font-size:0.9em">
                                 <option value="1000">1秒</option>
                                 <option value="2000">2秒</option>
                                 <option value="3000">3秒</option>
@@ -4350,7 +4350,7 @@ async function quickActionViewLog(logFile, hostId) {
                                 <option value="30000">30秒</option>
                             </select>
                         </label>
-                        <span id="quick-log-status" style="font-size:0.85em;color:#9ca3af;display:flex;align-items:center"><span style="color:#059669">● 实时更新中</span></span>
+                        <span id="quick-log-status" style="font-size:0.85em;color:var(--text-muted);display:flex;align-items:center"><span style="color:var(--emerald-600)">● 实时更新中</span></span>
                     </div>
                     <button class="btn" onclick="closeQuickLogModal()">关闭</button>
                 </div>
@@ -5276,6 +5276,8 @@ function generateLedModalContent(device, type) {
         return `
             <div class="modal-section cc-modal-section">
                 <div class="cc-section">
+                    <h4>${t('ledPage.filterTitle')}</h4>
+                    <p class="cc-help-text">${t('ledPage.selectFilter')}</p>
                     <div class="filters-grid">
                         <button class="btn filter-btn" data-filter="pulse" onclick="selectFilterInModal('pulse', this)">${t('ledPage.filterPulse')}</button>
                         <button class="btn filter-btn" data-filter="breathing" onclick="selectFilterInModal('breathing', this)">${t('ledPage.filterBreathing')}</button>
@@ -5292,10 +5294,11 @@ function generateLedModalContent(device, type) {
                         <button class="btn filter-btn" data-filter="invert" onclick="selectFilterInModal('invert', this)">${t('ledPage.filterInvert')}</button>
                         <button class="btn filter-btn" data-filter="grayscale" onclick="selectFilterInModal('grayscale', this)">${t('ledPage.filterGrayscale')}</button>
                     </div>
-                    <div class="filter-config-modal" id="modal-filter-config" style="display:none;">
-                        <span class="filter-name" id="modal-filter-name">${t('ledPage.effectNotSelected')}</span>
-                        <div id="modal-filter-params"></div>
-                    </div>
+                </div>
+                <div class="cc-section" id="modal-filter-config" style="display:none;">
+                    <h4>${t('ledPage.settings')}</h4>
+                    <p class="cc-help-text">${t('ledPage.current')}: <span id="modal-filter-name">${t('ledPage.effectNotSelected')}</span></p>
+                    <div id="modal-filter-params"></div>
                 </div>
                 <div class="config-actions cc-actions">
                     <button class="btn btn-service-style btn-sm" id="modal-apply-filter-btn" onclick="applyFilterFromModal()" disabled>${t('ledPage.apply')}</button>
@@ -5787,7 +5790,7 @@ function selectFilterInModal(filter, btn) {
         }
     }
     
-    if (configDiv) configDiv.style.display = 'flex';
+    if (configDiv) configDiv.style.display = 'block';
     
     const applyBtn = document.getElementById('modal-apply-filter-btn');
     if (applyBtn) applyBtn.disabled = false;
@@ -7325,7 +7328,7 @@ async function showWifiScan() {
         const errorMsg = e.message || '';
         if (errorMsg.includes('STA') || errorMsg.includes('APSTA') || errorMsg.includes('mode')) {
             container.innerHTML = `<div class="error-state">
-                <div class="error-icon"><i class="ri-error-warning-line" style="color:var(--danger-color)"></i></div>
+                <div class="error-icon"><i class="ri-error-warning-line" style="color:var(--rose-500)"></i></div>
                 <div class="error-text">需要切换到 STA 或 APSTA 模式</div>
             </div>`;
         } else {
@@ -8533,7 +8536,7 @@ async function loadCommandsPage() {
         
         <!-- 新建/编辑指令模态框 -->
         <div id="command-modal" class="modal hidden">
-            <div class="modal-content cc-compact" style="max-width:560px">
+            <div class="modal-content cc-compact" style="max-width:680px">
                 <div class="modal-header">
                     <h2 id="command-modal-title">${typeof t === 'function' ? t('ssh.newCommand') : '新建指令'}</h2>
                     <div id="command-modal-header-actions"></div>
@@ -8546,8 +8549,8 @@ async function loadCommandsPage() {
                             <input type="text" id="cmd-edit-id" placeholder="${typeof t === 'function' ? t('ssh.cmdIdPlaceholder') : '例如：restart_nginx, check_status'}" 
                                    pattern="^[a-zA-Z0-9][a-zA-Z0-9_-]*[a-zA-Z0-9]$|^[a-zA-Z0-9]$"
                                    oninput="validateCommandId(this)" required>
-                            <small style="color:#6b7280">${typeof t === 'function' ? t('ssh.cmdIdHint') : '唯一标识符，仅限字母、数字、下划线、连字符，不能以 _ 或 - 开头/结尾'}</small>
-                            <span id="cmd-id-error" class="error-hint" style="display:none;color:var(--danger-color);font-size:12px"></span>
+                            <small style="color:var(--text-muted)">${typeof t === 'function' ? t('ssh.cmdIdHint') : '唯一标识符，仅限字母、数字、下划线、连字符，不能以 _ 或 - 开头/结尾'}</small>
+                            <span id="cmd-id-error" class="error-hint" style="display:none;color:var(--rose-500);font-size:12px"></span>
                         </div>
                         <div class="form-group">
                             <label>${typeof t === 'function' ? t('ssh.cmdName') : '指令名称'} *</label>
@@ -8555,8 +8558,8 @@ async function loadCommandsPage() {
                         </div>
                         <div class="form-group">
                             <label>${typeof t === 'function' ? t('ssh.commandText') : 'SSH 命令'} *</label>
-                            <textarea id="cmd-command" rows="3" placeholder="${typeof t === 'function' ? t('ssh.cmdCommandPlaceholder') : '例如：sudo systemctl restart nginx'}" required></textarea>
-                            <small style="color:#6b7280">${typeof t === 'function' ? t('ssh.multiLineHint') : '支持多行命令，每行一条'}</small>
+                            <textarea id="cmd-command" rows="5" placeholder="${typeof t === 'function' ? t('ssh.cmdCommandPlaceholder') : '例如：sudo systemctl restart nginx'}" required></textarea>
+                            <small style="color:var(--text-muted)">${typeof t === 'function' ? t('ssh.multiLineHint') : '支持多行命令，每行一条'}</small>
                         </div>
                         <div class="form-group">
                             <label>${typeof t === 'function' ? t('common.description') : '描述'}（${typeof t === 'function' ? t('common.optional') : '可选'}）</label>
@@ -8721,9 +8724,9 @@ function addCommandsPageStyles() {
             gap: 10px;
         }
         .host-card {
-            background: var(--bg-secondary);
-            border: 2px solid var(--border-color);
-            border-radius: 8px;
+            background: var(--bg-card);
+            border: 2px solid var(--border);
+            border-radius: var(--radius);
             padding: 12px 16px;
             cursor: pointer;
             transition: all 0.2s;
@@ -8734,17 +8737,17 @@ function addCommandsPageStyles() {
         }
         .host-card .host-icon {
             font-size: 2.5em;
-            color: var(--primary);
+            color: var(--blue-500);
             line-height: 1;
             align-self: center;
         }
         .host-card:hover {
-            border-color: var(--primary);
+            border-color: var(--blue-500);
             transform: translateY(-2px);
         }
         .host-card.selected {
             border-color: transparent;
-            background: rgba(16, 185, 129, 0.06);
+            background: var(--emerald-50);
         }
         .host-card .host-name {
             font-weight: bold;
@@ -8752,7 +8755,7 @@ function addCommandsPageStyles() {
         }
         .host-card .host-info {
             font-size: 0.85em;
-            color: #666;
+            color: var(--text-muted);
         }
         
         .commands-list {
@@ -8762,9 +8765,9 @@ function addCommandsPageStyles() {
             min-height: 220px;
         }
         .command-card {
-            background: var(--bg-secondary);
-            border: 1px solid var(--border-color);
-            border-radius: 8px;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
             padding: 12px;
             display: flex;
             flex-direction: column;
@@ -8787,7 +8790,7 @@ function addCommandsPageStyles() {
             white-space: nowrap;
         }
         .command-card .cmd-desc {
-            color: #666;
+            color: var(--text-muted);
             font-size: 0.85em;
             line-height: 1.3;
             display: -webkit-box;
@@ -8798,10 +8801,10 @@ function addCommandsPageStyles() {
         .command-card .cmd-code {
             font-family: monospace;
             font-size: 0.8em;
-            color: #888;
-            background: rgba(0,0,0,0.1);
+            color: var(--text-muted);
+            background: var(--bg-muted);
             padding: 4px 8px;
-            border-radius: 4px;
+            border-radius: var(--radius-sm);
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
@@ -8839,30 +8842,30 @@ function addCommandsPageStyles() {
         /* 高级选项折叠面板 */
         .advanced-options {
             margin-top: 15px;
-            border: 1px solid var(--border-color);
-            border-radius: 8px;
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
             overflow: hidden;
         }
         .advanced-options summary {
             padding: 10px 15px;
-            background: var(--bg-secondary);
+            background: var(--bg-muted);
             cursor: pointer;
             font-weight: 500;
             user-select: none;
         }
         .advanced-options summary:hover {
-            background: rgba(var(--primary-rgb), 0.1);
+            background: var(--blue-50);
         }
         .advanced-content {
             padding: 15px;
-            border-top: 1px solid var(--border-color);
+            border-top: 1px solid var(--border);
         }
         .advanced-content .form-group {
             margin-bottom: 12px;
         }
         .advanced-content small {
             display: block;
-            color: #888;
+            color: var(--text-muted);
             font-size: 0.8em;
             margin-top: 4px;
         }
@@ -8882,7 +8885,7 @@ function addCommandsPageStyles() {
             background: #1e1e1e;
             color: #d4d4d4;
             padding: 15px;
-            border-radius: 8px;
+            border-radius: var(--radius);
             font-family: monospace;
             font-size: 0.9em;
             max-height: 400px;
@@ -8899,7 +8902,7 @@ function addCommandsPageStyles() {
             flex-wrap: wrap;
         }
         .nohup-actions .btn {
-            background: var(--primary-color);
+            background: var(--blue-500);
             color: white;
         }
         .nohup-actions .btn:hover {
@@ -8909,9 +8912,9 @@ function addCommandsPageStyles() {
         /* 匹配结果面板 */
         .match-result-panel {
             margin-top: 15px;
-            background: var(--bg-secondary);
-            border: 1px solid var(--border-color);
-            border-radius: 8px;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
             padding: 15px;
         }
         .match-panel-header {
@@ -8931,20 +8934,20 @@ function addCommandsPageStyles() {
             font-weight: 500;
         }
         .match-status.success {
-            background: rgba(40, 167, 69, 0.2);
-            color: #28a745;
+            background: var(--emerald-50);
+            color: var(--emerald-600);
         }
         .match-status.failed {
-            background: rgba(220, 53, 69, 0.2);
-            color: #dc3545;
+            background: var(--rose-50);
+            color: var(--rose-500);
         }
         .match-status.timeout {
-            background: rgba(255, 193, 7, 0.2);
-            color: #f59e0b;
+            background: var(--amber-50);
+            color: var(--amber-500);
         }
         .match-status.extracting {
-            background: rgba(59, 130, 246, 0.12);
-            color: #3b82f6;
+            background: var(--blue-100);
+            color: var(--blue-600);
             animation: pulse 1.5s infinite;
         }
         @keyframes pulse {
@@ -8957,14 +8960,14 @@ function addCommandsPageStyles() {
             gap: 12px;
         }
         .match-result-item {
-            background: var(--bg-primary);
-            border: 1px solid var(--border-color);
-            border-radius: 6px;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
             padding: 10px 12px;
         }
         .match-label {
             font-size: 0.85em;
-            color: #888;
+            color: var(--text-muted);
             margin-bottom: 4px;
         }
         .match-value {
@@ -8974,10 +8977,10 @@ function addCommandsPageStyles() {
             word-break: break-all;
         }
         .match-value.true {
-            color: #28a745;
+            color: var(--emerald-500);
         }
         .match-value.false {
-            color: #dc3545;
+            color: var(--rose-500);
         }
         .match-extracted {
             font-family: monospace;
@@ -8988,21 +8991,21 @@ function addCommandsPageStyles() {
         .match-var {
             display: block;
             font-size: 0.75em;
-            color: #6c757d;
-            background: rgba(0,0,0,0.1);
+            color: var(--text-muted);
+            background: var(--bg-muted);
             padding: 2px 6px;
-            border-radius: 3px;
+            border-radius: var(--radius-sm);
         }
         .match-api-hint {
             margin-top: 12px;
             padding-top: 10px;
-            border-top: 1px solid var(--border-color);
-            color: #888;
+            border-top: 1px solid var(--border);
+            color: var(--text-muted);
         }
         .match-api-hint code {
-            background: rgba(0,0,0,0.1);
+            background: var(--bg-muted);
             padding: 2px 6px;
-            border-radius: 3px;
+            border-radius: var(--radius-sm);
             font-size: 0.85em;
         }
         
@@ -9015,20 +9018,31 @@ function addCommandsPageStyles() {
             width: 36px;
             height: 36px;
             font-size: 1.2em;
-            border: 2px solid var(--border-color);
-            border-radius: 6px;
-            background: var(--bg-secondary);
+            border: 2px solid var(--border);
+            border-radius: var(--radius-sm);
+            background: var(--bg-muted);
             cursor: pointer;
         }
         .icon-btn:hover, .icon-btn.selected {
-            border-color: var(--primary);
-            background: rgba(var(--primary-rgb), 0.1);
+            border-color: var(--blue-500);
+            background: var(--blue-50);
         }
         
         .empty-state {
             text-align: center;
             padding: 40px;
-            color: #666;
+            color: var(--text-muted);
+        }
+        
+        /* 新建指令模态框 - 输入栏加大以便用户查看 */
+        #command-modal .form-group input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]),
+        #command-modal .form-group textarea {
+            padding: 12px 16px;
+            font-size: 0.95rem;
+            min-height: 48px;
+        }
+        #command-modal .form-group textarea {
+            min-height: 150px;
         }
     `;
     document.head.appendChild(style);
@@ -9356,7 +9370,7 @@ async function showCommandVariables(varName) {
                 v.source_id === varName || v.name.startsWith(varName + '.'));
             
             if (vars.length === 0) {
-                body.innerHTML = '<p style="text-align:center;color:var(--text-light);padding:20px">该指令暂无变量数据，请先执行一次</p>';
+                body.innerHTML = '<p style="text-align:center;color:var(--text-secondary);padding:20px">该指令暂无变量数据，请先执行一次</p>';
                 return;
             }
             
@@ -9383,10 +9397,10 @@ async function showCommandVariables(varName) {
                 </table>
             `;
         } else {
-            body.innerHTML = `<p style="text-align:center;color:var(--danger-color)">${result.message || '获取变量失败'}</p>`;
+            body.innerHTML = `<p style="text-align:center;color:var(--rose-500)">${result.message || '获取变量失败'}</p>`;
         }
     } catch (error) {
-        body.innerHTML = `<p style="text-align:center;color:var(--danger-color)">${error.message}</p>`;
+        body.innerHTML = `<p style="text-align:center;color:var(--rose-500)">${error.message}</p>`;
     }
 }
 
@@ -9587,7 +9601,7 @@ function validateCommandId(input) {
     }
     
     if (errorMsg) {
-        input.style.borderColor = 'var(--danger-color)';
+        input.style.borderColor = 'var(--rose-500)';
         errorSpan.innerHTML = '<i class="ri-error-warning-line"></i> ' + errorMsg;
         errorSpan.style.display = 'block';
         return false;
@@ -13920,8 +13934,8 @@ async function loadTerminalPage() {
                 align-items: center;
                 gap: 15px;
                 padding: 12px 15px;
-                background: var(--card-bg);
-                border-radius: 8px;
+                background: var(--bg-card);
+                border-radius: var(--radius);
                 flex-wrap: wrap;
             }
             .toolbar-left {
@@ -13943,7 +13957,7 @@ async function loadTerminalPage() {
             }
             .toolbar-item label {
                 font-size: 0.85em;
-                color: var(--text-light);
+                color: var(--text-secondary);
                 white-space: nowrap;
             }
             .toolbar-item .form-control {
@@ -13957,7 +13971,7 @@ async function loadTerminalPage() {
             
             .log-stats {
                 font-size: 0.85em;
-                color: var(--text-light);
+                color: var(--text-secondary);
             }
             
             .auto-scroll-toggle {
@@ -13965,7 +13979,7 @@ async function loadTerminalPage() {
                 align-items: center;
                 gap: 4px;
                 font-size: 0.85em;
-                color: var(--text-light);
+                color: var(--text-secondary);
                 cursor: pointer;
             }
             .auto-scroll-toggle input {
@@ -13975,8 +13989,8 @@ async function loadTerminalPage() {
             /* 日志面板 */
             .log-panel {
                 flex: 1;
-                background: var(--card-bg);
-                border-radius: 8px;
+                background: var(--bg-card);
+                border-radius: var(--radius);
                 overflow: hidden;
                 display: flex;
                 flex-direction: column;
@@ -13996,7 +14010,7 @@ async function loadTerminalPage() {
             
             .log-entry {
                 padding: 3px 8px;
-                border-radius: 3px;
+                border-radius: var(--radius-sm);
                 margin: 2px 0;
                 display: flex;
                 align-items: baseline;
@@ -14006,7 +14020,7 @@ async function loadTerminalPage() {
                 background: rgba(255,255,255,0.05);
             }
             .log-time {
-                color: #666;
+                color: var(--text-muted);
                 font-size: 0.9em;
                 flex-shrink: 0;
             }
@@ -14014,13 +14028,13 @@ async function loadTerminalPage() {
                 font-weight: 600;
                 font-size: 0.85em;
                 padding: 1px 6px;
-                border-radius: 3px;
+                border-radius: var(--radius-sm);
                 flex-shrink: 0;
                 min-width: 55px;
                 text-align: center;
             }
             .log-tag {
-                color: #64b5f6;
+                color: var(--cyan-500);
                 flex-shrink: 0;
                 max-width: 150px;
                 overflow: hidden;
@@ -14031,22 +14045,22 @@ async function loadTerminalPage() {
                 word-break: break-word;
             }
             .log-task {
-                color: #666;
+                color: var(--text-muted);
                 font-size: 0.85em;
                 flex-shrink: 0;
             }
             
             /* 日志级别颜色 */
-            .level-error { border-left: 3px solid #ef5350; }
-            .level-error .log-level { background: #ef5350; color: #fff; }
-            .level-warn { border-left: 3px solid #ffa726; }
-            .level-warn .log-level { background: #ffa726; color: #000; }
-            .level-info { border-left: 3px solid #66bb6a; }
-            .level-info .log-level { background: rgba(102,187,106,0.2); color: #66bb6a; }
-            .level-debug { border-left: 3px solid #42a5f5; }
-            .level-debug .log-level { background: rgba(66,165,245,0.2); color: #42a5f5; }
-            .level-verbose { border-left: 3px solid #78909c; }
-            .level-verbose .log-level { background: rgba(120,144,156,0.2); color: #78909c; }
+            .level-error { border-left: 3px solid var(--rose-500); }
+            .level-error .log-level { background: var(--rose-500); color: #fff; }
+            .level-warn { border-left: 3px solid var(--amber-500); }
+            .level-warn .log-level { background: var(--amber-500); color: var(--text-primary); }
+            .level-info { border-left: 3px solid var(--emerald-500); }
+            .level-info .log-level { background: var(--emerald-50); color: var(--emerald-600); }
+            .level-debug { border-left: 3px solid var(--blue-500); }
+            .level-debug .log-level { background: var(--blue-50); color: var(--blue-600); }
+            .level-verbose { border-left: 3px solid var(--text-muted); }
+            .level-verbose .log-level { background: var(--bg-muted); color: var(--text-muted); }
             
             .log-empty {
                 display: flex;
@@ -14054,7 +14068,7 @@ async function loadTerminalPage() {
                 align-items: center;
                 justify-content: center;
                 height: 200px;
-                color: #666;
+                color: var(--text-muted);
             }
             .log-empty .icon {
                 font-size: 3em;
@@ -14066,8 +14080,8 @@ async function loadTerminalPage() {
             }
             
             .log-highlight {
-                background: #ffeb3b;
-                color: #000;
+                background: var(--amber-500);
+                color: var(--text-primary);
                 padding: 0 3px;
                 border-radius: 2px;
             }
@@ -14624,10 +14638,10 @@ async function loadOtaPage() {
         
         /* 主卡片 */
         .ota-main-card {
-            background: white;
-            border-radius: 12px;
+            background: var(--bg-card);
+            border-radius: var(--radius-lg);
             padding: 20px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            box-shadow: var(--shadow);
             margin-bottom: 15px;
         }
         
@@ -14641,23 +14655,23 @@ async function loadOtaPage() {
         
         .version-label {
             font-size: 0.9em;
-            color: #666;
+            color: var(--text-secondary);
         }
         
         .version-number {
             font-size: 1em;
             font-weight: 700;
-            color: #333;
+            color: var(--text-primary);
             font-family: 'SF Mono', 'Courier New', monospace;
             letter-spacing: -0.5px;
         }
         
         .version-meta {
             font-size: 0.85em;
-            color: #888;
+            color: var(--text-muted);
             margin-bottom: 16px;
             padding-bottom: 16px;
-            border-bottom: 1px solid #eee;
+            border-bottom: 1px solid var(--border);
         }
         
         /* OTA 服务器行 */
@@ -14669,7 +14683,7 @@ async function loadOtaPage() {
         
         .server-label {
             font-size: 0.9em;
-            color: #666;
+            color: var(--text-secondary);
             white-space: nowrap;
         }
         
@@ -14683,15 +14697,15 @@ async function loadOtaPage() {
         .server-input-group .form-input {
             flex: 1;
             padding: 10px 12px;
-            border: 1px solid #ddd;
-            border-radius: 6px;
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
             font-size: 0.95em;
             min-width: 0;
         }
         
         .server-input-group .form-input:focus {
             outline: none;
-            border-color: #4CAF50;
+            border-color: var(--blue-500);
         }
         
         .server-input-group .btn,
@@ -14701,24 +14715,24 @@ async function loadOtaPage() {
             box-sizing: border-box;
             font-size: 0.95em;
             line-height: 1.2;
-            border-radius: 6px;
+            border-radius: var(--radius-sm);
         }
         
         .server-input-group .btn-icon {
-            border: 1px solid #ddd;
-            background: #f9f9f9;
+            border: 1px solid var(--border);
+            background: var(--bg-muted);
             cursor: pointer;
         }
         
         .server-input-group .btn-icon:hover {
-            background: #eee;
+            background: var(--border-hover);
         }
         
         /* 更新状态 */
         .ota-update-status {
             margin-top: 15px;
             padding: 15px;
-            border-radius: 8px;
+            border-radius: var(--radius);
             animation: fadeIn 0.3s ease;
         }
         
@@ -14728,22 +14742,22 @@ async function loadOtaPage() {
         }
         
         .ota-update-status.has-update {
-            background: rgba(16, 185, 129, 0.06);
-            border: 1px solid #81c784;
+            background: var(--emerald-50);
+            border: 1px solid var(--emerald-500);
         }
         
         .ota-update-status.no-update {
-            background: #e3f2fd;
-            border: 1px solid #90caf9;
+            background: var(--blue-50);
+            border: 1px solid var(--blue-500);
         }
         
         .ota-update-status.downgrade {
-            background: #fff3e0;
-            border: 1px solid #ffb74d;
+            background: var(--amber-50);
+            border: 1px solid var(--amber-500);
         }
         
         .ota-update-status.error {
-            background: rgba(244, 63, 94, 0.06);
+            background: var(--rose-50);
             border: 1px solid transparent;
         }
         
@@ -14751,8 +14765,8 @@ async function loadOtaPage() {
         .ota-progress-section {
             margin-top: 15px;
             padding: 15px;
-            background: #f5f5f5;
-            border-radius: 8px;
+            background: var(--bg-muted);
+            border-radius: var(--radius);
         }
         
         .progress-header {
@@ -14764,25 +14778,25 @@ async function loadOtaPage() {
         
         .progress-state {
             font-weight: 600;
-            color: #333;
+            color: var(--text-primary);
         }
         
         .progress-percent {
             font-weight: 700;
             font-size: 1.2em;
-            color: #4CAF50;
+            color: var(--emerald-500);
         }
         
         .progress-bar-container {
             height: 8px;
-            background: #ddd;
-            border-radius: 4px;
+            background: var(--border);
+            border-radius: var(--radius-sm);
             overflow: hidden;
         }
         
         .progress-bar-fill {
             height: 100%;
-            background: linear-gradient(90deg, #4CAF50, #81c784);
+            background: linear-gradient(90deg, var(--emerald-500), var(--emerald-600));
             transition: width 0.3s ease;
         }
         
@@ -14790,7 +14804,7 @@ async function loadOtaPage() {
             display: flex;
             justify-content: space-between;
             font-size: 0.85em;
-            color: #666;
+            color: var(--text-secondary);
             margin-top: 8px;
         }
         
@@ -14801,26 +14815,26 @@ async function loadOtaPage() {
         
         /* 可折叠区 */
         .ota-section {
-            background: white;
-            border-radius: 8px;
+            background: var(--bg-card);
+            border-radius: var(--radius);
             margin-bottom: 10px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+            box-shadow: var(--shadow-sm);
         }
         
         .ota-section summary {
             padding: 12px 15px;
             cursor: pointer;
             font-weight: 600;
-            color: #333;
+            color: var(--text-primary);
             user-select: none;
         }
         
         .ota-section summary:hover {
-            background: #f9f9f9;
+            background: var(--bg-muted);
         }
         
         .ota-section[open] summary {
-            border-bottom: 1px solid #eee;
+            border-bottom: 1px solid var(--border);
         }
         
         /* 升级方式 */
@@ -14832,15 +14846,15 @@ async function loadOtaPage() {
         }
         
         .ota-method {
-            border: 1px solid #eee;
-            border-radius: 8px;
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
             padding: 15px;
         }
         
         .ota-method h4 {
             margin: 0 0 10px 0;
             font-size: 1em;
-            color: #555;
+            color: var(--text-secondary);
         }
         
         .method-content {
@@ -14851,8 +14865,8 @@ async function loadOtaPage() {
         
         .method-content .form-input {
             padding: 8px 10px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
             font-size: 0.9em;
         }
         
@@ -14860,7 +14874,7 @@ async function loadOtaPage() {
             display: flex;
             gap: 15px;
             font-size: 0.85em;
-            color: #666;
+            color: var(--text-secondary);
         }
         
         .method-options label {
@@ -14879,22 +14893,22 @@ async function loadOtaPage() {
         }
         
         .partition-card {
-            border: 2px solid #ddd;
-            border-radius: 10px;
+            border: 2px solid var(--border);
+            border-radius: var(--radius);
             padding: 15px;
-            background: #fafafa;
+            background: var(--bg-muted);
             display: flex;
             flex-direction: column;
         }
         
         .partition-card.running {
-            border-color: #4CAF50;
-            background: rgba(16, 185, 129, 0.06);
+            border-color: var(--emerald-500);
+            background: var(--emerald-50);
         }
         
         .partition-card.bootable {
-            border-color: #ff9800;
-            background: linear-gradient(135deg, #fff8e1 0%, #fff3e0 100%);
+            border-color: var(--amber-500);
+            background: var(--amber-50);
         }
         
         .partition-header {
@@ -14913,32 +14927,32 @@ async function loadOtaPage() {
         .partition-badge {
             font-size: 0.75em;
             padding: 3px 10px;
-            border-radius: 12px;
+            border-radius: var(--radius-full);
             color: white;
             font-weight: 500;
         }
         
-        .partition-badge.running { background: #4CAF50; }
-        .partition-badge.bootable { background: #ff9800; }
-        .partition-badge.idle { background: #999; }
+        .partition-badge.running { background: var(--emerald-500); }
+        .partition-badge.bootable { background: var(--amber-500); }
+        .partition-badge.idle { background: var(--text-muted); }
         
         .partition-version {
             font-size: 1em;
             font-weight: 600;
-            color: #333;
+            color: var(--text-primary);
             margin-bottom: 4px;
         }
         
         .partition-info {
             font-size: 0.85em;
-            color: #666;
+            color: var(--text-secondary);
             margin-bottom: 12px;
         }
         
         .partition-action {
             margin-top: auto;
             padding-top: 10px;
-            border-top: 1px solid rgba(0,0,0,0.1);
+            border-top: 1px solid var(--border);
         }
         
         .partition-action .btn {
@@ -14948,7 +14962,7 @@ async function loadOtaPage() {
         
         .partition-action-desc {
             font-size: 0.8em;
-            color: #888;
+            color: var(--text-muted);
             margin-top: 6px;
             text-align: center;
         }
@@ -16829,7 +16843,7 @@ async function refreshRules() {
         if (result.code === 0 && result.data && result.data.rules) {
             const rules = result.data.rules;
             if (rules.length === 0) {
-                container.innerHTML = '<p style="text-align:center;color:var(--text-light)">' + (typeof t === 'function' ? t('automationPage.noRules') : '暂无规则，点击"添加"创建第一条') + '</p>';
+                container.innerHTML = '<p style="text-align:center;color:var(--text-secondary)">' + (typeof t === 'function' ? t('automationPage.noRules') : '暂无规则，点击"添加"创建第一条') + '</p>';
                 return;
             }
             
@@ -16859,7 +16873,7 @@ async function refreshRules() {
                             } else {
                                 iconHtml = `<i class="${getRuleIconRi(iconValue)}" style="font-size:1.2em"></i>`;
                             }
-                            const manualBadge = r.manual_trigger ? '<span class="badge" style="background:#10b981;font-size:0.7em">' + (typeof t === 'function' ? t('common.manual') : '手动') + '</span>' : '';
+                            const manualBadge = r.manual_trigger ? '<span class="badge" style="background:var(--emerald-500);font-size:0.7em">' + (typeof t === 'function' ? t('common.manual') : '手动') + '</span>' : '';
                             const enabledStr = typeof t === 'function' ? t('common.enabled') : '启用';
                             const disabledStr = typeof t === 'function' ? t('common.disabled') : '禁用';
                             return `
@@ -16884,11 +16898,11 @@ async function refreshRules() {
                 </table>
             `;
         } else {
-            container.innerHTML = '<p style="text-align:center;color:var(--text-light)">' + (result.message || (typeof t === 'function' ? t('automationPage.getRulesFailed') : '获取规则失败')) + '</p>';
+            container.innerHTML = '<p style="text-align:center;color:var(--text-secondary)">' + (result.message || (typeof t === 'function' ? t('automationPage.getRulesFailed') : '获取规则失败')) + '</p>';
         }
     } catch (error) {
         const isNetworkError = error.message.includes('fetch') || error.message.includes('network');
-        container.innerHTML = '<p style="text-align:center;color:var(--danger-color)">' + (isNetworkError && typeof t === 'function' ? t('automationPage.networkFailed') : error.message) + '</p>';
+        container.innerHTML = '<p style="text-align:center;color:var(--rose-500)">' + (isNetworkError && typeof t === 'function' ? t('automationPage.networkFailed') : error.message) + '</p>';
     }
 }
 
@@ -16932,7 +16946,7 @@ async function refreshSources() {
         if (result.code === 0 && result.data && result.data.sources) {
             const sources = result.data.sources;
             if (sources.length === 0) {
-                container.innerHTML = '<p style="text-align:center;color:var(--text-light)">' + (typeof t === 'function' ? t('automationPage.noSources') : '暂无数据源，点击"添加"创建第一个') + '</p>';
+                container.innerHTML = '<p style="text-align:center;color:var(--text-secondary)">' + (typeof t === 'function' ? t('automationPage.noSources') : '暂无数据源，点击"添加"创建第一个') + '</p>';
                 return;
             }
             
@@ -16971,11 +16985,11 @@ async function refreshSources() {
                 </table>
             `;
         } else {
-            container.innerHTML = '<p style="text-align:center;color:var(--text-light)">' + (result.message || (typeof t === 'function' ? t('automationPage.getSourcesFailed') : '获取数据源失败')) + '</p>';
+            container.innerHTML = '<p style="text-align:center;color:var(--text-secondary)">' + (result.message || (typeof t === 'function' ? t('automationPage.getSourcesFailed') : '获取数据源失败')) + '</p>';
         }
     } catch (error) {
         const isNetworkError = error.message.includes('fetch') || error.message.includes('network');
-        container.innerHTML = '<p style="text-align:center;color:var(--danger-color)">' + (isNetworkError && typeof t === 'function' ? t('automationPage.networkFailed') : error.message) + '</p>';
+        container.innerHTML = '<p style="text-align:center;color:var(--rose-500)">' + (isNetworkError && typeof t === 'function' ? t('automationPage.networkFailed') : error.message) + '</p>';
     }
 }
 
@@ -16999,10 +17013,10 @@ async function refreshVariables() {
             if (countBadge) countBadge.textContent = allVariables.length;
             renderVariables(allVariables);
         } else {
-            container.innerHTML = `<p style="text-align:center;color:var(--text-light)">${result.message || '获取变量失败'}</p>`;
+            container.innerHTML = `<p style="text-align:center;color:var(--text-secondary)">${result.message || '获取变量失败'}</p>`;
         }
     } catch (error) {
-        container.innerHTML = `<p style="text-align:center;color:var(--danger-color)">${error.message}</p>`;
+        container.innerHTML = `<p style="text-align:center;color:var(--rose-500)">${error.message}</p>`;
     }
 }
 
@@ -17030,7 +17044,7 @@ function renderVariables(variables) {
     if (!container) return;
     
     if (variables.length === 0) {
-        container.innerHTML = '<p style="text-align:center;color:var(--text-light)">暂无变量数据</p>';
+        container.innerHTML = '<p style="text-align:center;color:var(--text-secondary)">暂无变量数据</p>';
         return;
     }
     
@@ -17145,7 +17159,7 @@ async function refreshActions() {
         const actions = result.data?.templates || [];
         
         if (actions.length === 0) {
-            container.innerHTML = '<p style="text-align:center;color:var(--text-light)">' + (typeof t === 'function' ? t('automationPage.noActions') : '暂无动作模板，点击"添加"创建') + '</p>';
+            container.innerHTML = '<p style="text-align:center;color:var(--text-secondary)">' + (typeof t === 'function' ? t('automationPage.noActions') : '暂无动作模板，点击"添加"创建') + '</p>';
         } else {
             const asyncStr = typeof t === 'function' ? t('automation.asyncAction') : '异步';
             const syncStr = typeof t === 'function' ? (t('automationPage.syncMode') || '同步') : '同步';
@@ -17995,15 +18009,15 @@ function updateActionLedTypeFields() {
             break;
             
         case 'off':
-            html = `<div class="form-hint" style="padding:10px;color:var(--text-light);">关闭 LED 设备，无需额外参数</div>`;
+            html = `<div class="form-hint" style="padding:10px;color:var(--text-secondary);">关闭 LED 设备，无需额外参数</div>`;
             break;
             
         case 'filter_stop':
-            html = `<div class="form-hint" style="padding:10px;color:var(--text-light);">停止当前运行的滤镜效果，无需额外参数</div>`;
+            html = `<div class="form-hint" style="padding:10px;color:var(--text-secondary);">停止当前运行的滤镜效果，无需额外参数</div>`;
             break;
             
         case 'text_stop':
-            html = `<div class="form-hint" style="padding:10px;color:var(--text-light);">停止当前运行的文本覆盖层，无需额外参数</div>`;
+            html = `<div class="form-hint" style="padding:10px;color:var(--text-secondary);">停止当前运行的文本覆盖层，无需额外参数</div>`;
             break;
             
         case 'text':
@@ -18222,7 +18236,7 @@ async function showImageSelectModal(title, onSelect) {
                     <p>${t('common.loading')}</p>
                 </div>
                 <div id="image-select-list" style="display:none;max-height:400px;overflow-y:auto;"></div>
-                <div id="image-select-empty" style="display:none;text-align:center;padding:30px;color:var(--text-light);">
+                <div id="image-select-empty" style="display:none;text-align:center;padding:30px;color:var(--text-secondary);">
                     <i class="ri-inbox-line" style="font-size:48px;margin-bottom:10px;display:block;"></i>
                     <p>没有找到图像文件</p>
                     <small>支持 PNG、JPG、BMP、GIF 格式</small>
@@ -18271,7 +18285,7 @@ async function showImageSelectModal(title, onSelect) {
                     <span style="font-size:24px;margin-right:12px;">${icon}</span>
                     <div style="flex:1;min-width:0;">
                         <div style="font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${img.name}</div>
-                        <small style="color:var(--text-light);">${size}</small>
+                        <small style="color:var(--text-secondary);">${size}</small>
                     </div>
                     <span class="image-select-check" style="display:none;color:var(--success);font-size:20px;"><i class="ri-check-line"></i></span>
                 </div>
@@ -18361,7 +18375,7 @@ async function showVariableSelectModal(targetInputId, mode = 'insert') {
                     <p>${typeof t === 'function' ? t('automation.loadingVariables') : '加载变量列表...'}</p>
                 </div>
                 <div id="variable-select-list" style="display:none;max-height:400px;overflow-y:auto;"></div>
-                <div id="variable-select-empty" style="display:none;text-align:center;padding:30px;color:var(--text-light);">
+                <div id="variable-select-empty" style="display:none;text-align:center;padding:30px;color:var(--text-secondary);">
                     <i class="ri-inbox-line" style="font-size:48px;margin-bottom:10px;display:block;"></i>
                     <p>没有可用的变量</p>
                     <small>请先配置数据源并启用</small>
@@ -18404,7 +18418,7 @@ async function showVariableSelectModal(targetInputId, mode = 'insert') {
             html += `<div class="var-group" data-source="${sourceId}">
                 <div class="var-group-header" style="padding:10px 12px;background:var(--bg-elevated);font-weight:600;border-bottom:1px solid var(--border);cursor:pointer;display:flex;align-items:center;justify-content:space-between;"
                      onclick="toggleVarGroup('${groupId}')">
-                    <span><i class="ri-archive-line"></i> ${sourceId === '_system' ? (typeof t === 'function' ? t('automation.systemVariables') : 'System Variables') : sourceId} <span style="font-weight:normal;color:var(--text-light);">(${vars.length})</span></span>
+                    <span><i class="ri-archive-line"></i> ${sourceId === '_system' ? (typeof t === 'function' ? t('automation.systemVariables') : 'System Variables') : sourceId} <span style="font-weight:normal;color:var(--text-secondary);">(${vars.length})</span></span>
                     <span class="var-group-arrow" id="${groupId}-arrow" style="transition:transform 0.2s;">▶</span>
                 </div>
                 <div class="var-group-items" id="${groupId}" style="display:none;">`;
@@ -18423,7 +18437,7 @@ async function showVariableSelectModal(targetInputId, mode = 'insert') {
                         <span style="font-size:18px;margin-right:10px;">${typeIcon}</span>
                         <div style="flex:1;min-width:0;">
                             <div style="font-weight:500;font-family:monospace;">\${${v.name}}</div>
-                            <small style="color:var(--text-light);">当前值: ${displayValue}${displayValue.length >= 30 ? '...' : ''}</small>
+                            <small style="color:var(--text-secondary);">当前值: ${displayValue}${displayValue.length >= 30 ? '...' : ''}</small>
                         </div>
                         <span class="var-select-check" style="display:none;color:var(--success);font-size:20px;"><i class="ri-check-line"></i></span>
                     </div>
@@ -18605,7 +18619,7 @@ function updateActionFilterParams() {
     const config = filterConfig[filter];
     
     if (!config || !config.params || config.params.length === 0) {
-        paramsContainer.innerHTML = '<div class="form-hint" style="padding:10px;color:var(--text-light);">此滤镜无额外参数</div>';
+        paramsContainer.innerHTML = '<div class="form-hint" style="padding:10px;color:var(--text-secondary);">此滤镜无额外参数</div>';
         return;
     }
     
@@ -18983,7 +18997,7 @@ async function showSourceVariables(sourceId) {
             const vars = result.data.variables.filter(v => v.source_id === sourceId);
             
             if (vars.length === 0) {
-                body.innerHTML = '<p style="text-align:center;color:var(--text-light);padding:20px">该数据源暂无变量数据</p>';
+                body.innerHTML = '<p style="text-align:center;color:var(--text-secondary);padding:20px">该数据源暂无变量数据</p>';
                 return;
             }
             
@@ -19010,10 +19024,10 @@ async function showSourceVariables(sourceId) {
                 </table>
             `;
         } else {
-            body.innerHTML = `<p style="text-align:center;color:var(--danger-color)">${result.message || '获取变量失败'}</p>`;
+            body.innerHTML = `<p style="text-align:center;color:var(--rose-500)">${result.message || '获取变量失败'}</p>`;
         }
     } catch (error) {
-        body.innerHTML = `<p style="text-align:center;color:var(--danger-color)">${error.message}</p>`;
+        body.innerHTML = `<p style="text-align:center;color:var(--rose-500)">${error.message}</p>`;
     }
 }
 
@@ -19264,7 +19278,7 @@ function showAddSourceModal() {
                     </div>
                     
                     <div class="form-group">
-                        <label>${typeof t === 'function' ? t('automation.jsonPathLabel') : 'JSON 数据路径'} <span style="color:var(--text-light);font-weight:normal">${typeof t === 'function' ? t('automation.jsonPathHint') : '(点击上方字段自动填入)'}</span></label>
+                        <label>${typeof t === 'function' ? t('automation.jsonPathLabel') : 'JSON 数据路径'} <span style="color:var(--text-secondary);font-weight:normal">${typeof t === 'function' ? t('automation.jsonPathHint') : '(点击上方字段自动填入)'}</span></label>
                         <input type="text" id="source-rest-path" class="input" placeholder="${typeof t === 'function' ? t('automation.jsonPathPlaceholderRest') : '如: data.temperature（留空取整个响应）'}">
                     </div>
                 </div>
@@ -19307,11 +19321,11 @@ function showAddSourceModal() {
                             <input type="text" id="source-sio-url" class="input" placeholder="${typeof t === 'function' ? t('automation.sioPlaceholder') : 'http://10.10.99.99:59090'}">
                             <button class="btn btn-sm btn-warning" onclick="testSioConnection()" id="btn-test-sio">${typeof t === 'function' ? t('automation.testBtn') : '测试'}</button>
                         </div>
-                        <small style="color:var(--text-light)">${typeof t === 'function' ? t('automation.sioV4Hint') : 'Socket.IO v4 协议，使用 HTTP/HTTPS 地址'}</small>
+                        <small style="color:var(--text-secondary)">${typeof t === 'function' ? t('automation.sioV4Hint') : 'Socket.IO v4 协议，使用 HTTP/HTTPS 地址'}</small>
                     </div>
                     <div class="form-row">
                         <div class="form-group">
-                            <label>${typeof t === 'function' ? t('automation.eventNameLabel') : '事件名称'} <span style="color:var(--text-light);font-weight:normal">${typeof t === 'function' ? t('automation.eventNameHint') : '(留空自动发现)'}</span></label>
+                            <label>${typeof t === 'function' ? t('automation.eventNameLabel') : '事件名称'} <span style="color:var(--text-secondary);font-weight:normal">${typeof t === 'function' ? t('automation.eventNameHint') : '(留空自动发现)'}</span></label>
                             <input type="text" id="source-sio-event" class="input" placeholder="${typeof t === 'function' ? t('automation.eventNamePlaceholder') : '测试时留空可自动发现事件'}">
                         </div>
                         <div class="form-group" style="flex:0 0 150px">
@@ -19338,7 +19352,7 @@ function showAddSourceModal() {
                         <input type="checkbox" id="source-sio-auto-discover" checked>
                         <span>${typeof t === 'function' ? t('automation.autoDiscoverFields') : '自动发现所有 JSON 字段为变量'}</span>
                     </label>
-                    <small style="color:var(--text-light);display:block;margin-top:-10px;margin-bottom:10px;padding-left:24px">${typeof t === 'function' ? t('automation.autoDiscoverHint') : '关闭后仅使用上方选中的字段作为变量'}</small>
+                    <small style="color:var(--text-secondary);display:block;margin-top:-10px;margin-bottom:10px;padding-left:24px">${typeof t === 'function' ? t('automation.autoDiscoverHint') : '关闭后仅使用上方选中的字段作为变量'}</small>
                 </div>
                 
                 <div id="source-variable-config" class="config-section" style="display:none">
@@ -19348,14 +19362,14 @@ function showAddSourceModal() {
                         <select id="source-ssh-host" class="input" onchange="onSshHostChangeForSource()">
                             <option value="">-- ${t('common.loading')} --</option>
                         </select>
-                        <small style="color:var(--text-light)">${typeof t === 'function' ? t('automation.sshHostHint') : '选择已配置的 SSH 主机（在 SSH 页面添加）'}</small>
+                        <small style="color:var(--text-secondary)">${typeof t === 'function' ? t('automation.sshHostHint') : '选择已配置的 SSH 主机（在 SSH 页面添加）'}</small>
                     </div>
                     <div class="form-group">
                         <label>${typeof t === 'function' ? t('automation.selectCmdReq') : '选择指令'} <span class="required">*</span></label>
                         <select id="source-ssh-cmd" class="input" onchange="onSshCmdChange()">
                             <option value="">${typeof t === 'function' ? t('automation.selectHostFirst') : '-- 先选择主机 --'}</option>
                         </select>
-                        <small style="color:var(--text-light)">${typeof t === 'function' ? t('automation.selectCmdHint') : '选择要监视的指令（在 SSH 页面创建）'}</small>
+                        <small style="color:var(--text-secondary)">${typeof t === 'function' ? t('automation.selectCmdHint') : '选择要监视的指令（在 SSH 页面创建）'}</small>
                     </div>
                     <div id="source-ssh-cmd-preview" class="ssh-cmd-preview" style="display:none">
                         <div class="preview-title">${typeof t === 'function' ? t('automation.cmdPreviewTitle') : '指令详情'}</div>
@@ -19376,7 +19390,7 @@ function showAddSourceModal() {
                     <div class="form-group">
                         <label>${typeof t === 'function' ? t('automation.pollIntervalSec') : '检测间隔 (秒)'}</label>
                         <input type="number" id="source-var-interval" class="input" value="5" min="1" max="3600">
-                        <small style="color:var(--text-light)">${typeof t === 'function' ? t('automation.pollIntervalHint') : '定期读取变量值的间隔'}</small>
+                        <small style="color:var(--text-secondary)">${typeof t === 'function' ? t('automation.pollIntervalHint') : '定期读取变量值的间隔'}</small>
                     </div>
                 </div>
                 
@@ -19432,7 +19446,7 @@ async function testRestConnection() {
         
         if (result.code === 0 && result.data) {
             lastTestData = result.data.body;
-            statusSpan.innerHTML = `<span style="color:var(--secondary-color)">连接成功</span> <span style="color:var(--text-light)">(${result.data.status || 200})</span>`;
+            statusSpan.innerHTML = `<span style="color:var(--emerald-500)">连接成功</span> <span style="color:var(--text-secondary)">(${result.data.status || 200})</span>`;
             
             // 解析并显示可选变量
             try {
@@ -19446,11 +19460,11 @@ async function testRestConnection() {
                 document.getElementById('rest-json-preview').textContent = lastTestData;
             }
         } else {
-            statusSpan.innerHTML = `<span style="color:var(--danger-color)">请求失败: ${result.message || '未知错误'}</span>`;
+            statusSpan.innerHTML = `<span style="color:var(--rose-500)">请求失败: ${result.message || '未知错误'}</span>`;
             document.querySelector('#rest-var-selector .var-list').innerHTML = '';
         }
     } catch (error) {
-        statusSpan.innerHTML = `<span style="color:var(--danger-color)">错误: ${error.message}</span>`;
+        statusSpan.innerHTML = `<span style="color:var(--rose-500)">错误: ${error.message}</span>`;
         document.querySelector('#rest-var-selector .var-list').innerHTML = '';
     }
     
@@ -19490,7 +19504,7 @@ async function testWsConnection() {
         
         if (result.code === 0 && result.data) {
             lastTestData = result.data.message;
-            statusSpan.innerHTML = `<span style="color:var(--secondary-color)">连接成功，已收到数据</span>`;
+            statusSpan.innerHTML = `<span style="color:var(--emerald-500)">连接成功，已收到数据</span>`;
             
             try {
                 const jsonData = typeof lastTestData === 'string' ? JSON.parse(lastTestData) : lastTestData;
@@ -19502,11 +19516,11 @@ async function testWsConnection() {
                 document.getElementById('ws-json-preview').textContent = lastTestData;
             }
         } else {
-            statusSpan.innerHTML = `<span style="color:var(--danger-color)">${result.message || '连接失败'}</span>`;
+            statusSpan.innerHTML = `<span style="color:var(--rose-500)">${result.message || '连接失败'}</span>`;
             document.querySelector('#ws-var-selector .var-list').innerHTML = '';
         }
     } catch (error) {
-        statusSpan.innerHTML = `<span style="color:var(--danger-color)">错误: ${error.message}</span>`;
+        statusSpan.innerHTML = `<span style="color:var(--rose-500)">错误: ${error.message}</span>`;
         document.querySelector('#ws-var-selector .var-list').innerHTML = '';
     }
     
@@ -19554,19 +19568,19 @@ async function testSioConnection() {
             lastTestData = data.data;
             
             // 显示成功状态和发现的事件
-            let statusHtml = `<span style="color:var(--secondary-color)">连接成功</span>`;
+            let statusHtml = `<span style="color:var(--emerald-500)">连接成功</span>`;
             if (data.event) {
-                statusHtml += ` <span style="color:var(--text-light)">| 事件: <strong>${eventName}</strong></span>`;
+                statusHtml += ` <span style="color:var(--text-secondary)">| 事件: <strong>${eventName}</strong></span>`;
             }
             if (data.sid) {
-                statusHtml += ` <span style="color:var(--text-light);font-size:0.85em">| SID: ${data.sid.substring(0, 8)}...</span>`;
+                statusHtml += ` <span style="color:var(--text-secondary);font-size:0.85em">| SID: ${data.sid.substring(0, 8)}...</span>`;
             }
             statusSpan.innerHTML = statusHtml;
             
             // 自动填充发现的事件名（如果用户没有手动输入）
             if (data.event && !eventInput.value) {
                 eventInput.value = data.event;
-                eventInput.style.borderColor = 'var(--secondary-color)';
+                eventInput.style.borderColor = 'var(--emerald-500)';
                 setTimeout(() => eventInput.style.borderColor = '', 2000);
             }
             
@@ -19585,7 +19599,7 @@ async function testSioConnection() {
             if (result.data && result.data.sid) {
                 errorMsg += ` (已获取 SID，但未收到事件数据)`;
             }
-            statusSpan.innerHTML = `<span style="color:var(--danger-color)">${errorMsg}</span>`;
+            statusSpan.innerHTML = `<span style="color:var(--rose-500)">${errorMsg}</span>`;
             document.querySelector('#sio-var-selector .var-list').innerHTML = 
                 '<div class="var-item disabled">提示：留空事件名称可自动发现服务器推送的事件</div>';
             
@@ -19596,7 +19610,7 @@ async function testSioConnection() {
             }
         }
     } catch (error) {
-        statusSpan.innerHTML = `<span style="color:var(--danger-color)">错误: ${error.message}</span>`;
+        statusSpan.innerHTML = `<span style="color:var(--rose-500)">错误: ${error.message}</span>`;
         document.querySelector('#sio-var-selector .var-list').innerHTML = '';
     }
     
@@ -19705,7 +19719,7 @@ function selectVarPath(inputId, path) {
         input.value = path;
         input.focus();
         // 高亮效果
-        input.style.borderColor = 'var(--secondary-color)';
+        input.style.borderColor = 'var(--emerald-500)';
         setTimeout(() => input.style.borderColor = '', 1000);
     }
 }
@@ -19755,7 +19769,7 @@ function switchSourceType(type) {
         if (type === 'variable') {
             // 指令变量类型：ID 由选择的命令决定，设为只读
             sourceIdInput.readOnly = true;
-            sourceIdInput.style.backgroundColor = 'var(--bg-color)';
+            sourceIdInput.style.backgroundColor = 'var(--bg-muted)';
             sourceIdInput.placeholder = typeof t === 'function' ? t('automationPage.autoFilledByCmd') : '由选择的指令自动填入';
         } else {
             // 其他类型：允许手动输入
@@ -19920,7 +19934,7 @@ function onSshCmdChange() {
     if (sourceIdInput) {
         sourceIdInput.value = varName;
         sourceIdInput.readOnly = true;  // 设为只读，因为必须与 varName 一致
-        sourceIdInput.style.backgroundColor = 'var(--bg-color)';
+        sourceIdInput.style.backgroundColor = 'var(--bg-muted)';
     }
     if (sourceLabelInput && !sourceLabelInput.value) {
         sourceLabelInput.value = cmd.name || varName;
@@ -20097,7 +20111,7 @@ function showAddRuleModal(ruleData = null) {
                 <div class="form-row three-col">
                     <div class="form-group">
                         <label>${typeof t === 'function' ? t('automation.ruleId') : '规则 ID'} <span class="required">*</span></label>
-                        <input type="text" id="rule-id" class="input" placeholder="${typeof t === 'function' ? t('automation.ruleIdPlaceholder') : '唯一标识符'}" ${isEdit ? 'readonly style="background:var(--bg-color)"' : ''}>
+                        <input type="text" id="rule-id" class="input" placeholder="${typeof t === 'function' ? t('automation.ruleIdPlaceholder') : '唯一标识符'}" ${isEdit ? 'readonly style="background:var(--bg-muted)"' : ''}>
                     </div>
                     <div class="form-group" style="flex:2">
                         <label>${typeof t === 'function' ? t('automation.ruleName') : '规则名称'} <span class="required">*</span></label>
@@ -20258,7 +20272,7 @@ function toggleManualOnly() {
         // 禁用添加条件按钮，清空现有条件
         addBtn.disabled = true;
         addBtn.style.opacity = '0.5';
-        container.innerHTML = '<p class="empty-hint" style="color:var(--secondary-color)">此规则仅可通过手动触发按钮执行</p>';
+        container.innerHTML = '<p class="empty-hint" style="color:var(--emerald-500)">此规则仅可通过手动触发按钮执行</p>';
     } else {
         // 启用添加条件按钮
         addBtn.disabled = false;
@@ -20443,7 +20457,7 @@ async function openConditionVarSelector(rowId) {
                     <p>${typeof t === 'function' ? t('automation.loadingVarList') : '加载变量列表...'}</p>
                 </div>
                 <div id="variable-select-list" style="display:none;max-height:400px;overflow-y:auto;"></div>
-                <div id="variable-select-empty" style="display:none;text-align:center;padding:30px;color:var(--text-light);">
+                <div id="variable-select-empty" style="display:none;text-align:center;padding:30px;color:var(--text-secondary);">
                     <i class="ri-inbox-line" style="font-size:48px;margin-bottom:10px;display:block;"></i>
                     <p>${typeof t === 'function' ? t('automation.noVariablesAvailable') : '没有可用的变量'}</p>
                 </div>
@@ -20485,7 +20499,7 @@ async function openConditionVarSelector(rowId) {
             html += `<div class="var-group" data-source="${sourceId}">
                 <div class="var-group-header" style="padding:10px 12px;background:var(--bg-elevated);font-weight:600;border-bottom:1px solid var(--border);cursor:pointer;display:flex;align-items:center;justify-content:space-between;"
                      onclick="toggleVarGroup('${groupId}')">
-                    <span><i class="ri-archive-line"></i> ${sourceId === '_system' ? (typeof t === 'function' ? t('automation.systemVariables') : 'System Variables') : sourceId} <span style="font-weight:normal;color:var(--text-light);">(${vars.length})</span></span>
+                    <span><i class="ri-archive-line"></i> ${sourceId === '_system' ? (typeof t === 'function' ? t('automation.systemVariables') : 'System Variables') : sourceId} <span style="font-weight:normal;color:var(--text-secondary);">(${vars.length})</span></span>
                     <span class="var-group-arrow" id="${groupId}-arrow" style="transition:transform 0.2s;">▶</span>
                 </div>
                 <div class="var-group-items" id="${groupId}" style="display:none;">`;
@@ -20504,7 +20518,7 @@ async function openConditionVarSelector(rowId) {
                         <span style="font-size:18px;margin-right:10px;">${typeIcon}</span>
                         <div style="flex:1;min-width:0;">
                             <div style="font-weight:500;font-family:monospace;">${v.name}</div>
-                            <small style="color:var(--text-light);">当前值: ${displayValue}${displayValue.length >= 30 ? '...' : ''}</small>
+                            <small style="color:var(--text-secondary);">当前值: ${displayValue}${displayValue.length >= 30 ? '...' : ''}</small>
                         </div>
                     </div>
                 `;
@@ -20619,12 +20633,12 @@ async function addActionTemplateRow(templateId = '', delayMs = 0, repeatMode = '
                 <button class="btn btn-sm btn-danger" onclick="this.closest('.action-row').remove()">✕</button>
             </div>
             <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-                <label style="display:flex;align-items:center;gap:4px;font-size:12px;color:var(--text-light);">
+                <label style="display:flex;align-items:center;gap:4px;font-size:12px;color:var(--text-secondary);">
                     延迟
                     <input type="number" class="input action-delay" placeholder="0" value="${delayMs}" min="0" style="width:70px;padding:4px 6px;">
                     <span>ms</span>
                 </label>
-                <label style="display:flex;align-items:center;gap:4px;font-size:12px;color:var(--text-light);">
+                <label style="display:flex;align-items:center;gap:4px;font-size:12px;color:var(--text-secondary);">
                     执行
                     <select class="input action-repeat-mode" onchange="toggleRepeatOptions(${rowId})" style="padding:4px 6px;">
                         <option value="once" ${repeatMode === 'once' ? 'selected' : ''}>单次</option>
@@ -20633,11 +20647,11 @@ async function addActionTemplateRow(templateId = '', delayMs = 0, repeatMode = '
                     </select>
                 </label>
                 <span class="repeat-options" id="repeat-options-${rowId}" style="display:${showRepeatOptions ? 'flex' : 'none'};gap:8px;align-items:center;">
-                    <label class="repeat-count-label" style="display:${repeatMode === 'count' ? 'flex' : 'none'};align-items:center;gap:4px;font-size:12px;color:var(--text-light);">
+                    <label class="repeat-count-label" style="display:${repeatMode === 'count' ? 'flex' : 'none'};align-items:center;gap:4px;font-size:12px;color:var(--text-secondary);">
                         次数
                         <input type="number" class="input action-repeat-count" value="${repeatCount}" min="1" max="100" style="width:50px;padding:4px 6px;">
                     </label>
-                    <label style="display:flex;align-items:center;gap:4px;font-size:12px;color:var(--text-light);">
+                    <label style="display:flex;align-items:center;gap:4px;font-size:12px;color:var(--text-secondary);">
                         间隔
                         <input type="number" class="input action-repeat-interval" value="${repeatIntervalMs}" min="100" style="width:70px;padding:4px 6px;">
                         <span>ms</span>
@@ -20645,7 +20659,7 @@ async function addActionTemplateRow(templateId = '', delayMs = 0, repeatMode = '
                 </span>
             </div>
             <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-                <label style="display:flex;align-items:center;gap:4px;font-size:12px;color:var(--text-light);">
+                <label style="display:flex;align-items:center;gap:4px;font-size:12px;color:var(--text-secondary);">
                     <input type="checkbox" class="action-has-condition" onchange="toggleActionCondition(${rowId})" ${hasCondition ? 'checked' : ''}>
                     执行条件
                 </label>
@@ -20795,7 +20809,7 @@ async function showVariableSelectModalForCondition() {
                     <p>加载变量列表...</p>
                 </div>
                 <div id="variable-select-list" style="display:none;max-height:400px;overflow-y:auto;"></div>
-                <div id="variable-select-empty" style="display:none;text-align:center;padding:30px;color:var(--text-light);">
+                <div id="variable-select-empty" style="display:none;text-align:center;padding:30px;color:var(--text-secondary);">
                     <i class="ri-inbox-line" style="font-size:48px;margin-bottom:10px;display:block;"></i>
                     <p>没有可用的变量</p>
                 </div>
@@ -20837,7 +20851,7 @@ async function showVariableSelectModalForCondition() {
             html += `<div class="var-group" data-source="${sourceId}">
                 <div class="var-group-header" style="padding:10px 12px;background:var(--bg-elevated);font-weight:600;border-bottom:1px solid var(--border);cursor:pointer;display:flex;align-items:center;justify-content:space-between;"
                      onclick="toggleVarGroup('${groupId}')">
-                    <span><i class="ri-archive-line"></i> ${sourceId === '_system' ? (typeof t === 'function' ? t('automation.systemVariables') : 'System Variables') : sourceId} <span style="font-weight:normal;color:var(--text-light);">(${vars.length})</span></span>
+                    <span><i class="ri-archive-line"></i> ${sourceId === '_system' ? (typeof t === 'function' ? t('automation.systemVariables') : 'System Variables') : sourceId} <span style="font-weight:normal;color:var(--text-secondary);">(${vars.length})</span></span>
                     <span class="var-group-arrow" id="${groupId}-arrow" style="transition:transform 0.2s;">▶</span>
                 </div>
                 <div class="var-group-items" id="${groupId}" style="display:none;">`;
@@ -20856,7 +20870,7 @@ async function showVariableSelectModalForCondition() {
                         <span style="font-size:18px;margin-right:10px;">${typeIcon}</span>
                         <div style="flex:1;min-width:0;">
                             <div style="font-weight:500;font-family:monospace;">${v.name}</div>
-                            <small style="color:var(--text-light);">当前值: ${displayValue}${displayValue.length >= 30 ? '...' : ''}</small>
+                            <small style="color:var(--text-secondary);">当前值: ${displayValue}${displayValue.length >= 30 ? '...' : ''}</small>
                         </div>
                     </div>
                 `;
