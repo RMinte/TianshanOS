@@ -5564,6 +5564,18 @@ button.btn-gray:hover,
     font-size: 0.85em;
 }
 
+/* 操作列图标按钮：统一为正方形，避免下载/删除按钮比前两个宽 */
+.page-automation .data-table td .btn.btn-sm.btn-icon-square,
+.page-automation .data-table td .btn.btn-sm.btn-danger.btn-icon-square {
+    width: 32px;
+    min-width: 32px;
+    height: 32px;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
 /* 状态徽章 */
 .status-badge {
     display: inline-block;
@@ -5774,7 +5786,7 @@ button.btn-gray:hover,
 #add-rule-modal .form-row.three-col {
     display: flex;
     flex-wrap: nowrap;
-    align-items: flex-start;
+    align-items: center;
     gap: 12px;
 }
 
@@ -5784,6 +5796,13 @@ button.btn-gray:hover,
     min-width: 0;
 }
 
+#add-rule-modal .form-row.three-col .form-group-logic select.input,
+#add-rule-modal .form-row.three-col .form-group input[type="number"] {
+    height: 38px;
+    min-height: 38px;
+    box-sizing: border-box;
+}
+
 #add-rule-modal .form-row.three-col .form-group:nth-of-type(2) {
     flex: 0 0 140px;
     min-width: 0;
@@ -5791,6 +5810,18 @@ button.btn-gray:hover,
 
 #add-rule-modal .form-row.three-col .checkbox-label {
     flex: 0 0 auto;
+    margin-left: 16px;
+    margin-bottom: 0;
+}
+
+/* 冷却时间与条件逻辑样式统一：隐藏 number 的默认 spinner，与 select 下拉视觉一致 */
+#add-rule-modal input[type="number"] {
+    -moz-appearance: textfield;
+}
+#add-rule-modal input[type="number"]::-webkit-outer-spin-button,
+#add-rule-modal input[type="number"]::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
 }
 
 /* 条件行 */

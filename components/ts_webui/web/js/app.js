@@ -8565,8 +8565,8 @@ async function loadCommandsPage() {
                             <label>${typeof t === 'function' ? t('common.description') : '描述'}（${typeof t === 'function' ? t('common.optional') : '可选'}）</label>
                             <input type="text" id="cmd-desc" placeholder="${typeof t === 'function' ? t('ssh.cmdDescPlaceholder') : '简要说明这个指令的作用'}">
                         </div>
-                        <div class="form-group">
-                            <label>${typeof t === 'function' ? t('dataWidget.icon') : '图标'}</label>
+                        <div class="config-section config-section-icon">
+                            <span class="config-title">${typeof t === 'function' ? t('dataWidget.icon') : '图标'}</span>
                             <div class="icon-type-tabs">
                                 <button type="button" class="icon-tab active" onclick="switchCmdIconType('emoji')"><i class="ri-emotion-line"></i> ${typeof t === 'function' ? t('automation.iconTab') : '图标'}</button>
                                 <button type="button" class="icon-tab" onclick="switchCmdIconType('image')"><i class="ri-image-line"></i> ${typeof t === 'function' ? t('automation.imageTab') : '图片'}</button>
@@ -8664,7 +8664,7 @@ async function loadCommandsPage() {
                                     <div class="form-group">
                                         <label class="checkbox-label">
                                             <input type="checkbox" id="cmd-stop-on-match" onchange="updateTimeoutState()">
-                                            <span><i class="ri-stop-line"></i> ${typeof t === 'function' ? t('ssh.stopOnMatchLabel') : '匹配后自动停止'}</span>
+                                            <span>${typeof t === 'function' ? t('ssh.stopOnMatchLabel') : '匹配后自动停止'}</span>
                                         </label>
                                         <small>${typeof t === 'function' ? t('ssh.stopOnMatchHint') : '适用于 ping 等持续运行的命令，匹配成功后自动终止'}</small>
                                     </div>
@@ -9020,7 +9020,7 @@ function addCommandsPageStyles() {
             font-size: 1.2em;
             border: 2px solid var(--border);
             border-radius: var(--radius-sm);
-            background: var(--bg-muted);
+            background: transparent;
             cursor: pointer;
         }
         .icon-btn:hover, .icon-btn.selected {
@@ -9043,6 +9043,31 @@ function addCommandsPageStyles() {
         }
         #command-modal .form-group textarea {
             min-height: 150px;
+        }
+        /* 新建指令模态框 - 图标区块与添加规则一致，带底色包裹 */
+        #command-modal .config-section.config-section-icon {
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 14px;
+            margin-bottom: 16px;
+            background: var(--bg-muted);
+        }
+        #command-modal .config-section-icon .config-title {
+            font-weight: 600;
+            font-size: 0.95rem;
+            margin-bottom: 12px;
+            display: block;
+        }
+        #command-modal .config-section-icon .icon-type-tabs {
+            margin-bottom: 10px;
+        }
+        /* 图标网格去白底：icon-picker 和 icon-btn 透明，与 config-section 灰底融为一体 */
+        #command-modal .config-section-icon .icon-picker {
+            background: transparent;
+            padding: 0;
+        }
+        #command-modal .config-section-icon .icon-btn {
+            background: transparent;
         }
     `;
     document.head.appendChild(style);
@@ -16886,11 +16911,11 @@ async function refreshRules() {
                                 <td>${r.actions_count || 0}</td>
                                 <td>${r.trigger_count || 0}</td>
                                 <td style="white-space:nowrap">
-                                    <button class="btn btn-sm btn-gray" onclick="toggleRule('${r.id}', ${!r.enabled})" title="${r.enabled ? disabledStr : enabledStr}"><i class="${r.enabled ? 'ri-stop-circle-line' : 'ri-play-circle-line'}"></i></button>
-                                    <button class="btn btn-sm btn-gray" onclick="triggerRule('${r.id}')" title="${typeof t === 'function' ? t('automation.manualTrigger') : '手动触发'}"><i class="ri-play-line"></i></button>
-                                    <button class="btn btn-sm btn-gray" onclick="editRule('${r.id}')" title="${typeof t === 'function' ? t('common.edit') : '编辑'}"><i class="ri-edit-line"></i></button>
-                                    <button class="btn btn-sm btn-gray" onclick="showExportRuleModal('${r.id}')" title="${typeof t === 'function' ? t('securityPage.exportConfigPack') || '导出配置包' : '导出配置包'}"><i class="ri-download-line"></i></button>
-                                    <button class="btn btn-sm btn-danger" onclick="deleteRule('${r.id}')" title="${typeof t === 'function' ? t('common.delete') : '删除'}"><i class="ri-delete-bin-line"></i></button>
+                                    <button class="btn btn-sm btn-gray btn-icon-square" onclick="toggleRule('${r.id}', ${!r.enabled})" title="${r.enabled ? disabledStr : enabledStr}"><i class="${r.enabled ? 'ri-stop-circle-line' : 'ri-play-circle-line'}"></i></button>
+                                    <button class="btn btn-sm btn-gray btn-icon-square" onclick="triggerRule('${r.id}')" title="${typeof t === 'function' ? t('automation.manualTrigger') : '手动触发'}"><i class="ri-play-line"></i></button>
+                                    <button class="btn btn-sm btn-gray btn-icon-square" onclick="editRule('${r.id}')" title="${typeof t === 'function' ? t('common.edit') : '编辑'}"><i class="ri-edit-line"></i></button>
+                                    <button class="btn btn-sm btn-gray btn-icon-square" onclick="showExportRuleModal('${r.id}')" title="${typeof t === 'function' ? t('securityPage.exportConfigPack') || '导出配置包' : '导出配置包'}"><i class="ri-download-line"></i></button>
+                                    <button class="btn btn-sm btn-danger btn-icon-square" onclick="deleteRule('${r.id}')" title="${typeof t === 'function' ? t('common.delete') : '删除'}"><i class="ri-delete-bin-line"></i></button>
                                 </td>
                             </tr>
                         `}).join('')}
@@ -16974,10 +16999,10 @@ async function refreshSources() {
                                 <td><span class="status-badge ${s.enabled ? 'status-running' : 'status-stopped'}">${s.enabled ? enStr : disStr}</span></td>
                                 <td>${s.poll_interval_ms ? (s.poll_interval_ms / 1000) + secStr : '-'}</td>
                                 <td style="white-space:nowrap">
-                                    <button class="btn btn-sm btn-gray" onclick="showSourceVariables('${s.id}')" title="${typeof t === 'function' ? t('automation.viewVariables') : '查看变量'}"><i class="ri-bar-chart-box-line"></i></button>
-                                    <button class="btn btn-sm btn-gray" onclick="toggleSource('${s.id}', ${!s.enabled})" title="${s.enabled ? disStr : enStr}"><i class="${s.enabled ? 'ri-stop-circle-line' : 'ri-play-circle-line'}"></i></button>
-                                    <button class="btn btn-sm btn-gray" onclick="showExportSourceModal('${s.id}')" title="${typeof t === 'function' ? (t('securityPage.exportConfigPack') || '导出配置包') : '导出配置包'}"><i class="ri-download-line"></i></button>
-                                    <button class="btn btn-sm btn-danger" onclick="deleteSource('${s.id}')" title="${typeof t === 'function' ? t('common.delete') : '删除'}"><i class="ri-delete-bin-line"></i></button>
+                                    <button class="btn btn-sm btn-gray btn-icon-square" onclick="showSourceVariables('${s.id}')" title="${typeof t === 'function' ? t('automation.viewVariables') : '查看变量'}"><i class="ri-bar-chart-box-line"></i></button>
+                                    <button class="btn btn-sm btn-gray btn-icon-square" onclick="toggleSource('${s.id}', ${!s.enabled})" title="${s.enabled ? disStr : enStr}"><i class="${s.enabled ? 'ri-stop-circle-line' : 'ri-play-circle-line'}"></i></button>
+                                    <button class="btn btn-sm btn-gray btn-icon-square" onclick="showExportSourceModal('${s.id}')" title="${typeof t === 'function' ? (t('securityPage.exportConfigPack') || '导出配置包') : '导出配置包'}"><i class="ri-download-line"></i></button>
+                                    <button class="btn btn-sm btn-danger btn-icon-square" onclick="deleteSource('${s.id}')" title="${typeof t === 'function' ? t('common.delete') : '删除'}"><i class="ri-delete-bin-line"></i></button>
                                 </td>
                             </tr>
                         `).join('')}
@@ -17184,10 +17209,10 @@ async function refreshActions() {
                                 <td>${a.async ? '<span class="badge badge-warning">' + asyncStr + '</span>' : '<span class="badge badge-light">' + syncStr + '</span>'}</td>
                                 <td class="text-muted">${a.description || '-'}</td>
                                 <td style="white-space:nowrap">
-                                    <button class="btn btn-sm btn-gray" onclick="testAction('${a.id}')" title="${typeof t === 'function' ? t('common.test') : '测试'}"><i class="ri-play-line"></i></button>
-                                    <button class="btn btn-sm btn-gray" onclick="editAction('${a.id}')" title="${typeof t === 'function' ? t('common.edit') : '编辑'}"><i class="ri-edit-line"></i></button>
-                                    <button class="btn btn-sm btn-gray" onclick="showExportActionModal('${a.id}')" title="${typeof t === 'function' ? (t('securityPage.exportConfigPack') || '导出配置包') : '导出配置包'}"><i class="ri-download-line"></i></button>
-                                    <button class="btn btn-sm btn-danger" onclick="deleteAction('${a.id}')" title="${typeof t === 'function' ? t('common.delete') : '删除'}"><i class="ri-delete-bin-line"></i></button>
+                                    <button class="btn btn-sm btn-gray btn-icon-square" onclick="testAction('${a.id}')" title="${typeof t === 'function' ? t('common.test') : '测试'}"><i class="ri-play-line"></i></button>
+                                    <button class="btn btn-sm btn-gray btn-icon-square" onclick="editAction('${a.id}')" title="${typeof t === 'function' ? t('common.edit') : '编辑'}"><i class="ri-edit-line"></i></button>
+                                    <button class="btn btn-sm btn-gray btn-icon-square" onclick="showExportActionModal('${a.id}')" title="${typeof t === 'function' ? (t('securityPage.exportConfigPack') || '导出配置包') : '导出配置包'}"><i class="ri-download-line"></i></button>
+                                    <button class="btn btn-sm btn-danger btn-icon-square" onclick="deleteAction('${a.id}')" title="${typeof t === 'function' ? t('common.delete') : '删除'}"><i class="ri-delete-bin-line"></i></button>
                                 </td>
                             </tr>
                         `).join('')}
@@ -19352,7 +19377,7 @@ function showAddSourceModal() {
                         <input type="checkbox" id="source-sio-auto-discover" checked>
                         <span>${typeof t === 'function' ? t('automation.autoDiscoverFields') : '自动发现所有 JSON 字段为变量'}</span>
                     </label>
-                    <small style="color:var(--text-secondary);display:block;margin-top:-10px;margin-bottom:10px;padding-left:24px">${typeof t === 'function' ? t('automation.autoDiscoverHint') : '关闭后仅使用上方选中的字段作为变量'}</small>
+                    <small style="color:var(--text-secondary);display:block;margin-top:4px;margin-bottom:10px;padding-left:24px">${typeof t === 'function' ? t('automation.autoDiscoverHint') : '关闭后仅使用上方选中的字段作为变量'}</small>
                 </div>
                 
                 <div id="source-variable-config" class="config-section" style="display:none">
@@ -20119,8 +20144,8 @@ function showAddRuleModal(ruleData = null) {
                     </div>
                 </div>
                 
-                <div class="form-group">
-                    <label>${typeof t === 'function' ? t('automation.iconLabel') : '图标'}</label>
+                <div class="config-section">
+                    <span class="config-title">${typeof t === 'function' ? t('automation.iconLabel') : '图标'}</span>
                     <div class="icon-type-tabs">
                         <button type="button" class="icon-tab active" onclick="switchRuleIconType('emoji')">${typeof t === 'function' ? t('automation.iconTab') : '图标'}</button>
                         <button type="button" class="icon-tab" onclick="switchRuleIconType('image')">${typeof t === 'function' ? t('automation.imageTab') : '图片'}</button>
@@ -20147,22 +20172,25 @@ function showAddRuleModal(ruleData = null) {
                     <input type="hidden" id="rule-icon-type" value="emoji">
                 </div>
                 
-                <div class="form-row three-col">
-                    <div class="form-group form-group-logic">
-                        <label>${typeof t === 'function' ? t('automation.conditionLogic') : '条件逻辑'}</label>
-                        <select id="rule-logic" class="input">
-                            <option value="and">AND</option>
-                            <option value="or">OR</option>
-                        </select>
+                <div class="config-section">
+                    <span class="config-title">${typeof t === 'function' ? (t('automation.ruleOptions') || '规则选项') : '规则选项'}</span>
+                    <div class="form-row three-col" style="margin-bottom:0">
+                        <div class="form-group form-group-logic">
+                            <label>${typeof t === 'function' ? t('automation.conditionLogic') : '条件逻辑'}</label>
+                            <select id="rule-logic" class="input">
+                                <option value="and">AND</option>
+                                <option value="or">OR</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>${typeof t === 'function' ? t('automation.cooldownMs') : '冷却时间 (ms)'}</label>
+                            <input type="number" id="rule-cooldown" class="input" value="0" min="0">
+                        </div>
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="rule-enabled" checked>
+                            <span>${typeof t === 'function' ? t('automation.enableImmediately') : '立即启用'}</span>
+                        </label>
                     </div>
-                    <div class="form-group">
-                        <label>${typeof t === 'function' ? t('automation.cooldownMs') : '冷却时间 (ms)'}</label>
-                        <input type="number" id="rule-cooldown" class="input" value="0" min="0">
-                    </div>
-                    <label class="checkbox-label" style="padding-top:24px">
-                        <input type="checkbox" id="rule-enabled" checked>
-                        <span>${typeof t === 'function' ? t('automation.enableImmediately') : '立即启用'}</span>
-                    </label>
                 </div>
                 
                 <div class="config-section">

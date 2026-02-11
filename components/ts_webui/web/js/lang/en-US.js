@@ -698,6 +698,7 @@ if (typeof i18n !== 'undefined') i18n.registerLanguage('en-US', {
         ruleName: 'Rule Name',
         conditions: 'Conditions',
         conditionLogic: 'Logic',
+        ruleOptions: 'Rule options',
         logicAnd: 'All (AND)',
         logicOr: 'Any (OR)',
         cooldown: 'Cooldown',

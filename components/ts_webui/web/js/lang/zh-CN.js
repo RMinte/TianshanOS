@@ -706,6 +706,7 @@ if (typeof i18n !== 'undefined') i18n.registerLanguage('zh-CN', {
         ruleName: '规则名称',
         conditions: '触发条件',
         conditionLogic: '条件逻辑',
+        ruleOptions: '规则选项',
         logicAnd: '全部满足 (AND)',
         logicOr: '任一满足 (OR)',
         cooldown: '冷却时间',
