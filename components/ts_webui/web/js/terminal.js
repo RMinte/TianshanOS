@@ -147,7 +147,7 @@ class WebTerminal {
             if (this.sshMode) {
                 // 检查 Ctrl+\ (0x1C) 退出 SSH
                 if (data.charCodeAt(0) === 0x1C) {
-                    this.writeln('\r\n^\\  (退出 SSH shell)');
+                    this.writeln('\r\n' + (typeof t === 'function' ? t('terminal.exitSshDisplay') : '^\\  (退出 SSH shell)'));
                     this.exitSshShell();
                     return;
                 }
@@ -335,14 +335,14 @@ class WebTerminal {
                 this.pingInterval = null;
             }
             
-            this.writeln('\r\n\x1b[1;31m连接已断开\x1b[0m');
+            this.writeln('\r\n\x1b[1;31m' + (typeof t === 'function' ? t('terminal.connectionDisconnected') : '连接已断开') + '\x1b[0m');
             
             // 尝试重连
             if (event.code !== 1000) { // 非正常关闭
-                this.writeln('\x1b[33m5秒后尝试重新连接...\x1b[0m');
+                this.writeln('\x1b[33m' + (typeof t === 'function' ? t('terminal.reconnectIn') : '5秒后尝试重新连接...') + '\x1b[0m');
                 setTimeout(() => {
                     if (!this.connected) {
-                        this.writeln('正在重新连接...');
+                        this.writeln(typeof t === 'function' ? t('terminal.reconnecting') : '正在重新连接...');
                         this.connect();
                     }
                 }, 5000);
@@ -351,7 +351,7 @@ class WebTerminal {
         
         this.ws.onerror = (error) => {
             console.error('Terminal WebSocket error:', error);
-            this.writeln('\r\n\x1b[1;31m连接错误\x1b[0m');
+            this.writeln('\r\n\x1b[1;31m' + (typeof t === 'function' ? t('terminal.connectionError') : '连接错误') + '\x1b[0m');
         };
     }
 
@@ -382,7 +382,7 @@ class WebTerminal {
                 break;
                 
             case 'error':
-                this.writeln('\x1b[1;31m错误: ' + (msg.message || '未知错误') + '\x1b[0m');
+                this.writeln('\x1b[1;31m' + (typeof t === 'function' ? t('terminal.errorLabel') : '错误') + ': ' + (msg.message || (typeof t === 'function' ? t('terminal.unknownError') : '未知错误')) + '\x1b[0m');
                 this.writePrompt();
                 break;
                 
@@ -423,10 +423,11 @@ class WebTerminal {
         let notification = '';
         let color = '\x1b[33m'; // 默认黄色
         
+        const _t = (key, params, fallback) => (typeof t === 'function' ? t(key, params) : fallback);
         switch (event) {
             case 'low_voltage':
                 color = '\x1b[1;31m'; // 亮红色
-                notification = `⚠️  低电压警告! 电压: ${voltage}V - 开始关机倒计时`;
+                notification = _t('terminal.lowVoltageWarning', { voltage }, `⚠️  低电压警告! 电压: ${voltage}V - 开始关机倒计时`);
                 break;
             case 'countdown_tick':
                 if (countdown <= 10) {
@@ -436,39 +437,39 @@ class WebTerminal {
                 } else {
                     return; // 不显示每秒倒计时，只显示关键时刻
                 }
-                notification = `⏱️  关机倒计时: ${countdown}秒 | 电压: ${voltage}V`;
+                notification = _t('terminal.countdownTick', { countdown, voltage }, `⏱️  关机倒计时: ${countdown}秒 | 电压: ${voltage}V`);
                 break;
             case 'shutdown_start':
                 color = '\x1b[1;31m';
-                notification = `🔴 正在执行关机... 电压: ${voltage}V`;
+                notification = _t('terminal.shutdownStart', { voltage }, `🔴 正在执行关机... 电压: ${voltage}V`);
                 break;
             case 'protected':
                 color = '\x1b[35m'; // 紫色
-                notification = `🛡️  进入保护状态 | 等待电压恢复...`;
+                notification = _t('terminal.protected', {}, '🛡️  进入保护状态 | 等待电压恢复...');
                 break;
             case 'recovery_start':
                 color = '\x1b[36m'; // 青色
-                notification = `🔄 电压恢复中: ${voltage}V | 等待稳定...`;
+                notification = _t('terminal.recoveryStart', { voltage }, `🔄 电压恢复中: ${voltage}V | 等待稳定...`);
                 break;
             case 'recovery_complete':
                 color = '\x1b[1;32m'; // 亮绿色
-                notification = `✅ 电压恢复完成! ${voltage}V | 系统即将重启`;
+                notification = _t('terminal.recoveryComplete', { voltage }, `✅ 电压恢复完成! ${voltage}V | 系统即将重启`);
                 break;
             case 'debug_tick':
                 // 调试模式：每秒显示状态
                 color = '\x1b[36m'; // 青色
-                notification = `📊 [调试] ${state} | 电压: ${voltage}V | 倒计时: ${countdown}s`;
+                notification = _t('terminal.debugTick', { state, voltage, countdown }, `📊 [调试] ${state} | 电压: ${voltage}V | 倒计时: ${countdown}s`);
                 break;
             case 'state_changed':
                 if (state === 'NORMAL') {
                     color = '\x1b[32m';
-                    notification = `✓ 电压状态正常: ${voltage}V`;
+                    notification = _t('terminal.voltageNormal', { voltage }, `✓ 电压状态正常: ${voltage}V`);
                 } else {
-                    notification = `状态变更: ${state} | 电压: ${voltage}V`;
+                    notification = _t('terminal.stateChanged', { state, voltage }, `状态变更: ${state} | 电压: ${voltage}V`);
                 }
                 break;
             default:
-                notification = `[电源] ${event}: 状态=${state}, 电压=${voltage}V`;
+                notification = _t('terminal.powerEvent', { event, state, voltage }, `[电源] ${event}: 状态=${state}, 电压=${voltage}V`);
         }
         
         if (notification) {
@@ -504,7 +505,7 @@ class WebTerminal {
                 data: command
             }));
         } else {
-            this.writeln('\x1b[1;31m未连接到设备\x1b[0m');
+            this.writeln('\x1b[1;31m' + (typeof t === 'function' ? t('terminal.notConnected') : '未连接到设备') + '\x1b[0m');
             this.writePrompt();
         }
     }
@@ -527,7 +528,7 @@ class WebTerminal {
         const portMatch = argsStr.match(/--port\s+(\d+)/i);
         
         if (!hostMatch || !userMatch) {
-            this.writeln('\x1b[1;31m错误: SSH shell 需要 --host 和 --user 参数\x1b[0m');
+            this.writeln('\x1b[1;31m' + (typeof t === 'function' ? t('terminal.sshShellRequiresParams') : '错误: SSH shell 需要 --host 和 --user 参数') + '\x1b[0m');
             this.writePrompt();
             return true;
         }
@@ -548,13 +549,14 @@ class WebTerminal {
      */
     startSshShell(params) {
         if (this.sshConnecting || this.sshMode) {
-            this.writeln('\x1b[1;31mSSH 会话已在进行中\x1b[0m');
+            this.writeln('\x1b[1;31m' + (typeof t === 'function' ? t('terminal.sshSessionInProgress') : 'SSH 会话已在进行中') + '\x1b[0m');
             this.writePrompt();
             return;
         }
         
         this.sshConnecting = true;
-        this.writeln(`\x1b[36m正在连接到 ${params.user}@${params.host}:${params.port}...\x1b[0m`);
+        const connMsg = typeof t === 'function' ? t('terminal.sshConnectingTo', { user: params.user, host: params.host, port: params.port }) : `正在连接到 ${params.user}@${params.host}:${params.port}...`;
+        this.writeln(`\x1b[36m${connMsg}\x1b[0m`);
         
         if (this.ws && this.ws.readyState === WebSocket.OPEN) {
             this.ws.send(JSON.stringify({
@@ -594,7 +596,7 @@ class WebTerminal {
                 this.sshMode = true;
                 this.sshConnecting = false;
                 this.writeln(`\x1b[1;32m${message}\x1b[0m`);
-                this.writeln('\x1b[90m(按 Ctrl+\\ 退出 SSH shell)\x1b[0m');
+                this.writeln('\x1b[90m' + (typeof t === 'function' ? t('terminal.exitSshHint') : '(按 Ctrl+\\ 退出 SSH shell)') + '\x1b[0m');
                 this.writeln('');
                 break;
             case 'closed':

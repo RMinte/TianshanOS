@@ -88,7 +88,7 @@
                 <!-- 动态页面内容由 SPA 路由器加载 -->
                 <div class="loading">
                     <i class="ri-refresh-line loading-icon"></i>
-                    <p>Loading</p>
+                    <p data-i18n="common.loading">Loading</p>
                 </div>
             </div>
         </main>
@@ -114,7 +114,7 @@
                     <div class="form-group">
                         <label for="password" data-i18n="login.password">密码</label>
                         <input type="password" id="password" name="password" class="input" required 
-                               data-i18n-placeholder="login.password" placeholder="请输入密码" autocomplete="current-password">
+                               data-i18n-placeholder="login.passwordPlaceholder" placeholder="请输入密码" autocomplete="current-password">
                     </div>
                     <div id="login-error" class="form-error hidden"></div>
                 </div>
@@ -351,6 +351,8 @@
     (function loadInitialLang() {
         i18n.init();
         var cur = i18n.getLanguage();
+        var nameEl = document.getElementById('lang-name');
+        if (nameEl) nameEl.textContent = cur === 'zh-CN' ? '\u4e2d\u6587' : 'English';
         var s = document.createElement('script');
         s.src = '/js/lang/' + cur + '.js';
         s.onload = function() {
