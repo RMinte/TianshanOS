@@ -128,7 +128,7 @@ class WebTerminal {
 
         // 显示欢迎信息
         this.writeln('\x1b[1;36m╔══════════════════════════════════════════╗\x1b[0m');
-        this.writeln('\x1b[1;36m║\x1b[0m     \x1b[1;33m⛰️  TianshanOS Web Terminal\x1b[0m          \x1b[1;36m║\x1b[0m');
+        this.writeln('\x1b[1;36m║\x1b[0m     \x1b[1;33mTianshanOS Web Terminal\x1b[0m              \x1b[1;36m║\x1b[0m');
         this.writeln('\x1b[1;36m╚══════════════════════════════════════════╝\x1b[0m');
         this.writeln('');
         this.writeln(typeof t === 'function' ? t('terminal.connecting') : '正在连接到设备...');

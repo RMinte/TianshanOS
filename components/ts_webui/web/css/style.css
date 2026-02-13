@@ -1590,7 +1590,7 @@ button.btn-gray:hover,
 
 .section h2 {
     margin-bottom: 16px;
-    padding-bottom: 14px;
+    padding-bottom: 8px;
     border-bottom: 1px solid var(--border);
     color: var(--text-primary);
     font-size: 0.9375rem;
@@ -7504,6 +7504,7 @@ button.btn-gray:hover,
     display: grid;
     grid-template-columns: repeat(4, 1fr);
     gap: 12px;
+    margin-top: 10px;  /* 与 quick-actions-grid 的 padding-bottom 对齐，使分隔线上下间距一致 */
 }
 
 @media (max-width: 1200px) {
