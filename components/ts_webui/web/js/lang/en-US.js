@@ -3297,6 +3297,8 @@ if (typeof i18n !== 'undefined') i18n.registerLanguage('en-US', {
         pageTitle: 'Web Terminal',
         errorLabel: 'Error',
         unknownError: 'Unknown error',
+        sessionClosed: 'Session closed, please reconnect',
+        sessionRestored: 'Session restored, please retry',
         terminalHint: 'Tip: Type <code>help</code> for commands | <code>Ctrl+C</code> interrupt | <code>Ctrl+L</code> clear | <code>↑↓</code> history',
         systemLogTitle: 'System Logs',
         levelLabel: 'Level',

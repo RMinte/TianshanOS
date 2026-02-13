@@ -16,6 +16,7 @@
  */
 
 #include "ts_console.h"
+#include "ts_i18n.h"
 #include "ts_api.h"
 #include "ts_log.h"
 #include "ts_core.h"  /* TS_MALLOC_PSRAM, TS_STRDUP_PSRAM */
@@ -1530,56 +1531,56 @@ static int ssh_cmd_handler(int argc, char **argv)
     
     /* 显示帮助 */
     if (s_ssh_args.help->count > 0) {
-        ts_console_printf("\nUsage: ssh [options]\n\n");
-        ts_console_printf("SSH client for remote operations\n\n");
-        ts_console_printf("Connection Options:\n");
-        ts_console_printf("  --host <ip>       Remote host address\n");
-        ts_console_printf("  --port <num>      SSH port (default: 22)\n");
-        ts_console_printf("  --user <name>     Username\n");
-        ts_console_printf("  --password <pwd>  Password (for password auth)\n");
-        ts_console_printf("  --key <path>      Private key file (for public key auth)\n");
-        ts_console_printf("  --keyid <id>      Use key from secure storage (see 'key' command)\n");
-        ts_console_printf("  --exec <cmd>      Execute command on remote host\n");
-        ts_console_printf("  --shell           Open interactive shell\n");
-        ts_console_printf("  --forward <spec>  Port forwarding: L<local>:<remote_host>:<remote_port>\n");
-        ts_console_printf("  --test            Test SSH connection\n");
-        ts_console_printf("  --timeout <sec>   Connection timeout in seconds (default: 10)\n");
-        ts_console_printf("  --verbose         Show detailed output\n");
-        ts_console_printf("\nKey File Management:\n");
-        ts_console_printf("  --keygen          Generate SSH key pair to file\n");
-        ts_console_printf("  --copyid          Deploy public key to remote server\n");
-        ts_console_printf("  --revoke          Remove public key from remote server\n");
-        ts_console_printf("  --type <type>     Key type: rsa, rsa2048, rsa4096, ecdsa, ec256, ec384\n");
-        ts_console_printf("  --output <path>   Output file path for private key\n");
-        ts_console_printf("  --comment <text>  Comment for the public key\n");
-        ts_console_printf("\nGeneral:\n");
-        ts_console_printf("  --help            Show this help\n");
-        ts_console_printf("\nExamples:\n");
-        ts_console_printf("  # Generate RSA key pair to file\n");
-        ts_console_printf("  ssh --keygen --type rsa2048 --output /sdcard/id_rsa\n");
+        ts_console_printf("\n%s\n\n", TS_STR(TS_STR_SSH_HELP_USAGE));
+        ts_console_printf("%s\n\n", TS_STR(TS_STR_SSH_HELP_DESC));
+        ts_console_printf("%s\n", TS_STR(TS_STR_SSH_HELP_CONN_OPTS));
+        ts_console_printf("%s\n", TS_STR(TS_STR_SSH_HELP_HOST));
+        ts_console_printf("%s\n", TS_STR(TS_STR_SSH_HELP_PORT));
+        ts_console_printf("%s\n", TS_STR(TS_STR_SSH_HELP_USER));
+        ts_console_printf("%s\n", TS_STR(TS_STR_SSH_HELP_PASSWORD));
+        ts_console_printf("%s\n", TS_STR(TS_STR_SSH_HELP_KEY));
+        ts_console_printf("%s\n", TS_STR(TS_STR_SSH_HELP_KEYID));
+        ts_console_printf("%s\n", TS_STR(TS_STR_SSH_HELP_EXEC));
+        ts_console_printf("%s\n", TS_STR(TS_STR_SSH_HELP_SHELL));
+        ts_console_printf("%s\n", TS_STR(TS_STR_SSH_HELP_FORWARD));
+        ts_console_printf("%s\n", TS_STR(TS_STR_SSH_HELP_TEST));
+        ts_console_printf("%s\n", TS_STR(TS_STR_SSH_HELP_TIMEOUT));
+        ts_console_printf("%s\n", TS_STR(TS_STR_SSH_HELP_VERBOSE));
+        ts_console_printf("\n%s\n", TS_STR(TS_STR_SSH_HELP_KEY_MGMT));
+        ts_console_printf("%s\n", TS_STR(TS_STR_SSH_HELP_KEYGEN));
+        ts_console_printf("%s\n", TS_STR(TS_STR_SSH_HELP_COPYID));
+        ts_console_printf("%s\n", TS_STR(TS_STR_SSH_HELP_REVOKE));
+        ts_console_printf("%s\n", TS_STR(TS_STR_SSH_HELP_TYPE));
+        ts_console_printf("%s\n", TS_STR(TS_STR_SSH_HELP_OUTPUT));
+        ts_console_printf("%s\n", TS_STR(TS_STR_SSH_HELP_COMMENT));
+        ts_console_printf("\n%s\n", TS_STR(TS_STR_SSH_HELP_GENERAL));
+        ts_console_printf("%s\n", TS_STR(TS_STR_SSH_HELP_HELP_OPT));
+        ts_console_printf("\n%s\n", TS_STR(TS_STR_SSH_HELP_EXAMPLES));
+        ts_console_printf("%s\n", TS_STR(TS_STR_SSH_HELP_EX_KEYGEN));
+        ts_console_printf("%s\n", TS_STR(TS_STR_SSH_HELP_EX_KEYGEN_CMD));
         ts_console_printf("  \n");
-        ts_console_printf("  # Connect using stored key (manage keys with 'key' command)\n");
-        ts_console_printf("  key --list                                          # List stored keys\n");
-        ts_console_printf("  key --generate --id agx --type rsa                  # Generate RSA key\n");
-        ts_console_printf("  ssh --host 192.168.1.100 --user nvidia --keyid agx --shell\n");
+        ts_console_printf("%s\n", TS_STR(TS_STR_SSH_HELP_EX_STORED));
+        ts_console_printf("%s\n", TS_STR(TS_STR_SSH_HELP_EX_KEY_LIST));
+        ts_console_printf("%s\n", TS_STR(TS_STR_SSH_HELP_EX_KEY_GEN));
+        ts_console_printf("%s\n", TS_STR(TS_STR_SSH_HELP_EX_SSH));
         ts_console_printf("  \n");
-        ts_console_printf("  # Deploy public key to remote server (using secure storage key)\n");
-        ts_console_printf("  ssh --copyid --host 192.168.1.100 --user nvidia --password pw --keyid agx\n");
+        ts_console_printf("%s\n", TS_STR(TS_STR_SSH_HELP_EX_COPYID));
+        ts_console_printf("%s\n", TS_STR(TS_STR_SSH_HELP_EX_COPYID_CMD));
         ts_console_printf("  \n");
-        ts_console_printf("  # Revoke (remove) deployed public key from remote server\n");
-        ts_console_printf("  ssh --revoke --host 192.168.1.100 --user nvidia --password pw --keyid agx\n");
+        ts_console_printf("%s\n", TS_STR(TS_STR_SSH_HELP_EX_REVOKE));
+        ts_console_printf("%s\n", TS_STR(TS_STR_SSH_HELP_EX_REVOKE_CMD));
         ts_console_printf("  \n");
-        ts_console_printf("  # Or deploy using file-based key\n");
-        ts_console_printf("  ssh --copyid --host 192.168.1.100 --user nvidia --password pw --key /sdcard/id_rsa\n");
-        ts_console_printf("\nNote: Key management has moved to the 'key' command. Use 'key --help' for details.\n");
-        ts_console_printf("      Use 'hosts' command to manage known hosts.\n");
+        ts_console_printf("%s\n", TS_STR(TS_STR_SSH_HELP_EX_FILE));
+        ts_console_printf("%s\n", TS_STR(TS_STR_SSH_HELP_EX_FILE_CMD));
+        ts_console_printf("\n%s\n", TS_STR(TS_STR_SSH_HELP_NOTE));
+        ts_console_printf("%s\n", TS_STR(TS_STR_SSH_HELP_NOTE_HOSTS));
         return 0;
     }
     
     /* 参数错误检查 */
     if (nerrors > 0) {
         arg_print_errors(stderr, s_ssh_args.end, "ssh");
-        ts_console_printf("Use 'ssh --help' for usage information\n");
+        ts_console_printf("%s\n", TS_STR(TS_STR_SSH_HELP_USE));
         return 1;
     }
     
@@ -1754,7 +1755,7 @@ static int ssh_cmd_handler(int argc, char **argv)
         result = do_ssh_test(host, port, user, &auth, timeout);
     } else {
         ts_console_printf("Error: Specify --exec, --shell, --forward, --test, or --keygen\n");
-        ts_console_printf("Use 'ssh --help' for usage information\n");
+        ts_console_printf("%s\n", TS_STR(TS_STR_SSH_HELP_USE));
         result = 1;
     }
     

@@ -54,6 +54,14 @@ class Router {
         if (typeof stopDeviceStateMonitor === 'function') {
             stopDeviceStateMonitor();
         }
+        // 取消系统页快捷操作定时器，避免切走后仍触发 refreshQuickActions
+        if (typeof stopSystemPageTimers === 'function') {
+            stopSystemPageTimers();
+        }
+        // 离开终端页时主动断开 WebSocket，避免 1006 异常关闭
+        if (typeof destroyWebTerminal === 'function') {
+            destroyWebTerminal();
+        }
         
         // 检查访问权限
         const access = this.checkAccess(hash);

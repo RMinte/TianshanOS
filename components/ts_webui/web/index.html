@@ -257,6 +257,11 @@
                 currentLang = lang;
                 try { localStorage.setItem('ts_language', lang); } catch(e) {}
                 document.documentElement.lang = lang;
+                /* 同步到设备端 system.language（供终端 help 等 i18n 使用） */
+                if (window.api && typeof window.api.configSet === 'function') {
+                    var deviceLang = lang === 'zh-CN' ? 1 : 0;
+                    window.api.configSet('system.language', deviceLang, true).catch(function(){});
+                }
                 window.dispatchEvent(new CustomEvent('languageChanged', { detail: { language: lang } }));
                 return true;
             }

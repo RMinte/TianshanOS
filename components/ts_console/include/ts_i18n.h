@@ -30,9 +30,6 @@ extern "C" {
 typedef enum {
     TS_LANG_EN = 0,             /**< English (default) */
     TS_LANG_ZH_CN,              /**< Simplified Chinese */
-    TS_LANG_ZH_TW,              /**< Traditional Chinese */
-    TS_LANG_JA,                 /**< Japanese */
-    TS_LANG_KO,                 /**< Korean */
     TS_LANG_MAX
 } ts_language_t;
 
@@ -108,6 +105,49 @@ typedef enum {
     TS_STR_REBOOTING,
     TS_STR_SHUTTING_DOWN,
     TS_STR_REBOOT_IN,
+    
+    /* Help messages */
+    TS_STR_HELP_USE_CMD,           /**< "Use '<command> --help' for command details" */
+    TS_STR_SSH_HELP_USE,           /**< "Use 'ssh --help' for usage information" */
+    TS_STR_SSH_HELP_USAGE,
+    TS_STR_SSH_HELP_DESC,
+    TS_STR_SSH_HELP_CONN_OPTS,
+    TS_STR_SSH_HELP_HOST,
+    TS_STR_SSH_HELP_PORT,
+    TS_STR_SSH_HELP_USER,
+    TS_STR_SSH_HELP_PASSWORD,
+    TS_STR_SSH_HELP_KEY,
+    TS_STR_SSH_HELP_KEYID,
+    TS_STR_SSH_HELP_EXEC,
+    TS_STR_SSH_HELP_SHELL,
+    TS_STR_SSH_HELP_FORWARD,
+    TS_STR_SSH_HELP_TEST,
+    TS_STR_SSH_HELP_TIMEOUT,
+    TS_STR_SSH_HELP_VERBOSE,
+    TS_STR_SSH_HELP_KEY_MGMT,
+    TS_STR_SSH_HELP_KEYGEN,
+    TS_STR_SSH_HELP_COPYID,
+    TS_STR_SSH_HELP_REVOKE,
+    TS_STR_SSH_HELP_TYPE,
+    TS_STR_SSH_HELP_OUTPUT,
+    TS_STR_SSH_HELP_COMMENT,
+    TS_STR_SSH_HELP_GENERAL,
+    TS_STR_SSH_HELP_HELP_OPT,
+    TS_STR_SSH_HELP_EXAMPLES,
+    TS_STR_SSH_HELP_EX_KEYGEN,
+    TS_STR_SSH_HELP_EX_KEYGEN_CMD,
+    TS_STR_SSH_HELP_EX_STORED,
+    TS_STR_SSH_HELP_EX_KEY_LIST,
+    TS_STR_SSH_HELP_EX_KEY_GEN,
+    TS_STR_SSH_HELP_EX_SSH,
+    TS_STR_SSH_HELP_EX_COPYID,
+    TS_STR_SSH_HELP_EX_COPYID_CMD,
+    TS_STR_SSH_HELP_EX_REVOKE,
+    TS_STR_SSH_HELP_EX_REVOKE_CMD,
+    TS_STR_SSH_HELP_EX_FILE,
+    TS_STR_SSH_HELP_EX_FILE_CMD,
+    TS_STR_SSH_HELP_NOTE,
+    TS_STR_SSH_HELP_NOTE_HOSTS,
     
     TS_STR_MAX
 } ts_string_id_t;

@@ -49,7 +49,7 @@ static int cmd_help(int argc, char **argv)
         }
     }
     
-    ts_console_printf("Use '<command> --help' for command details\n\n");
+    ts_console_printf("%s\n\n", TS_STR(TS_STR_HELP_USE_CMD));
     
     return 0;
 }
@@ -288,9 +288,6 @@ static int cmd_lang(int argc, char **argv)
         ts_console_printf("\nAvailable languages:\n");
         ts_console_printf("  en     - %s\n", ts_i18n_get_language_name(TS_LANG_EN));
         ts_console_printf("  zh-cn  - %s\n", ts_i18n_get_language_name(TS_LANG_ZH_CN));
-        ts_console_printf("  zh-tw  - %s\n", ts_i18n_get_language_name(TS_LANG_ZH_TW));
-        ts_console_printf("  ja     - %s\n", ts_i18n_get_language_name(TS_LANG_JA));
-        ts_console_printf("  ko     - %s\n", ts_i18n_get_language_name(TS_LANG_KO));
         ts_console_printf("\nCurrent: %s\n\n", ts_i18n_get_language_name(ts_i18n_get_language()));
         return 0;
     }
@@ -302,9 +299,6 @@ static int cmd_lang(int argc, char **argv)
         
         if (strcmp(lang_str, "en") == 0) lang = TS_LANG_EN;
         else if (strcmp(lang_str, "zh-cn") == 0 || strcmp(lang_str, "zh") == 0) lang = TS_LANG_ZH_CN;
-        else if (strcmp(lang_str, "zh-tw") == 0) lang = TS_LANG_ZH_TW;
-        else if (strcmp(lang_str, "ja") == 0) lang = TS_LANG_JA;
-        else if (strcmp(lang_str, "ko") == 0) lang = TS_LANG_KO;
         else {
             ts_console_error("Unknown language: %s\n", lang_str);
             ts_console_printf("Use 'lang -l' to list available languages\n");
@@ -378,7 +372,7 @@ static int cmd_log(int argc, char **argv)
 esp_err_t ts_console_register_builtin_cmds(void)
 {
     /* Initialize lang command arguments */
-    s_lang_args.lang = arg_str0(NULL, NULL, "<language>", "Language code (en/zh-cn/zh-tw/ja/ko)");
+    s_lang_args.lang = arg_str0(NULL, NULL, "<language>", "Language code (en/zh-cn)");
     s_lang_args.list = arg_lit0("l", "list", "List available languages");
     s_lang_args.end = arg_end(2);
     
