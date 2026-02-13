@@ -8,6 +8,7 @@
  */
 
 #include "ts_console.h"
+#include "ts_i18n.h"
 #include "ts_log.h"
 #include "esp_console.h"
 #include "esp_vfs_dev.h"
@@ -247,6 +248,12 @@ esp_err_t ts_console_init(const ts_console_config_t *config)
 {
     if (s_console.initialized) {
         return ESP_ERR_INVALID_STATE;
+    }
+    
+    /* Initialize i18n (loads system.language from config for help/ssh --help etc.) */
+    esp_err_t i18n_ret = ts_i18n_init();
+    if (i18n_ret != ESP_OK) {
+        return i18n_ret;
     }
     
     /* Use defaults if no config provided */

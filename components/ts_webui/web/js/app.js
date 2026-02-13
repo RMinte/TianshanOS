@@ -129,6 +129,19 @@ document.addEventListener('DOMContentLoaded', () => {
     // 初始化认证 UI
     updateAuthUI();
     
+    // 根据设备 system.language 同步 WebUI 语言（与设备终端 help i18n 一致）
+    (async function syncLanguageFromDevice() {
+        try {
+            const r = await api.configGet('system.language');
+            if (r && r.code === 0 && r.data && r.data.value !== undefined) {
+                const webLang = r.data.value === 1 ? 'zh-CN' : 'en-US';
+                if (typeof selectLanguage === 'function' && i18n && i18n.getLanguage() !== webLang) {
+                    selectLanguage(webLang);
+                }
+            }
+        } catch (e) {}
+    })();
+    
     // 更新 Footer 版本号
     updateFooterVersion();
     
@@ -495,6 +508,12 @@ function handlePowerEvent(msg) {
 async function loadSystemPage() {
     clearInterval(refreshInterval);
     
+    // 取消之前设置的快捷操作刷新定时器（防止切换到其他页后仍触发）
+    if (quickActionsTimeoutId) {
+        clearTimeout(quickActionsTimeoutId);
+        quickActionsTimeoutId = null;
+    }
+    
     // 取消之前的订阅
     if (subscriptionManager) {
         subscriptionManager.unsubscribe('system.dashboard');  // 取消聚合订阅
@@ -721,7 +740,10 @@ async function loadSystemPage() {
     await initDataWidgets();
     
     // 快捷操作延迟 2 秒后台加载，避免与 initDataWidgets 的首次变量刷新竞争 API
-    setTimeout(() => void refreshQuickActions(), 2000);
+    quickActionsTimeoutId = setTimeout(() => {
+        quickActionsTimeoutId = null;
+        void refreshQuickActions();
+    }, 2000);
     
     // 订阅 WebSocket 实时更新 - 使用聚合订阅（system.dashboard）
     if (subscriptionManager) {
@@ -3972,7 +3994,7 @@ function deleteDataWidget(widgetId) {
 async function refreshQuickActions() {
     const container = document.getElementById('quick-actions-grid');
     if (!container) {
-        console.warn('refreshQuickActions: quick-actions-grid not found');
+        // 用户已切到其他页面，quick-actions-grid 不存在属正常情况，静默返回
         return;
     }
     
@@ -4167,6 +4189,15 @@ async function updateQuickActionServiceStatus() {
 // 触发快捷操作后的冷却时间（毫秒），避免连续触发导致后端只执行最后一个
 let _quickActionTriggerCooldownUntil = 0;
 let _quickActionLastTriggeredId = '';
+let quickActionsTimeoutId = null;  // 用于导航时取消，避免 quick-actions-grid not found
+
+/** 供 router 在页面切换时取消快捷操作定时器 */
+window.stopSystemPageTimers = function() {
+    if (quickActionsTimeoutId) {
+        clearTimeout(quickActionsTimeoutId);
+        quickActionsTimeoutId = null;
+    }
+};
 
 /**
  * 触发快捷操作
@@ -14165,11 +14196,23 @@ async function loadTerminalPage() {
         </style>
     `;
     
-    // 初始化终端
+    // 初始化终端（标签页可见时才连接，避免后台标签抢占当前会话导致 session_closed）
     webTerminal = new WebTerminal('terminal-container');
     const ok = await webTerminal.init();
     if (ok) {
-        webTerminal.connect();
+        function doConnect() {
+            if (document.visibilityState === 'visible') {
+                webTerminal.connect();
+            } else {
+                document.addEventListener('visibilitychange', function handler() {
+                    if (document.visibilityState === 'visible') {
+                        document.removeEventListener('visibilitychange', handler);
+                        webTerminal.connect();
+                    }
+                });
+            }
+        }
+        doConnect();
     }
 }
 

@@ -3306,6 +3306,8 @@ if (typeof i18n !== 'undefined') i18n.registerLanguage('zh-CN', {
         pageTitle: 'Web 终端',
         errorLabel: '错误',
         unknownError: '未知错误',
+        sessionClosed: '会话已关闭，请重新连接',
+        sessionRestored: '会话已恢复，请重试',
         terminalHint: '提示: 输入 <code>help</code> 查看命令 | <code>Ctrl+C</code> 中断 | <code>Ctrl+L</code> 清屏 | <code>↑↓</code> 历史',
         systemLogTitle: '系统日志',
         levelLabel: '级别',

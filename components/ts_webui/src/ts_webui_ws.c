@@ -34,8 +34,12 @@
 #define MAX_WS_CLIENTS 8
 #endif
 
-/* 终端输出缓冲区大小 */
-#define TERMINAL_OUTPUT_BUF_SIZE 4096
+/* 终端输出缓冲区大小（可由 Kconfig 配置） */
+#ifdef CONFIG_TS_WEBUI_TERMINAL_OUTPUT_BUF_SIZE
+#define TERMINAL_OUTPUT_BUF_SIZE CONFIG_TS_WEBUI_TERMINAL_OUTPUT_BUF_SIZE
+#else
+#define TERMINAL_OUTPUT_BUF_SIZE 32768
+#endif
 
 /* SSH Shell 输出缓冲区大小 */
 #define SSH_OUTPUT_BUF_SIZE 2048

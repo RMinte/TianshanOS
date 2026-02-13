@@ -337,15 +337,22 @@ class WebTerminal {
             
             this.writeln('\r\n\x1b[1;31m' + (typeof t === 'function' ? t('terminal.connectionDisconnected') : '连接已断开') + '\x1b[0m');
             
-            // 尝试重连
+            // 尝试重连（仅当标签页可见时发起，避免后台 tab 抢占前台会话）
             if (event.code !== 1000) { // 非正常关闭
                 this.writeln('\x1b[33m' + (typeof t === 'function' ? t('terminal.reconnectIn') : '5秒后尝试重新连接...') + '\x1b[0m');
-                setTimeout(() => {
-                    if (!this.connected) {
-                        this.writeln(typeof t === 'function' ? t('terminal.reconnecting') : '正在重新连接...');
-                        this.connect();
+                const tryReconnect = () => {
+                    if (this.connected) return;
+                    if (document.visibilityState !== 'visible') {
+                        document.addEventListener('visibilitychange', function handler() {
+                            document.removeEventListener('visibilitychange', handler);
+                            tryReconnect();
+                        }, { once: true });
+                        return;
                     }
-                }, 5000);
+                    this.writeln(typeof t === 'function' ? t('terminal.reconnecting') : '正在重新连接...');
+                    this.connect();
+                };
+                setTimeout(tryReconnect, 5000);
             }
         };
         
@@ -381,10 +388,18 @@ class WebTerminal {
                 this.writePrompt();
                 break;
                 
-            case 'error':
-                this.writeln('\x1b[1;31m' + (typeof t === 'function' ? t('terminal.errorLabel') : '错误') + ': ' + (msg.message || (typeof t === 'function' ? t('terminal.unknownError') : '未知错误')) + '\x1b[0m');
-                this.writePrompt();
+            case 'error': {
+                const errMsg = msg.message || (typeof t === 'function' ? t('terminal.unknownError') : '未知错误');
+                if (errMsg.indexOf('Not a terminal session') >= 0 && this.ws && this.ws.readyState === WebSocket.OPEN) {
+                    this.ws.send(JSON.stringify({ type: 'terminal_start' }));
+                    const toast = typeof showToast === 'function' ? showToast : function(m) { console.log(m); };
+                    toast(typeof t === 'function' ? t('terminal.sessionRestored') : '会话已恢复，请重试', 'success');
+                } else {
+                    this.writeln('\x1b[1;31m' + (typeof t === 'function' ? t('terminal.errorLabel') : '错误') + ': ' + errMsg + '\x1b[0m');
+                    this.writePrompt();
+                }
                 break;
+            }
                 
             case 'pong':
                 // 心跳响应，忽略
@@ -404,6 +419,11 @@ class WebTerminal {
                 if (msg.data) {
                     this.write(msg.data);
                 }
+                break;
+            
+            case 'session_closed':
+                this.connected = false;
+                this.writeln('\x1b[33m' + (typeof t === 'function' ? t('terminal.sessionClosed') : '会话已关闭，请重新连接') + '\x1b[0m');
                 break;
                 
             default:
@@ -697,3 +717,11 @@ class WebTerminal {
 
 // 全局终端实例
 let webTerminal = null;
+
+/** 供 router 在离开终端页时调用，主动关闭 WebSocket 避免 1006 */
+window.destroyWebTerminal = function() {
+    if (webTerminal) {
+        webTerminal.destroy();
+        webTerminal = null;
+    }
+};

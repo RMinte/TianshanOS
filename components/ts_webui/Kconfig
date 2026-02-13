@@ -19,6 +19,15 @@ menu "TianShanOS WebUI Configuration"
         default 8
         depends on TS_WEBUI_WS_ENABLE
 
+    config TS_WEBUI_TERMINAL_OUTPUT_BUF_SIZE
+        int "Terminal output buffer size (bytes)"
+        default 32768
+        range 4096 131072
+        depends on TS_WEBUI_WS_ENABLE
+        help
+            Max output size for local console commands (e.g. ssh --help).
+            32KB recommended when PSRAM is available.
+
     config TS_WEBUI_AUTH_REQUIRED
         bool "Require Authentication for API"
         default y
