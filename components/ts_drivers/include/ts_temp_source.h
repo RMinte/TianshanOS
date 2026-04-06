@@ -106,6 +106,17 @@ typedef struct {
 /** 最大绑定变量名长度 */
 #define TS_TEMP_MAX_VARNAME_LEN     64
 
+/** 最大加权绑定变量数量 */
+#define TS_TEMP_MAX_BOUND_VARS      8
+
+/**
+ * @brief 加权绑定变量条目
+ */
+typedef struct {
+    char name[TS_TEMP_MAX_VARNAME_LEN];     /**< 变量名 */
+    float weight;                            /**< 权重 0.0 - 1.0 */
+} ts_temp_bound_var_t;
+
 /**
  * @brief 温度源状态信息
  */
@@ -113,7 +124,9 @@ typedef struct {
     bool initialized;                       /**< 初始化状态 */
     ts_temp_source_type_t active_source;    /**< 当前活动源 */
     ts_temp_source_type_t preferred_source; /**< 用户首选源（0 表示自动选择）*/
-    char bound_variable[TS_TEMP_MAX_VARNAME_LEN]; /**< 绑定的变量名 */
+    char bound_variable[TS_TEMP_MAX_VARNAME_LEN]; /**< 绑定的变量名（向后兼容，取第一个） */
+    ts_temp_bound_var_t bound_vars[TS_TEMP_MAX_BOUND_VARS]; /**< 加权绑定变量数组 */
+    uint8_t bound_var_count;                /**< 绑定变量数量 */
     int16_t current_temp;                   /**< 当前温度 */
     bool manual_mode;                       /**< 手动模式启用 */
     uint32_t provider_count;                /**< 注册的 provider 数量 */
@@ -261,10 +274,7 @@ esp_err_t ts_temp_clear_preferred_source(void);
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief 绑定温度源到系统变量
- * 
- * 当首选源设置为 TS_TEMP_SOURCE_VARIABLE 时，系统将从指定的变量读取温度值。
- * 变量值应为浮点数（单位：°C）。
+ * @brief 绑定温度源到系统变量（单变量，权重 1.0，向后兼容）
  * 
  * @param var_name 变量名（如 "agx.cpu_temp"）
  * @return ESP_OK 成功
@@ -272,13 +282,35 @@ esp_err_t ts_temp_clear_preferred_source(void);
 esp_err_t ts_temp_bind_variable(const char *var_name);
 
 /**
- * @brief 获取绑定的变量名
+ * @brief 绑定多个加权温度变量
+ * 
+ * 系统将按权重加权求和计算有效温度。
+ * 例如: cpu_temp*0.4 + gpu_temp*0.6 = 加权温度
+ * 每个权重范围为 0.0 ~ 1.0，且总权重必须大于 0。
+ * 
+ * @param vars 加权变量数组
+ * @param count 数组长度（1 ~ TS_TEMP_MAX_BOUND_VARS）
+ * @return ESP_OK 成功
+ */
+esp_err_t ts_temp_bind_variables(const ts_temp_bound_var_t *vars, uint8_t count);
+
+/**
+ * @brief 获取绑定的变量名（向后兼容，返回第一个变量名）
  * 
  * @param buffer 输出缓冲区
  * @param buffer_size 缓冲区大小
  * @return ESP_OK 成功，ESP_ERR_NOT_FOUND 未绑定
  */
 esp_err_t ts_temp_get_bound_variable(char *buffer, size_t buffer_size);
+
+/**
+ * @brief 获取所有加权绑定变量
+ * 
+ * @param[out] vars 输出数组（至少 TS_TEMP_MAX_BOUND_VARS 大小）
+ * @param[out] count 输出实际数量
+ * @return ESP_OK 成功，ESP_ERR_NOT_FOUND 无绑定
+ */
+esp_err_t ts_temp_get_bound_variables(ts_temp_bound_var_t *vars, uint8_t *count);
 
 /**
  * @brief 清除变量绑定

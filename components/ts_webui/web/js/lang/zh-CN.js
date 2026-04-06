@@ -2716,7 +2716,7 @@ if (typeof i18n !== 'undefined') i18n.registerLanguage('zh-CN', {
         bind: '绑定',
         unbind: '解绑',
         tempSpeedCurve: '温度-转速曲线',
-        addPoint: '+ 添加点',
+        addPoint: '添加点',
         curveHint: '温度低于最小点时使用最小转速，高于最大点时使用最大转速',
         curvePreview: '曲线预览',
         minDuty: '最小占空比 (%)',
@@ -2748,6 +2748,18 @@ if (typeof i18n !== 'undefined') i18n.registerLanguage('zh-CN', {
         curvePointFormatError: '曲线点格式错误',
         configImported: '已导入配置文件: {name}',
         importConfigFailed: '导入配置失败',
+        // 加权温度绑定
+        addVariable: '添加变量',
+        weight: '权重',
+        weightedTemp: '加权温度',
+        weightSumWarning: '权重总和建议为 1.0（当前: {sum}）',
+        boundVarCount: '已绑定: {count} 个',
+        bindAll: '绑定全部',
+        unbindAll: '解绑全部',
+        selectVariableWeightHint: '添加多个浮点变量并设置权重（0-1），权重总和建议为 1.0',
+        maxBoundVars: '最多支持 {max} 个绑定变量',
+        tempBoundWeighted: '已绑定 {count} 个加权温度变量',
+        noVarSelected: '请为每个绑定项选择变量',
         // 曲线点
         tempPlaceholder: '温度',
         speedPlaceholder: '转速'

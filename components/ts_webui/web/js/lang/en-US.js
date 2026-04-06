@@ -2731,7 +2731,7 @@ if (typeof i18n !== 'undefined') i18n.registerLanguage('en-US', {
         bind: 'Bind',
         unbind: 'Unbind',
         tempSpeedCurve: 'Temperature-Speed Curve',
-        addPoint: '+ Add Point',
+        addPoint: 'Add Point',
         curveHint: 'Uses min speed below lowest point, max speed above highest point',
         curvePreview: 'Curve Preview',
         minDuty: 'Min Duty Cycle (%)',
@@ -2763,6 +2763,18 @@ if (typeof i18n !== 'undefined') i18n.registerLanguage('en-US', {
         curvePointFormatError: 'Curve point format error',
         configImported: 'Config imported: {name}',
         importConfigFailed: 'Import config failed',
+        // Weighted temp binding
+        addVariable: 'Add Variable',
+        weight: 'Weight',
+        weightedTemp: 'Weighted Temp',
+        weightSumWarning: 'Weight sum should be 1.0 (current: {sum})',
+        boundVarCount: 'Bound: {count}',
+        bindAll: 'Bind All',
+        unbindAll: 'Unbind All',
+        selectVariableWeightHint: 'Add float variables with weights (0-1), sum should be 1.0',
+        maxBoundVars: 'Max {max} bound variables',
+        tempBoundWeighted: 'Bound {count} weighted temperature variable(s)',
+        noVarSelected: 'Please select a variable for each binding',
         // Curve points
         tempPlaceholder: 'Temp',
         speedPlaceholder: 'Speed'

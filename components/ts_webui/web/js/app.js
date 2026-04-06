@@ -1654,6 +1654,11 @@ async function refreshFans() {
 /*                          风扇曲线管理                                       */
 /*===========================================================================*/
 
+// 加权温度变量绑定编辑状态
+let tempVarBindings = [];
+// 可用变量列表缓存（加载后填充）
+let availableTempVars = [];
+
 // 存储当前编辑的风扇曲线配置
 let fanCurveConfig = {
     fanId: 0,
@@ -1673,32 +1678,6 @@ let fanCurveConfig = {
  */
 async function showFanCurveModal(fanId = 0) {
     fanCurveConfig.fanId = fanId;
-    
-    // 从设备加载配置
-    try {
-        const result = await api.call('fan.config', { id: fanId });
-        if (result.code === 0 && result.data) {
-            const cfg = result.data;
-            if (cfg.curve && cfg.curve.length >= 2) {
-                fanCurveConfig.curve = cfg.curve;
-            }
-            if (typeof cfg.hysteresis === 'number') {
-                fanCurveConfig.hysteresis = cfg.hysteresis;
-            }
-            if (typeof cfg.min_interval === 'number') {
-                fanCurveConfig.minInterval = cfg.min_interval;
-            }
-            if (typeof cfg.min_duty === 'number') {
-                fanCurveConfig.minDuty = cfg.min_duty;
-            }
-            if (typeof cfg.max_duty === 'number') {
-                fanCurveConfig.maxDuty = cfg.max_duty;
-            }
-            console.log('从设备加载风扇配置:', cfg);
-        }
-    } catch (e) {
-        console.warn('从设备加载配置失败，使用默认值:', e);
-    }
     
     const modal = document.createElement('div');
     modal.id = 'fan-curve-modal';
@@ -1729,14 +1708,16 @@ async function showFanCurveModal(fanId = 0) {
                             <div id="fan-curve-temp-current" style="padding:6px 12px; background:var(--bg-card); border-radius:var(--radius-sm); font-size:16px; font-weight:bold; color:var(--blue-500);">--°C</div>
                         </div>
                     </label>
-                    <div style="display:flex; gap:10px; align-items:center;">
-                        <select id="temp-variable-select" class="input" style="flex:1; min-width:0;">
-                            <option value="">${t('fanPage.selectVariable')}</option>
-                        </select>
-                        <button class="btn btn-sm btn-service-style" onclick="bindTempVariable()">${t('fanPage.bind')}</button>
+                    <div id="temp-var-bindings-container" class="temp-var-bindings"></div>
+                    <div style="display:flex; gap:10px; align-items:center; margin-top:10px;">
+                        <button class="btn btn-sm btn-success" onclick="addTempVarBinding()"><i class="ri-add-line"></i> ${t('fanPage.addVariable')}</button>
+                        <div style="flex:1;"></div>
+                        <button class="btn btn-sm btn-service-style" onclick="bindTempVariable()">${t('fanPage.bindAll')}</button>
                         <button class="btn btn-sm btn-secondary" onclick="unbindTempVariable()"><i class="ri-delete-bin-line"></i></button>
                     </div>
-                    <small class="form-hint" id="temp-source-hint" style="margin-top:10px;">${t('fanPage.selectVariableHint')}</small>
+                    <div id="temp-var-formula" class="temp-var-formula" style="margin-top:10px; display:none;"></div>
+                    <div id="temp-var-weight-warn" class="temp-var-weight-warn" style="display:none;"></div>
+                    <small class="form-hint" id="temp-source-hint" style="margin-top:10px;">${t('fanPage.selectVariableWeightHint')}</small>
                 </div>
                 <div class="form-group">
                     <label style="display:flex;justify-content:space-between;align-items:center;">
@@ -1786,14 +1767,31 @@ async function showFanCurveModal(fanId = 0) {
     
     document.body.appendChild(modal);
     
-    // 设置当前风扇
     document.getElementById('fan-curve-fan-select').value = fanId;
     
-    // 加载温度源状态
     loadTempSourceStatus();
-    
-    // 绘制曲线预览
     setTimeout(() => drawCurvePreview(), 50);
+    
+    // 异步加载设备配置并更新 UI（不阻塞 modal 显示）
+    api.call('fan.config', { id: fanId }).then(result => {
+        if (result.code === 0 && result.data) {
+            const cfg = result.data;
+            if (cfg.curve && cfg.curve.length >= 2) fanCurveConfig.curve = cfg.curve;
+            if (typeof cfg.hysteresis === 'number') fanCurveConfig.hysteresis = cfg.hysteresis;
+            if (typeof cfg.min_interval === 'number') fanCurveConfig.minInterval = cfg.min_interval;
+            if (typeof cfg.min_duty === 'number') fanCurveConfig.minDuty = cfg.min_duty;
+            if (typeof cfg.max_duty === 'number') fanCurveConfig.maxDuty = cfg.max_duty;
+            const hEl = document.getElementById('fan-curve-hysteresis');
+            const iEl = document.getElementById('fan-curve-interval');
+            const minEl = document.getElementById('fan-curve-min-duty');
+            const maxEl = document.getElementById('fan-curve-max-duty');
+            if (hEl) hEl.value = fanCurveConfig.hysteresis;
+            if (iEl) iEl.value = fanCurveConfig.minInterval;
+            if (minEl) minEl.value = fanCurveConfig.minDuty;
+            if (maxEl) maxEl.value = fanCurveConfig.maxDuty;
+            refreshCurveEditor();
+        }
+    }).catch(e => console.warn('从设备加载配置失败，使用默认值:', e));
 }
 
 /**
@@ -1802,6 +1800,175 @@ async function showFanCurveModal(fanId = 0) {
 function closeFanCurveModal() {
     const modal = document.getElementById('fan-curve-modal');
     if (modal) modal.remove();
+}
+
+/**
+ * 渲染加权温度变量绑定列表
+ */
+function renderTempVarBindings() {
+    const container = document.getElementById('temp-var-bindings-container');
+    if (!container) return;
+    
+    if (tempVarBindings.length === 0) {
+        container.innerHTML = `<div style="text-align:center;color:var(--text-secondary);padding:12px;font-size:13px;">${t('fanPage.unbound')}</div>`;
+        updateWeightedTempFormula();
+        return;
+    }
+    
+    container.innerHTML = tempVarBindings.map((binding, index) => {
+        const selectOptions = buildVarSelectOptions(binding.name);
+        return `<div class="temp-var-row" data-index="${index}">
+            <select class="input" style="flex:1;min-width:0;" onchange="updateTempVarName(${index}, this.value)">
+                <option value="">-- ${t('fanPage.selectVariable')} --</option>
+                ${selectOptions}
+            </select>
+            <div class="temp-var-weight">
+                <label>${t('fanPage.weight')}</label>
+                <input type="number" class="input" value="${binding.weight}" min="0" max="1" step="0.05"
+                       onchange="updateTempVarWeight(${index}, this.value)"
+                       oninput="updateWeightedTempFormula()">
+            </div>
+            <button class="btn btn-sm btn-secondary temp-var-delete"
+                    onclick="removeTempVarBinding(${index})">
+                <i class="ri-delete-bin-line"></i>
+            </button>
+        </div>`;
+    }).join('');
+    
+    updateWeightedTempFormula();
+}
+
+/**
+ * 构建变量 select options HTML（带分组）
+ */
+function buildVarSelectOptions(selectedName) {
+    if (!availableTempVars || availableTempVars.length === 0) return '';
+    
+    const priorityVars = availableTempVars.filter(v => v.name.includes('temp'));
+    const otherVars = availableTempVars.filter(v => !v.name.includes('temp'));
+    
+    let html = '';
+    if (priorityVars.length > 0) {
+        html += `<optgroup label="${t('dataWidget.tempVariables') || '温度变量'}">`;
+        priorityVars.forEach(v => {
+            const sel = v.name === selectedName ? 'selected' : '';
+            html += `<option value="${v.name}" ${sel}>${v.name} (${v.value?.toFixed?.(1) ?? v.value})</option>`;
+        });
+        html += `</optgroup>`;
+    }
+    if (otherVars.length > 0) {
+        html += `<optgroup label="${t('dataWidget.otherNumericVariables') || '其他数值变量'}">`;
+        otherVars.forEach(v => {
+            const sel = v.name === selectedName ? 'selected' : '';
+            html += `<option value="${v.name}" ${sel}>${v.name} (${v.value?.toFixed?.(1) ?? v.value})</option>`;
+        });
+        html += `</optgroup>`;
+    }
+    
+    /* 如果已选变量不在列表中，追加显示 */
+    if (selectedName && !availableTempVars.find(v => v.name === selectedName)) {
+        html += `<option value="${selectedName}" selected>${selectedName} (${t('common.current') || '当前'})</option>`;
+    }
+    
+    return html;
+}
+
+/**
+ * 添加一个空的温度变量绑定行
+ */
+function addTempVarBinding() {
+    if (tempVarBindings.length >= 8) {
+        showToast(t('fanPage.maxBoundVars', { max: 8 }), 'warning');
+        return;
+    }
+    const defaultWeight = tempVarBindings.length === 0 ? 1.0 : 0.5;
+    tempVarBindings.push({ name: '', weight: defaultWeight });
+    renderTempVarBindings();
+}
+
+/**
+ * 删除指定索引的温度变量绑定行
+ */
+function removeTempVarBinding(index) {
+    tempVarBindings.splice(index, 1);
+    renderTempVarBindings();
+}
+
+/**
+ * 更新指定行的变量名
+ */
+function updateTempVarName(index, name) {
+    if (index >= 0 && index < tempVarBindings.length) {
+        tempVarBindings[index].name = name;
+        updateWeightedTempFormula();
+    }
+}
+
+/**
+ * 更新指定行的权重
+ */
+function updateTempVarWeight(index, weight) {
+    if (index >= 0 && index < tempVarBindings.length) {
+        let w = parseFloat(weight);
+        if (isNaN(w)) w = 0;
+        if (w < 0) w = 0;
+        if (w > 1) w = 1;
+        tempVarBindings[index].weight = w;
+        updateWeightedTempFormula();
+    }
+}
+
+/**
+ * 更新加权温度公式展示
+ */
+function updateWeightedTempFormula() {
+    const formulaEl = document.getElementById('temp-var-formula');
+    const warnEl = document.getElementById('temp-var-weight-warn');
+    if (!formulaEl) return;
+    
+    const validBindings = tempVarBindings.filter(b => b.name && b.weight > 0);
+    
+    if (validBindings.length === 0) {
+        formulaEl.style.display = 'none';
+        if (warnEl) warnEl.style.display = 'none';
+        return;
+    }
+    
+    /* 从缓存的变量列表获取当前值 */
+    let parts = [];
+    let weightedSum = 0;
+    let totalWeight = 0;
+    
+    validBindings.forEach(b => {
+        const varInfo = availableTempVars.find(v => v.name === b.name);
+        const val = varInfo?.value;
+        if (typeof val === 'number') {
+            parts.push(`${val.toFixed(1)}°C × ${b.weight}`);
+            weightedSum += val * b.weight;
+        } else {
+            parts.push(`??°C × ${b.weight}`);
+        }
+        totalWeight += b.weight;
+    });
+    
+    let formula = parts.join(' + ');
+    if (totalWeight > 0.001) {
+        formula += ` = <span class="result">${(weightedSum / totalWeight).toFixed(1)}°C</span>`;
+    }
+    
+    formulaEl.innerHTML = `${t('fanPage.weightedTemp')}: ${formula}`;
+    formulaEl.style.display = 'block';
+    
+    /* 权重总和警告 */
+    if (warnEl) {
+        const sum = tempVarBindings.reduce((s, b) => s + (b.weight || 0), 0);
+        if (Math.abs(sum - 1.0) > 0.01 && tempVarBindings.length > 0) {
+            warnEl.textContent = t('fanPage.weightSumWarning', { sum: sum.toFixed(2) });
+            warnEl.style.display = 'block';
+        } else {
+            warnEl.style.display = 'none';
+        }
+    }
 }
 
 /**
@@ -2028,28 +2195,15 @@ function drawCurvePreview() {
 async function loadTempSourceStatus() {
     try {
         const result = await api.call('temp.status');
-        
         if (result.code === 0 && result.data) {
             const data = result.data;
-            
-            // 更新当前温度显示
             const tempEl = document.getElementById('fan-curve-temp-current');
             if (tempEl) {
                 const temp = data.temperature_c?.toFixed(1) || '--';
                 tempEl.textContent = `${temp}°C`;
                 tempEl.style.color = data.valid ? 'var(--primary)' : 'var(--warning)';
             }
-            
-            // 更新提示信息
-            const hintEl = document.getElementById('temp-source-hint');
-            if (hintEl && data.bound_variable) {
-                hintEl.textContent = (typeof t === 'function' ? t('fanPage.currentBound') : '当前绑定') + ': ' + data.bound_variable;
-            }
         }
-        
-        // 加载变量绑定状态
-        await loadVariableBindStatus();
-        
     } catch (e) {
         console.error('获取温度源状态失败:', e);
         const tempEl = document.getElementById('fan-curve-temp-current');
@@ -2058,146 +2212,104 @@ async function loadTempSourceStatus() {
             tempEl.style.color = 'var(--error)';
         }
     }
+    await loadVariableBindStatus();
 }
 
 /**
  * 加载变量绑定状态和变量列表
  */
 async function loadVariableBindStatus() {
+    // 两个 API 调用独立 try-catch，互不阻塞
     try {
-        // 获取当前绑定状态
+        const varsResult = await api.call('automation.variables.list');
+        if (varsResult.code === 0 && varsResult.data?.variables) {
+            const tempVars = varsResult.data.variables.filter(v =>
+                v.type === 'float' || v.type === 'double' || v.type === 'number' ||
+                v.name.includes('temp') || v.name.includes('cpu') || v.name.includes('gpu')
+            );
+            availableTempVars = tempVars.length > 0 ? tempVars : varsResult.data.variables.filter(v =>
+                v.type === 'float' || v.type === 'double' || typeof v.value === 'number'
+            );
+        }
+    } catch (e) {
+        console.warn('加载变量列表失败:', e.message);
+    }
+    
+    try {
         const bindResult = await api.call('temp.bind');
         const statusEl = document.getElementById('variable-bind-status');
-        const selectEl = document.getElementById('temp-variable-select');
         
         if (bindResult.code === 0 && bindResult.data) {
-            const boundVar = bindResult.data.bound_variable;
+            const data = bindResult.data;
+            const boundVars = data.bound_variables || [];
+            
+            if (boundVars.length > 0) {
+                tempVarBindings = boundVars.map(bv => ({
+                    name: bv.name,
+                    weight: bv.weight ?? 1.0
+                }));
+            } else if (data.bound_variable) {
+                tempVarBindings = [{ name: data.bound_variable, weight: 1.0 }];
+            } else {
+                tempVarBindings = [];
+            }
+            
             if (statusEl) {
-                if (boundVar) {
-                    statusEl.textContent = (typeof t === 'function' ? t('fanPage.bound') : '已绑定') + ': ' + boundVar;
+                if (tempVarBindings.length > 0) {
+                    statusEl.textContent = t('fanPage.boundVarCount', { count: tempVarBindings.length });
                     statusEl.className = 'badge badge-success';
                 } else {
-                    statusEl.textContent = typeof t === 'function' ? t('fanPage.unbound') : '未绑定';
+                    statusEl.textContent = t('fanPage.unbound');
                     statusEl.className = 'badge badge-secondary';
                 }
             }
             
-            // 设置选择器当前值
-            if (selectEl && boundVar) {
-                // 先检查选项是否存在，如果不存在则添加临时选项
-                let optionExists = false;
-                for (let opt of selectEl.options) {
-                    if (opt.value === boundVar) {
-                        optionExists = true;
-                        break;
-                    }
-                }
-                if (!optionExists) {
-                    const tempOpt = document.createElement('option');
-                    tempOpt.value = boundVar;
-                    tempOpt.textContent = boundVar + ' (' + (typeof t === 'function' ? t('common.current') : '当前') + ')';
-                    selectEl.appendChild(tempOpt);
-                }
-                selectEl.value = boundVar;
-            }
-        }
-        
-        // 获取可用变量列表
-        const varsResult = await api.call('automation.variables.list');
-        if (varsResult.code === 0 && varsResult.data?.variables && selectEl) {
-            // 保存当前选中值
-            const currentVal = selectEl.value;
-            
-            // 清空并重建选项
-            selectEl.innerHTML = `<option value="">-- ${typeof t === 'function' ? t('automation.selectVariable') : '选择变量'} --</option>`;
-            
-            // 过滤并添加浮点类型变量（温度相关）
-            const tempVars = varsResult.data.variables.filter(v => 
-                v.type === 'float' || v.type === 'double' || v.type === 'number' ||
-                v.name.includes('temp') || v.name.includes('cpu') || v.name.includes('gpu')
-            );
-            
-            // 先添加温度相关的变量（优先显示）
-            const priorityVars = tempVars.filter(v => v.name.includes('temp'));
-            const otherVars = tempVars.filter(v => !v.name.includes('temp'));
-            
-            if (priorityVars.length > 0) {
-                const group1 = document.createElement('optgroup');
-                group1.label = typeof t === 'function' ? t('dataWidget.tempVariables') : '温度变量';
-                priorityVars.forEach(v => {
-                    const opt = document.createElement('option');
-                    opt.value = v.name;
-                    opt.textContent = `${v.name} (${v.value?.toFixed?.(1) || v.value})`;
-                    group1.appendChild(opt);
-                });
-                selectEl.appendChild(group1);
-            }
-            
-            if (otherVars.length > 0) {
-                const group2 = document.createElement('optgroup');
-                group2.label = typeof t === 'function' ? t('dataWidget.otherNumericVariables') : '其他数值变量';
-                otherVars.forEach(v => {
-                    const opt = document.createElement('option');
-                    opt.value = v.name;
-                    opt.textContent = `${v.name} (${v.value?.toFixed?.(1) || v.value})`;
-                    group2.appendChild(opt);
-                });
-                selectEl.appendChild(group2);
-            }
-            
-            // 如果没有找到匹配变量，显示所有浮点变量
-            if (tempVars.length === 0) {
-                const allFloats = varsResult.data.variables.filter(v => 
-                    v.type === 'float' || v.type === 'double' || typeof v.value === 'number'
-                );
-                allFloats.forEach(v => {
-                    const opt = document.createElement('option');
-                    opt.value = v.name;
-                    opt.textContent = `${v.name} (${v.value?.toFixed?.(1) || v.value})`;
-                    selectEl.appendChild(opt);
-                });
-            }
-            
-            // 恢复选中值
-            if (currentVal) {
-                selectEl.value = currentVal;
+            const tempEl = document.getElementById('fan-curve-temp-current');
+            if (tempEl && typeof data.weighted_temp_c === 'number') {
+                tempEl.textContent = `${data.weighted_temp_c.toFixed(1)}°C`;
+                tempEl.style.color = 'var(--primary)';
+            } else if (tempEl && typeof data.temperature_c === 'number') {
+                tempEl.textContent = `${data.temperature_c.toFixed(1)}°C`;
             }
         }
     } catch (e) {
-        console.error('加载变量绑定状态失败:', e);
+        console.warn('加载绑定状态失败:', e.message);
     }
+    
+    renderTempVarBindings();
 }
 
 /**
  * 绑定温度变量
  */
 async function bindTempVariable() {
-    const selectEl = document.getElementById('temp-variable-select');
-    const varName = selectEl?.value;
+    const validBindings = tempVarBindings.filter(b => b.name && b.name.trim() !== '');
     
-    if (!varName) {
-        showToast(typeof t === 'function' ? t('fanPage.selectVarToBind') : '请选择要绑定的变量', 'warning');
+    if (validBindings.length === 0) {
+        showToast(t('fanPage.noVarSelected'), 'warning');
         return;
     }
     
     try {
-        // 绑定变量
-        const result = await api.call('temp.bind', { variable: varName });
+        const variables = validBindings.map(b => ({
+            name: b.name,
+            weight: Math.max(0, Math.min(1, b.weight || 0))
+        }));
+        
+        const result = await api.call('temp.bind', { variables });
         
         if (result.code === 0) {
-            // 自动切换到变量模式
             await api.call('temp.select', { source: 'variable' });
             
-            showToast(typeof t === 'function' ? t('fanPage.tempBoundToVar', { var: varName }) : `温度已绑定到变量: ${varName}`, 'success');
+            showToast(t('fanPage.tempBoundWeighted', { count: variables.length }), 'success');
             
-            // 刷新状态
             await loadTempSourceStatus();
         } else {
-            showToast((typeof t === 'function' ? t('fanPage.bindFailed') : '绑定失败') + ': ' + result.message, 'error');
+            showToast(t('fanPage.bindFailed') + ': ' + result.message, 'error');
         }
     } catch (e) {
         console.error('绑定温度变量失败:', e);
-        showToast((typeof t === 'function' ? t('fanPage.bindFailed') : '绑定失败') + ': ' + e.message, 'error');
+        showToast(t('fanPage.bindFailed') + ': ' + e.message, 'error');
     }
 }
 
@@ -2206,19 +2318,19 @@ async function bindTempVariable() {
  */
 async function unbindTempVariable() {
     try {
-        const result = await api.call('temp.bind', { variable: null });
+        const result = await api.call('temp.bind', { variables: [] });
         
         if (result.code === 0) {
-            showToast(typeof t === 'function' ? t('fanPage.unbindSuccess') : '温度变量绑定已解除', 'success');
+            tempVarBindings = [];
+            showToast(t('fanPage.unbindSuccess'), 'success');
             
-            // 刷新状态
             await loadTempSourceStatus();
         } else {
-            showToast((typeof t === 'function' ? t('fanPage.unbindFailed') : '解绑失败') + ': ' + result.message, 'error');
+            showToast(t('fanPage.unbindFailed') + ': ' + result.message, 'error');
         }
     } catch (e) {
         console.error('解绑温度变量失败:', e);
-        showToast((typeof t === 'function' ? t('fanPage.unbindFailed') : '解绑失败') + ': ' + e.message, 'error');
+        showToast(t('fanPage.unbindFailed') + ': ' + e.message, 'error');
     }
 }
 
@@ -4026,13 +4138,14 @@ function deleteDataWidget(widgetId) {
 
 // ==================== 快捷操作（手动触发规则） ====================
 
+let _sshExecCircuitBreaker = { failUntil: 0, failCount: 0 };
+
 /**
  * 刷新快捷操作面板
  */
 async function refreshQuickActions() {
     const container = document.getElementById('quick-actions-grid');
     if (!container) {
-        // 用户已切到其他页面，quick-actions-grid 不存在属正常情况，静默返回
         return;
     }
     
@@ -4090,7 +4203,12 @@ async function refreshQuickActions() {
                     let nohupBtns = '';
                     let isRunning = false;
                     if (nohupInfo) {
-                        try {
+                        const cbOpen = Date.now() < _sshExecCircuitBreaker.failUntil;
+                        if (cbOpen) {
+                            console.info('[SSH CircuitBreaker] Skipping ssh.exec check for', rule.id,
+                                '(cooldown', Math.round((_sshExecCircuitBreaker.failUntil - Date.now()) / 1000), 's)');
+                            isRunning = false;
+                        } else try {
                             const host = window._sshHostsData?.[nohupInfo.hostId];
                             if (host) {
                                 const checkResult = await api.call('ssh.exec', {
@@ -4103,10 +4221,16 @@ async function refreshQuickActions() {
                                 });
                                 const stdout = (checkResult.data?.stdout || '').trim();
                                 isRunning = stdout.includes('running');
+                                _sshExecCircuitBreaker.failCount = 0;
+                                _sshExecCircuitBreaker.failUntil = 0;
                             }
                         } catch (e) {
                             console.warn('Check process status failed for rule', rule.id, e);
                             isRunning = false;
+                            _sshExecCircuitBreaker.failCount++;
+                            const backoff = Math.min(60, 15 * _sshExecCircuitBreaker.failCount);
+                            _sshExecCircuitBreaker.failUntil = Date.now() + backoff * 1000;
+                            console.warn(`[SSH CircuitBreaker] SSH exec failed ${_sshExecCircuitBreaker.failCount}x, cooling down ${backoff}s`);
                         }
                         
                         const statusIcon = isRunning ? '<i class="ri-record-circle-fill" style="color:#059669"></i>' : '<i class="ri-record-circle-line" style="color:#9ca3af"></i>';

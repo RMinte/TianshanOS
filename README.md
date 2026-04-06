@@ -157,7 +157,7 @@ esptool.py --chip esp32s3 -p /dev/ttyACM0 write_flash \
 
 ## 当前状态
 
-**版本**: 0.4.4  
+**版本**: 0.4.5  
 **阶段**: Phase 38 完成 - WebUI 多语言支持
 
 ### 已完成功能

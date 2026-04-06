@@ -706,7 +706,7 @@ POST /api/v1/fan.save
 ```
 
 ### temp.bind
-绑定温度变量。
+绑定温度变量，支持单变量兼容模式和多变量加权模式。
 
 **请求**:
 ```json
@@ -715,10 +715,49 @@ POST /api/v1/temp.bind
   "variable": "agx.cpu_temp"   // 绑定变量
 }
 
+// 加权绑定
+POST /api/v1/temp.bind
+{
+  "variables": [
+    { "name": "agx.cpu_temp", "weight": 0.4 },
+    { "name": "agx.gpu_temp", "weight": 0.6 }
+  ]
+}
+
 // 解除绑定
 POST /api/v1/temp.bind
 {
   "variable": null
+}
+
+// 使用新格式解除绑定
+POST /api/v1/temp.bind
+{
+  "variables": []
+}
+```
+
+**说明**:
+- `variables` 为新格式，优先级高于 `variable`
+- 每个 `weight` 取值范围为 `0.0 ~ 1.0`
+- 所有权重之和必须大于 `0`
+- 旧格式 `variable` 仍然兼容，等价于单变量且权重为 `1.0`
+
+**响应示例**:
+```json
+{
+  "code": 0,
+  "data": {
+    "bound_variable": "agx.cpu_temp",
+    "bound_variables": [
+      { "name": "agx.cpu_temp", "weight": 0.4, "value": 52.3 },
+      { "name": "agx.gpu_temp", "weight": 0.6, "value": 49.8 }
+    ],
+    "weighted_temp_c": 50.8,
+    "active_source": "variable",
+    "temperature_c": 50.8,
+    "valid": true
+  }
 }
 ```
 
