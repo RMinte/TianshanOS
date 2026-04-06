@@ -30,6 +30,7 @@
 #define NVS_NAMESPACE       "ts_temp"
 #define NVS_KEY_PREFERRED   "preferred"
 #define NVS_KEY_BOUND_VAR   "bound_var"
+#define NVS_KEY_BOUND_VARS  "bound_vars"
 
 /*===========================================================================*/
 /*                          Internal Types                                    */
@@ -52,7 +53,9 @@ typedef struct {
     int16_t current_temp;
     ts_temp_source_type_t active_source;
     ts_temp_source_type_t preferred_source;  /**< 用户首选源（0=自动）*/
-    char bound_variable[TS_TEMP_MAX_VARNAME_LEN];  /**< 绑定的变量名 */
+    char bound_variable[TS_TEMP_MAX_VARNAME_LEN];  /**< 向后兼容：第一个绑定变量名 */
+    ts_temp_bound_var_t bound_vars[TS_TEMP_MAX_BOUND_VARS]; /**< 加权绑定变量 */
+    uint8_t bound_var_count;                /**< 绑定变量数量 */
     provider_t providers[TS_TEMP_SOURCE_MAX];
     SemaphoreHandle_t mutex;
 } temp_source_state_t;
@@ -71,9 +74,13 @@ static uint32_t get_current_ms(void);
 static void evaluate_active_source(void);
 static void publish_temp_event(int16_t new_temp, ts_temp_source_type_t new_source,
                                int16_t prev_temp, ts_temp_source_type_t prev_source);
+static void sync_bound_variable_compat(void);
+static esp_err_t save_bound_vars_to_nvs(void);
 static esp_err_t load_preferred_source_from_nvs(void);
 static esp_err_t save_preferred_source_to_nvs(ts_temp_source_type_t type);
 static void export_temp_config_to_sdcard(void);
+static float sanitize_bound_weight(float weight);
+static bool has_positive_bound_weight(const ts_temp_bound_var_t *vars, uint8_t count);
 
 /*===========================================================================*/
 /*                          Utility Functions                                 */
@@ -82,6 +89,28 @@ static void export_temp_config_to_sdcard(void);
 static uint32_t get_current_ms(void)
 {
     return (uint32_t)(esp_timer_get_time() / 1000);
+}
+
+static float sanitize_bound_weight(float weight)
+{
+    if (weight < 0.0f) return 0.0f;
+    if (weight > 1.0f) return 1.0f;
+    return weight;
+}
+
+static bool has_positive_bound_weight(const ts_temp_bound_var_t *vars, uint8_t count)
+{
+    if (!vars || count == 0) {
+        return false;
+    }
+
+    for (uint8_t i = 0; i < count; i++) {
+        if (sanitize_bound_weight(vars[i].weight) > 0.001f) {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 const char *ts_temp_source_type_to_str(ts_temp_source_type_t type)
@@ -107,52 +136,97 @@ static bool is_provider_valid(ts_temp_source_type_t type, uint32_t now)
 {
     if (type >= TS_TEMP_SOURCE_MAX) return false;
     
-    // VARIABLE 类型特殊处理 - 检查绑定变量是否可读
     if (type == TS_TEMP_SOURCE_VARIABLE) {
-        if (s_state.bound_variable[0] == '\0') return false;
-        double value = 0;
-        return (ts_variable_get_float(s_state.bound_variable, &value) == ESP_OK);
+        if (s_state.bound_var_count == 0) return false;
+        for (uint8_t i = 0; i < s_state.bound_var_count; i++) {
+            float weight = sanitize_bound_weight(s_state.bound_vars[i].weight);
+            if (weight <= 0.001f) {
+                continue;
+            }
+            double value = 0;
+            if (ts_variable_get_float(s_state.bound_vars[i].name, &value) == ESP_OK) {
+                return true;
+            }
+        }
+        return false;
     }
     
     provider_t *p = &s_state.providers[type];
     if (!p->registered || !p->active) return false;
     
-    // DEFAULT 源始终有效
     if (type == TS_TEMP_SOURCE_DEFAULT) return true;
     
-    // 检查数据是否过期
     uint32_t age = now - p->last_update_ms;
     return (age < TS_TEMP_DATA_TIMEOUT_MS);
 }
 
 /**
- * @brief 从绑定的变量读取温度值
+ * @brief 从绑定的变量读取加权温度值
+ *
+ * 遍历 bound_vars 数组，对每个可读变量读值乘以权重求和。
+ * 不可读的变量跳过，用剩余有效变量的权重归一化。
  */
 static int16_t read_temp_from_variable(void)
 {
-    if (s_state.bound_variable[0] == '\0') {
+    if (s_state.bound_var_count == 0) {
         return TS_TEMP_DEFAULT_VALUE;
     }
     
-    double value = 0;
-    esp_err_t ret = ts_variable_get_float(s_state.bound_variable, &value);
-    if (ret != ESP_OK) {
-        TS_LOGD(TAG, "Failed to read variable '%s': %s", 
-                s_state.bound_variable, esp_err_to_name(ret));
+    double weighted_sum = 0.0;
+    double total_weight = 0.0;
+    uint8_t valid_count = 0;
+    
+    for (uint8_t i = 0; i < s_state.bound_var_count; i++) {
+        double value = 0;
+        esp_err_t ret = ts_variable_get_float(s_state.bound_vars[i].name, &value);
+        if (ret != ESP_OK) {
+            TS_LOGD(TAG, "Failed to read variable '%s': %s",
+                    s_state.bound_vars[i].name, esp_err_to_name(ret));
+            continue;
+        }
+        float w = sanitize_bound_weight(s_state.bound_vars[i].weight);
+        if (w <= 0.001f) {
+            continue;
+        }
+        weighted_sum += value * w;
+        total_weight += w;
+        valid_count++;
+    }
+    
+    if (valid_count == 0) {
         return TS_TEMP_DEFAULT_VALUE;
     }
     
-    // 转换为 0.1°C 单位
-    int16_t temp_01c = (int16_t)(value * 10.0);
+    /* 归一化：如果总权重不为 0 且不为 1.0，按实际权重比例缩放 */
+    double effective_temp;
+    if (total_weight > 0.001) {
+        effective_temp = weighted_sum / total_weight;
+    } else {
+        effective_temp = weighted_sum;
+    }
     
-    // 范围检查
+    int16_t temp_01c = (int16_t)(effective_temp * 10.0);
+    
     if (temp_01c < TS_TEMP_MIN_VALID || temp_01c > TS_TEMP_MAX_VALID) {
-        TS_LOGW(TAG, "Variable '%s' value out of range: %.1f°C", 
-                s_state.bound_variable, value);
+        TS_LOGW(TAG, "Weighted temp out of range: %.1f°C", effective_temp);
         return TS_TEMP_DEFAULT_VALUE;
     }
     
     return temp_01c;
+}
+
+/**
+ * @brief 同步 bound_variable 兼容字段
+ */
+static void sync_bound_variable_compat(void)
+{
+    if (s_state.bound_var_count > 0) {
+        strncpy(s_state.bound_variable, s_state.bound_vars[0].name,
+                sizeof(s_state.bound_variable) - 1);
+        s_state.bound_variable[sizeof(s_state.bound_variable) - 1] = '\0';
+    } else {
+        s_state.bound_variable[0] = '\0';
+    }
 }
 
 /**
@@ -532,10 +606,15 @@ esp_err_t ts_temp_get_status(ts_temp_status_t *status)
     status->current_temp = s_state.current_temp;
     status->manual_mode = s_state.manual_mode;
     
-    /* 复制绑定的变量名 */
+    /* 复制绑定变量信息 */
     if (s_state.bound_variable[0] != '\0') {
         strncpy(status->bound_variable, s_state.bound_variable, sizeof(status->bound_variable) - 1);
         status->bound_variable[sizeof(status->bound_variable) - 1] = '\0';
+    }
+    status->bound_var_count = s_state.bound_var_count;
+    if (s_state.bound_var_count > 0) {
+        memcpy(status->bound_vars, s_state.bound_vars,
+               s_state.bound_var_count * sizeof(ts_temp_bound_var_t));
     }
     
     uint32_t count = 0;
@@ -658,13 +737,45 @@ static esp_err_t load_preferred_source_from_nvs(void)
         TS_LOGI(TAG, "Loaded preferred source from NVS: %s",
                 preferred == 0 ? "auto" : ts_temp_source_type_to_str(s_state.preferred_source));
         
-        /* 加载绑定的变量名 */
-        size_t len = sizeof(s_state.bound_variable);
-        ret = nvs_get_str(handle, NVS_KEY_BOUND_VAR, s_state.bound_variable, &len);
-        if (ret == ESP_OK && s_state.bound_variable[0] != '\0') {
-            TS_LOGI(TAG, "Loaded bound variable from NVS: %s", s_state.bound_variable);
-        } else {
-            s_state.bound_variable[0] = '\0';
+        /* 加载绑定变量：优先新 blob 格式，回退旧 string 格式 */
+        {
+            typedef struct {
+                uint8_t count;
+                ts_temp_bound_var_t vars[TS_TEMP_MAX_BOUND_VARS];
+            } bound_vars_blob_t;
+            
+            bound_vars_blob_t blob = {0};
+            size_t blob_len = sizeof(blob);
+            ret = nvs_get_blob(handle, NVS_KEY_BOUND_VARS, &blob, &blob_len);
+            if (ret == ESP_OK && blob.count > 0 && blob.count <= TS_TEMP_MAX_BOUND_VARS) {
+                s_state.bound_var_count = blob.count;
+                memcpy(s_state.bound_vars, blob.vars, blob.count * sizeof(ts_temp_bound_var_t));
+                for (uint8_t i = 0; i < s_state.bound_var_count; i++) {
+                    s_state.bound_vars[i].weight =
+                        sanitize_bound_weight(s_state.bound_vars[i].weight);
+                }
+                if (!has_positive_bound_weight(s_state.bound_vars, s_state.bound_var_count)) {
+                    TS_LOGW(TAG, "Ignoring persisted bound vars with no positive weights");
+                    s_state.bound_var_count = 0;
+                    memset(s_state.bound_vars, 0, sizeof(s_state.bound_vars));
+                }
+                sync_bound_variable_compat();
+                TS_LOGI(TAG, "Loaded %d weighted bound vars from NVS", s_state.bound_var_count);
+            } else {
+                size_t len = sizeof(s_state.bound_variable);
+                ret = nvs_get_str(handle, NVS_KEY_BOUND_VAR, s_state.bound_variable, &len);
+                if (ret == ESP_OK && s_state.bound_variable[0] != '\0') {
+                    s_state.bound_var_count = 1;
+                    strncpy(s_state.bound_vars[0].name, s_state.bound_variable,
+                            sizeof(s_state.bound_vars[0].name) - 1);
+                    s_state.bound_vars[0].name[sizeof(s_state.bound_vars[0].name) - 1] = '\0';
+                    s_state.bound_vars[0].weight = 1.0f;
+                    TS_LOGI(TAG, "Loaded legacy bound variable from NVS: %s", s_state.bound_variable);
+                } else {
+                    s_state.bound_variable[0] = '\0';
+                    s_state.bound_var_count = 0;
+                }
+            }
         }
     } else {
         TS_LOGD(TAG, "No saved temp config found, using defaults");
@@ -725,23 +836,55 @@ static esp_err_t load_temp_config_from_file(const char *filepath)
         }
     }
     
-    /* Parse bound_variable */
-    cJSON *bound = cJSON_GetObjectItem(root, "bound_variable");
-    if (bound && cJSON_IsString(bound)) {
-        strncpy(s_state.bound_variable, bound->valuestring, sizeof(s_state.bound_variable) - 1);
-        s_state.bound_variable[sizeof(s_state.bound_variable) - 1] = '\0';
+    /* Parse bound_variables (new array format) or bound_variable (legacy string) */
+    cJSON *bound_arr = cJSON_GetObjectItem(root, "bound_variables");
+    if (bound_arr && cJSON_IsArray(bound_arr)) {
+        int arr_size = cJSON_GetArraySize(bound_arr);
+        if (arr_size > TS_TEMP_MAX_BOUND_VARS) arr_size = TS_TEMP_MAX_BOUND_VARS;
+        s_state.bound_var_count = 0;
+        for (int i = 0; i < arr_size; i++) {
+            cJSON *item = cJSON_GetArrayItem(bound_arr, i);
+            cJSON *jname = cJSON_GetObjectItem(item, "name");
+            cJSON *jweight = cJSON_GetObjectItem(item, "weight");
+            if (jname && cJSON_IsString(jname) && jname->valuestring[0] != '\0') {
+                strncpy(s_state.bound_vars[s_state.bound_var_count].name,
+                        jname->valuestring,
+                        sizeof(s_state.bound_vars[0].name) - 1);
+                s_state.bound_vars[s_state.bound_var_count].name[sizeof(s_state.bound_vars[0].name) - 1] = '\0';
+                s_state.bound_vars[s_state.bound_var_count].weight =
+                    sanitize_bound_weight((jweight && cJSON_IsNumber(jweight))
+                                          ? (float)jweight->valuedouble : 1.0f);
+                s_state.bound_var_count++;
+            }
+        }
+        if (!has_positive_bound_weight(s_state.bound_vars, s_state.bound_var_count)) {
+            TS_LOGW(TAG, "Ignoring SD card bound vars with no positive weights");
+            s_state.bound_var_count = 0;
+            memset(s_state.bound_vars, 0, sizeof(s_state.bound_vars));
+        }
+        sync_bound_variable_compat();
+    } else {
+        cJSON *bound = cJSON_GetObjectItem(root, "bound_variable");
+        if (bound && cJSON_IsString(bound) && bound->valuestring[0] != '\0') {
+            s_state.bound_var_count = 1;
+            strncpy(s_state.bound_vars[0].name, bound->valuestring,
+                    sizeof(s_state.bound_vars[0].name) - 1);
+            s_state.bound_vars[0].name[sizeof(s_state.bound_vars[0].name) - 1] = '\0';
+            s_state.bound_vars[0].weight = 1.0f;
+            sync_bound_variable_compat();
+        }
     }
     
     cJSON_Delete(root);
     
-    TS_LOGI(TAG, "Loaded temp config from SD card: preferred=%s, bound=%s",
+    TS_LOGI(TAG, "Loaded temp config from SD card: preferred=%s, bound_vars=%d",
             ts_temp_source_type_to_str(s_state.preferred_source),
-            s_state.bound_variable[0] ? s_state.bound_variable : "(none)");
+            s_state.bound_var_count);
     
     /* Save to NVS for next boot */
     save_preferred_source_to_nvs(s_state.preferred_source);
-    if (s_state.bound_variable[0]) {
-        save_bound_variable_to_nvs(s_state.bound_variable);
+    if (s_state.bound_var_count > 0) {
+        save_bound_vars_to_nvs();
     }
     
     return ESP_OK;
@@ -789,7 +932,7 @@ static esp_err_t save_bound_variable_to_nvs(const char *var_name)
         ret = nvs_set_str(handle, NVS_KEY_BOUND_VAR, var_name);
     } else {
         ret = nvs_erase_key(handle, NVS_KEY_BOUND_VAR);
-        if (ret == ESP_ERR_NVS_NOT_FOUND) ret = ESP_OK;  // 键不存在也是成功
+        if (ret == ESP_ERR_NVS_NOT_FOUND) ret = ESP_OK;
     }
     
     if (ret != ESP_OK) {
@@ -808,10 +951,56 @@ static esp_err_t save_bound_variable_to_nvs(const char *var_name)
     return ret;
 }
 
+static esp_err_t save_bound_vars_to_nvs(void)
+{
+    nvs_handle_t handle;
+    esp_err_t ret = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &handle);
+    
+    if (ret != ESP_OK) {
+        TS_LOGE(TAG, "Failed to open NVS for write: %s", esp_err_to_name(ret));
+        return ret;
+    }
+    
+    typedef struct {
+        uint8_t count;
+        ts_temp_bound_var_t vars[TS_TEMP_MAX_BOUND_VARS];
+    } bound_vars_blob_t;
+    
+    if (s_state.bound_var_count > 0) {
+        bound_vars_blob_t blob = {0};
+        blob.count = s_state.bound_var_count;
+        memcpy(blob.vars, s_state.bound_vars,
+               s_state.bound_var_count * sizeof(ts_temp_bound_var_t));
+        ret = nvs_set_blob(handle, NVS_KEY_BOUND_VARS, &blob, sizeof(blob));
+    } else {
+        ret = nvs_erase_key(handle, NVS_KEY_BOUND_VARS);
+        if (ret == ESP_ERR_NVS_NOT_FOUND) ret = ESP_OK;
+    }
+    
+    /* 同步旧 key 以保持向后兼容 */
+    if (s_state.bound_variable[0] != '\0') {
+        nvs_set_str(handle, NVS_KEY_BOUND_VAR, s_state.bound_variable);
+    } else {
+        nvs_erase_key(handle, NVS_KEY_BOUND_VAR);
+    }
+    
+    if (ret != ESP_OK) {
+        TS_LOGE(TAG, "Failed to write bound vars blob: %s", esp_err_to_name(ret));
+        nvs_close(handle);
+        return ret;
+    }
+    
+    ret = nvs_commit(handle);
+    nvs_close(handle);
+    
+    TS_LOGD(TAG, "Saved %d bound vars to NVS", s_state.bound_var_count);
+    return ret;
+}
+
 /**
  * @brief 导出温度配置到 SD 卡
  * 
- * 生成包含 preferred_source 和 bound_variable 的 JSON 并写入 SD 卡
+ * 生成包含 preferred_source、bound_variable（兼容）和 bound_variables（数组）的 JSON
  */
 static void export_temp_config_to_sdcard(void)
 {
@@ -821,18 +1010,32 @@ static void export_temp_config_to_sdcard(void)
         return;
     }
     
-    /* 导出首选源 */
     const char *preferred_str = s_state.preferred_source == TS_TEMP_SOURCE_DEFAULT 
                                 ? "auto" 
                                 : ts_temp_source_type_to_str(s_state.preferred_source);
     cJSON_AddStringToObject(root, "preferred_source", preferred_str);
     
-    /* 导出绑定变量（如果有） */
+    /* 向后兼容：导出第一个变量名 */
     if (s_state.bound_variable[0] != '\0') {
         cJSON_AddStringToObject(root, "bound_variable", s_state.bound_variable);
     }
     
-    /* 使用配置模块导出 API */
+    /* 导出加权变量数组 */
+    if (s_state.bound_var_count > 0) {
+        cJSON *arr = cJSON_CreateArray();
+        if (arr) {
+            for (uint8_t i = 0; i < s_state.bound_var_count; i++) {
+                cJSON *item = cJSON_CreateObject();
+                if (item) {
+                    cJSON_AddStringToObject(item, "name", s_state.bound_vars[i].name);
+                    cJSON_AddNumberToObject(item, "weight", s_state.bound_vars[i].weight);
+                    cJSON_AddItemToArray(arr, item);
+                }
+            }
+            cJSON_AddItemToObject(root, "bound_variables", arr);
+        }
+    }
+    
     esp_err_t ret = ts_config_module_export_custom_json(TS_CONFIG_MODULE_TEMP, root);
     cJSON_Delete(root);
     
@@ -847,36 +1050,55 @@ static void export_temp_config_to_sdcard(void)
 
 esp_err_t ts_temp_bind_variable(const char *var_name)
 {
-    if (!s_state.initialized) return ESP_ERR_INVALID_STATE;
     if (!var_name || var_name[0] == '\0') return ESP_ERR_INVALID_ARG;
+    if (strlen(var_name) >= TS_TEMP_MAX_VARNAME_LEN) return ESP_ERR_INVALID_SIZE;
     
-    /* 检查变量名长度 */
-    if (strlen(var_name) >= TS_TEMP_MAX_VARNAME_LEN) {
-        TS_LOGE(TAG, "Variable name too long: %s", var_name);
-        return ESP_ERR_INVALID_SIZE;
+    ts_temp_bound_var_t single = {0};
+    strncpy(single.name, var_name, sizeof(single.name) - 1);
+    single.weight = 1.0f;
+    return ts_temp_bind_variables(&single, 1);
+}
+
+esp_err_t ts_temp_bind_variables(const ts_temp_bound_var_t *vars, uint8_t count)
+{
+    if (!s_state.initialized) return ESP_ERR_INVALID_STATE;
+    if (!vars || count == 0 || count > TS_TEMP_MAX_BOUND_VARS) return ESP_ERR_INVALID_ARG;
+
+    ts_temp_bound_var_t validated_vars[TS_TEMP_MAX_BOUND_VARS] = {0};
+    double total_weight = 0.0;
+
+    for (uint8_t i = 0; i < count; i++) {
+        if (vars[i].name[0] == '\0') return ESP_ERR_INVALID_ARG;
+        if (strlen(vars[i].name) >= TS_TEMP_MAX_VARNAME_LEN) return ESP_ERR_INVALID_SIZE;
+        if (!ts_variable_exists(vars[i].name)) {
+            TS_LOGW(TAG, "Variable does not exist: %s (will bind anyway)", vars[i].name);
+        }
+
+        validated_vars[i] = vars[i];
+        validated_vars[i].weight = sanitize_bound_weight(vars[i].weight);
+        total_weight += validated_vars[i].weight;
     }
-    
-    /* 验证变量是否存在 */
-    if (!ts_variable_exists(var_name)) {
-        TS_LOGW(TAG, "Variable does not exist: %s (will bind anyway)", var_name);
+
+    if (total_weight <= 0.001) {
+        TS_LOGW(TAG, "Rejected weighted binding with non-positive total weight");
+        return ESP_ERR_INVALID_ARG;
     }
-    
+
     xSemaphoreTake(s_state.mutex, portMAX_DELAY);
-    
-    strncpy(s_state.bound_variable, var_name, sizeof(s_state.bound_variable) - 1);
-    s_state.bound_variable[sizeof(s_state.bound_variable) - 1] = '\0';
-    
-    /* 重新评估活动源 */
+
+    s_state.bound_var_count = count;
+    memcpy(s_state.bound_vars, validated_vars, count * sizeof(ts_temp_bound_var_t));
+    sync_bound_variable_compat();
+
     evaluate_active_source();
-    
+
     xSemaphoreGive(s_state.mutex);
-    
-    /* 保存到 NVS + SD 卡 */
-    save_bound_variable_to_nvs(var_name);
+
+    save_bound_vars_to_nvs();
     export_temp_config_to_sdcard();
-    
-    TS_LOGI(TAG, "Temperature bound to variable: %s", var_name);
-    
+
+    TS_LOGI(TAG, "Temperature bound to %d weighted variable(s)", count);
+
     return ESP_OK;
 }
 
@@ -887,7 +1109,7 @@ esp_err_t ts_temp_get_bound_variable(char *var_name, size_t len)
     
     xSemaphoreTake(s_state.mutex, portMAX_DELAY);
     
-    if (s_state.bound_variable[0] == '\0') {
+    if (s_state.bound_var_count == 0) {
         xSemaphoreGive(s_state.mutex);
         var_name[0] = '\0';
         return ESP_ERR_NOT_FOUND;
@@ -901,22 +1123,44 @@ esp_err_t ts_temp_get_bound_variable(char *var_name, size_t len)
     return ESP_OK;
 }
 
+esp_err_t ts_temp_get_bound_variables(ts_temp_bound_var_t *vars, uint8_t *count)
+{
+    if (!vars || !count) return ESP_ERR_INVALID_ARG;
+    if (!s_state.initialized) return ESP_ERR_INVALID_STATE;
+    
+    xSemaphoreTake(s_state.mutex, portMAX_DELAY);
+    
+    if (s_state.bound_var_count == 0) {
+        xSemaphoreGive(s_state.mutex);
+        *count = 0;
+        return ESP_ERR_NOT_FOUND;
+    }
+    
+    *count = s_state.bound_var_count;
+    memcpy(vars, s_state.bound_vars, s_state.bound_var_count * sizeof(ts_temp_bound_var_t));
+    
+    xSemaphoreGive(s_state.mutex);
+    
+    return ESP_OK;
+}
+
 esp_err_t ts_temp_unbind_variable(void)
 {
     if (!s_state.initialized) return ESP_ERR_INVALID_STATE;
     
     xSemaphoreTake(s_state.mutex, portMAX_DELAY);
     
-    bool was_bound = (s_state.bound_variable[0] != '\0');
+    bool was_bound = (s_state.bound_var_count > 0);
+    s_state.bound_var_count = 0;
+    memset(s_state.bound_vars, 0, sizeof(s_state.bound_vars));
     s_state.bound_variable[0] = '\0';
     
-    /* 重新评估活动源 */
     evaluate_active_source();
     
     xSemaphoreGive(s_state.mutex);
     
     if (was_bound) {
-        /* 从 NVS + SD 卡清除 */
+        save_bound_vars_to_nvs();
         save_bound_variable_to_nvs(NULL);
         export_temp_config_to_sdcard();
         TS_LOGI(TAG, "Temperature variable binding removed");

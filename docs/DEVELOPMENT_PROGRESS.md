@@ -1702,11 +1702,16 @@ POST /api/v1/fan.limits
 ```json
 POST /api/v1/temp.bind
 {
-  "variable": "agx.cpu_temp"
+  "variables": [
+    { "name": "agx.cpu_temp", "weight": 0.4 },
+    { "name": "agx.gpu_temp", "weight": 0.6 }
+  ]
 }
 ```
 
-**用途**：将系统变量绑定为温度源，实现风扇根据 AGX GPU/CPU 温度自动调速。
+**用途**：将系统变量绑定为温度源，实现风扇根据 AGX GPU/CPU 温度自动调速，并支持多变量加权温度。
+
+**兼容性**：旧格式 `{ "variable": "agx.cpu_temp" }` 仍可继续使用，等价于单变量权重 `1.0`。
 
 #### 3. temp.manual - 测试温度
 

@@ -9,6 +9,7 @@
 
 #include "ts_api.h"
 #include "ts_temp_source.h"
+#include "ts_variable.h"
 #include "ts_log.h"
 #include <string.h>
 
@@ -274,23 +275,77 @@ static esp_err_t api_temp_select(const cJSON *params, ts_api_result_t *result)
 }
 
 /**
- * @brief temp.bind - Bind/unbind temperature to a system variable
+ * @brief temp.bind - Bind/unbind temperature to system variable(s)
  * 
- * Params: { "variable": "agx.cpu_temp" }  // 绑定到变量
- *         { "variable": null }            // 取消绑定
- *         {}                              // 查询当前绑定
+ * New format (weighted):
+ *   { "variables": [{"name": "agx.cpu_temp", "weight": 0.4}, ...] }
  * 
- * 绑定变量后，温度源会自动从该变量读取温度值。
- * 变量必须为浮点类型，单位为摄氏度。
+ * Legacy format (single variable, weight 1.0):
+ *   { "variable": "agx.cpu_temp" }
+ * 
+ * Unbind:
+ *   { "variable": null }  or  { "variables": [] }
+ * 
+ * Query:
+ *   {}
  */
 static esp_err_t api_temp_bind(const cJSON *params, ts_api_result_t *result)
 {
+    const cJSON *vars_arr = cJSON_GetObjectItem(params, "variables");
     const cJSON *var_item = cJSON_GetObjectItem(params, "variable");
     
-    /* 处理绑定/解绑请求 */
-    if (var_item != NULL) {
+    /* New array format takes priority */
+    if (vars_arr != NULL && cJSON_IsArray(vars_arr)) {
+        int arr_size = cJSON_GetArraySize(vars_arr);
+        if (arr_size == 0) {
+            esp_err_t ret = ts_temp_unbind_variable();
+            if (ret != ESP_OK) {
+                ts_api_result_error(result, TS_API_ERR_INTERNAL, "Failed to unbind");
+                return ret;
+            }
+        } else {
+            if (arr_size > TS_TEMP_MAX_BOUND_VARS) {
+                ts_api_result_error(result, TS_API_ERR_INVALID_ARG, "Too many variables (max 8)");
+                return ESP_ERR_INVALID_ARG;
+            }
+            ts_temp_bound_var_t bind_arr[TS_TEMP_MAX_BOUND_VARS] = {0};
+            double total_weight = 0.0;
+            for (int i = 0; i < arr_size; i++) {
+                cJSON *item = cJSON_GetArrayItem(vars_arr, i);
+                cJSON *jname = cJSON_GetObjectItem(item, "name");
+                cJSON *jweight = cJSON_GetObjectItem(item, "weight");
+                if (!jname || !cJSON_IsString(jname) || !jname->valuestring[0]) {
+                    ts_api_result_error(result, TS_API_ERR_INVALID_ARG, "Each variable needs a name");
+                    return ESP_ERR_INVALID_ARG;
+                }
+                strncpy(bind_arr[i].name, jname->valuestring, TS_TEMP_MAX_VARNAME_LEN - 1);
+                bind_arr[i].weight = (jweight && cJSON_IsNumber(jweight))
+                                     ? (float)jweight->valuedouble : 1.0f;
+                if (bind_arr[i].weight < 0.0f) bind_arr[i].weight = 0.0f;
+                if (bind_arr[i].weight > 1.0f) bind_arr[i].weight = 1.0f;
+                total_weight += bind_arr[i].weight;
+            }
+            if (total_weight <= 0.001) {
+                ts_api_result_error(result, TS_API_ERR_INVALID_ARG,
+                                    "At least one variable must have a positive weight");
+                return ESP_ERR_INVALID_ARG;
+            }
+            esp_err_t ret = ts_temp_bind_variables(bind_arr, (uint8_t)arr_size);
+            if (ret != ESP_OK) {
+                if (ret == ESP_ERR_INVALID_ARG) {
+                    ts_api_result_error(result, TS_API_ERR_INVALID_ARG,
+                                        "Invalid weighted binding configuration");
+                } else if (ret == ESP_ERR_INVALID_SIZE) {
+                    ts_api_result_error(result, TS_API_ERR_INVALID_ARG, "Variable name too long");
+                } else {
+                    ts_api_result_error(result, TS_API_ERR_INTERNAL, "Failed to bind variables");
+                }
+                return ret;
+            }
+        }
+    } else if (var_item != NULL) {
+        /* Legacy single-variable format */
         if (cJSON_IsString(var_item) && var_item->valuestring && var_item->valuestring[0] != '\0') {
-            /* 绑定到变量 */
             esp_err_t ret = ts_temp_bind_variable(var_item->valuestring);
             if (ret != ESP_OK) {
                 if (ret == ESP_ERR_INVALID_SIZE) {
@@ -301,7 +356,6 @@ static esp_err_t api_temp_bind(const cJSON *params, ts_api_result_t *result)
                 return ret;
             }
         } else if (cJSON_IsNull(var_item)) {
-            /* 取消绑定 */
             esp_err_t ret = ts_temp_unbind_variable();
             if (ret != ESP_OK) {
                 ts_api_result_error(result, TS_API_ERR_INTERNAL, "Failed to unbind variable");
@@ -313,9 +367,10 @@ static esp_err_t api_temp_bind(const cJSON *params, ts_api_result_t *result)
         }
     }
     
-    /* 返回当前状态 */
+    /* Build response with full binding info */
     cJSON *data = cJSON_CreateObject();
     
+    /* Legacy compatible: first variable name */
     char var_name[TS_TEMP_MAX_VARNAME_LEN];
     esp_err_t ret = ts_temp_get_bound_variable(var_name, sizeof(var_name));
     if (ret == ESP_OK && var_name[0] != '\0') {
@@ -324,7 +379,38 @@ static esp_err_t api_temp_bind(const cJSON *params, ts_api_result_t *result)
         cJSON_AddNullToObject(data, "bound_variable");
     }
     
-    /* 添加活动源和当前温度信息 */
+    /* New: full weighted binding array with live values */
+    ts_temp_bound_var_t bound[TS_TEMP_MAX_BOUND_VARS];
+    uint8_t bound_count = 0;
+    ts_temp_get_bound_variables(bound, &bound_count);
+    
+    cJSON *bv_arr = cJSON_CreateArray();
+    double weighted_sum = 0.0;
+    double total_weight = 0.0;
+    
+    for (uint8_t i = 0; i < bound_count; i++) {
+        cJSON *bv_item = cJSON_CreateObject();
+        cJSON_AddStringToObject(bv_item, "name", bound[i].name);
+        cJSON_AddNumberToObject(bv_item, "weight", bound[i].weight);
+        
+        double val = 0;
+        bool readable = (ts_variable_get_float(bound[i].name, &val) == ESP_OK);
+        if (readable) {
+            cJSON_AddNumberToObject(bv_item, "value", val);
+            weighted_sum += val * bound[i].weight;
+            total_weight += bound[i].weight;
+        } else {
+            cJSON_AddNullToObject(bv_item, "value");
+        }
+        cJSON_AddItemToArray(bv_arr, bv_item);
+    }
+    cJSON_AddItemToObject(data, "bound_variables", bv_arr);
+    
+    /* Weighted temperature */
+    if (bound_count > 0 && total_weight > 0.001) {
+        cJSON_AddNumberToObject(data, "weighted_temp_c", weighted_sum / total_weight);
+    }
+    
     ts_temp_source_type_t active = ts_temp_get_active_source();
     cJSON_AddStringToObject(data, "active_source", ts_temp_source_type_to_str(active));
     
