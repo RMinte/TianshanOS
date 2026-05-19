@@ -353,6 +353,8 @@ class TianShanAPI {
     
     // 综合网络状态 (包含 ethernet, wifi_sta, wifi_ap)
     async networkStatus() { return this.call('network.status'); }
+    async lpmuAccessStart() { return this.call('network.lpmu_access.start', null, 'POST'); }
+    async lpmuAccessStatus() { return this.call('network.lpmu_access.status'); }
     
     // WiFi 相关
     async wifiMode(mode = null) { 

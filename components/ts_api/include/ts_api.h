@@ -350,6 +350,11 @@ esp_err_t ts_api_dhcp_register(void);
 esp_err_t ts_api_nat_register(void);
 
 /**
+ * @brief Register LPMU upper-network access APIs
+ */
+esp_err_t ts_api_lpmu_access_register(void);
+
+/**
  * @brief Register SSH known hosts APIs
  */
 esp_err_t ts_api_hosts_register(void);

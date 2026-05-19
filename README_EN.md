@@ -93,7 +93,7 @@ git clone https://github.com/thomas-hiddenpeak/TianshanOS.git
 cd TianshanOS
 
 # Set up ESP-IDF environment
-. $HOME/esp/v5.5/esp-idf/export.sh
+. $HOME/esp/v5.5.2/esp-idf/export.sh
 
 # Set target chip
 idf.py set-target esp32s3
@@ -139,8 +139,8 @@ For detailed instructions, please refer to the [Quick Start Guide](docs/QUICK_ST
 
 ## Current Status
 
-**Version**: 0.3.0  
-**Phase**: Phase 20 Complete - Automation Engine, SSH Remote Execution, Variable System
+**Version**: 0.4.6
+**Phase**: Phase 39 Complete - LPMU Upstream Network Access
 
 ### Completed Features
 
@@ -151,7 +151,7 @@ For detailed instructions, please refer to the [Quick Start Guide](docs/QUICK_ST
 | Hardware Abstraction | GPIO, PWM, I2C, SPI, UART, ADC |
 | LED System | WS2812 driver, multi-device multi-layer, effects engine, BMP/PNG/JPG/GIF |
 | Console | Command system, multi-language, script engine, configuration persistence |
-| Networking | WiFi, Ethernet W5500, HTTP/HTTPS server |
+| Networking | WiFi, Ethernet W5500, HTTP/HTTPS server, LPMU upstream network access |
 | Security | Session management, Token authentication, AES-GCM, RSA/EC, SSH client, PKI certificate management |
 | Drivers | Fan control, power monitoring (ADC/INA3221/PZEM), AGX/LPMU power control, USB MUX |
 | WebUI | REST API gateway, WebSocket broadcast, frontend dashboard |

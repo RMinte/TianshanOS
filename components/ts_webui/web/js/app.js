@@ -632,7 +632,7 @@ async function loadSystemPage() {
                     </div>
                 </div>
             </div>
-            
+
             <!-- 设备面板 + 风扇控制 并排 -->
             <div class="panel-row">
                 <!-- 设备面板 -->
@@ -7060,9 +7060,15 @@ async function stopFilter() {
 //                         网络页面
 // =========================================================================
 
+const NETWORK_LPMU_ACCESS_POLL_MS = 1500;
+let networkLpmuAccessPollTimer = null;
+let networkLpmuAccessRequesting = false;
+let networkLpmuAccessLastInfo = { stage: 'idle', running: false };
+
 async function loadNetworkPage() {
     clearInterval(refreshInterval);
     stopServiceStatusRefresh();
+    stopNetworkLpmuAccessPolling();
     
     // 取消系统页面的订阅
     if (subscriptionManager) {
@@ -7260,6 +7266,20 @@ async function loadNetworkPage() {
                 </div>
             </div>
             
+            <!-- 接入上层网络 -->
+            <div class="net-section" id="lpmu-access-section" style="padding:12px 16px">
+                <div class="section-header" style="margin-bottom:8px">
+                    <h3>${typeof t === 'function' ? t('networkPage.lpmuAccessTitle') : '接入上层网络'}</h3>
+                    <button class="btn btn-sm btn-service-style lpmu-access-btn" id="network-lpmu-access-btn" onclick="startNetworkLpmuAccess()">${typeof t === 'function' ? t('networkPage.lpmuAccessButton') : '通过LPMU接入'}</button>
+                </div>
+                <div class="service-detail" style="margin-bottom:0">
+                    <div id="network-lpmu-access-current" style="display:flex;align-items:center;gap:8px;min-height:22px">
+                        <span class="status-dot gray"></span>${typeof t === 'function' ? t('networkPage.lpmuAccessIdle') : '未启动'}
+                    </div>
+                    <div id="network-lpmu-access-summary" style="margin-top:8px;word-break:break-word"></div>
+                </div>
+            </div>
+
             <!-- WiFi 扫描结果面板 -->
             <div class="net-section hidden" id="wifi-scan-section">
                 <div class="section-header">
@@ -7338,6 +7358,10 @@ async function loadNetworkPage() {
     `;
     
     await refreshNetworkPage();
+    await refreshNetworkLpmuAccessStatus();
+    if (networkLpmuAccessLastInfo?.running) {
+        startNetworkLpmuAccessPolling();
+    }
 }
 
 // 网络页面 Tab 切换
@@ -7498,6 +7522,184 @@ async function refreshNetworkPage() {
             natToggleBtn.disabled = !canToggle;
         }
     } catch (e) { console.log('NAT error:', e); }
+}
+
+async function startNetworkLpmuAccess() {
+    if (networkLpmuAccessLastInfo?.running) return;
+
+    renderNetworkLpmuAccessStatus({ stage: 'check', status: 'running', running: true });
+
+    try {
+        const result = await api.lpmuAccessStart();
+        if (!result || result.code !== 0) {
+            throw new Error(result?.message || (typeof t === 'function' ? t('networkPage.lpmuAccessStartFailed') : '启动接入失败'));
+        }
+
+        let data = result.data || {};
+        if (data === null || typeof data !== 'object') {
+            data = { summary: data };
+        }
+        if (!data.stage && !data.status && data.running !== false) {
+            data = { ...data, stage: 'check', running: true };
+        }
+
+        renderNetworkLpmuAccessStatus(data);
+        startNetworkLpmuAccessPolling();
+        await refreshNetworkLpmuAccessStatus();
+    } catch (e) {
+        stopNetworkLpmuAccessPolling();
+        const msg = e.message || (typeof t === 'function' ? t('common.unknown') : '未知错误');
+        renderNetworkLpmuAccessStatus({ stage: 'failed', status: 'failed', error: msg, running: false });
+        showToast((typeof t === 'function' ? t('networkPage.lpmuAccessFailed') : '接入失败') + ': ' + escapeHtml(msg), 'error', 5000);
+    }
+}
+
+function startNetworkLpmuAccessPolling() {
+    stopNetworkLpmuAccessPolling();
+    networkLpmuAccessPollTimer = setInterval(refreshNetworkLpmuAccessStatus, NETWORK_LPMU_ACCESS_POLL_MS);
+}
+
+function stopNetworkLpmuAccessPolling() {
+    if (networkLpmuAccessPollTimer) {
+        clearInterval(networkLpmuAccessPollTimer);
+        networkLpmuAccessPollTimer = null;
+    }
+}
+
+async function refreshNetworkLpmuAccessStatus() {
+    if (networkLpmuAccessRequesting) return;
+    if (!document.getElementById('network-lpmu-access-btn')) {
+        stopNetworkLpmuAccessPolling();
+        return;
+    }
+
+    const wasRunning = !!networkLpmuAccessLastInfo?.running;
+    networkLpmuAccessRequesting = true;
+
+    try {
+        const result = await api.lpmuAccessStatus();
+        if (!result || result.code !== 0) {
+            throw new Error(result?.message || (typeof t === 'function' ? t('networkPage.lpmuAccessStatusFailed') : '状态获取失败'));
+        }
+
+        const info = renderNetworkLpmuAccessStatus(result.data || {});
+        if (!info.running) {
+            stopNetworkLpmuAccessPolling();
+            if (wasRunning && info.success) {
+                showToast(typeof t === 'function' ? t('networkPage.lpmuAccessSuccess') : '接入成功', 'success');
+            } else if (wasRunning && info.failed) {
+                const msg = info.summary ? ': ' + escapeHtml(info.summary) : '';
+                showToast((typeof t === 'function' ? t('networkPage.lpmuAccessFailed') : '接入失败') + msg, 'error', 5000);
+            }
+        }
+    } catch (e) {
+        stopNetworkLpmuAccessPolling();
+        const msg = e.message || (typeof t === 'function' ? t('common.unknown') : '未知错误');
+        renderNetworkLpmuAccessStatus({ stage: 'failed', status: 'failed', error: msg, running: false });
+        if (wasRunning) {
+            showToast((typeof t === 'function' ? t('networkPage.lpmuAccessStatusFailed') : '状态获取失败') + ': ' + escapeHtml(msg), 'error', 5000);
+        }
+    } finally {
+        networkLpmuAccessRequesting = false;
+    }
+}
+
+function renderNetworkLpmuAccessStatus(statusData = {}, fallbackMessage = '') {
+    const info = normalizeNetworkLpmuAccessStatus(statusData, fallbackMessage);
+    networkLpmuAccessLastInfo = info;
+
+    const btn = document.getElementById('network-lpmu-access-btn');
+    if (btn) {
+        btn.disabled = !!info.running;
+        btn.innerHTML = info.running
+            ? (typeof t === 'function' ? t('networkPage.lpmuAccessRunning') : '处理中')
+            : (typeof t === 'function' ? t('networkPage.lpmuAccessButton') : '通过LPMU接入');
+    }
+
+    const currentEl = document.getElementById('network-lpmu-access-current');
+    if (currentEl) {
+        const dot = info.failed ? 'red' : (info.success ? 'green' : (info.running ? 'yellow' : 'gray'));
+        const label = getNetworkLpmuAccessStageLabel(info.stage);
+        const text = info.running ? (typeof t === 'function' ? t('networkPage.lpmuAccessRunning') : '处理中') + ': ' + label : label;
+        currentEl.innerHTML = '<span class="status-dot ' + dot + '"></span><span>' + escapeHtml(text) + '</span>';
+    }
+
+    const summaryEl = document.getElementById('network-lpmu-access-summary');
+    if (summaryEl) {
+        if (info.summary) {
+            const label = info.failed
+                ? (typeof t === 'function' ? t('networkPage.lpmuAccessError') : '错误')
+                : (typeof t === 'function' ? t('networkPage.lpmuAccessOutput') : '输出');
+            const color = info.failed ? 'var(--danger-color)' : 'var(--text-light)';
+            summaryEl.innerHTML = '<span style="color:' + color + '">' + label + ': ' + escapeHtml(info.summary) + '</span>';
+        } else {
+            summaryEl.textContent = '';
+        }
+    }
+
+    return info;
+}
+
+function normalizeNetworkLpmuAccessStatus(statusData = {}, fallbackMessage = '') {
+    let data = statusData || {};
+    if (data === null || typeof data !== 'object') {
+        data = { summary: data };
+    }
+
+    const raw = String(data.stage || data.step || data.status || data.state || '').toLowerCase();
+    let stage = normalizeNetworkLpmuAccessStage(raw, data);
+    const failed = stage === 'failed' || !!data.error || !!data.last_error;
+    const success = stage === 'success';
+    let running = data.running === true || data.busy === true;
+
+    if (!running && ['check', 'upload', 'unpack', 'execute'].includes(stage)) {
+        running = data.running !== false && data.done !== true;
+    }
+    if (success || failed || stage === 'idle') {
+        running = false;
+    }
+
+    const errorText = data.error || data.last_error || data.stderr;
+    const safeFallback = fallbackMessage && fallbackMessage !== 'OK' ? fallbackMessage : '';
+    const outputText = data.summary || data.output_tail || data.output || data.stdout || data.message || safeFallback;
+    const summary = compactNetworkLpmuAccessText(failed ? (errorText || outputText) : (outputText || errorText));
+
+    return { stage, running, success, failed, summary };
+}
+
+function normalizeNetworkLpmuAccessStage(raw, data = {}) {
+    if (!raw && data.running) return 'check';
+    if (!raw) return 'idle';
+    if (raw.includes('fail') || raw.includes('error')) return 'failed';
+    if (raw.includes('success') || raw.includes('done') || raw.includes('complete')) return 'success';
+    if (raw.includes('queue') || raw.includes('find') || raw.includes('load') || raw.includes('connect') || raw.includes('verify')) return 'check';
+    if (raw.includes('upload')) return 'upload';
+    if (raw.includes('unpack') || raw.includes('extract')) return 'unpack';
+    if (raw.includes('chmod') || raw.includes('exec') || raw.includes('run')) return 'execute';
+    if (raw.includes('check') || raw.includes('prepare') || raw.includes('verify')) return 'check';
+    if (raw === 'pending') return data.running ? 'check' : 'idle';
+    if (raw === 'idle') return 'idle';
+    return raw;
+}
+
+function getNetworkLpmuAccessStageLabel(stage) {
+    const labels = {
+        idle: typeof t === 'function' ? t('networkPage.lpmuAccessIdle') : '未启动',
+        check: typeof t === 'function' ? t('networkPage.lpmuAccessStageCheck') : '检查远端项目',
+        upload: typeof t === 'function' ? t('networkPage.lpmuAccessStageUpload') : '上传项目包',
+        unpack: typeof t === 'function' ? t('networkPage.lpmuAccessStageUnpack') : '解包项目',
+        execute: typeof t === 'function' ? t('networkPage.lpmuAccessStageExecute') : '执行路由脚本',
+        success: typeof t === 'function' ? t('networkPage.lpmuAccessSuccess') : '成功',
+        failed: typeof t === 'function' ? t('networkPage.lpmuAccessFailed') : '失败'
+    };
+    return labels[stage] || stage || labels.idle;
+}
+
+function compactNetworkLpmuAccessText(value) {
+    if (value === null || value === undefined) return '';
+    const text = String(value).replace(/\s+/g, ' ').trim();
+    if (text.length <= 160) return text;
+    return text.slice(0, 157) + '...';
 }
 
 // 更新接口状态样式

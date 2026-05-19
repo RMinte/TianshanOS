@@ -632,6 +632,13 @@ esp_err_t ts_api_register_all(void)
         TS_LOGE(TAG, "Failed to register NAT APIs: %s", esp_err_to_name(ret));
         return ret;
     }
+
+    /* LPMU upper network access APIs */
+    ret = ts_api_lpmu_access_register();
+    if (ret != ESP_OK) {
+        TS_LOGE(TAG, "Failed to register LPMU access APIs: %s", esp_err_to_name(ret));
+        return ret;
+    }
     
     /* SSH Known Hosts APIs */
     ret = ts_api_hosts_register();
