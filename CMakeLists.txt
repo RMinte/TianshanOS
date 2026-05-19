@@ -75,8 +75,8 @@ set(EXTRA_COMPONENT_DIRS
     "${CMAKE_CURRENT_SOURCE_DIR}/components/ts_core/ts_service"
 )
 
-# 使用 OTA 分区表（16MB Flash, 双 OTA 分区）
-set(PARTITION_TABLE_FILE "${CMAKE_CURRENT_SOURCE_DIR}/partitions_ota.csv" CACHE STRING "" FORCE)
+# 使用项目自定义分区表（16MB Flash, 双 OTA 分区 + WebUI 分区）
+set(PARTITION_TABLE_FILE "${CMAKE_CURRENT_SOURCE_DIR}/partitions.csv" CACHE STRING "" FORCE)
 
 # 包含 ESP-IDF
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)

@@ -4732,6 +4732,16 @@ button.btn-gray:hover,
     gap: 8px;
 }
 
+.lpmu-access-btn,
+.btn.btn-sm.lpmu-access-btn {
+    flex: 0 0 auto;
+    min-height: 30px;
+    padding: 5px 12px;
+    font-size: 0.85rem;
+    line-height: 1.2;
+    border-radius: var(--radius-sm);
+}
+
 /* WiFi 网络卡片 */
 .wifi-networks {
     display: grid;

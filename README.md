@@ -100,7 +100,7 @@ git clone https://github.com/thomas-hiddenpeak/TianshanOS.git
 cd TianshanOS
 
 # 设置 ESP-IDF 环境
-. $HOME/esp/v5.5/esp-idf/export.sh
+. $HOME/esp/v5.5.2/esp-idf/export.sh
 
 # 设置目标芯片
 idf.py set-target esp32s3
@@ -157,8 +157,8 @@ esptool.py --chip esp32s3 -p /dev/ttyACM0 write_flash \
 
 ## 当前状态
 
-**版本**: 0.4.5  
-**阶段**: Phase 38 完成 - WebUI 多语言支持
+**版本**: 0.4.6
+**阶段**: Phase 39 完成 - LPMU 接入上层网络
 
 ### 已完成功能
 
@@ -170,13 +170,13 @@ esptool.py --chip esp32s3 -p /dev/ttyACM0 write_flash \
 | 硬件抽象 | GPIO、PWM、I2C、SPI、UART、ADC |
 | LED 系统 | WS2812 驱动、多设备多图层、特效引擎、BMP/PNG/JPG/GIF |
 | 控制台 | 命令系统、多语言、脚本引擎、配置持久化 |
-| 网络 | WiFi、以太网 W5500、HTTP/HTTPS 服务器 |
+| 网络 | WiFi、以太网 W5500、HTTP/HTTPS 服务器、LPMU 接入上层网络 |
 | 安全 | 会话管理、Token 认证、AES-GCM、RSA/EC、SSH 客户端、PKI 证书管理 |
 | 驱动 | 风扇控制、电源监控 (ADC/INA3221/PZEM)、AGX/LPMU 电源控制、USB MUX |
 | WebUI | REST API 网关、WebSocket 广播、前端仪表盘、认证系统、中英文国际化 |
 | OTA | 双分区升级、版本检测、完整性校验、自动回滚 |
 | 自动化引擎 | 触发器-条件-动作系统、SSH 远程执行、正则解析、变量系统、电压保护集成 |
-| CI/CD | GitHub Actions 自动编译、Tag 触发 Release 发布 |
+| CI/CD | GitHub Actions 自动编译、Tag/Release 触发固件发布 |
 
 ### 配置包加密系统 (Config Pack)
 

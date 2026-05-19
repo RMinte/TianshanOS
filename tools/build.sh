@@ -18,7 +18,7 @@ cd "$PROJECT_DIR"
 # 确保 ESP-IDF 环境已激活
 if [ -z "$IDF_PATH" ]; then
     echo "正在激活 ESP-IDF 环境..."
-    source ~/esp/v5.5/esp-idf/export.sh 2>/dev/null || {
+    source ~/esp/v5.5.2/esp-idf/export.sh 2>/dev/null || {
         echo "错误: 无法找到 ESP-IDF，请先安装或手动 source export.sh"
         exit 1
     }
