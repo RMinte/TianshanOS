@@ -1,0 +1,130 @@
+%%{init: {
+  "theme": "base",
+  "themeVariables": {
+    "background": "#ffffff",
+    "primaryColor": "#eef6ff",
+    "primaryTextColor": "#172033",
+    "primaryBorderColor": "#2563eb",
+    "lineColor": "#52637a",
+    "secondaryColor": "#f8fafc",
+    "tertiaryColor": "#ecfdf5",
+    "fontFamily": "Inter, Noto Sans SC, PingFang SC, Microsoft YaHei, Arial, sans-serif"
+  },
+  "flowchart": {
+    "defaultRenderer": "elk",
+    "curve": "basis",
+    "nodeSpacing": 26,
+    "rankSpacing": 42,
+    "padding": 18,
+    "htmlLabels": true
+  }
+}}%%
+
+flowchart LR
+    subgraph L1["外部交互与接入"]
+        direction TB
+        Boundary["系统边界<br/>用户操作 / 遥测输入 / 固件与证书"]
+        Browser["WebUI 浏览器<br/>仪表盘 / 配置 / OTA"]
+        CLI["串口 / SSH CLI<br/>命令 / 脚本 / 调试"]
+        Services["PKI / OTA 服务<br/>证书 / 固件 / 配置包"]
+        Hosts["AGX / LPMU / 上层网络<br/>控制 / 遥测 / 接入"]
+        Entry["统一请求入口<br/>HTTP / WebSocket / mTLS / CLI"]
+        WebUI["ts_webui<br/>静态资源 / REST 网关 / WS 广播"]
+        Console["ts_console<br/>命令路由 / 脚本 / i18n"]
+        HTTPS["ts_https<br/>mTLS API Server"]
+    end
+
+    subgraph L3["统一控制面"]
+        direction TB
+        CoreAPI["ts_api<br/>统一 REST / CLI 语义<br/>权限校验 / 参数模型 / 返回模型"]
+    end
+
+    subgraph L4["核心运行时合同"]
+        direction TB
+        Runtime["运行时主干<br/>生命周期 / 事件 / 配置 / 持久化"]
+        Service["ts_service<br/>8 阶段启动 / 依赖 / 健康检查"]
+        Event["ts_event<br/>发布订阅 / 异步事件"]
+        Config["ts_config<br/>SD 优先 + NVS 备份 / Schema 迁移"]
+        Storage["ts_storage<br/>SPIFFS / SD / FATFS"]
+        LogMem["ts_log + ts_mempool<br/>诊断输出 / 受控内存池"]
+    end
+
+    subgraph L5["系统能力层"]
+        direction TB
+        Capability["能力编排<br/>共享 API / 事件 / 配置合同"]
+        Automation["自动化与变量<br/>ts_automation / ts_jsonpath"]
+        DeviceOps["设备控制与监测<br/>ts_drivers / ts_led"]
+        Connectivity["网络与远程接入<br/>ts_net / HTTP / NAT / DHCP"]
+        SecurityDelivery["安全与交付<br/>ts_security / ts_cert / ts_pki_client<br/>ts_config_pack / ts_ota"]
+    end
+
+    subgraph L6["硬件与平台边界"]
+        direction TB
+        Platform["平台边界<br/>逻辑功能 -> 外设 / 引脚 / 总线"]
+        HAL["ts_hal<br/>GPIO / PWM / I2C / SPI / UART / ADC"]
+        Board["boards/rm01_esp32s3<br/>pins.json / services.json"]
+        ESPIDF["ESP-IDF 5.5+<br/>ESP32-S3 / ESP32-P4 适配"]
+    end
+
+    subgraph L7["硬件与持久化资源"]
+        direction TB
+        Resources["资源层<br/>实际设备 / 存储 / 分区"]
+        ManagedCompute["被管理计算<br/>Jetson AGX / LattePanda Mu"]
+        PowerCooling["电源与散热<br/>INA3221 / PZEM / ADC / PWM / 温度源"]
+        NetworkMux["网络与切换<br/>W5500 / USB MUX / 上层网络"]
+        Visual["状态与灯效<br/>WS2812"]
+        Persistence["持久化与分区<br/>SD 卡 / NVS / SPIFFS / OTA 分区"]
+    end
+
+    Boundary --> Entry
+    Entry --> CoreAPI
+    CoreAPI --> Runtime
+    Runtime --> Capability
+    Capability --> Platform
+    Platform --> Resources
+
+    Boundary --- Browser
+    Boundary --- CLI
+    Boundary --- Services
+    Boundary --- Hosts
+
+    Entry --- WebUI
+    Entry --- Console
+    Entry --- HTTPS
+
+    Runtime --- Service
+    Runtime --- Event
+    Runtime --- Config
+    Runtime --- Storage
+    Runtime --- LogMem
+
+    Capability --- Automation
+    Capability --- DeviceOps
+    Capability --- Connectivity
+    Capability --- SecurityDelivery
+
+    Platform --- HAL
+    Platform --- Board
+    Platform --- ESPIDF
+
+    Resources --- ManagedCompute
+    Resources --- PowerCooling
+    Resources --- NetworkMux
+    Resources --- Visual
+    Resources --- Persistence
+
+    classDef boundary fill:#dbeafe,stroke:#2563eb,stroke-width:2px,color:#172554;
+    classDef actor fill:#f8fafc,stroke:#94a3b8,stroke-width:1.2px,color:#0f172a;
+    classDef entry fill:#e0f2fe,stroke:#0284c7,stroke-width:1.35px,color:#082f49;
+    classDef runtime fill:#ecfdf5,stroke:#059669,stroke-width:1.35px,color:#064e3b;
+    classDef capability fill:#fff7ed,stroke:#ea580c,stroke-width:1.25px,color:#7c2d12;
+    classDef platform fill:#f5f3ff,stroke:#7c3aed,stroke-width:1.35px,color:#2e1065;
+    classDef hardware fill:#f1f5f9,stroke:#475569,stroke-width:1.2px,color:#0f172a;
+
+    class Boundary,Entry,CoreAPI,Runtime,Capability,Platform,Resources boundary;
+    class Browser,CLI,Services,Hosts actor;
+    class WebUI,Console,HTTPS entry;
+    class Service,Event,Config,Storage,LogMem runtime;
+    class Automation,DeviceOps,Connectivity,SecurityDelivery capability;
+    class HAL,Board,ESPIDF platform;
+    class ManagedCompute,PowerCooling,NetworkMux,Visual,Persistence hardware;
