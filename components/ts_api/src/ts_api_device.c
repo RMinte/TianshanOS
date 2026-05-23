@@ -48,6 +48,19 @@ static const char *fan_mode_to_str(ts_fan_mode_t mode)
         case TS_FAN_MODE_OFF:    return "off";
         case TS_FAN_MODE_MANUAL: return "manual";
         case TS_FAN_MODE_AUTO:   return "auto";
+        case TS_FAN_MODE_CURVE:  return "curve";
+        default: return "unknown";
+    }
+}
+
+static const char *fan_auto_state_to_str(ts_fan_auto_state_t state)
+{
+    switch (state) {
+        case TS_FAN_AUTO_STATE_IDLE:     return "idle";
+        case TS_FAN_AUTO_STATE_BASELINE: return "baseline";
+        case TS_FAN_AUTO_STATE_ACTIVE:   return "active";
+        case TS_FAN_AUTO_STATE_GUARD:    return "guard";
+        case TS_FAN_AUTO_STATE_STALE:    return "stale";
         default: return "unknown";
     }
 }
@@ -215,6 +228,15 @@ static esp_err_t api_device_fan_status(const cJSON *params, ts_api_result_t *res
             cJSON_AddNumberToObject(fan, "rpm", status.rpm);
             cJSON_AddNumberToObject(fan, "temp", status.temp / 10.0);
             cJSON_AddBoolToObject(fan, "running", status.is_running);
+            cJSON_AddNumberToObject(fan, "control_temperature", status.control_temp / 10.0);
+            cJSON_AddNumberToObject(fan, "guard_temperature", status.guard_temp / 10.0);
+            cJSON_AddNumberToObject(fan, "predicted_temperature", status.predicted_temp / 10.0);
+            cJSON_AddNumberToObject(fan, "slope_c_per_min", status.slope_c_per_min);
+            cJSON_AddNumberToObject(fan, "controller_gain", status.controller_gain);
+            cJSON_AddNumberToObject(fan, "cooling_response", status.cooling_response);
+            cJSON_AddStringToObject(fan, "auto_state", fan_auto_state_to_str(status.auto_state));
+            cJSON_AddBoolToObject(fan, "guard_active", status.guard_active);
+            cJSON_AddBoolToObject(fan, "temp_stale", status.temp_stale);
             cJSON_AddItemToArray(fans, fan);
         }
     }
@@ -226,7 +248,7 @@ static esp_err_t api_device_fan_status(const cJSON *params, ts_api_result_t *res
 /**
  * @brief device.fan.set - Set fan parameters
  * @param fan: fan id
- * @param mode: "off", "manual", "auto"
+ * @param mode: "off", "manual", "auto", "curve"
  * @param duty: duty cycle (0-100) for manual mode
  */
 static esp_err_t api_device_fan_set(const cJSON *params, ts_api_result_t *result)
@@ -254,6 +276,8 @@ static esp_err_t api_device_fan_set(const cJSON *params, ts_api_result_t *result
             fan_mode = TS_FAN_MODE_MANUAL;
         } else if (strcmp(mode->valuestring, "auto") == 0) {
             fan_mode = TS_FAN_MODE_AUTO;
+        } else if (strcmp(mode->valuestring, "curve") == 0) {
+            fan_mode = TS_FAN_MODE_CURVE;
         } else {
             ts_api_result_error(result, TS_API_ERR_INVALID_ARG, "Invalid mode");
             return ESP_ERR_INVALID_ARG;
@@ -264,7 +288,8 @@ static esp_err_t api_device_fan_set(const cJSON *params, ts_api_result_t *result
     cJSON *duty = cJSON_GetObjectItem(params, "duty");
     if (ret == ESP_OK && duty && cJSON_IsNumber(duty)) {
         int duty_val = (int)cJSON_GetNumberValue(duty);
-        if (duty_val >= 0 && duty_val <= 100) {
+        if ((!mode || !cJSON_IsString(mode) || strcmp(mode->valuestring, "manual") == 0) &&
+            duty_val >= 0 && duty_val <= 100) {
             ret = ts_fan_set_duty(fan_id, duty_val);
         }
     }

@@ -11,9 +11,28 @@
 #include "ts_temp_source.h"
 #include "ts_variable.h"
 #include "ts_log.h"
+#include "esp_timer.h"
 #include <string.h>
 
 #define TAG "api_temp"
+
+static bool variable_info_to_float(const ts_variable_info_t *var, double *value)
+{
+    if (!var || !value) {
+        return false;
+    }
+
+    switch (var->value.type) {
+        case TS_AUTO_VAL_FLOAT:
+            *value = var->value.float_val;
+            return true;
+        case TS_AUTO_VAL_INT:
+            *value = (double)var->value.int_val;
+            return true;
+        default:
+            return false;
+    }
+}
 
 /*===========================================================================*/
 /*                          API Handlers                                      */
@@ -39,20 +58,54 @@ static esp_err_t api_temp_sources(const cJSON *params, ts_api_result_t *result)
     cJSON_AddStringToObject(data, "active_source", ts_temp_source_type_to_str(status.active_source));
     cJSON_AddNumberToObject(data, "current_temp_01c", status.current_temp);
     cJSON_AddNumberToObject(data, "current_temp_c", status.current_temp / 10.0);
+    cJSON_AddNumberToObject(data, "current_timestamp_ms", (double)status.current_timestamp_ms);
+    cJSON_AddBoolToObject(data, "current_valid", status.current_valid);
     cJSON_AddBoolToObject(data, "manual_mode", status.manual_mode);
+    cJSON_AddBoolToObject(data, "variable_partial_stale", status.variable_partial_stale);
+    cJSON_AddNumberToObject(data, "variable_valid_count", status.variable_valid_count);
+    cJSON_AddNumberToObject(data, "variable_total_count", status.variable_total_count);
+    cJSON_AddNumberToObject(data, "variable_valid_weight", status.variable_valid_weight);
+    cJSON_AddNumberToObject(data, "variable_total_weight", status.variable_total_weight);
     cJSON_AddNumberToObject(data, "provider_count", status.provider_count);
+    int64_t now_ms = esp_timer_get_time() / 1000;
     
     /* Provider list */
     cJSON *providers = cJSON_AddArrayToObject(data, "providers");
     for (uint32_t i = 0; i < status.provider_count; i++) {
         ts_temp_provider_info_t *p = &status.providers[i];
+        int64_t age_ms = -1;
+        if (p->last_update_ms > 0) {
+            age_ms = now_ms - p->last_update_ms;
+            if (age_ms < 0) age_ms = 0;
+        }
+        bool stale = false;
+        bool valid = false;
+        if (p->type == TS_TEMP_SOURCE_DEFAULT) {
+            stale = false;
+            valid = false;
+        } else if (p->type == TS_TEMP_SOURCE_MANUAL) {
+            stale = false;
+            valid = p->active;
+        } else {
+            stale = !p->active || p->last_update_ms <= 0 ||
+                     (now_ms - p->last_update_ms) < 0 ||
+                     (now_ms - p->last_update_ms) > TS_TEMP_DATA_TIMEOUT_MS;
+            valid = !stale;
+        }
         cJSON *provider = cJSON_CreateObject();
         cJSON_AddStringToObject(provider, "name", p->name ? p->name : "unknown");
         cJSON_AddStringToObject(provider, "type", ts_temp_source_type_to_str(p->type));
         cJSON_AddBoolToObject(provider, "active", p->active);
+        cJSON_AddBoolToObject(provider, "valid", valid);
+        cJSON_AddBoolToObject(provider, "stale", stale);
         cJSON_AddNumberToObject(provider, "last_value_01c", p->last_value);
         cJSON_AddNumberToObject(provider, "last_value_c", p->last_value / 10.0);
-        cJSON_AddNumberToObject(provider, "last_update_ms", p->last_update_ms);
+        cJSON_AddNumberToObject(provider, "last_update_ms", (double)p->last_update_ms);
+        if (age_ms >= 0) {
+            cJSON_AddNumberToObject(provider, "age_ms", (double)age_ms);
+        } else {
+            cJSON_AddNullToObject(provider, "age_ms");
+        }
         cJSON_AddNumberToObject(provider, "update_count", p->update_count);
         cJSON_AddItemToArray(providers, provider);
     }
@@ -83,6 +136,8 @@ static esp_err_t api_temp_read(const cJSON *params, ts_api_result_t *result)
             source_type = TS_TEMP_SOURCE_SENSOR_LOCAL;
         } else if (strcmp(src_str, "agx_auto") == 0 || strcmp(src_str, "agx") == 0) {
             source_type = TS_TEMP_SOURCE_AGX_AUTO;
+        } else if (strcmp(src_str, "variable") == 0) {
+            source_type = TS_TEMP_SOURCE_VARIABLE;
         } else if (strcmp(src_str, "manual") == 0) {
             source_type = TS_TEMP_SOURCE_MANUAL;
         } else {
@@ -107,6 +162,13 @@ static esp_err_t api_temp_read(const cJSON *params, ts_api_result_t *result)
     cJSON_AddStringToObject(json, "source", ts_temp_source_type_to_str(data.source));
     cJSON_AddNumberToObject(json, "timestamp_ms", data.timestamp_ms);
     cJSON_AddBoolToObject(json, "valid", data.valid);
+    if (data.source == TS_TEMP_SOURCE_VARIABLE) {
+        cJSON_AddBoolToObject(json, "partial_stale", data.partial_stale);
+        cJSON_AddNumberToObject(json, "bound_valid_count", data.bound_valid_count);
+        cJSON_AddNumberToObject(json, "bound_total_count", data.bound_total_count);
+        cJSON_AddNumberToObject(json, "bound_valid_weight", data.bound_valid_weight);
+        cJSON_AddNumberToObject(json, "bound_total_weight", data.bound_total_weight);
+    }
     
     ts_api_result_ok(result, json);
     return ESP_OK;
@@ -179,17 +241,20 @@ static esp_err_t api_temp_status(const cJSON *params, ts_api_result_t *result)
     
     cJSON *data = cJSON_CreateObject();
     
-    /* Get full status for bound_variable */
     ts_temp_status_t status;
-    ts_temp_get_status(&status);
+    esp_err_t ret = ts_temp_get_status(&status);
+    if (ret != ESP_OK) {
+        cJSON_Delete(data);
+        ts_api_result_error(result, TS_API_ERR_INTERNAL, "Failed to get temp status");
+        return ret;
+    }
     
-    /* Basic status */
-    cJSON_AddBoolToObject(data, "initialized", ts_temp_source_is_initialized());
-    cJSON_AddBoolToObject(data, "manual_mode", ts_temp_is_manual_mode());
-    cJSON_AddStringToObject(data, "active_source", ts_temp_source_type_to_str(ts_temp_get_active_source()));
+    cJSON_AddBoolToObject(data, "initialized", status.initialized);
+    cJSON_AddBoolToObject(data, "manual_mode", status.manual_mode);
+    cJSON_AddStringToObject(data, "active_source", ts_temp_source_type_to_str(status.active_source));
     
     /* Preferred source */
-    ts_temp_source_type_t preferred = ts_temp_get_preferred_source();
+    ts_temp_source_type_t preferred = status.preferred_source;
     cJSON_AddStringToObject(data, "preferred_source", 
                             preferred == TS_TEMP_SOURCE_DEFAULT ? "auto" : 
                             ts_temp_source_type_to_str(preferred));
@@ -201,13 +266,10 @@ static esp_err_t api_temp_status(const cJSON *params, ts_api_result_t *result)
         cJSON_AddNullToObject(data, "bound_variable");
     }
     
-    /* Current effective temperature */
-    ts_temp_data_t temp_data;
-    int16_t temp = ts_temp_get_effective(&temp_data);
-    cJSON_AddNumberToObject(data, "temperature_01c", temp);
-    cJSON_AddNumberToObject(data, "temperature_c", temp / 10.0);
-    cJSON_AddBoolToObject(data, "valid", temp_data.valid);
-    cJSON_AddNumberToObject(data, "timestamp_ms", temp_data.timestamp_ms);
+    cJSON_AddNumberToObject(data, "temperature_01c", status.current_temp);
+    cJSON_AddNumberToObject(data, "temperature_c", status.current_temp / 10.0);
+    cJSON_AddBoolToObject(data, "valid", status.current_valid);
+    cJSON_AddNumberToObject(data, "timestamp_ms", (double)status.current_timestamp_ms);
     
     ts_api_result_ok(result, data);
     return ESP_OK;
@@ -318,6 +380,10 @@ static esp_err_t api_temp_bind(const cJSON *params, ts_api_result_t *result)
                     ts_api_result_error(result, TS_API_ERR_INVALID_ARG, "Each variable needs a name");
                     return ESP_ERR_INVALID_ARG;
                 }
+                if (strlen(jname->valuestring) >= TS_TEMP_MAX_VARNAME_LEN) {
+                    ts_api_result_error(result, TS_API_ERR_INVALID_ARG, "Variable name too long");
+                    return ESP_ERR_INVALID_ARG;
+                }
                 strncpy(bind_arr[i].name, jname->valuestring, TS_TEMP_MAX_VARNAME_LEN - 1);
                 bind_arr[i].weight = (jweight && cJSON_IsNumber(jweight))
                                      ? (float)jweight->valuedouble : 1.0f;
@@ -387,37 +453,85 @@ static esp_err_t api_temp_bind(const cJSON *params, ts_api_result_t *result)
     cJSON *bv_arr = cJSON_CreateArray();
     double weighted_sum = 0.0;
     double total_weight = 0.0;
+    double configured_weight = 0.0;
+    uint8_t positive_count = 0;
+    uint8_t valid_count = 0;
+    int64_t now_ms = esp_timer_get_time() / 1000;
     
     for (uint8_t i = 0; i < bound_count; i++) {
         cJSON *bv_item = cJSON_CreateObject();
+        float weight = bound[i].weight;
         cJSON_AddStringToObject(bv_item, "name", bound[i].name);
-        cJSON_AddNumberToObject(bv_item, "weight", bound[i].weight);
+        cJSON_AddNumberToObject(bv_item, "weight", weight);
+        if (weight > 0.001f) {
+            positive_count++;
+            configured_weight += weight;
+        }
         
         double val = 0;
-        bool readable = (ts_variable_get_float(bound[i].name, &val) == ESP_OK);
+        ts_variable_info_t var_info = {0};
+        bool has_info = (ts_variable_get_info(bound[i].name, &var_info) == ESP_OK);
+        bool readable = has_info && variable_info_to_float(&var_info, &val);
         if (readable) {
             cJSON_AddNumberToObject(bv_item, "value", val);
-            weighted_sum += val * bound[i].weight;
-            total_weight += bound[i].weight;
         } else {
             cJSON_AddNullToObject(bv_item, "value");
+        }
+        if (has_info) {
+            cJSON_AddNumberToObject(bv_item, "last_change_ms", (double)var_info.last_change_ms);
+            cJSON_AddNumberToObject(bv_item, "last_update_ms", (double)var_info.last_update_ms);
+            if (var_info.last_update_ms > 0) {
+                int64_t age_ms = now_ms - var_info.last_update_ms;
+                bool stale = (age_ms < 0 || age_ms > TS_TEMP_DATA_TIMEOUT_MS);
+                if (age_ms < 0) age_ms = 0;
+                cJSON_AddNumberToObject(bv_item, "age_ms", (double)age_ms);
+                cJSON_AddBoolToObject(bv_item, "stale", stale);
+                bool in_range = (val >= (TS_TEMP_MIN_VALID / 10.0) &&
+                                 val <= (TS_TEMP_MAX_VALID / 10.0));
+                bool valid = readable && !stale && in_range;
+                cJSON_AddBoolToObject(bv_item, "valid", valid);
+                if (valid && weight > 0.001f) {
+                    weighted_sum += val * weight;
+                    total_weight += weight;
+                    valid_count++;
+                }
+            } else {
+                cJSON_AddNullToObject(bv_item, "age_ms");
+                cJSON_AddBoolToObject(bv_item, "stale", true);
+                cJSON_AddBoolToObject(bv_item, "valid", false);
+            }
+        } else {
+            cJSON_AddNullToObject(bv_item, "last_change_ms");
+            cJSON_AddNullToObject(bv_item, "last_update_ms");
+            cJSON_AddNullToObject(bv_item, "age_ms");
+            cJSON_AddBoolToObject(bv_item, "stale", true);
+            cJSON_AddBoolToObject(bv_item, "valid", false);
         }
         cJSON_AddItemToArray(bv_arr, bv_item);
     }
     cJSON_AddItemToObject(data, "bound_variables", bv_arr);
+    cJSON_AddNumberToObject(data, "bound_valid_count", valid_count);
+    cJSON_AddNumberToObject(data, "bound_total_count", positive_count);
+    cJSON_AddNumberToObject(data, "bound_valid_weight", total_weight);
+    cJSON_AddNumberToObject(data, "bound_total_weight", configured_weight);
+    cJSON_AddBoolToObject(data, "partial_stale",
+                          positive_count > 0 && valid_count < positive_count);
     
     /* Weighted temperature */
-    if (bound_count > 0 && total_weight > 0.001) {
+    if (positive_count > 0 && valid_count == positive_count && total_weight > 0.001) {
         cJSON_AddNumberToObject(data, "weighted_temp_c", weighted_sum / total_weight);
     }
     
-    ts_temp_source_type_t active = ts_temp_get_active_source();
-    cJSON_AddStringToObject(data, "active_source", ts_temp_source_type_to_str(active));
-    
-    ts_temp_data_t temp_data;
-    ts_temp_get_effective(&temp_data);
-    cJSON_AddNumberToObject(data, "temperature_c", temp_data.value / 10.0);
-    cJSON_AddBoolToObject(data, "valid", temp_data.valid);
+    ts_temp_status_t temp_status = {0};
+    if (ts_temp_get_status(&temp_status) == ESP_OK) {
+        cJSON_AddStringToObject(data, "active_source",
+                                ts_temp_source_type_to_str(temp_status.active_source));
+        cJSON_AddNumberToObject(data, "temperature_c", temp_status.current_temp / 10.0);
+        cJSON_AddBoolToObject(data, "valid", temp_status.current_valid);
+    } else {
+        cJSON_AddStringToObject(data, "active_source", "unknown");
+        cJSON_AddBoolToObject(data, "valid", false);
+    }
     
     ts_api_result_ok(result, data);
     return ESP_OK;

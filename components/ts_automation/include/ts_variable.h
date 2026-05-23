@@ -37,6 +37,18 @@ typedef struct {
     ts_auto_value_t new_value;           /**< New value */
 } ts_variable_change_event_t;
 
+/**
+ * @brief Public variable metadata snapshot
+ */
+typedef struct {
+    char name[TS_AUTO_NAME_MAX_LEN];      /**< Variable name */
+    char source_id[TS_AUTO_NAME_MAX_LEN]; /**< Owning source ID */
+    ts_auto_value_t value;                /**< Current value */
+    uint32_t flags;                       /**< Variable flags */
+    int64_t last_change_ms;               /**< Last value-change timestamp */
+    int64_t last_update_ms;               /**< Last real update timestamp */
+} ts_variable_info_t;
+
 /*===========================================================================*/
 /*                           Initialization                                   */
 /*===========================================================================*/
@@ -73,6 +85,17 @@ bool ts_variable_is_initialized(void);
  * @return ESP_OK on success
  */
 esp_err_t ts_variable_register(const ts_auto_variable_t *var);
+
+/**
+ * @brief Create or update a variable with a real observed value
+ *
+ * Unlike ts_variable_register(), this marks last_update_ms because the caller
+ * is publishing current source data, not just declaring a variable.
+ *
+ * @param var Variable definition and current value
+ * @return ESP_OK on success
+ */
+esp_err_t ts_variable_upsert(const ts_auto_variable_t *var);
 
 /**
  * @brief Unregister a variable
@@ -147,6 +170,24 @@ esp_err_t ts_variable_get_float(const char *name, double *value);
  * @return ESP_OK on success
  */
 esp_err_t ts_variable_get_string(const char *name, char *buffer, size_t buffer_size);
+
+/**
+ * @brief Get public variable metadata and value
+ *
+ * @param name Variable name
+ * @param info Output metadata snapshot
+ * @return ESP_OK on success
+ */
+esp_err_t ts_variable_get_info(const char *name, ts_variable_info_t *info);
+
+/**
+ * @brief Try to get public variable metadata and value without waiting
+ *
+ * @param name Variable name
+ * @param info Output metadata snapshot
+ * @return ESP_OK on success, ESP_ERR_TIMEOUT if storage is busy
+ */
+esp_err_t ts_variable_get_info_try(const char *name, ts_variable_info_t *info);
 
 /*===========================================================================*/
 /*                           Value Modification                               */

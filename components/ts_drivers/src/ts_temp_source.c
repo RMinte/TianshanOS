@@ -40,7 +40,7 @@ typedef struct {
     ts_temp_source_type_t type;
     const char *name;
     int16_t value;
-    uint32_t last_update_ms;
+    int64_t last_update_ms;
     uint32_t update_count;
     bool registered;
     bool active;
@@ -51,6 +51,15 @@ typedef struct {
     bool manual_mode;
     int16_t manual_temp;
     int16_t current_temp;
+    bool variable_valid;
+    int64_t variable_last_update_ms;
+    int16_t variable_guard_temp;
+    bool variable_guard_valid;
+    bool variable_partial_stale;
+    uint8_t variable_valid_count;
+    uint8_t variable_total_count;
+    float variable_valid_weight;
+    float variable_total_weight;
     ts_temp_source_type_t active_source;
     ts_temp_source_type_t preferred_source;  /**< 用户首选源（0=自动）*/
     char bound_variable[TS_TEMP_MAX_VARNAME_LEN];  /**< 向后兼容：第一个绑定变量名 */
@@ -59,6 +68,19 @@ typedef struct {
     provider_t providers[TS_TEMP_SOURCE_MAX];
     SemaphoreHandle_t mutex;
 } temp_source_state_t;
+
+typedef struct {
+    bool valid;
+    int16_t temp;
+    int64_t timestamp_ms;
+    int16_t guard_temp;
+    bool guard_valid;
+    bool partial_stale;
+    uint8_t valid_count;
+    uint8_t total_count;
+    float valid_weight;
+    float total_weight;
+} variable_temp_snapshot_t;
 
 /*===========================================================================*/
 /*                          Static Variables                                  */
@@ -70,8 +92,9 @@ static temp_source_state_t s_state = {0};
 /*                          Forward Declarations                              */
 /*===========================================================================*/
 
-static uint32_t get_current_ms(void);
+static int64_t get_current_ms(void);
 static void evaluate_active_source(void);
+static void evaluate_active_source_with_lock_mode(bool try_variable_lock);
 static void publish_temp_event(int16_t new_temp, ts_temp_source_type_t new_source,
                                int16_t prev_temp, ts_temp_source_type_t prev_source);
 static void sync_bound_variable_compat(void);
@@ -81,14 +104,18 @@ static esp_err_t save_preferred_source_to_nvs(ts_temp_source_type_t type);
 static void export_temp_config_to_sdcard(void);
 static float sanitize_bound_weight(float weight);
 static bool has_positive_bound_weight(const ts_temp_bound_var_t *vars, uint8_t count);
+static bool read_fresh_variable_float(const char *name, int64_t now, double *value,
+                                      int64_t *last_update_ms, bool try_lock);
+static bool read_variable_temp_snapshot(variable_temp_snapshot_t *snapshot, int64_t now,
+                                        bool try_lock);
 
 /*===========================================================================*/
 /*                          Utility Functions                                 */
 /*===========================================================================*/
 
-static uint32_t get_current_ms(void)
+static int64_t get_current_ms(void)
 {
-    return (uint32_t)(esp_timer_get_time() / 1000);
+    return esp_timer_get_time() / 1000;
 }
 
 static float sanitize_bound_weight(float weight)
@@ -113,6 +140,151 @@ static bool has_positive_bound_weight(const ts_temp_bound_var_t *vars, uint8_t c
     return false;
 }
 
+static void store_variable_snapshot(const variable_temp_snapshot_t *snapshot)
+{
+    if (!snapshot) {
+        s_state.variable_valid = false;
+        s_state.variable_last_update_ms = 0;
+        s_state.variable_guard_temp = TS_TEMP_DEFAULT_VALUE;
+        s_state.variable_guard_valid = false;
+        s_state.variable_partial_stale = false;
+        s_state.variable_valid_count = 0;
+        s_state.variable_total_count = 0;
+        s_state.variable_valid_weight = 0.0f;
+        s_state.variable_total_weight = 0.0f;
+        return;
+    }
+
+    s_state.variable_valid = snapshot->valid;
+    s_state.variable_last_update_ms = snapshot->timestamp_ms;
+    s_state.variable_guard_temp = snapshot->guard_temp;
+    s_state.variable_guard_valid = snapshot->guard_valid;
+    s_state.variable_partial_stale = snapshot->partial_stale;
+    s_state.variable_valid_count = snapshot->valid_count;
+    s_state.variable_total_count = snapshot->total_count;
+    s_state.variable_valid_weight = snapshot->valid_weight;
+    s_state.variable_total_weight = snapshot->total_weight;
+}
+
+static bool read_fresh_variable_float(const char *name, int64_t now, double *value,
+                                      int64_t *last_update_ms, bool try_lock)
+{
+    ts_variable_info_t var = {0};
+    double temp_c = 0.0;
+    esp_err_t ret;
+
+    if (!name || !value) {
+        return false;
+    }
+
+    ret = try_lock ? ts_variable_get_info_try(name, &var)
+                   : ts_variable_get_info(name, &var);
+    if (ret != ESP_OK) {
+        return false;
+    }
+
+    if (var.last_update_ms <= 0) {
+        return false;
+    }
+
+    int64_t age = now - var.last_update_ms;
+    if (age < 0 || age > TS_TEMP_DATA_TIMEOUT_MS) {
+        return false;
+    }
+    if (last_update_ms) {
+        *last_update_ms = var.last_update_ms;
+    }
+
+    switch (var.value.type) {
+        case TS_AUTO_VAL_FLOAT:
+            temp_c = var.value.float_val;
+            break;
+        case TS_AUTO_VAL_INT:
+            temp_c = (double)var.value.int_val;
+            break;
+        default:
+            return false;
+    }
+
+    if (temp_c < (TS_TEMP_MIN_VALID / 10.0) ||
+        temp_c > (TS_TEMP_MAX_VALID / 10.0)) {
+        return false;
+    }
+
+    *value = temp_c;
+    return true;
+}
+
+static bool read_variable_temp_snapshot(variable_temp_snapshot_t *snapshot, int64_t now,
+                                        bool try_lock)
+{
+    double weighted_sum = 0.0;
+    int16_t max_bound = TS_TEMP_MIN_VALID;
+
+    if (!snapshot) {
+        return false;
+    }
+
+    memset(snapshot, 0, sizeof(*snapshot));
+    snapshot->guard_temp = TS_TEMP_DEFAULT_VALUE;
+    if (s_state.bound_var_count == 0) {
+        return false;
+    }
+
+    for (uint8_t i = 0; i < s_state.bound_var_count; i++) {
+        float w = sanitize_bound_weight(s_state.bound_vars[i].weight);
+        if (w <= 0.001f) {
+            continue;
+        }
+
+        snapshot->total_count++;
+        snapshot->total_weight += w;
+
+        double value = 0.0;
+        int64_t last_update_ms = 0;
+        if (!read_fresh_variable_float(s_state.bound_vars[i].name, now, &value,
+                                       &last_update_ms, try_lock)) {
+            TS_LOGD(TAG, "Variable '%s' unavailable or stale",
+                    s_state.bound_vars[i].name);
+            continue;
+        }
+
+        weighted_sum += value * w;
+        snapshot->valid_weight += w;
+        snapshot->valid_count++;
+        int16_t temp_01c = (int16_t)(value * 10.0);
+        if (temp_01c > max_bound) {
+            max_bound = temp_01c;
+        }
+        if (snapshot->timestamp_ms == 0 || last_update_ms < snapshot->timestamp_ms) {
+            snapshot->timestamp_ms = last_update_ms;
+        }
+    }
+
+    snapshot->partial_stale = (snapshot->valid_count < snapshot->total_count);
+    if (snapshot->valid_count == 0 || snapshot->valid_weight <= 0.001f) {
+        return false;
+    }
+
+    snapshot->guard_temp = max_bound;
+    snapshot->guard_valid = true;
+
+    if (snapshot->partial_stale) {
+        return false;
+    }
+
+    double effective_temp = weighted_sum / snapshot->valid_weight;
+    int16_t temp_01c = (int16_t)(effective_temp * 10.0);
+    if (temp_01c < TS_TEMP_MIN_VALID || temp_01c > TS_TEMP_MAX_VALID) {
+        TS_LOGW(TAG, "Weighted temp out of range: %.1f°C", effective_temp);
+        return false;
+    }
+
+    snapshot->temp = temp_01c;
+    snapshot->valid = true;
+    return true;
+}
+
 const char *ts_temp_source_type_to_str(ts_temp_source_type_t type)
 {
     switch (type) {
@@ -132,87 +304,25 @@ const char *ts_temp_source_type_to_str(ts_temp_source_type_t type)
 /**
  * @brief 检查 provider 是否可用（已注册、激活且数据未过期）
  */
-static bool is_provider_valid(ts_temp_source_type_t type, uint32_t now)
+static bool is_provider_valid(ts_temp_source_type_t type, int64_t now, bool try_variable_lock)
 {
     if (type >= TS_TEMP_SOURCE_MAX) return false;
     
     if (type == TS_TEMP_SOURCE_VARIABLE) {
-        if (s_state.bound_var_count == 0) return false;
-        for (uint8_t i = 0; i < s_state.bound_var_count; i++) {
-            float weight = sanitize_bound_weight(s_state.bound_vars[i].weight);
-            if (weight <= 0.001f) {
-                continue;
-            }
-            double value = 0;
-            if (ts_variable_get_float(s_state.bound_vars[i].name, &value) == ESP_OK) {
-                return true;
-            }
-        }
-        return false;
+        variable_temp_snapshot_t snapshot = {0};
+        bool valid = read_variable_temp_snapshot(&snapshot, now, try_variable_lock);
+        store_variable_snapshot(&snapshot);
+        return valid;
     }
     
     provider_t *p = &s_state.providers[type];
     if (!p->registered || !p->active) return false;
     
-    if (type == TS_TEMP_SOURCE_DEFAULT) return true;
+    if (type == TS_TEMP_SOURCE_DEFAULT) return false;
+    if (type == TS_TEMP_SOURCE_MANUAL) return p->registered && p->active;
     
-    uint32_t age = now - p->last_update_ms;
-    return (age < TS_TEMP_DATA_TIMEOUT_MS);
-}
-
-/**
- * @brief 从绑定的变量读取加权温度值
- *
- * 遍历 bound_vars 数组，对每个可读变量读值乘以权重求和。
- * 不可读的变量跳过，用剩余有效变量的权重归一化。
- */
-static int16_t read_temp_from_variable(void)
-{
-    if (s_state.bound_var_count == 0) {
-        return TS_TEMP_DEFAULT_VALUE;
-    }
-    
-    double weighted_sum = 0.0;
-    double total_weight = 0.0;
-    uint8_t valid_count = 0;
-    
-    for (uint8_t i = 0; i < s_state.bound_var_count; i++) {
-        double value = 0;
-        esp_err_t ret = ts_variable_get_float(s_state.bound_vars[i].name, &value);
-        if (ret != ESP_OK) {
-            TS_LOGD(TAG, "Failed to read variable '%s': %s",
-                    s_state.bound_vars[i].name, esp_err_to_name(ret));
-            continue;
-        }
-        float w = sanitize_bound_weight(s_state.bound_vars[i].weight);
-        if (w <= 0.001f) {
-            continue;
-        }
-        weighted_sum += value * w;
-        total_weight += w;
-        valid_count++;
-    }
-    
-    if (valid_count == 0) {
-        return TS_TEMP_DEFAULT_VALUE;
-    }
-    
-    /* 归一化：如果总权重不为 0 且不为 1.0，按实际权重比例缩放 */
-    double effective_temp;
-    if (total_weight > 0.001) {
-        effective_temp = weighted_sum / total_weight;
-    } else {
-        effective_temp = weighted_sum;
-    }
-    
-    int16_t temp_01c = (int16_t)(effective_temp * 10.0);
-    
-    if (temp_01c < TS_TEMP_MIN_VALID || temp_01c > TS_TEMP_MAX_VALID) {
-        TS_LOGW(TAG, "Weighted temp out of range: %.1f°C", effective_temp);
-        return TS_TEMP_DEFAULT_VALUE;
-    }
-    
-    return temp_01c;
+    int64_t age = now - p->last_update_ms;
+    return (age >= 0 && age < TS_TEMP_DATA_TIMEOUT_MS);
 }
 
 /**
@@ -237,16 +347,20 @@ static void sync_bound_variable_compat(void)
  * 2. 如果设置了 preferred_source 且该源可用，使用它
  * 3. 否则按默认优先级（VARIABLE > AGX > SENSOR > DEFAULT）
  */
-static void evaluate_active_source(void)
+static void evaluate_active_source_with_lock_mode(bool try_variable_lock)
 {
-    uint32_t now = get_current_ms();
+    int64_t now = get_current_ms();
     ts_temp_source_type_t best_source = TS_TEMP_SOURCE_DEFAULT;
     int16_t best_temp = TS_TEMP_DEFAULT_VALUE;
+    variable_temp_snapshot_t variable_snapshot = {0};
+    bool variable_snapshot_valid = read_variable_temp_snapshot(&variable_snapshot, now,
+                                                               try_variable_lock);
+    store_variable_snapshot(&variable_snapshot);
     
     // 1. 手动模式最高优先级
     if (s_state.manual_mode) {
         provider_t *p = &s_state.providers[TS_TEMP_SOURCE_MANUAL];
-        if (p->registered) {
+        if (p->registered && p->active) {
             best_source = TS_TEMP_SOURCE_MANUAL;
             best_temp = p->value;
             goto done;
@@ -259,12 +373,12 @@ static void evaluate_active_source(void)
         
         // 变量绑定特殊处理
         if (s_state.preferred_source == TS_TEMP_SOURCE_VARIABLE) {
-            if (is_provider_valid(TS_TEMP_SOURCE_VARIABLE, now)) {
+            if (variable_snapshot_valid) {
                 best_source = TS_TEMP_SOURCE_VARIABLE;
-                best_temp = read_temp_from_variable();
+                best_temp = variable_snapshot.temp;
                 goto done;
             }
-        } else if (is_provider_valid(s_state.preferred_source, now)) {
+        } else if (is_provider_valid(s_state.preferred_source, now, try_variable_lock)) {
             best_source = s_state.preferred_source;
             best_temp = s_state.providers[s_state.preferred_source].value;
             goto done;
@@ -275,19 +389,19 @@ static void evaluate_active_source(void)
     }
     
     // 3. 默认优先级：VARIABLE > AGX > SENSOR > DEFAULT
-    if (is_provider_valid(TS_TEMP_SOURCE_VARIABLE, now)) {
+    if (variable_snapshot_valid) {
         best_source = TS_TEMP_SOURCE_VARIABLE;
-        best_temp = read_temp_from_variable();
+        best_temp = variable_snapshot.temp;
         goto done;
     }
     
-    if (is_provider_valid(TS_TEMP_SOURCE_AGX_AUTO, now)) {
+    if (is_provider_valid(TS_TEMP_SOURCE_AGX_AUTO, now, try_variable_lock)) {
         best_source = TS_TEMP_SOURCE_AGX_AUTO;
         best_temp = s_state.providers[TS_TEMP_SOURCE_AGX_AUTO].value;
         goto done;
     }
     
-    if (is_provider_valid(TS_TEMP_SOURCE_SENSOR_LOCAL, now)) {
+    if (is_provider_valid(TS_TEMP_SOURCE_SENSOR_LOCAL, now, try_variable_lock)) {
         best_source = TS_TEMP_SOURCE_SENSOR_LOCAL;
         best_temp = s_state.providers[TS_TEMP_SOURCE_SENSOR_LOCAL].value;
         goto done;
@@ -308,6 +422,44 @@ done:
         
         publish_temp_event(best_temp, best_source, prev_temp, prev_source);
     }
+}
+
+static void evaluate_active_source(void)
+{
+    evaluate_active_source_with_lock_mode(false);
+}
+
+static bool is_cached_active_source_valid_locked(int64_t now)
+{
+    ts_temp_source_type_t source = s_state.active_source;
+
+    if (source == TS_TEMP_SOURCE_VARIABLE) {
+        if (!s_state.variable_valid ||
+            s_state.variable_last_update_ms <= 0 ||
+            s_state.variable_partial_stale ||
+            s_state.variable_total_count == 0 ||
+            s_state.variable_valid_count < s_state.variable_total_count) {
+            return false;
+        }
+
+        int64_t age = now - s_state.variable_last_update_ms;
+        return age >= 0 && age < TS_TEMP_DATA_TIMEOUT_MS;
+    }
+    if (source == TS_TEMP_SOURCE_DEFAULT || source >= TS_TEMP_SOURCE_MAX) {
+        return false;
+    }
+    if (source == TS_TEMP_SOURCE_MANUAL) {
+        return s_state.providers[source].registered &&
+               s_state.providers[source].active;
+    }
+
+    provider_t *p = &s_state.providers[source];
+    if (!p->registered || !p->active || p->last_update_ms <= 0) {
+        return false;
+    }
+
+    int64_t age = now - p->last_update_ms;
+    return age >= 0 && age < TS_TEMP_DATA_TIMEOUT_MS;
 }
 
 /**
@@ -473,36 +625,75 @@ esp_err_t ts_temp_provider_update(ts_temp_source_type_t type, int16_t temp_01c)
 /*                          Public API - Consumer                             */
 /*===========================================================================*/
 
-int16_t ts_temp_get_effective(ts_temp_data_t *data)
+static void fill_invalid_temp_data(ts_temp_data_t *data)
+{
+    if (!data) {
+        return;
+    }
+
+    memset(data, 0, sizeof(*data));
+    data->value = TS_TEMP_DEFAULT_VALUE;
+    data->source = TS_TEMP_SOURCE_DEFAULT;
+    data->guard_value = TS_TEMP_DEFAULT_VALUE;
+}
+
+static void fill_effective_data_locked(ts_temp_data_t *data)
+{
+    if (!data) {
+        return;
+    }
+
+    int16_t temp = s_state.current_temp;
+    ts_temp_source_type_t source = s_state.active_source;
+    int64_t now = get_current_ms();
+
+    data->value = temp;
+    data->source = source;
+    data->timestamp_ms = (source == TS_TEMP_SOURCE_VARIABLE)
+                         ? s_state.variable_last_update_ms
+                         : s_state.providers[source].last_update_ms;
+    data->valid = is_cached_active_source_valid_locked(now);
+    data->guard_value = s_state.variable_guard_valid
+                        ? s_state.variable_guard_temp : temp;
+    data->guard_valid = s_state.variable_guard_valid ? true : data->valid;
+    data->partial_stale = s_state.variable_partial_stale;
+    data->bound_valid_count = s_state.variable_valid_count;
+    data->bound_total_count = s_state.variable_total_count;
+    data->bound_valid_weight = s_state.variable_valid_weight;
+    data->bound_total_weight = s_state.variable_total_weight;
+}
+
+static int16_t ts_temp_get_effective_impl(ts_temp_data_t *data, bool try_lock)
 {
     if (!s_state.initialized) {
-        if (data) {
-            data->value = TS_TEMP_DEFAULT_VALUE;
-            data->source = TS_TEMP_SOURCE_DEFAULT;
-            data->timestamp_ms = 0;
-            data->valid = false;
-        }
+        fill_invalid_temp_data(data);
         return TS_TEMP_DEFAULT_VALUE;
     }
     
-    xSemaphoreTake(s_state.mutex, portMAX_DELAY);
+    if (xSemaphoreTake(s_state.mutex, try_lock ? 0 : portMAX_DELAY) != pdTRUE) {
+        fill_invalid_temp_data(data);
+        return TS_TEMP_DEFAULT_VALUE;
+    }
     
     /* 重新评估活动源并更新温度（确保获取最新值） */
-    evaluate_active_source();
+    evaluate_active_source_with_lock_mode(try_lock);
     
     int16_t temp = s_state.current_temp;
-    ts_temp_source_type_t source = s_state.active_source;
-    
-    if (data) {
-        data->value = temp;
-        data->source = source;
-        data->timestamp_ms = s_state.providers[source].last_update_ms;
-        data->valid = true;
-    }
+    fill_effective_data_locked(data);
     
     xSemaphoreGive(s_state.mutex);
     
     return temp;
+}
+
+int16_t ts_temp_get_effective(ts_temp_data_t *data)
+{
+    return ts_temp_get_effective_impl(data, false);
+}
+
+int16_t ts_temp_get_effective_nonblocking(ts_temp_data_t *data)
+{
+    return ts_temp_get_effective_impl(data, true);
 }
 
 esp_err_t ts_temp_get_by_source(ts_temp_source_type_t type, ts_temp_data_t *data)
@@ -511,6 +702,25 @@ esp_err_t ts_temp_get_by_source(ts_temp_source_type_t type, ts_temp_data_t *data
     if (type >= TS_TEMP_SOURCE_MAX || !data) return ESP_ERR_INVALID_ARG;
     
     xSemaphoreTake(s_state.mutex, portMAX_DELAY);
+
+    if (type == TS_TEMP_SOURCE_VARIABLE) {
+        variable_temp_snapshot_t snapshot = {0};
+        bool valid = read_variable_temp_snapshot(&snapshot, get_current_ms(), false);
+        store_variable_snapshot(&snapshot);
+        data->value = valid ? snapshot.temp : TS_TEMP_DEFAULT_VALUE;
+        data->source = TS_TEMP_SOURCE_VARIABLE;
+        data->timestamp_ms = snapshot.timestamp_ms;
+        data->valid = valid;
+        data->guard_value = snapshot.guard_temp;
+        data->guard_valid = snapshot.guard_valid;
+        data->partial_stale = snapshot.partial_stale;
+        data->bound_valid_count = snapshot.valid_count;
+        data->bound_total_count = snapshot.total_count;
+        data->bound_valid_weight = snapshot.valid_weight;
+        data->bound_total_weight = snapshot.total_weight;
+        xSemaphoreGive(s_state.mutex);
+        return (snapshot.total_count > 0) ? ESP_OK : ESP_ERR_NOT_FOUND;
+    }
     
     provider_t *p = &s_state.providers[type];
     if (!p->registered) {
@@ -521,7 +731,15 @@ esp_err_t ts_temp_get_by_source(ts_temp_source_type_t type, ts_temp_data_t *data
     data->value = p->value;
     data->source = p->type;
     data->timestamp_ms = p->last_update_ms;
-    data->valid = p->active;
+    data->valid = (type != TS_TEMP_SOURCE_DEFAULT) &&
+                  is_provider_valid(type, get_current_ms(), false);
+    data->guard_value = p->value;
+    data->guard_valid = data->valid;
+    data->partial_stale = false;
+    data->bound_valid_count = 0;
+    data->bound_total_count = 0;
+    data->bound_valid_weight = 0.0f;
+    data->bound_total_weight = 0.0f;
     
     xSemaphoreGive(s_state.mutex);
     
@@ -535,6 +753,9 @@ esp_err_t ts_temp_get_by_source(ts_temp_source_type_t type, ts_temp_data_t *data
 esp_err_t ts_temp_set_manual(int16_t temp_01c)
 {
     if (!s_state.initialized) return ESP_ERR_INVALID_STATE;
+    if (temp_01c < TS_TEMP_MIN_VALID || temp_01c > TS_TEMP_MAX_VALID) {
+        return ESP_ERR_INVALID_ARG;
+    }
     
     // 注册手动 provider（如果尚未注册）
     if (!s_state.providers[TS_TEMP_SOURCE_MANUAL].registered) {
@@ -566,6 +787,10 @@ esp_err_t ts_temp_set_manual_mode(bool enable)
         p->last_update_ms = get_current_ms();
         p->registered = true;
         p->active = true;
+    } else if (enable) {
+        provider_t *p = &s_state.providers[TS_TEMP_SOURCE_MANUAL];
+        p->active = true;
+        p->last_update_ms = get_current_ms();
     }
     
     evaluate_active_source();
@@ -596,15 +821,24 @@ esp_err_t ts_temp_get_status(ts_temp_status_t *status)
     }
     
     xSemaphoreTake(s_state.mutex, portMAX_DELAY);
-    
-    /* 重新评估活动源并更新温度（确保获取最新值） */
-    evaluate_active_source();
-    
+
+    int64_t now = get_current_ms();
     status->initialized = s_state.initialized;
     status->active_source = s_state.active_source;
     status->preferred_source = s_state.preferred_source;
     status->current_temp = s_state.current_temp;
+    if (s_state.active_source == TS_TEMP_SOURCE_VARIABLE) {
+        status->current_timestamp_ms = s_state.variable_last_update_ms;
+    } else if (s_state.active_source < TS_TEMP_SOURCE_MAX) {
+        status->current_timestamp_ms = s_state.providers[s_state.active_source].last_update_ms;
+    }
+    status->current_valid = is_cached_active_source_valid_locked(now);
     status->manual_mode = s_state.manual_mode;
+    status->variable_partial_stale = s_state.variable_partial_stale;
+    status->variable_valid_count = s_state.variable_valid_count;
+    status->variable_total_count = s_state.variable_total_count;
+    status->variable_valid_weight = s_state.variable_valid_weight;
+    status->variable_total_weight = s_state.variable_total_weight;
     
     /* 复制绑定变量信息 */
     if (s_state.bound_variable[0] != '\0') {
@@ -954,23 +1188,33 @@ static esp_err_t save_bound_variable_to_nvs(const char *var_name)
 static esp_err_t save_bound_vars_to_nvs(void)
 {
     nvs_handle_t handle;
-    esp_err_t ret = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &handle);
-    
-    if (ret != ESP_OK) {
-        TS_LOGE(TAG, "Failed to open NVS for write: %s", esp_err_to_name(ret));
-        return ret;
-    }
-    
     typedef struct {
         uint8_t count;
         ts_temp_bound_var_t vars[TS_TEMP_MAX_BOUND_VARS];
     } bound_vars_blob_t;
-    
-    if (s_state.bound_var_count > 0) {
-        bound_vars_blob_t blob = {0};
+
+    bound_vars_blob_t blob = {0};
+    char bound_variable[TS_TEMP_MAX_VARNAME_LEN] = {0};
+
+    if (s_state.mutex) {
+        xSemaphoreTake(s_state.mutex, portMAX_DELAY);
         blob.count = s_state.bound_var_count;
-        memcpy(blob.vars, s_state.bound_vars,
-               s_state.bound_var_count * sizeof(ts_temp_bound_var_t));
+        if (blob.count > 0) {
+            memcpy(blob.vars, s_state.bound_vars,
+                   blob.count * sizeof(ts_temp_bound_var_t));
+        }
+        strncpy(bound_variable, s_state.bound_variable, sizeof(bound_variable) - 1);
+        xSemaphoreGive(s_state.mutex);
+    }
+
+    esp_err_t ret = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &handle);
+
+    if (ret != ESP_OK) {
+        TS_LOGE(TAG, "Failed to open NVS for write: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
+    if (blob.count > 0) {
         ret = nvs_set_blob(handle, NVS_KEY_BOUND_VARS, &blob, sizeof(blob));
     } else {
         ret = nvs_erase_key(handle, NVS_KEY_BOUND_VARS);
@@ -978,10 +1222,17 @@ static esp_err_t save_bound_vars_to_nvs(void)
     }
     
     /* 同步旧 key 以保持向后兼容 */
-    if (s_state.bound_variable[0] != '\0') {
-        nvs_set_str(handle, NVS_KEY_BOUND_VAR, s_state.bound_variable);
-    } else {
-        nvs_erase_key(handle, NVS_KEY_BOUND_VAR);
+    if (ret == ESP_OK) {
+        esp_err_t legacy_ret;
+        if (bound_variable[0] != '\0') {
+            legacy_ret = nvs_set_str(handle, NVS_KEY_BOUND_VAR, bound_variable);
+        } else {
+            legacy_ret = nvs_erase_key(handle, NVS_KEY_BOUND_VAR);
+            if (legacy_ret == ESP_ERR_NVS_NOT_FOUND) legacy_ret = ESP_OK;
+        }
+        if (legacy_ret != ESP_OK) {
+            ret = legacy_ret;
+        }
     }
     
     if (ret != ESP_OK) {
@@ -993,7 +1244,11 @@ static esp_err_t save_bound_vars_to_nvs(void)
     ret = nvs_commit(handle);
     nvs_close(handle);
     
-    TS_LOGD(TAG, "Saved %d bound vars to NVS", s_state.bound_var_count);
+    if (ret == ESP_OK) {
+        TS_LOGD(TAG, "Saved %d bound vars to NVS", blob.count);
+    } else {
+        TS_LOGE(TAG, "Failed to commit bound vars: %s", esp_err_to_name(ret));
+    }
     return ret;
 }
 
@@ -1004,31 +1259,50 @@ static esp_err_t save_bound_vars_to_nvs(void)
  */
 static void export_temp_config_to_sdcard(void)
 {
+    ts_temp_source_type_t preferred_source = TS_TEMP_SOURCE_DEFAULT;
+    char bound_variable[TS_TEMP_MAX_VARNAME_LEN] = {0};
+    ts_temp_bound_var_t bound_vars[TS_TEMP_MAX_BOUND_VARS] = {0};
+    uint8_t bound_var_count = 0;
+
+    if (s_state.mutex) {
+        xSemaphoreTake(s_state.mutex, portMAX_DELAY);
+    }
+    preferred_source = s_state.preferred_source;
+    strncpy(bound_variable, s_state.bound_variable, sizeof(bound_variable) - 1);
+    bound_var_count = s_state.bound_var_count;
+    if (bound_var_count > 0) {
+        memcpy(bound_vars, s_state.bound_vars,
+               bound_var_count * sizeof(ts_temp_bound_var_t));
+    }
+    if (s_state.mutex) {
+        xSemaphoreGive(s_state.mutex);
+    }
+
     cJSON *root = cJSON_CreateObject();
     if (!root) {
         TS_LOGW(TAG, "Failed to create JSON for SD card export");
         return;
     }
     
-    const char *preferred_str = s_state.preferred_source == TS_TEMP_SOURCE_DEFAULT 
+    const char *preferred_str = preferred_source == TS_TEMP_SOURCE_DEFAULT
                                 ? "auto" 
-                                : ts_temp_source_type_to_str(s_state.preferred_source);
+                                : ts_temp_source_type_to_str(preferred_source);
     cJSON_AddStringToObject(root, "preferred_source", preferred_str);
     
     /* 向后兼容：导出第一个变量名 */
-    if (s_state.bound_variable[0] != '\0') {
-        cJSON_AddStringToObject(root, "bound_variable", s_state.bound_variable);
+    if (bound_variable[0] != '\0') {
+        cJSON_AddStringToObject(root, "bound_variable", bound_variable);
     }
     
     /* 导出加权变量数组 */
-    if (s_state.bound_var_count > 0) {
+    if (bound_var_count > 0) {
         cJSON *arr = cJSON_CreateArray();
         if (arr) {
-            for (uint8_t i = 0; i < s_state.bound_var_count; i++) {
+            for (uint8_t i = 0; i < bound_var_count; i++) {
                 cJSON *item = cJSON_CreateObject();
                 if (item) {
-                    cJSON_AddStringToObject(item, "name", s_state.bound_vars[i].name);
-                    cJSON_AddNumberToObject(item, "weight", s_state.bound_vars[i].weight);
+                    cJSON_AddStringToObject(item, "name", bound_vars[i].name);
+                    cJSON_AddNumberToObject(item, "weight", bound_vars[i].weight);
                     cJSON_AddItemToArray(arr, item);
                 }
             }

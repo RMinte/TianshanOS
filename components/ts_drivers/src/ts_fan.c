@@ -21,15 +21,35 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include <string.h>
-#include <math.h>
+#include <stdlib.h>
 
 #define TAG "ts_fan"
 #define FAN_NVS_NAMESPACE "fan_config"
 #define FAN_CONFIG_VERSION 2
+#define FAN_AUTO_GUARD_TEMP            950     /* 95.0°C */
+#define FAN_AUTO_GUARD_RELEASE_TEMP    900     /* 90.0°C */
+#define FAN_AUTO_GUARD_RELEASE_MS      30000
+#define FAN_AUTO_PREDICT_WINDOW_SEC    45.0f
+#define FAN_AUTO_SLOPE_WINDOW_MS       30000
+#define FAN_AUTO_MIN_SAMPLE_MS         10000
+#define FAN_AUTO_RESPONSE_WINDOW_MS    30000
+#define FAN_AUTO_RESPONSE_DUTY_DELTA   5
+#define FAN_AUTO_GAIN_DEFAULT          0.75f
+#define FAN_AUTO_GAIN_MIN              0.50f
+#define FAN_AUTO_GAIN_MAX              2.00f
+#define FAN_AUTO_RISE_RATE_PER_SEC     12.0f
+#define FAN_AUTO_FALL_RATE_PER_SEC     0.30f
+#define FAN_AUTO_HISTORY_SIZE          32
 
 /*===========================================================================*/
 /*                          Internal Types                                    */
 /*===========================================================================*/
+
+typedef struct {
+    int16_t temp;
+    int64_t timestamp_ms;
+    bool valid;
+} fan_temp_sample_t;
 
 typedef struct {
     bool initialized;
@@ -47,6 +67,24 @@ typedef struct {
     volatile uint32_t tach_count;
     int64_t last_tach_time;
     bool fault;
+    int16_t control_temperature;
+    int16_t guard_temperature;
+    int16_t predicted_temperature;
+    float slope_c_per_min;
+    float controller_gain;
+    float cooling_response;
+    ts_fan_auto_state_t auto_state;
+    bool guard_active;
+    bool temp_stale;
+    int64_t guard_release_since_ms;
+    bool response_observing;
+    int64_t response_until_ms;
+    float response_slope_before;
+    fan_temp_sample_t temp_history[FAN_AUTO_HISTORY_SIZE];
+    uint8_t temp_history_next;
+    uint8_t temp_history_count;
+    int64_t last_auto_update_ms;
+    float auto_fall_credit;
 } fan_instance_t;
 
 /*===========================================================================*/
@@ -67,6 +105,7 @@ static void tach_isr_callback(ts_gpio_handle_t handle, void *arg);
 static void fan_update_callback(void *arg);
 static uint8_t calc_duty_from_curve(fan_instance_t *fan, int16_t temp);
 static esp_err_t apply_curve_with_hysteresis(fan_instance_t *fan, uint8_t fan_id);
+static esp_err_t apply_adaptive_auto(fan_instance_t *fan, const ts_temp_data_t *temp_data);
 static esp_err_t update_pwm(fan_instance_t *fan, uint8_t duty);
 static void temp_event_handler(const ts_event_t *event, void *user_data);
 
@@ -89,11 +128,15 @@ static void temp_event_handler(const ts_event_t *event, void *user_data)
     
     const ts_temp_event_data_t *temp_evt = (const ts_temp_event_data_t *)event->data;
     if (temp_evt == NULL) return;
+    if (temp_evt->source == TS_TEMP_SOURCE_DEFAULT ||
+        temp_evt->temp < TS_TEMP_MIN_VALID ||
+        temp_evt->temp > TS_TEMP_MAX_VALID) {
+        return;
+    }
     
-    /* 更新所有处于自动/曲线模式的风扇温度 */
+    /* AUTO 模式只由 fan_update_callback() 推进，事件仅服务旧的 CURVE 快照路径 */
     for (int i = 0; i < TS_FAN_MAX; i++) {
-        if (s_fans[i].initialized && 
-            (s_fans[i].mode == TS_FAN_MODE_AUTO || s_fans[i].mode == TS_FAN_MODE_CURVE)) {
+        if (s_fans[i].initialized && s_fans[i].mode == TS_FAN_MODE_CURVE) {
             s_fans[i].temperature = temp_evt->temp;
             TS_LOGD(TAG, "Fan %d temp updated: %d.%d°C (source=%d)", 
                     i, temp_evt->temp / 10, 
@@ -152,11 +195,347 @@ static uint8_t calc_duty_from_curve(fan_instance_t *fan, int16_t temp)
     return fan->config.max_duty;
 }
 
+static float clamp_float(float value, float min_value, float max_value)
+{
+    if (value < min_value) return min_value;
+    if (value > max_value) return max_value;
+    return value;
+}
+
+static uint8_t apply_duty_limits(fan_instance_t *fan, uint8_t target)
+{
+    if (target < fan->config.min_duty && target > 0) {
+        target = fan->config.min_duty;
+    }
+    if (target > fan->config.max_duty) {
+        target = fan->config.max_duty;
+    }
+    return target;
+}
+
+static bool is_temp_data_basic_valid(const ts_temp_data_t *data)
+{
+    if (!data ||
+        !data->valid ||
+        data->source == TS_TEMP_SOURCE_DEFAULT ||
+        data->value < TS_TEMP_MIN_VALID ||
+        data->value > TS_TEMP_MAX_VALID) {
+        return false;
+    }
+
+    return true;
+}
+
+static bool is_auto_temp_data_usable(const ts_temp_data_t *data)
+{
+    if (!is_temp_data_basic_valid(data)) {
+        return false;
+    }
+
+    if (data->bound_total_count > 0 &&
+        (data->partial_stale || data->bound_valid_count < data->bound_total_count)) {
+        return false;
+    }
+
+    return true;
+}
+
+static void reset_adaptive_auto_state(fan_instance_t *fan)
+{
+    fan->target_duty = fan->current_duty;
+    fan->control_temperature = fan->temperature;
+    fan->guard_temperature = fan->temperature;
+    fan->predicted_temperature = fan->temperature;
+    fan->slope_c_per_min = 0.0f;
+    fan->controller_gain = FAN_AUTO_GAIN_DEFAULT;
+    fan->cooling_response = 0.0f;
+    fan->auto_state = TS_FAN_AUTO_STATE_IDLE;
+    fan->guard_active = false;
+    fan->temp_stale = false;
+    fan->guard_release_since_ms = 0;
+    fan->response_observing = false;
+    fan->response_until_ms = 0;
+    fan->response_slope_before = 0.0f;
+    memset(fan->temp_history, 0, sizeof(fan->temp_history));
+    fan->temp_history_next = 0;
+    fan->temp_history_count = 0;
+    fan->last_auto_update_ms = 0;
+    fan->auto_fall_credit = 0.0f;
+}
+
+static bool get_adaptive_temperatures(const ts_temp_data_t *temp_data,
+                                      int16_t *control_temp,
+                                      int16_t *guard_temp)
+{
+    if (!control_temp || !guard_temp || !is_auto_temp_data_usable(temp_data)) {
+        return false;
+    }
+
+    *control_temp = temp_data->value;
+    if (temp_data->guard_valid &&
+        temp_data->guard_value >= TS_TEMP_MIN_VALID &&
+        temp_data->guard_value <= TS_TEMP_MAX_VALID) {
+        *guard_temp = temp_data->guard_value;
+    } else {
+        *guard_temp = temp_data->value;
+    }
+
+    return true;
+}
+
+static void record_auto_temp_sample(fan_instance_t *fan, int16_t temp, int64_t now_ms)
+{
+    fan->temp_history[fan->temp_history_next].temp = temp;
+    fan->temp_history[fan->temp_history_next].timestamp_ms = now_ms;
+    fan->temp_history[fan->temp_history_next].valid = true;
+    fan->temp_history_next = (fan->temp_history_next + 1) % FAN_AUTO_HISTORY_SIZE;
+    if (fan->temp_history_count < FAN_AUTO_HISTORY_SIZE) {
+        fan->temp_history_count++;
+    }
+}
+
+static bool calculate_auto_slope(fan_instance_t *fan, int16_t current_temp,
+                                 int64_t now_ms, uint32_t min_span_ms,
+                                 float *slope_c_per_min)
+{
+    const fan_temp_sample_t *oldest = NULL;
+    int64_t oldest_age = 0;
+
+    if (!fan || !slope_c_per_min || fan->temp_history_count == 0) {
+        return false;
+    }
+
+    for (uint8_t i = 0; i < fan->temp_history_count; i++) {
+        const fan_temp_sample_t *sample = &fan->temp_history[i];
+        if (!sample->valid) {
+            continue;
+        }
+        int64_t age = now_ms - sample->timestamp_ms;
+        if (age < 0 || age > FAN_AUTO_SLOPE_WINDOW_MS) {
+            continue;
+        }
+        if (!oldest || age > oldest_age) {
+            oldest = sample;
+            oldest_age = age;
+        }
+    }
+
+    if (!oldest || oldest_age < min_span_ms) {
+        return false;
+    }
+
+    float delta_c = (current_temp - oldest->temp) / 10.0f;
+    *slope_c_per_min = delta_c * 60000.0f / (float)oldest_age;
+    return true;
+}
+
+static uint8_t apply_auto_rate_limit(fan_instance_t *fan, uint8_t target,
+                                     bool allow_down, int64_t now_ms)
+{
+    uint8_t current = fan->current_duty;
+    float dt_sec = 1.0f;
+    if (fan->last_auto_update_ms > 0) {
+        dt_sec = (now_ms - fan->last_auto_update_ms) / 1000.0f;
+    }
+    if (dt_sec <= 0.0f) {
+        dt_sec = 1.0f;
+    }
+
+    if (target > current) {
+        fan->auto_fall_credit = 0.0f;
+        uint8_t max_step = (uint8_t)(FAN_AUTO_RISE_RATE_PER_SEC * dt_sec + 0.5f);
+        if (max_step < 1) max_step = 1;
+        if ((uint16_t)target > (uint16_t)current + max_step) {
+            target = current + max_step;
+        }
+        if (current == 0 && target > 0 &&
+            target < fan->config.min_duty) {
+            target = fan->config.min_duty;
+        }
+    } else if (target < current) {
+        if (!allow_down) {
+            fan->auto_fall_credit = 0.0f;
+            target = current;
+        } else {
+            fan->auto_fall_credit += FAN_AUTO_FALL_RATE_PER_SEC * dt_sec;
+            uint8_t max_step = (uint8_t)fan->auto_fall_credit;
+            if (max_step == 0) {
+                target = current;
+            } else {
+                uint8_t desired_step = current - target;
+                uint8_t actual_step = desired_step < max_step ? desired_step : max_step;
+                target = current - actual_step;
+                fan->auto_fall_credit -= actual_step;
+            }
+        }
+    } else {
+        fan->auto_fall_credit = 0.0f;
+    }
+
+    fan->last_auto_update_ms = now_ms;
+    return target;
+}
+
+static void update_response_learning(fan_instance_t *fan, bool slope_valid,
+                                     float slope, int64_t now_ms)
+{
+    if (!fan->response_observing || now_ms < fan->response_until_ms) {
+        return;
+    }
+
+    fan->response_observing = false;
+    if (!slope_valid) {
+        return;
+    }
+
+    fan->cooling_response = fan->response_slope_before - slope;
+    if (fan->cooling_response < 0.2f) {
+        fan->controller_gain *= 1.15f;
+    } else if (fan->cooling_response > 1.5f || slope < -0.5f) {
+        fan->controller_gain *= 0.95f;
+    }
+    fan->controller_gain = clamp_float(fan->controller_gain,
+                                       FAN_AUTO_GAIN_MIN,
+                                       FAN_AUTO_GAIN_MAX);
+}
+
+static esp_err_t apply_adaptive_auto(fan_instance_t *fan, const ts_temp_data_t *temp_data)
+{
+    int64_t now_ms = esp_timer_get_time() / 1000;
+    int16_t control_temp = TS_TEMP_DEFAULT_VALUE;
+    int16_t guard_temp = TS_TEMP_DEFAULT_VALUE;
+    uint8_t old_duty = fan->current_duty;
+
+    if (!get_adaptive_temperatures(temp_data, &control_temp, &guard_temp)) {
+        fan->temp_stale = true;
+        fan->auto_state = TS_FAN_AUTO_STATE_STALE;
+        fan->response_observing = false;
+        fan->auto_fall_credit = 0.0f;
+        fan->target_duty = 100;
+        fan->predicted_temperature = fan->control_temperature;
+        fan->last_auto_update_ms = now_ms;
+        return update_pwm(fan, 100);
+    }
+
+    fan->temp_stale = false;
+    fan->temperature = control_temp;
+    fan->control_temperature = control_temp;
+    fan->guard_temperature = guard_temp;
+    record_auto_temp_sample(fan, control_temp, now_ms);
+
+    if (guard_temp >= FAN_AUTO_GUARD_TEMP) {
+        fan->guard_active = true;
+        fan->guard_release_since_ms = 0;
+    } else if (fan->guard_active) {
+        if (guard_temp <= FAN_AUTO_GUARD_RELEASE_TEMP) {
+            if (fan->guard_release_since_ms == 0) {
+                fan->guard_release_since_ms = now_ms;
+            } else if ((now_ms - fan->guard_release_since_ms) >= FAN_AUTO_GUARD_RELEASE_MS) {
+                fan->guard_active = false;
+                fan->guard_release_since_ms = 0;
+            }
+        } else {
+            fan->guard_release_since_ms = 0;
+        }
+    }
+
+    bool slope_valid = calculate_auto_slope(fan, control_temp, now_ms,
+                                            FAN_AUTO_MIN_SAMPLE_MS,
+                                            &fan->slope_c_per_min);
+    if (!slope_valid) {
+        fan->slope_c_per_min = 0.0f;
+    }
+    update_response_learning(fan, slope_valid, fan->slope_c_per_min, now_ms);
+
+    if (fan->guard_active) {
+        fan->auto_state = TS_FAN_AUTO_STATE_GUARD;
+        fan->response_observing = false;
+        fan->auto_fall_credit = 0.0f;
+        fan->target_duty = 100;
+        fan->predicted_temperature = guard_temp;
+        fan->last_auto_update_ms = now_ms;
+        return update_pwm(fan, 100);
+    }
+
+    uint8_t baseline = apply_duty_limits(fan, calc_duty_from_curve(fan, control_temp));
+    uint8_t target = baseline;
+
+    if (slope_valid) {
+        float predicted = control_temp + (fan->slope_c_per_min * (FAN_AUTO_PREDICT_WINDOW_SEC / 60.0f) * 10.0f);
+        if (predicted < TS_TEMP_MIN_VALID) predicted = TS_TEMP_MIN_VALID;
+        if (predicted > TS_TEMP_MAX_VALID) predicted = TS_TEMP_MAX_VALID;
+        fan->predicted_temperature = (int16_t)predicted;
+
+        if (fan->predicted_temperature >= FAN_AUTO_GUARD_TEMP) {
+            fan->auto_state = TS_FAN_AUTO_STATE_GUARD;
+            target = fan->config.max_duty;
+        } else {
+            float boost = 0.0f;
+            float margin_c = (FAN_AUTO_GUARD_TEMP - guard_temp) / 10.0f;
+            if (margin_c < 25.0f) {
+                boost += (25.0f - margin_c) * 1.2f;
+            }
+            if (fan->predicted_temperature > 850) {
+                boost += ((fan->predicted_temperature - 850) / 10.0f) * 1.5f;
+            }
+            if (fan->slope_c_per_min > 0.0f) {
+                boost += fan->slope_c_per_min * 2.0f;
+            }
+
+            float adaptive_target = baseline + boost * fan->controller_gain;
+            if (adaptive_target > 100.0f) adaptive_target = 100.0f;
+            target = apply_duty_limits(fan, (uint8_t)(adaptive_target + 0.5f));
+            fan->auto_state = TS_FAN_AUTO_STATE_ACTIVE;
+        }
+    } else {
+        fan->predicted_temperature = control_temp;
+        fan->auto_state = TS_FAN_AUTO_STATE_BASELINE;
+    }
+
+    bool allow_down = (guard_temp <= FAN_AUTO_GUARD_RELEASE_TEMP) &&
+                      (!slope_valid || fan->slope_c_per_min <= 0.0f);
+    if (target < fan->current_duty && !allow_down) {
+        target = fan->current_duty;
+    }
+
+    target = apply_auto_rate_limit(fan, target, allow_down, now_ms);
+    fan->target_duty = target;
+    esp_err_t ret = update_pwm(fan, target);
+
+    if (ret == ESP_OK && !fan->response_observing && slope_valid &&
+        target >= old_duty + FAN_AUTO_RESPONSE_DUTY_DELTA) {
+        fan->response_observing = true;
+        fan->response_until_ms = now_ms + FAN_AUTO_RESPONSE_WINDOW_MS;
+        fan->response_slope_before = fan->slope_c_per_min;
+    }
+
+    return ret;
+}
+
+static esp_err_t apply_auto_immediate(fan_instance_t *fan)
+{
+    ts_temp_data_t temp_data = {0};
+    const ts_temp_data_t *auto_temp = NULL;
+
+    if (s_auto_temp_enabled) {
+        ts_temp_get_effective(&temp_data);
+        if (is_temp_data_basic_valid(&temp_data)) {
+            fan->temperature = temp_data.value;
+        }
+        auto_temp = &temp_data;
+    }
+
+    reset_adaptive_auto_state(fan);
+    return apply_adaptive_auto(fan, auto_temp);
+}
+
 /**
  * @brief 应用曲线（带迟滞控制）
  */
 static esp_err_t apply_curve_with_hysteresis(fan_instance_t *fan, uint8_t fan_id)
 {
+    (void)fan_id;
+
     if (fan->config.curve_points == 0) {
         return ESP_ERR_INVALID_STATE;
     }
@@ -167,12 +546,7 @@ static esp_err_t apply_curve_with_hysteresis(fan_instance_t *fan, uint8_t fan_id
     uint8_t target = calc_duty_from_curve(fan, fan->temperature);
     
     // 应用最小/最大限制
-    if (target < fan->config.min_duty && target > 0) {
-        target = fan->config.min_duty;
-    }
-    if (target > fan->config.max_duty) {
-        target = fan->config.max_duty;
-    }
+    target = apply_duty_limits(fan, target);
     
     fan->target_duty = target;
     
@@ -234,11 +608,25 @@ static void fan_update_callback(void *arg)
 {
     int64_t now = esp_timer_get_time();
     static uint32_t s_log_counter = 0;
+    ts_temp_data_t temp_data = {0};
+    bool have_temp_data = false;
+    bool basic_temp_data_valid = false;
+    bool needs_temp_data = false;
+
+    for (int i = 0; i < TS_FAN_MAX; i++) {
+        if (s_fans[i].initialized &&
+            (s_fans[i].mode == TS_FAN_MODE_CURVE ||
+             s_fans[i].mode == TS_FAN_MODE_AUTO)) {
+            needs_temp_data = true;
+            break;
+        }
+    }
     
     /* 主动获取最新温度（确保曲线模式能及时响应温度变化） */
-    if (s_auto_temp_enabled) {
-        ts_temp_data_t temp_data;
-        int16_t current_temp = ts_temp_get_effective(&temp_data);
+    if (s_auto_temp_enabled && needs_temp_data) {
+        int16_t current_temp = ts_temp_get_effective_nonblocking(&temp_data);
+        have_temp_data = true;
+        basic_temp_data_valid = is_temp_data_basic_valid(&temp_data);
         
         /* 每 10 秒输出一次调试日志 */
         if (++s_log_counter >= 10) {
@@ -248,10 +636,11 @@ static void fan_update_callback(void *arg)
                     temp_data.source, temp_data.valid);
         }
         
-        if (current_temp > TS_TEMP_MIN_VALID) {
+        if (basic_temp_data_valid) {
             for (int i = 0; i < TS_FAN_MAX; i++) {
                 if (s_fans[i].initialized && 
-                    (s_fans[i].mode == TS_FAN_MODE_AUTO || s_fans[i].mode == TS_FAN_MODE_CURVE)) {
+                    (s_fans[i].mode == TS_FAN_MODE_CURVE ||
+                     s_fans[i].mode == TS_FAN_MODE_AUTO)) {
                     s_fans[i].temperature = current_temp;
                 }
             }
@@ -285,18 +674,9 @@ static void fan_update_callback(void *arg)
             break;
             
         case TS_FAN_MODE_AUTO:
-            // 简单自动模式：基于曲线但无迟滞
             {
-                uint8_t target = calc_duty_from_curve(fan, fan->temperature);
-                if (target < fan->config.min_duty && target > 0) {
-                    target = fan->config.min_duty;
-                }
-                if (target > fan->config.max_duty) {
-                    target = fan->config.max_duty;
-                }
-                if (target != fan->current_duty) {
-                    update_pwm(fan, target);
-                }
+                const ts_temp_data_t *auto_temp = have_temp_data ? &temp_data : NULL;
+                apply_adaptive_auto(fan, auto_temp);
             }
             break;
             
@@ -339,6 +719,7 @@ esp_err_t ts_fan_init(void)
         s_fans[i].last_stable_temp = 250;  // 25.0°C
         s_fans[i].temperature = 250;
         s_fans[i].enabled = true;
+        reset_adaptive_auto_state(&s_fans[i]);
     }
     
     // 启动更新定时器
@@ -498,6 +879,7 @@ esp_err_t ts_fan_configure(ts_fan_id_t fan, const ts_fan_config_t *config)
     f->mode = TS_FAN_MODE_MANUAL;
     f->current_duty = config->min_duty;
     f->fault = false;
+    reset_adaptive_auto_state(f);
     
     TS_LOGI(TAG, "Fan %d configured: PWM=GPIO%d, TACH=%d, curve=%d points", 
             fan, config->gpio_pwm, config->gpio_tach, config->curve_points);
@@ -516,9 +898,10 @@ esp_err_t ts_fan_set_mode(ts_fan_id_t fan, ts_fan_mode_t mode)
     
     ts_fan_mode_t old_mode = s_fans[fan].mode;
     s_fans[fan].mode = mode;
+    esp_err_t ret = ESP_OK;
     
     if (mode == TS_FAN_MODE_OFF) {
-        update_pwm(&s_fans[fan], 0);
+        ret = update_pwm(&s_fans[fan], 0);
     }
     
     /* 切换到曲线/自动模式时，重置迟滞状态以允许立即生效 */
@@ -527,11 +910,12 @@ esp_err_t ts_fan_set_mode(ts_fan_id_t fan, ts_fan_mode_t mode)
         s_fans[fan].last_stable_temp = -1000;   /* -100.0°C，远低于任何实际温度 */
         s_fans[fan].last_speed_change_time = 0;  /* 允许立即调速 */
         
-        /* 立即获取当前温度 */
-        if (s_auto_temp_enabled) {
+        if (mode == TS_FAN_MODE_AUTO) {
+            ret = apply_auto_immediate(&s_fans[fan]);
+        } else if (s_auto_temp_enabled) {
             ts_temp_data_t temp_data;
             int16_t current_temp = ts_temp_get_effective(&temp_data);
-            if (current_temp > TS_TEMP_MIN_VALID) {
+            if (is_temp_data_basic_valid(&temp_data)) {
                 s_fans[fan].temperature = current_temp;
             }
         }
@@ -542,7 +926,7 @@ esp_err_t ts_fan_set_mode(ts_fan_id_t fan, ts_fan_mode_t mode)
         TS_LOGI(TAG, "Fan %d mode set to %d", fan, mode);
     }
     
-    return ESP_OK;
+    return ret;
 }
 
 esp_err_t ts_fan_get_mode(ts_fan_id_t fan, ts_fan_mode_t *mode)
@@ -563,6 +947,7 @@ esp_err_t ts_fan_set_duty(ts_fan_id_t fan, uint8_t duty_percent)
     
     s_fans[fan].mode = TS_FAN_MODE_MANUAL;
     s_fans[fan].current_duty = duty_percent;
+    reset_adaptive_auto_state(&s_fans[fan]);
     
     return update_pwm(&s_fans[fan], duty_percent);
 }
@@ -598,6 +983,10 @@ esp_err_t ts_fan_is_enabled(ts_fan_id_t fan, bool *enabled)
 esp_err_t ts_fan_set_temperature(ts_fan_id_t fan, int16_t temp_01c)
 {
     if (fan >= TS_FAN_MAX) return ESP_ERR_INVALID_ARG;
+    if (!s_fans[fan].initialized) return ESP_ERR_INVALID_STATE;
+    if (temp_01c < TS_TEMP_MIN_VALID || temp_01c > TS_TEMP_MAX_VALID) {
+        return ESP_ERR_INVALID_ARG;
+    }
     s_fans[fan].temperature = temp_01c;
     return ESP_OK;
 }
@@ -677,26 +1066,11 @@ esp_err_t ts_fan_get_status(ts_fan_id_t fan, ts_fan_status_t *status)
     
     fan_instance_t *f = &s_fans[fan];
     
-    /* 同步获取最新温度（确保从绑定变量读取最新值） */
-    if (f->mode == TS_FAN_MODE_AUTO || f->mode == TS_FAN_MODE_CURVE) {
-        ts_temp_data_t temp_data;
-        int16_t temp = ts_temp_get_effective(&temp_data);
-        if (temp > TS_TEMP_MIN_VALID) {
-            f->temperature = temp;
-            
-            /* 计算基于当前温度的目标转速（用于显示） */
-            uint8_t computed_target = calc_duty_from_curve(f, f->temperature);
-            if (computed_target < f->config.min_duty && computed_target > 0) {
-                computed_target = f->config.min_duty;
-            }
-            if (computed_target > f->config.max_duty) {
-                computed_target = f->config.max_duty;
-            }
-            f->target_duty = computed_target;
-        } else {
-            /* 温度无效时，目标转速等于当前转速 */
-            f->target_duty = f->current_duty;
-        }
+    /* 控制状态只由 fan_update_callback() 推进，状态查询不触发温度重算或调速 */
+    if (f->mode == TS_FAN_MODE_CURVE) {
+        /* CURVE 的 target_duty 由定时器回调维护 */
+    } else if (f->mode == TS_FAN_MODE_AUTO) {
+        /* 自适应状态只能在 fan_update_callback() 推进，这里不触发学习或调速 */
     } else {
         /* MANUAL/OFF 模式：目标转速等于当前转速 */
         f->target_duty = f->current_duty;
@@ -711,6 +1085,15 @@ esp_err_t ts_fan_get_status(ts_fan_id_t fan, ts_fan_status_t *status)
     status->is_running = f->current_duty > 0 && f->enabled;
     status->enabled = f->enabled;
     status->fault = f->fault;
+    status->control_temp = f->control_temperature;
+    status->guard_temp = f->guard_temperature;
+    status->predicted_temp = f->predicted_temperature;
+    status->slope_c_per_min = f->slope_c_per_min;
+    status->controller_gain = f->controller_gain;
+    status->cooling_response = f->cooling_response;
+    status->auto_state = f->auto_state;
+    status->guard_active = f->guard_active;
+    status->temp_stale = f->temp_stale;
     
     return ESP_OK;
 }
@@ -893,8 +1276,9 @@ esp_err_t ts_fan_load_config(void)
         memcpy(s_fans[i].config.curve, cfg.curve, 
                cfg.curve_points * sizeof(ts_fan_curve_point_t));
         
-        // 应用占空比
-        if (s_fans[i].mode == TS_FAN_MODE_MANUAL && s_fans[i].pwm) {
+        if (s_fans[i].mode == TS_FAN_MODE_AUTO && s_fans[i].pwm) {
+            apply_auto_immediate(&s_fans[i]);
+        } else if (s_fans[i].mode == TS_FAN_MODE_MANUAL && s_fans[i].pwm) {
             update_pwm(&s_fans[i], cfg.duty);
         }
         

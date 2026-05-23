@@ -77,8 +77,15 @@ typedef enum {
 typedef struct {
     int16_t value;                  /**< 温度值（0.1°C 单位）*/
     ts_temp_source_type_t source;   /**< 数据来源 */
-    uint32_t timestamp_ms;          /**< 更新时间戳 */
+    int64_t timestamp_ms;           /**< 更新时间戳 */
     bool valid;                     /**< 数据有效性 */
+    int16_t guard_value;            /**< 保护温度（0.1°C 单位），绑定变量最高 fresh 温度 */
+    bool guard_valid;               /**< 保护温度是否有效 */
+    bool partial_stale;             /**< 绑定变量是否只有部分有效 */
+    uint8_t bound_valid_count;      /**< 有效正权重绑定数量 */
+    uint8_t bound_total_count;      /**< 正权重绑定数量 */
+    float bound_valid_weight;       /**< 有效权重和 */
+    float bound_total_weight;       /**< 正权重和 */
 } ts_temp_data_t;
 
 /**
@@ -98,7 +105,7 @@ typedef struct {
     ts_temp_source_type_t type;     /**< Provider 类型 */
     const char *name;               /**< Provider 名称 */
     int16_t last_value;             /**< 最后报告的温度 */
-    uint32_t last_update_ms;        /**< 最后更新时间 */
+    int64_t last_update_ms;         /**< 最后更新时间 */
     uint32_t update_count;          /**< 更新计数 */
     bool active;                    /**< 是否激活 */
 } ts_temp_provider_info_t;
@@ -128,7 +135,14 @@ typedef struct {
     ts_temp_bound_var_t bound_vars[TS_TEMP_MAX_BOUND_VARS]; /**< 加权绑定变量数组 */
     uint8_t bound_var_count;                /**< 绑定变量数量 */
     int16_t current_temp;                   /**< 当前温度 */
+    int64_t current_timestamp_ms;           /**< 当前温度更新时间 */
+    bool current_valid;                     /**< 当前温度是否有效 */
     bool manual_mode;                       /**< 手动模式启用 */
+    bool variable_partial_stale;            /**< 变量温度源是否部分失效 */
+    uint8_t variable_valid_count;           /**< 变量温度源有效绑定数量 */
+    uint8_t variable_total_count;           /**< 变量温度源正权重绑定数量 */
+    float variable_valid_weight;            /**< 变量温度源有效权重和 */
+    float variable_total_weight;            /**< 变量温度源正权重和 */
     uint32_t provider_count;                /**< 注册的 provider 数量 */
     ts_temp_provider_info_t providers[TS_TEMP_MAX_PROVIDERS]; /**< Provider 信息 */
 } ts_temp_status_t;
@@ -201,6 +215,17 @@ esp_err_t ts_temp_provider_update(ts_temp_source_type_t type, int16_t temp_01c);
  * @return 当前温度（0.1°C 单位）
  */
 int16_t ts_temp_get_effective(ts_temp_data_t *data);
+
+/**
+ * @brief 获取当前有效温度（非阻塞）
+ *
+ * 与 ts_temp_get_effective() 相同，但不会等待温度源锁或变量锁。
+ * 如果当前锁繁忙，返回默认温度且 data.valid=false。
+ *
+ * @param[out] data 温度数据（可为 NULL 仅获取温度值）
+ * @return 当前温度（0.1°C 单位）
+ */
+int16_t ts_temp_get_effective_nonblocking(ts_temp_data_t *data);
 
 /**
  * @brief 获取指定源的温度

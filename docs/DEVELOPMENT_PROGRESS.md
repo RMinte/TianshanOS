@@ -1732,12 +1732,13 @@ POST /api/v1/temp.manual
 # 设置占空比限制
 fan --limits --id 0 --min 10 --max 100
 
-# 绑定温度变量
-temp --bind --variable "agx.cpu_temp"
+# 查看温度源
+temp --providers
 
 # 设置测试温度
-temp --manual --enable --value 45
-temp --manual --disable
+temp --set --value 45
+temp --mode --value manual
+temp --mode --value auto
 ```
 
 ### WebUI 改进
@@ -2279,7 +2280,11 @@ WebSocket 消息支持 `var_name` 字段：
 | `automation.variables.get` | 获取变量值 | `name` |
 | `automation.variables.set` | 设置变量 | `name`, `value`, `type` |
 | `automation.variables.delete` | 删除变量 | `name` |
-| `automation.variables.list` | 列出所有变量 | `prefix` (可选) |
+| `automation.variables.list` | 列出变量 | `prefix`, `source_id`, `include_value`, `include_meta` (可选) |
+
+`automation.variables.list` 默认返回变量值和更新时间元数据；资源敏感的选择器类 UI 应传
+`include_value:false, include_meta:false`。需要展示变量新鲜度时使用 `last_update_ms`、`age_ms`
+和 `stale`，不要再依赖旧的 `updated_at` 字段。
 
 > **注意**：原 `var.*` API 已废弃（2026-01-27）。
 

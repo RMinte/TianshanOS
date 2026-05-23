@@ -31,6 +31,18 @@ static const char *mode_to_string(ts_fan_mode_t mode)
     }
 }
 
+static const char *auto_state_to_string(ts_fan_auto_state_t state)
+{
+    switch (state) {
+        case TS_FAN_AUTO_STATE_IDLE:     return "idle";
+        case TS_FAN_AUTO_STATE_BASELINE: return "baseline";
+        case TS_FAN_AUTO_STATE_ACTIVE:   return "active";
+        case TS_FAN_AUTO_STATE_GUARD:    return "guard";
+        case TS_FAN_AUTO_STATE_STALE:    return "stale";
+        default:                         return "unknown";
+    }
+}
+
 static ts_fan_mode_t string_to_mode(const char *str)
 {
     if (!str) return TS_FAN_MODE_MANUAL;
@@ -53,6 +65,15 @@ static cJSON *status_to_json(ts_fan_id_t fan_id, const ts_fan_status_t *status)
     cJSON_AddBoolToObject(obj, "enabled", status->enabled);
     cJSON_AddBoolToObject(obj, "running", status->is_running);
     cJSON_AddBoolToObject(obj, "fault", status->fault);
+    cJSON_AddNumberToObject(obj, "control_temperature", status->control_temp / 10.0);
+    cJSON_AddNumberToObject(obj, "guard_temperature", status->guard_temp / 10.0);
+    cJSON_AddNumberToObject(obj, "predicted_temperature", status->predicted_temp / 10.0);
+    cJSON_AddNumberToObject(obj, "slope_c_per_min", status->slope_c_per_min);
+    cJSON_AddNumberToObject(obj, "controller_gain", status->controller_gain);
+    cJSON_AddNumberToObject(obj, "cooling_response", status->cooling_response);
+    cJSON_AddStringToObject(obj, "auto_state", auto_state_to_string(status->auto_state));
+    cJSON_AddBoolToObject(obj, "guard_active", status->guard_active);
+    cJSON_AddBoolToObject(obj, "temp_stale", status->temp_stale);
     return obj;
 }
 
@@ -102,9 +123,8 @@ static esp_err_t api_fan_status(const cJSON *params, ts_api_result_t *result)
         /* 添加全局温度信息（从绑定变量读取） */
         ts_temp_status_t temp_status;
         if (ts_temp_get_status(&temp_status) == ESP_OK) {
-            float temp_c = temp_status.current_temp / 10.0f;
-            cJSON_AddNumberToObject(data, "temperature", temp_c);
-            cJSON_AddBoolToObject(data, "temp_valid", temp_status.current_temp > -400);  // > -40°C 表示有效
+            cJSON_AddNumberToObject(data, "temperature", temp_status.current_temp / 10.0f);
+            cJSON_AddBoolToObject(data, "temp_valid", temp_status.current_valid);
             if (temp_status.bound_variable[0] != '\0') {
                 cJSON_AddStringToObject(data, "temp_source", temp_status.bound_variable);
             }

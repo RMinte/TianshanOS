@@ -203,10 +203,16 @@ POST /api/v1/config/delete
 - 自动化引擎数据源
 - 命令参数动态替换
 
-### var.get
+### automation.variables.get
 获取变量值。
 
-**请求**: `GET /api/v1/var/get?name=cpu_temp.extracted`
+**请求**:
+```json
+POST /api/v1/automation.variables.get
+{
+  "name": "cpu_temp.extracted"
+}
+```
 
 **响应**:
 ```json
@@ -214,11 +220,7 @@ POST /api/v1/config/delete
   "code": 0,
   "data": {
     "name": "cpu_temp.extracted",
-    "value": "45000",
-    "type": "string",
-    "source": "ssh",
-    "timestamp": 1706355600000,
-    "persistent": false
+    "value": "45000"
   }
 }
 ```
@@ -231,16 +233,16 @@ POST /api/v1/config/delete
 }
 ```
 
-### var.set
+### automation.variables.set
 设置变量值。
 
 **请求**:
-```
-POST /api/v1/var/set
+```json
+POST /api/v1/automation.variables.set
 {
   "name": "my_variable",
   "value": "hello world",
-  "persistent": false
+  "create_only": false
 }
 ```
 
@@ -248,40 +250,34 @@ POST /api/v1/var/set
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
 | `name` | string | 是 | 变量名（最大 64 字符） |
-| `value` | string | 是 | 变量值（最大 256 字符） |
-| `persistent` | bool | 否 | 是否持久化到 NVS（默认 false） |
+| `value` | bool/int/float/string/null | 是 | 变量值 |
+| `create_only` | bool | 否 | 仅在不存在时创建，不覆盖已有变量 |
 
 **响应**:
 ```json
 {
   "code": 0,
-  "message": "Variable set successfully"
+  "message": "Variable set successfully",
+  "data": {
+    "name": "my_variable",
+    "value": "hello world"
+  }
 }
 ```
 
-### var.delete
-删除变量。
+### automation.variables.list
+列出自动化变量，支持按前缀或来源过滤。默认返回变量值和更新时间元数据；资源敏感的选择器类 UI 可传 `include_value:false, include_meta:false`。
 
 **请求**:
-```
-POST /api/v1/var/delete
-{
-  "name": "my_variable"
-}
-```
-
-**响应**:
 ```json
+POST /api/v1/automation.variables.list
 {
-  "code": 0,
-  "message": "Variable deleted"
+  "prefix": "agx.",
+  "source_id": "agx",
+  "include_value": true,
+  "include_meta": true
 }
 ```
-
-### var.list
-列出所有变量或指定前缀的变量。
-
-**请求**: `GET /api/v1/var/list` 或 `GET /api/v1/var/list?prefix=cpu_temp`
 
 **响应**:
 ```json
@@ -291,28 +287,28 @@ POST /api/v1/var/delete
     "count": 3,
     "variables": [
       {
-        "name": "cpu_temp.extracted",
-        "value": "45000",
-        "type": "string",
-        "source": "ssh",
-        "timestamp": 1706355600000,
-        "persistent": false
+        "name": "agx.tj.temp",
+        "value": 72.5,
+        "type": "float",
+        "persistent": false,
+        "readonly": false,
+        "last_change_ms": 123456,
+        "last_update_ms": 123900,
+        "age_ms": 250,
+        "stale": false,
+        "source_id": "agx"
       },
       {
         "name": "cpu_temp.status",
-        "value": "success",
+        "value": "running",
         "type": "string",
-        "source": "ssh",
-        "timestamp": 1706355600000,
-        "persistent": false
-      },
-      {
-        "name": "cpu_temp.exit_code",
-        "value": "0",
-        "type": "number",
-        "source": "ssh",
-        "timestamp": 1706355600000,
-        "persistent": false
+        "persistent": false,
+        "readonly": false,
+        "last_change_ms": 123000,
+        "last_update_ms": 123900,
+        "age_ms": 250,
+        "stale": false,
+        "source_id": "cpu_temp"
       }
     ]
   }
@@ -323,9 +319,10 @@ POST /api/v1/var/delete
 
 | 类型 | 说明 | 示例 |
 |------|------|------|
-| `string` | 字符串（默认） | `"hello"` |
-| `number` | 数值（存储为字符串） | `"45000"` |
-| `bool` | 布尔值 | `"true"`, `"false"` |
+| `string` | 字符串 | `"hello"` |
+| `int` | 整数 | `45000` |
+| `float` | 浮点数 | `72.5` |
+| `bool` | 布尔值 | `true`, `false` |
 
 ### 变量来源
 
@@ -513,8 +510,24 @@ POST /api/v1/device/power
   "code": 0,
   "data": {
     "fans": [
-      {"id": 0, "running": true, "duty": 50, "rpm": 2500},
-      {"id": 1, "running": true, "duty": 60, "rpm": 2800}
+      {
+        "id": 0,
+        "mode": "auto",
+        "duty": 50,
+        "target_duty": 55,
+        "rpm": 2500,
+        "temp": 58.2,
+        "running": true,
+        "control_temperature": 58.2,
+        "guard_temperature": 72.5,
+        "predicted_temperature": 64.0,
+        "slope_c_per_min": 0.8,
+        "controller_gain": 0.75,
+        "cooling_response": 0.4,
+        "auto_state": "active",
+        "guard_active": false,
+        "temp_stale": false
+      }
     ]
   }
 }
@@ -553,14 +566,23 @@ POST /api/v1/device/fan/speed
     "fans": [
       {
         "id": 0,
-        "mode": "curve",
+        "mode": "auto",
         "duty": 30,
         "target_duty": 25,
         "rpm": 0,
         "temperature": 35.5,
         "enabled": true,
         "running": true,
-        "fault": false
+        "fault": false,
+        "control_temperature": 35.5,
+        "guard_temperature": 52.3,
+        "predicted_temperature": 58.0,
+        "slope_c_per_min": 1.2,
+        "controller_gain": 0.75,
+        "cooling_response": 0.4,
+        "auto_state": "active",
+        "guard_active": false,
+        "temp_stale": false
       }
     ],
     "temperature": 35.5,
@@ -569,6 +591,8 @@ POST /api/v1/device/fan/speed
   }
 }
 ```
+
+`control_temperature`、`guard_temperature`、`predicted_temperature`、`slope_c_per_min`、`controller_gain`、`cooling_response`、`auto_state`、`guard_active`、`temp_stale` 是自动模式的状态字段；非 `auto` 模式下这些字段仅表示上一次自动控制快照或默认值，不参与当前调速。
 
 ### fan.mode
 设置风扇工作模式。
@@ -696,11 +720,15 @@ POST /api/v1/fan.save
 {
   "code": 0,
   "data": {
-    "current_temp": 35.5,
-    "preferred_source": "variable",
+    "initialized": true,
+    "manual_mode": false,
     "active_source": "variable",
+    "preferred_source": "variable",
     "bound_variable": "agx.cpu_temp",
-    "manual_mode": false
+    "temperature_01c": 355,
+    "temperature_c": 35.5,
+    "valid": true,
+    "timestamp_ms": 123900
   }
 }
 ```
@@ -742,6 +770,9 @@ POST /api/v1/temp.bind
 - 每个 `weight` 取值范围为 `0.0 ~ 1.0`
 - 所有权重之和必须大于 `0`
 - 旧格式 `variable` 仍然兼容，等价于单变量且权重为 `1.0`
+- 只有所有正权重绑定变量都 fresh 且数值有效时才返回 `weighted_temp_c`
+- 任一正权重绑定变量过期或无效时，响应会标记 `partial_stale: true`
+- `weighted_temp_c` 是绑定变量的加权温度；`temperature_c` / `valid` 始终表示当前活动温度源状态
 
 **响应示例**:
 ```json
@@ -750,9 +781,30 @@ POST /api/v1/temp.bind
   "data": {
     "bound_variable": "agx.cpu_temp",
     "bound_variables": [
-      { "name": "agx.cpu_temp", "weight": 0.4, "value": 52.3 },
-      { "name": "agx.gpu_temp", "weight": 0.6, "value": 49.8 }
+      {
+        "name": "agx.cpu_temp",
+        "weight": 0.4,
+        "value": 52.3,
+        "last_update_ms": 123456,
+        "age_ms": 250,
+        "stale": false,
+        "valid": true
+      },
+      {
+        "name": "agx.gpu_temp",
+        "weight": 0.6,
+        "value": 49.8,
+        "last_update_ms": 123460,
+        "age_ms": 246,
+        "stale": false,
+        "valid": true
+      }
     ],
+    "bound_valid_count": 2,
+    "bound_total_count": 2,
+    "bound_valid_weight": 1.0,
+    "bound_total_weight": 1.0,
+    "partial_stale": false,
     "weighted_temp_c": 50.8,
     "active_source": "variable",
     "temperature_c": 50.8,

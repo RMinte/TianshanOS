@@ -221,6 +221,7 @@ typedef struct {
     ts_auto_value_t default_value;       /**< Default value */
     uint32_t flags;                      /**< Variable flags */
     int64_t last_change_ms;              /**< Last change timestamp */
+    int64_t last_update_ms;              /**< Last update timestamp */
 } ts_auto_variable_t;
 
 /*===========================================================================*/
