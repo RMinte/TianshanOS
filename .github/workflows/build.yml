@@ -138,11 +138,25 @@ jobs:
           pattern: tianshanos-firmware-*
           path: firmware
 
+      - name: Resolve release tag
+        id: release_tag
+        run: |
+          if [ "${{ github.event_name }}" = "release" ]; then
+            TAG="${{ github.event.release.tag_name }}"
+          elif [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            TAG="${GITHUB_REF_NAME}"
+          else
+            VERSION="${{ needs.build.outputs.version }}"
+            TAG="v${VERSION%%+*}"
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Release tag: $TAG"
+
       - name: Check if release already exists (main branch)
         if: github.ref == 'refs/heads/main'
         id: check
         run: |
-          TAG="v${{ needs.build.outputs.version }}"
+          TAG="${{ steps.release_tag.outputs.tag }}"
           if gh release view "$TAG" 2>/dev/null; then
             echo "skip=true" >> $GITHUB_OUTPUT
             echo "⏭️ Release $TAG already exists, skipping"
@@ -154,8 +168,8 @@ jobs:
         if: github.event_name == 'release' || startsWith(github.ref, 'refs/tags/') || (github.ref == 'refs/heads/main' && steps.check.outputs.skip != 'true')
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.event_name == 'release' && github.event.release.tag_name || startsWith(github.ref, 'refs/tags/') && github.ref_name || format('v{0}', needs.build.outputs.version) }}
-          name: ${{ github.event_name == 'release' && github.event.release.tag_name || startsWith(github.ref, 'refs/tags/') && github.ref_name || format('v{0}', needs.build.outputs.version) }}
+          tag_name: ${{ steps.release_tag.outputs.tag }}
+          name: ${{ steps.release_tag.outputs.tag }}
           files: |
             firmware/**/*.bin
             firmware/**/flasher_args.json

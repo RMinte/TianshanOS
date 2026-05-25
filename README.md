@@ -157,8 +157,8 @@ esptool.py --chip esp32s3 -p /dev/ttyACM0 write_flash \
 
 ## 当前状态
 
-**版本**: 0.4.6
-**阶段**: Phase 39 完成 - LPMU 接入上层网络
+**版本**: 0.4.7
+**阶段**: Phase 40 完成 - 自动风扇温度失效降速优化
 
 ### 已完成功能
 
