@@ -51,6 +51,7 @@ static const char *source_to_str(ts_temp_source_type_t source)
         case TS_TEMP_SOURCE_DEFAULT:     return "default";
         case TS_TEMP_SOURCE_SENSOR_LOCAL: return "sensor_local";
         case TS_TEMP_SOURCE_AGX_AUTO:    return "agx_auto";
+        case TS_TEMP_SOURCE_VARIABLE:    return "variable";
         case TS_TEMP_SOURCE_MANUAL:      return "manual";
         default:                         return "unknown";
     }
@@ -99,7 +100,9 @@ static int do_temp_status(bool json)
     ts_console_printf("  Valid:       %s\n", data.valid ? "Yes" : "No");
     
     if (data.valid && data.timestamp_ms > 0) {
-        ts_console_printf("  Updated:     %lu ms ago\n", data.timestamp_ms);
+        int64_t age_ms = (esp_timer_get_time() / 1000) - data.timestamp_ms;
+        if (age_ms < 0) age_ms = 0;
+        ts_console_printf("  Updated:     %lld ms ago\n", (long long)age_ms);
     }
     
     return 0;
@@ -114,7 +117,7 @@ static int do_temp_providers(bool json)
     /* JSON 模式通过 API 获取 */
     if (json) {
         ts_api_result_t result;
-        esp_err_t ret = ts_api_call("temp.providers", NULL, &result);
+        esp_err_t ret = ts_api_call("temp.sources", NULL, &result);
         
         if (ret == ESP_OK && result.code == TS_API_OK && result.data) {
             char *json_str = cJSON_PrintUnformatted(result.data);
@@ -134,6 +137,7 @@ static int do_temp_providers(bool json)
         TS_TEMP_SOURCE_DEFAULT,
         TS_TEMP_SOURCE_SENSOR_LOCAL,
         TS_TEMP_SOURCE_AGX_AUTO,
+        TS_TEMP_SOURCE_VARIABLE,
         TS_TEMP_SOURCE_MANUAL
     };
     
@@ -165,10 +169,10 @@ static int do_temp_set(double temp_c)
 {
     /* 通过 API 设置温度 */
     cJSON *params = cJSON_CreateObject();
-    cJSON_AddNumberToObject(params, "value", temp_c);
+    cJSON_AddNumberToObject(params, "temperature_c", temp_c);
     
     ts_api_result_t result;
-    esp_err_t ret = ts_api_call("temp.set", params, &result);
+    esp_err_t ret = ts_api_call("temp.manual", params, &result);
     cJSON_Delete(params);
     
     if (ret != ESP_OK || result.code != TS_API_OK) {
@@ -194,12 +198,18 @@ static int do_temp_mode(const char *mode_str)
         return 1;
     }
     
-    /* 通过 API 设置模式 */
     cJSON *params = cJSON_CreateObject();
-    cJSON_AddStringToObject(params, "mode", mode_str);
+    const char *api_name = NULL;
+    if (strcmp(mode_str, "manual") == 0) {
+        api_name = "temp.manual";
+        cJSON_AddBoolToObject(params, "enable", true);
+    } else {
+        api_name = "temp.select";
+        cJSON_AddStringToObject(params, "source", "auto");
+    }
     
     ts_api_result_t result;
-    esp_err_t ret = ts_api_call("temp.mode", params, &result);
+    esp_err_t ret = ts_api_call(api_name, params, &result);
     cJSON_Delete(params);
     
     if (ret != ESP_OK || result.code != TS_API_OK) {

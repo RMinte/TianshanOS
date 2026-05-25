@@ -21,6 +21,7 @@
 #include "ts_variable.h"
 #include "ts_rule_engine.h"
 #include "ts_source_manager.h"
+#include "ts_temp_source.h"
 #include "ts_action_manager.h"
 #include "ts_config_pack.h"
 #include "ts_cert.h"
@@ -29,6 +30,7 @@
 #include "esp_heap_caps.h"
 #include "esp_crt_bundle.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -219,15 +221,53 @@ static esp_err_t api_automation_variables_list(const cJSON *params, ts_api_resul
 {
     result->data = cJSON_CreateObject();
     cJSON *vars_array = cJSON_AddArrayToObject(result->data, "variables");
+    int64_t now_ms = esp_timer_get_time() / 1000;
+    const char *prefix = NULL;
+    const char *source_id = NULL;
+    size_t prefix_len = 0;
+    bool include_value = true;
+    bool include_meta = true;
+
+    if (params) {
+        cJSON *prefix_param = cJSON_GetObjectItem(params, "prefix");
+        if (prefix_param && cJSON_IsString(prefix_param) && prefix_param->valuestring) {
+            prefix = prefix_param->valuestring;
+            prefix_len = strlen(prefix);
+        }
+
+        cJSON *source_id_param = cJSON_GetObjectItem(params, "source_id");
+        if (source_id_param && cJSON_IsString(source_id_param) && source_id_param->valuestring) {
+            source_id = source_id_param->valuestring;
+        }
+
+        cJSON *include_value_param = cJSON_GetObjectItem(params, "include_value");
+        if (include_value_param && cJSON_IsBool(include_value_param)) {
+            include_value = cJSON_IsTrue(include_value_param);
+        }
+
+        cJSON *include_meta_param = cJSON_GetObjectItem(params, "include_meta");
+        if (include_meta_param && cJSON_IsBool(include_meta_param)) {
+            include_meta = cJSON_IsTrue(include_meta_param);
+        }
+    }
 
     // 遍历所有变量（使用内部迭代器）
     ts_variable_iterate_ctx_t ctx = {0};
     ts_auto_variable_t var;
     
     while (ts_variable_iterate(&ctx, &var) == ESP_OK) {
+        if (prefix_len > 0 && strncmp(var.name, prefix, prefix_len) != 0) {
+            continue;
+        }
+        if (source_id && strcmp(var.source_id, source_id) != 0) {
+            continue;
+        }
+
         cJSON *var_obj = cJSON_CreateObject();
         cJSON_AddStringToObject(var_obj, "name", var.name);
-        cJSON_AddItemToObject(var_obj, "value", value_to_json(&var.value));
+        if (include_value) {
+            cJSON_AddItemToObject(var_obj, "value", value_to_json(&var.value));
+        }
         
         // 类型字符串
         const char *type_str = "null";
@@ -241,6 +281,20 @@ static esp_err_t api_automation_variables_list(const cJSON *params, ts_api_resul
         cJSON_AddStringToObject(var_obj, "type", type_str);
         cJSON_AddBoolToObject(var_obj, "persistent", (var.flags & TS_AUTO_VAR_PERSISTENT) != 0);
         cJSON_AddBoolToObject(var_obj, "readonly", (var.flags & TS_AUTO_VAR_READONLY) != 0);
+        if (include_meta) {
+            cJSON_AddNumberToObject(var_obj, "last_change_ms", (double)var.last_change_ms);
+            cJSON_AddNumberToObject(var_obj, "last_update_ms", (double)var.last_update_ms);
+            if (var.last_update_ms > 0) {
+                int64_t age_ms = now_ms - var.last_update_ms;
+                bool stale = (age_ms < 0 || age_ms > TS_TEMP_DATA_TIMEOUT_MS);
+                if (age_ms < 0) age_ms = 0;
+                cJSON_AddNumberToObject(var_obj, "age_ms", (double)age_ms);
+                cJSON_AddBoolToObject(var_obj, "stale", stale);
+            } else {
+                cJSON_AddNullToObject(var_obj, "age_ms");
+                cJSON_AddBoolToObject(var_obj, "stale", true);
+            }
+        }
         
         if (var.source_id[0] != '\0') {
             cJSON_AddStringToObject(var_obj, "source_id", var.source_id);

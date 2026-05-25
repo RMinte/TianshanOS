@@ -1612,7 +1612,7 @@ static void ssh_exec_output_callback(const char *data, size_t len, bool is_stder
                     strncpy(var.name, full_var_name, sizeof(var.name) - 1);
                     var.value.type = TS_AUTO_VAL_STRING;
                     strncpy(var.value.str_val, s_exec_params->extracted_value, sizeof(var.value.str_val) - 1);
-                    esp_err_t ret = ts_variable_register(&var);
+                    esp_err_t ret = ts_variable_upsert(&var);
                     TS_LOGI(TAG, "Registered %s = %s (ret=%d)", full_var_name, s_exec_params->extracted_value, ret);
                 }
                 
@@ -1621,21 +1621,21 @@ static void ssh_exec_output_callback(const char *data, size_t len, bool is_stder
                 strncpy(var.name, full_var_name, sizeof(var.name) - 1);
                 var.value.type = TS_AUTO_VAL_STRING;
                 strncpy(var.value.str_val, "running", sizeof(var.value.str_val) - 1);
-                ts_variable_register(&var);
+                ts_variable_upsert(&var);
                 
                 /* 更新 host */
                 snprintf(full_var_name, sizeof(full_var_name), "%s.host", s_exec_params->var_name);
                 strncpy(var.name, full_var_name, sizeof(var.name) - 1);
                 var.value.type = TS_AUTO_VAL_STRING;
                 strncpy(var.value.str_val, s_exec_params->config.host ? s_exec_params->config.host : "", sizeof(var.value.str_val) - 1);
-                ts_variable_register(&var);
+                ts_variable_upsert(&var);
                 
                 /* 更新 timestamp */
                 snprintf(full_var_name, sizeof(full_var_name), "%s.timestamp", s_exec_params->var_name);
                 strncpy(var.name, full_var_name, sizeof(var.name) - 1);
                 var.value.type = TS_AUTO_VAL_INT;
                 var.value.int_val = (int32_t)(esp_timer_get_time() / 1000000);
-                ts_variable_register(&var);
+                ts_variable_upsert(&var);
                 
                 TS_LOGD(TAG, "Continuous mode: realtime update %s", s_exec_params->var_name);
             }
@@ -1900,49 +1900,49 @@ static void ssh_exec_task(void *arg)
         strncpy(var.name, full_var_name, sizeof(var.name) - 1);
         var.value.type = TS_AUTO_VAL_STRING;
         strncpy(var.value.str_val, status_str, sizeof(var.value.str_val) - 1);
-        ts_variable_register(&var);
+        ts_variable_upsert(&var);
         
         /* exit_code (int) */
         snprintf(full_var_name, sizeof(full_var_name), "%s.exit_code", params->var_name);
         strncpy(var.name, full_var_name, sizeof(var.name) - 1);
         var.value.type = TS_AUTO_VAL_INT;
         var.value.int_val = exit_code;
-        ts_variable_register(&var);
+        ts_variable_upsert(&var);
         
         /* extracted (string) */
         snprintf(full_var_name, sizeof(full_var_name), "%s.extracted", params->var_name);
         strncpy(var.name, full_var_name, sizeof(var.name) - 1);
         var.value.type = TS_AUTO_VAL_STRING;
         strncpy(var.value.str_val, extracted_value ? extracted_value : "", sizeof(var.value.str_val) - 1);
-        ts_variable_register(&var);
+        ts_variable_upsert(&var);
         
         /* expect_matched (bool) */
         snprintf(full_var_name, sizeof(full_var_name), "%s.expect_matched", params->var_name);
         strncpy(var.name, full_var_name, sizeof(var.name) - 1);
         var.value.type = TS_AUTO_VAL_BOOL;
         var.value.bool_val = expect_matched;
-        ts_variable_register(&var);
+        ts_variable_upsert(&var);
         
         /* fail_matched (bool) */
         snprintf(full_var_name, sizeof(full_var_name), "%s.fail_matched", params->var_name);
         strncpy(var.name, full_var_name, sizeof(var.name) - 1);
         var.value.type = TS_AUTO_VAL_BOOL;
         var.value.bool_val = fail_matched;
-        ts_variable_register(&var);
+        ts_variable_upsert(&var);
         
         /* host (string) */
         snprintf(full_var_name, sizeof(full_var_name), "%s.host", params->var_name);
         strncpy(var.name, full_var_name, sizeof(var.name) - 1);
         var.value.type = TS_AUTO_VAL_STRING;
         strncpy(var.value.str_val, params->config.host ? params->config.host : "", sizeof(var.value.str_val) - 1);
-        ts_variable_register(&var);
+        ts_variable_upsert(&var);
         
         /* timestamp (int) */
         snprintf(full_var_name, sizeof(full_var_name), "%s.timestamp", params->var_name);
         strncpy(var.name, full_var_name, sizeof(var.name) - 1);
         var.value.type = TS_AUTO_VAL_INT;
         var.value.int_val = (int32_t)(esp_timer_get_time() / 1000000);  /* 秒级时间戳 */
-        ts_variable_register(&var);
+        ts_variable_upsert(&var);
         
         TS_LOGI(TAG, "Synced SSH result to automation variables: %s (7 vars)", params->var_name);
     }
@@ -2258,49 +2258,49 @@ esp_err_t ts_webui_ssh_exec_start_ex(const char *host, uint16_t port,
         strncpy(var.name, full_var_name, sizeof(var.name) - 1);
         var.value.type = TS_AUTO_VAL_STRING;
         strncpy(var.value.str_val, "running", sizeof(var.value.str_val) - 1);
-        ts_variable_register(&var);
+        ts_variable_upsert(&var);
         
         /* 初始化 exit_code 为 -1（未完成） */
         snprintf(full_var_name, sizeof(full_var_name), "%s.exit_code", params->var_name);
         strncpy(var.name, full_var_name, sizeof(var.name) - 1);
         var.value.type = TS_AUTO_VAL_INT;
         var.value.int_val = -1;
-        ts_variable_register(&var);
+        ts_variable_upsert(&var);
         
         /* 初始化 extracted 为空 */
         snprintf(full_var_name, sizeof(full_var_name), "%s.extracted", params->var_name);
         strncpy(var.name, full_var_name, sizeof(var.name) - 1);
         var.value.type = TS_AUTO_VAL_STRING;
         var.value.str_val[0] = '\0';
-        ts_variable_register(&var);
+        ts_variable_upsert(&var);
         
         /* 初始化 expect_matched 为 false */
         snprintf(full_var_name, sizeof(full_var_name), "%s.expect_matched", params->var_name);
         strncpy(var.name, full_var_name, sizeof(var.name) - 1);
         var.value.type = TS_AUTO_VAL_BOOL;
         var.value.bool_val = false;
-        ts_variable_register(&var);
+        ts_variable_upsert(&var);
         
         /* 初始化 fail_matched 为 false */
         snprintf(full_var_name, sizeof(full_var_name), "%s.fail_matched", params->var_name);
         strncpy(var.name, full_var_name, sizeof(var.name) - 1);
         var.value.type = TS_AUTO_VAL_BOOL;
         var.value.bool_val = false;
-        ts_variable_register(&var);
+        ts_variable_upsert(&var);
         
         /* 初始化 host */
         snprintf(full_var_name, sizeof(full_var_name), "%s.host", params->var_name);
         strncpy(var.name, full_var_name, sizeof(var.name) - 1);
         var.value.type = TS_AUTO_VAL_STRING;
         strncpy(var.value.str_val, params->config.host ? params->config.host : "", sizeof(var.value.str_val) - 1);
-        ts_variable_register(&var);
+        ts_variable_upsert(&var);
         
         /* 初始化 timestamp */
         snprintf(full_var_name, sizeof(full_var_name), "%s.timestamp", params->var_name);
         strncpy(var.name, full_var_name, sizeof(var.name) - 1);
         var.value.type = TS_AUTO_VAL_INT;
         var.value.int_val = (int32_t)(esp_timer_get_time() / 1000000);  /* 秒级时间戳 */
-        ts_variable_register(&var);
+        ts_variable_upsert(&var);
         
         TS_LOGI(TAG, "Initialized variables for %s (status=running)", params->var_name);
     }

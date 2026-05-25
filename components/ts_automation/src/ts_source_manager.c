@@ -1057,7 +1057,7 @@ static int auto_discover_json_fields(ts_auto_source_t *src, cJSON *json_data,
                     new_var.value = value;
                     new_var.flags = 0;
                     
-                    ret = ts_variable_register(&new_var);
+                    ret = ts_variable_upsert(&new_var);
                     if (ret == ESP_OK) {
                         ESP_LOGD(TAG, "Auto-discovered variable: %s", var_name);
                         count++;
@@ -1093,7 +1093,7 @@ static int auto_discover_json_fields(ts_auto_source_t *src, cJSON *json_data,
                     new_var.value = value;
                     new_var.flags = 0;
                     
-                    ret = ts_variable_register(&new_var);
+                    ret = ts_variable_upsert(&new_var);
                     if (ret == ESP_OK) {
                         count++;
                     }
@@ -1167,7 +1167,7 @@ static int process_source_mappings(ts_auto_source_t *src, cJSON *json_data)
             new_var.value = value;
             new_var.flags = 0;  // 可读写
             
-            ret = ts_variable_register(&new_var);
+            ret = ts_variable_upsert(&new_var);
             if (ret == ESP_OK) {
                 ESP_LOGD(TAG, "Auto-created variable '%s' from mapping", mapping->var_name);
                 processed++;

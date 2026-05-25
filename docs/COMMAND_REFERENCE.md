@@ -196,20 +196,16 @@ fan --load
 temp --status
 temp --status --json
 
-# 获取当前温度
-temp --get
+# 列出温度源
+temp --providers
+temp --providers --json
 
 # 设置测试温度（调试用）
-temp --manual --enable --value 45
-temp --manual --disable            # 禁用测试温度
-
-# 绑定温度变量
-temp --bind --variable "agx.cpu_temp"
-temp --unbind                      # 解除绑定
+temp --set --value 45
 
 # 切换温度模式
-temp --select --source variable
-temp --select --source sensor
+temp --mode --value manual
+temp --mode --value auto
 ```
 
 ### LED 控制命令

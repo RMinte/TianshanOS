@@ -3037,10 +3037,78 @@ button.btn-gray:hover,
     margin-left: 2px;
 }
 
+.fan-auto-info-btn {
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    margin-left: 6px;
+    border: 1px solid var(--border-color);
+    border-radius: 50%;
+    background: var(--bg-elevated);
+    color: var(--text-muted);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    vertical-align: 16px;
+    cursor: pointer;
+    transition: all var(--t-fast);
+}
+
+.fan-auto-info-btn:hover {
+    color: var(--text-primary);
+    background: var(--bg-card);
+    border-color: var(--text-muted);
+}
+
+.fan-auto-info-btn i {
+    font-size: 0.95rem;
+    line-height: 1;
+}
+
 .fan-rpm-small {
     font-size: 0.85rem;
     color: var(--text-light);
     margin-top: 6px;
+}
+
+.fan-auto-help-content {
+    max-width: 460px;
+}
+
+.fan-auto-help-body {
+    color: var(--text-secondary);
+    font-size: 0.92rem;
+    line-height: 1.65;
+}
+
+.fan-auto-help-body p {
+    margin: 0 0 12px;
+}
+
+.fan-auto-help-body p:last-child {
+    margin-bottom: 0;
+}
+
+.fan-auto-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+    margin: -4px 0 14px;
+    font-size: 0.75rem;
+    color: var(--text-light);
+}
+
+.fan-auto-meta span {
+    padding: 3px 6px;
+    border-radius: 6px;
+    background: var(--bg-elevated);
+    white-space: nowrap;
+}
+
+.fan-auto-meta.is-guard span,
+.fan-auto-meta.is-stale span {
+    color: var(--error);
 }
 
 /* 模式选择Tabs */

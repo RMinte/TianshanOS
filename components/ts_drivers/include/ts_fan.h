@@ -46,9 +46,18 @@ typedef enum {
 typedef enum {
     TS_FAN_MODE_OFF,        /**< 风扇关闭 */
     TS_FAN_MODE_MANUAL,     /**< 手动模式（固定占空比） */
-    TS_FAN_MODE_AUTO,       /**< 自动模式（简单温度控制） */
+    TS_FAN_MODE_AUTO,       /**< 自动模式（自适应温度控制） */
     TS_FAN_MODE_CURVE,      /**< 曲线模式（自定义温度曲线） */
 } ts_fan_mode_t;
+
+/** Adaptive auto state */
+typedef enum {
+    TS_FAN_AUTO_STATE_IDLE = 0,      /**< Not running adaptive control */
+    TS_FAN_AUTO_STATE_BASELINE,      /**< Using curve baseline only */
+    TS_FAN_AUTO_STATE_ACTIVE,        /**< Adaptive control active */
+    TS_FAN_AUTO_STATE_GUARD,         /**< Hard guard active */
+    TS_FAN_AUTO_STATE_STALE,         /**< Temperature input stale/invalid */
+} ts_fan_auto_state_t;
 
 /** Temperature curve point */
 typedef struct {
@@ -80,6 +89,15 @@ typedef struct {
     bool is_running;            /**< 是否运行中 */
     bool enabled;               /**< 是否启用 */
     bool fault;                 /**< 故障标志 */
+    int16_t control_temp;        /**< AUTO 控制温度 0.1°C */
+    int16_t guard_temp;          /**< AUTO 保护温度 0.1°C */
+    int16_t predicted_temp;      /**< AUTO 预测温度 0.1°C */
+    float slope_c_per_min;       /**< AUTO 温度斜率 °C/min */
+    float controller_gain;       /**< AUTO 自适应增益 */
+    float cooling_response;      /**< AUTO 最近散热响应 °C/min */
+    ts_fan_auto_state_t auto_state; /**< AUTO 控制状态 */
+    bool guard_active;           /**< AUTO 硬保护是否激活 */
+    bool temp_stale;             /**< AUTO 温度输入是否失效/过期 */
 } ts_fan_status_t;
 
 /*===========================================================================*/

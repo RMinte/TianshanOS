@@ -1458,6 +1458,13 @@ function updateFanInfo(data) {
             const rpm = fan.rpm || 0;
             const isManual = mode === 'manual';
             const isOff = mode === 'off';
+            const hasAutoTelemetry = mode === 'auto' && (
+                fan.auto_state ||
+                typeof fan.guard_temperature === 'number' ||
+                typeof fan.predicted_temperature === 'number' ||
+                fan.temp_stale === true ||
+                fan.guard_active === true
+            );
             
             const _off = typeof t === 'function' ? t('fanPage.modeOff') : '关闭';
             const _manual = typeof t === 'function' ? t('fanPage.modeManual') : '手动';
@@ -1473,6 +1480,28 @@ function updateFanInfo(data) {
             const _fanTitle = typeof t === 'function' ? t('fanPage.fanN', { id: fan.id }) : `风扇 ${fan.id}`;
             const _speedAdjust = typeof t === 'function' ? t('fanPage.speedAdjust') : '转速调节';
             const _manualHint = typeof t === 'function' ? t('fanPage.manualModeHint') : '切换到手动模式后可调节';
+            const _autoHelpTitle = typeof t === 'function' ? t('fanPage.autoHelpTitle') : '自动模式有什么不同？';
+            const _autoHelpTitleSafe = typeof escapeHtml === 'function' ? escapeHtml(_autoHelpTitle) : _autoHelpTitle;
+            const autoStateLabels = {
+                idle: typeof t === 'function' ? t('fanPage.autoStateIdle') : '待机',
+                baseline: typeof t === 'function' ? t('fanPage.autoStateBaseline') : '基线',
+                active: typeof t === 'function' ? t('fanPage.autoStateActive') : '自适应',
+                guard: typeof t === 'function' ? t('fanPage.autoStateGuard') : '保护',
+                stale: typeof t === 'function' ? t('fanPage.autoStateStale') : '失效',
+                unknown: typeof t === 'function' ? t('fanPage.autoStateUnknown') : '未知'
+            };
+            const autoState = fan.auto_state || 'unknown';
+            const autoStateText = autoStateLabels[autoState] || autoState;
+            const guardLabel = typeof t === 'function' ? t('fanPage.guardTempShort') : '保护';
+            const predictedLabel = typeof t === 'function' ? t('fanPage.predictedTempShort') : '预测';
+            const autoMeta = hasAutoTelemetry ? `
+                <div class="fan-auto-meta ${fan.guard_active ? 'is-guard' : ''} ${fan.temp_stale ? 'is-stale' : ''}">
+                    <span>${autoStateText}</span>
+                    ${typeof fan.guard_temperature === 'number' ? `<span>${guardLabel} ${fan.guard_temperature.toFixed(1)}°C</span>` : ''}
+                    ${typeof fan.predicted_temperature === 'number' ? `<span>${predictedLabel} ${fan.predicted_temperature.toFixed(1)}°C</span>` : ''}
+                    ${typeof fan.slope_c_per_min === 'number' ? `<span>${fan.slope_c_per_min.toFixed(2)}°C/min</span>` : ''}
+                </div>
+            ` : '';
             
             return `
             <div class="fan-card ${isOff ? 'is-off' : ''}">
@@ -1485,8 +1514,10 @@ function updateFanInfo(data) {
                 <div class="fan-speed-display">
                     <span class="fan-speed-num">${displayDuty}</span>
                     <span class="fan-speed-percent">%</span>
+                    ${mode === 'auto' ? `<button type="button" class="fan-auto-info-btn" onclick="showFanAutoHelpModal()" title="${_autoHelpTitleSafe}" aria-label="${_autoHelpTitleSafe}"><i class="ri-information-line"></i></button>` : ''}
                     ${rpm > 0 ? `<div class="fan-rpm-small">${rpm} RPM</div>` : ''}
                 </div>
+                ${autoMeta}
                 <div class="fan-mode-tabs">
                     <button class="fan-mode-tab ${mode === 'off' ? 'active off' : ''}" onclick="setFanMode(${fan.id}, 'off')">${_off}</button>
                     <button class="fan-mode-tab ${mode === 'manual' ? 'active manual' : ''}" onclick="setFanMode(${fan.id}, 'manual')">${_manual}</button>
@@ -1510,6 +1541,49 @@ function updateFanInfo(data) {
     } else {
         container.innerHTML = '<p class="text-muted">' + (typeof t === 'function' ? t('fanPage.noFans') : '无可用风扇') + '</p>';
     }
+}
+
+function showFanAutoHelpModal() {
+    const existing = document.getElementById('fan-auto-help-modal');
+    if (existing) existing.remove();
+
+    const modal = document.createElement('div');
+    modal.id = 'fan-auto-help-modal';
+    modal.className = 'modal fan-auto-help-modal';
+    modal.onclick = (event) => {
+        if (event.target === modal) closeFanAutoHelpModal();
+    };
+
+    const title = typeof t === 'function' ? t('fanPage.autoHelpTitle') : '自动模式有什么不同？';
+    const closeLabel = typeof t === 'function' ? t('common.close') : '关闭';
+    const safeTitle = typeof escapeHtml === 'function' ? escapeHtml(title) : title;
+    const safeCloseLabel = typeof escapeHtml === 'function' ? escapeHtml(closeLabel) : closeLabel;
+    const paragraphs = [
+        typeof t === 'function' ? t('fanPage.autoHelpIntro') : '自动模式会根据设备当前的散热状态实时调节风扇，而不是只按一条固定曲线运行。',
+        typeof t === 'function' ? t('fanPage.autoHelpCurveDiff') : '曲线模式更像一张固定规则表：温度到多少，风扇就转到多少。它稳定、可预期，适合你想手动定义散热策略的场景。',
+        typeof t === 'function' ? t('fanPage.autoHelpAdaptive') : '自动模式会在曲线的基础上继续判断温度变化趋势。如果设备正在快速升温，它会提前加速；如果温度稳定下降，它才会慢慢把转速降下来。',
+        typeof t === 'function' ? t('fanPage.autoHelpSafety') : '这样做的目的，是让风扇不只是看到温度后再反应，而是尽量提前压住温度波动。日常轻载时保持更安静，高负载或温度异常时优先保护设备安全。'
+    ];
+
+    modal.innerHTML = `
+        <div class="modal-content modal-sm fan-auto-help-content">
+            <div class="modal-header">
+                <h2><i class="ri-information-line"></i> ${safeTitle}</h2>
+                <button class="modal-close" onclick="closeFanAutoHelpModal()">&times;</button>
+            </div>
+            <div class="modal-body fan-auto-help-body">
+                ${paragraphs.map(text => `<p>${typeof escapeHtml === 'function' ? escapeHtml(text) : text}</p>`).join('')}
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-service-style" onclick="closeFanAutoHelpModal()">${safeCloseLabel}</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+}
+
+function closeFanAutoHelpModal() {
+    document.getElementById('fan-auto-help-modal')?.remove();
 }
 
 // 更新滑块 UI（实时反馈）
@@ -1844,30 +1918,41 @@ function renderTempVarBindings() {
 function buildVarSelectOptions(selectedName) {
     if (!availableTempVars || availableTempVars.length === 0) return '';
     
-    const priorityVars = availableTempVars.filter(v => v.name.includes('temp'));
-    const otherVars = availableTempVars.filter(v => !v.name.includes('temp'));
+    const isPriorityTempVar = (v) => {
+        const name = (v.name || '').toLowerCase();
+        return name.includes('temp') || name.includes('tj') ||
+            name.includes('cpu') || name.includes('gpu');
+    };
+    const renderOption = (v) => {
+        const name = v.name || '';
+        const safeName = typeof escapeHtml === 'function' ? escapeHtml(name) : name;
+        const valueText = typeof v.value === 'number' ? ` (${v.value.toFixed(1)}°C)` : '';
+        const sel = name === selectedName ? 'selected' : '';
+        return `<option value="${safeName}" ${sel}>${safeName}${valueText}</option>`;
+    };
+    const priorityVars = availableTempVars.filter(isPriorityTempVar);
+    const otherVars = availableTempVars.filter(v => !isPriorityTempVar(v));
     
     let html = '';
     if (priorityVars.length > 0) {
         html += `<optgroup label="${t('dataWidget.tempVariables') || '温度变量'}">`;
         priorityVars.forEach(v => {
-            const sel = v.name === selectedName ? 'selected' : '';
-            html += `<option value="${v.name}" ${sel}>${v.name} (${v.value?.toFixed?.(1) ?? v.value})</option>`;
+            html += renderOption(v);
         });
         html += `</optgroup>`;
     }
     if (otherVars.length > 0) {
         html += `<optgroup label="${t('dataWidget.otherNumericVariables') || '其他数值变量'}">`;
         otherVars.forEach(v => {
-            const sel = v.name === selectedName ? 'selected' : '';
-            html += `<option value="${v.name}" ${sel}>${v.name} (${v.value?.toFixed?.(1) ?? v.value})</option>`;
+            html += renderOption(v);
         });
         html += `</optgroup>`;
     }
     
     /* 如果已选变量不在列表中，追加显示 */
     if (selectedName && !availableTempVars.find(v => v.name === selectedName)) {
-        html += `<option value="${selectedName}" selected>${selectedName} (${t('common.current') || '当前'})</option>`;
+        const safeName = typeof escapeHtml === 'function' ? escapeHtml(selectedName) : selectedName;
+        html += `<option value="${safeName}" selected>${safeName} (${t('common.current') || '当前'})</option>`;
     }
     
     return html;
@@ -1938,6 +2023,7 @@ function updateWeightedTempFormula() {
     let parts = [];
     let weightedSum = 0;
     let totalWeight = 0;
+    let allValuesKnown = true;
     
     validBindings.forEach(b => {
         const varInfo = availableTempVars.find(v => v.name === b.name);
@@ -1946,14 +2032,17 @@ function updateWeightedTempFormula() {
             parts.push(`${val.toFixed(1)}°C × ${b.weight}`);
             weightedSum += val * b.weight;
         } else {
-            parts.push(`??°C × ${b.weight}`);
+            allValuesKnown = false;
+            parts.push(`--°C × ${b.weight}`);
         }
         totalWeight += b.weight;
     });
     
     let formula = parts.join(' + ');
-    if (totalWeight > 0.001) {
+    if (allValuesKnown && totalWeight > 0.001) {
         formula += ` = <span class="result">${(weightedSum / totalWeight).toFixed(1)}°C</span>`;
+    } else {
+        formula += ` = <span class="result">${t('fanPage.variableNoData')}</span>`;
     }
     
     formulaEl.innerHTML = `${t('fanPage.weightedTemp')}: ${formula}`;
@@ -2221,14 +2310,22 @@ async function loadTempSourceStatus() {
 async function loadVariableBindStatus() {
     // 两个 API 调用独立 try-catch，互不阻塞
     try {
-        const varsResult = await api.call('automation.variables.list');
+        const varsResult = await api.call('automation.variables.list', {
+            include_value: true,
+            include_meta: false
+        });
         if (varsResult.code === 0 && varsResult.data?.variables) {
-            const tempVars = varsResult.data.variables.filter(v =>
-                v.type === 'float' || v.type === 'double' || v.type === 'number' ||
-                v.name.includes('temp') || v.name.includes('cpu') || v.name.includes('gpu')
-            );
+            const tempVars = varsResult.data.variables.filter(v => {
+                const name = (v.name || '').toLowerCase();
+                return v.type === 'float' || v.type === 'double' ||
+                    v.type === 'number' || v.type === 'int' ||
+                    name.includes('temp') || name.includes('cpu') ||
+                    name.includes('gpu') || name.includes('tj');
+            });
             availableTempVars = tempVars.length > 0 ? tempVars : varsResult.data.variables.filter(v =>
-                v.type === 'float' || v.type === 'double' || typeof v.value === 'number'
+                v.type === 'float' || v.type === 'double' ||
+                v.type === 'number' || v.type === 'int' ||
+                typeof v.value === 'number'
             );
         }
     } catch (e) {
@@ -2248,16 +2345,57 @@ async function loadVariableBindStatus() {
                     name: bv.name,
                     weight: bv.weight ?? 1.0
                 }));
+                boundVars.forEach(bv => {
+                    if (!bv.name) return;
+                    let existing = availableTempVars.find(v => v.name === bv.name);
+                    if (!existing) {
+                        existing = { name: bv.name, type: typeof bv.value === 'number' ? 'float' : 'unknown' };
+                        availableTempVars.push(existing);
+                    }
+                    if (typeof bv.value === 'number') {
+                        existing.value = bv.value;
+                    }
+                    existing.valid = bv.valid;
+                    existing.stale = bv.stale;
+                    existing.last_update_ms = bv.last_update_ms;
+                    existing.age_ms = bv.age_ms;
+                });
             } else if (data.bound_variable) {
                 tempVarBindings = [{ name: data.bound_variable, weight: 1.0 }];
             } else {
                 tempVarBindings = [];
             }
             
+            const positiveBoundVars = boundVars.filter(bv => (bv.weight ?? 1.0) > 0.001);
+            const positiveCount = typeof data.bound_total_count === 'number'
+                ? data.bound_total_count : positiveBoundVars.length;
+            const validCount = typeof data.bound_valid_count === 'number'
+                ? data.bound_valid_count
+                : positiveBoundVars.filter(bv => bv.valid === true).length;
+            const staleCount = positiveBoundVars.filter(bv => bv.stale === true).length;
+            const freshCount = Math.max(0, positiveCount - staleCount);
+            const partialStale = data.partial_stale === true ||
+                (positiveCount > 0 && validCount < positiveCount);
+            const hasWeightedTemp = typeof data.weighted_temp_c === 'number';
+
             if (statusEl) {
                 if (tempVarBindings.length > 0) {
-                    statusEl.textContent = t('fanPage.boundVarCount', { count: tempVarBindings.length });
-                    statusEl.className = 'badge badge-success';
+                    if (positiveCount > 0 && validCount === 0 && staleCount === positiveCount) {
+                        statusEl.textContent = t('fanPage.boundVarsStale', { count: tempVarBindings.length });
+                        statusEl.className = 'badge badge-warning';
+                    } else if (positiveCount > 0 && partialStale && validCount > 0) {
+                        statusEl.textContent = t('fanPage.boundVarsPartialStale', { fresh: validCount, count: positiveCount });
+                        statusEl.className = 'badge badge-warning';
+                    } else if (positiveCount > 0 && !hasWeightedTemp) {
+                        statusEl.textContent = t('fanPage.boundVarsInvalid', { count: tempVarBindings.length });
+                        statusEl.className = 'badge badge-warning';
+                    } else if (positiveCount === 0) {
+                        statusEl.textContent = t('fanPage.boundVarsInvalid', { count: tempVarBindings.length });
+                        statusEl.className = 'badge badge-warning';
+                    } else {
+                        statusEl.textContent = t('fanPage.boundVarCount', { count: tempVarBindings.length });
+                        statusEl.className = 'badge badge-success';
+                    }
                 } else {
                     statusEl.textContent = t('fanPage.unbound');
                     statusEl.className = 'badge badge-secondary';
@@ -2265,11 +2403,21 @@ async function loadVariableBindStatus() {
             }
             
             const tempEl = document.getElementById('fan-curve-temp-current');
-            if (tempEl && typeof data.weighted_temp_c === 'number') {
+            if (tempEl && hasWeightedTemp) {
                 tempEl.textContent = `${data.weighted_temp_c.toFixed(1)}°C`;
                 tempEl.style.color = 'var(--primary)';
+            } else if (tempEl && positiveCount > 0) {
+                if (validCount === 0 && staleCount === positiveCount) {
+                    tempEl.textContent = t('fanPage.boundVarsStaleShort');
+                } else if (partialStale && validCount > 0) {
+                    tempEl.textContent = t('fanPage.boundVarsPartialStale', { fresh: validCount, count: positiveCount });
+                } else {
+                    tempEl.textContent = freshCount === 0 ? t('fanPage.boundVarsStaleShort') : t('fanPage.boundVarsInvalidShort');
+                }
+                tempEl.style.color = 'var(--warning)';
             } else if (tempEl && typeof data.temperature_c === 'number') {
                 tempEl.textContent = `${data.temperature_c.toFixed(1)}°C`;
+                tempEl.style.color = '';
             }
         }
     } catch (e) {
@@ -3375,7 +3523,7 @@ async function refreshDataWidgets() {
         const variables = {};
         if (varNames.size > 0) {
             try {
-                const resp = await api.call('automation.variables.list');
+                const resp = await api.call('automation.variables.list', { include_meta: false });
                 if (resp.code === 0 && resp.data?.variables) {
                     for (const v of resp.data.variables) {
                         if (varNames.has(v.name) && v.value !== undefined) {
@@ -7812,8 +7960,7 @@ function getSignalIcon(rssi) {
 }
 
 function escapeHtml(str) {
-    if (!str) return '';
-    return str.replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+    return String(str ?? '').replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
 }
 
 function connectWifi(ssid) {
@@ -9850,7 +9997,10 @@ async function showCommandVariables(varName) {
     modal.classList.remove('hidden');
     
     try {
-        const result = await api.call('automation.variables.list');
+        const result = await api.call('automation.variables.list', {
+            prefix: `${varName}.`,
+            include_meta: true
+        });
         if (result.code === 0 && result.data && result.data.variables) {
             // 过滤出属于该指令的变量
             // SSH 指令变量的 source_id 就是 varName（不带 cmd. 前缀）
@@ -9879,7 +10029,7 @@ async function showCommandVariables(varName) {
                                 <td><code class="variable-name">${v.name}</code></td>
                                 <td><span class="type-badge type-${v.type || 'unknown'}">${v.type || '-'}</span></td>
                                 <td class="variable-value">${formatVariableValue(v.value, v.type)}</td>
-                                <td class="variable-time">${v.updated_at ? formatTimeAgo(v.updated_at) : '-'}</td>
+                                <td class="variable-time">${formatVariableUpdateTime(v)}</td>
                             </tr>
                         `).join('')}
                     </tbody>
@@ -14857,7 +15007,7 @@ function getLevelName(level) {
 
 function escapeHtml(text) {
     const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' };
-    return text.replace(/[&<>"']/g, m => map[m]);
+    return String(text ?? '').replace(/[&<>"']/g, m => map[m]);
 }
 
 function escapeRegex(text) {
@@ -17541,7 +17691,7 @@ async function refreshVariables() {
     container.innerHTML = '<div class="loading-small">' + t('common.loading') + '</div>';
     
     try {
-        const result = await api.call('automation.variables.list');
+        const result = await api.call('automation.variables.list', { include_meta: true });
         if (result.code === 0 && result.data && result.data.variables) {
             allVariables = result.data.variables;
             if (countBadge) countBadge.textContent = allVariables.length;
@@ -17614,7 +17764,7 @@ function renderVariables(variables) {
                                     <td><code class="variable-name">${v.name}</code></td>
                                     <td><span class="type-badge type-${v.type || 'unknown'}">${v.type || '-'}</span></td>
                                     <td class="variable-value">${formatVariableValue(v.value, v.type)}</td>
-                                    <td class="variable-time">${v.updated_at ? formatTimeAgo(v.updated_at) : '-'}</td>
+                                    <td class="variable-time">${formatVariableUpdateTime(v)}</td>
                                 </tr>
                             `).join('')}
                         </tbody>
@@ -17664,12 +17814,31 @@ function formatTimeAgo(timestamp) {
     const now = Date.now();
     const ts = typeof timestamp === 'number' ? timestamp * 1000 : new Date(timestamp).getTime();
     const diff = now - ts;
-    
-    if (diff < 1000) return '刚刚';
-    if (diff < 60000) return `${Math.floor(diff / 1000)}秒前`;
-    if (diff < 3600000) return `${Math.floor(diff / 60000)}分钟前`;
-    if (diff < 86400000) return `${Math.floor(diff / 3600000)}小时前`;
+
+    if (diff >= 0 && diff < 86400000) {
+        return formatAgeMs(diff);
+    }
     return new Date(ts).toLocaleString();
+}
+
+function formatAgeMs(ageMs) {
+    const age = Math.max(0, ageMs);
+    if (age < 1000) return t('common.justNow');
+    if (age < 60000) return `${Math.floor(age / 1000)}${t('common.secondsAgo')}`;
+    if (age < 3600000) return `${Math.floor(age / 60000)}${t('common.minutesAgo')}`;
+    if (age < 86400000) return `${Math.floor(age / 3600000)}${t('common.hoursAgo')}`;
+    return `${Math.floor(age / 86400000)}${t('common.daysAgo')}`;
+}
+
+function formatVariableUpdateTime(variable) {
+    if (!variable) return '-';
+    if (typeof variable.age_ms === 'number') {
+        return formatAgeMs(variable.age_ms);
+    }
+    if (variable.updated_at) {
+        return formatTimeAgo(variable.updated_at);
+    }
+    return '-';
 }
 
 /**
@@ -17677,7 +17846,7 @@ function formatTimeAgo(timestamp) {
  */
 function escapeHtml(text) {
     const div = document.createElement('div');
-    div.textContent = text;
+    div.textContent = String(text ?? '');
     return div.innerHTML;
 }
 
@@ -18925,7 +19094,10 @@ async function showVariableSelectModal(targetInputId, mode = 'insert') {
     
     // 加载变量列表
     try {
-        const result = await api.call('automation.variables.list');
+        const result = await api.call('automation.variables.list', {
+            include_value: false,
+            include_meta: false
+        });
         const variables = result.data?.variables || [];
         
         document.getElementById('variable-select-loading').style.display = 'none';
@@ -18949,29 +19121,38 @@ async function showVariableSelectModal(targetInputId, mode = 'insert') {
         let html = '';
         for (const [sourceId, vars] of Object.entries(grouped)) {
             const groupId = `var-group-${sourceId.replace(/[^a-zA-Z0-9]/g, '_')}`;
-            html += `<div class="var-group" data-source="${sourceId}">
+            const safeSourceId = escapeHtml(sourceId);
+            const sourceLabel = sourceId === '_system'
+                ? (typeof t === 'function' ? t('automation.systemVariables') : 'System Variables')
+                : sourceId;
+            html += `<div class="var-group" data-source="${safeSourceId}">
                 <div class="var-group-header" style="padding:10px 12px;background:var(--bg-elevated);font-weight:600;border-bottom:1px solid var(--border);cursor:pointer;display:flex;align-items:center;justify-content:space-between;"
                      onclick="toggleVarGroup('${groupId}')">
-                    <span><i class="ri-archive-line"></i> ${sourceId === '_system' ? (typeof t === 'function' ? t('automation.systemVariables') : 'System Variables') : sourceId} <span style="font-weight:normal;color:var(--text-secondary);">(${vars.length})</span></span>
+                    <span><i class="ri-archive-line"></i> ${escapeHtml(sourceLabel)} <span style="font-weight:normal;color:var(--text-secondary);">(${vars.length})</span></span>
                     <span class="var-group-arrow" id="${groupId}-arrow" style="transition:transform 0.2s;">▶</span>
                 </div>
                 <div class="var-group-items" id="${groupId}" style="display:none;">`;
             
             vars.forEach(v => {
                 const typeIcon = { 'bool': '<i class="ri-record-circle-fill"></i>', 'int': '<i class="ri-numbers-line"></i>', 'float': '<i class="ri-bar-chart-line"></i>', 'string': '<i class="ri-file-text-line"></i>' }[v.type] || '<i class="ri-file-list-line"></i>';
-                const displayValue = v.value !== undefined ? String(v.value).substring(0, 30) : '-';
+                const rawName = v.name || '';
+                const safeName = escapeHtml(rawName);
+                const displayMeta = v.value !== undefined ? String(v.value).substring(0, 30) : (v.type || '-');
+                const metaLabel = v.value !== undefined
+                    ? (typeof t === 'function' ? t('sshPage.varTableValue') : '当前值')
+                    : (typeof t === 'function' ? t('common.type') : '类型');
                 html += `
-                    <div class="var-select-item" data-name="${v.name}" data-source="${sourceId}" style="
+                    <div class="var-select-item" data-name="${safeName}" data-source="${safeSourceId}" style="
                         display:flex;align-items:center;padding:10px 12px;padding-left:24px;
                         border-bottom:1px solid var(--border);cursor:pointer;
                         transition:background 0.2s;"
                         onmouseover="this.style.background='var(--bg-hover)'"
                         onmouseout="this.style.background='transparent'"
-                        onclick="selectVariable('${v.name}')">
+                        onclick="selectVariable(this.dataset.name)">
                         <span style="font-size:18px;margin-right:10px;">${typeIcon}</span>
                         <div style="flex:1;min-width:0;">
-                            <div style="font-weight:500;font-family:monospace;">\${${v.name}}</div>
-                            <small style="color:var(--text-secondary);">当前值: ${displayValue}${displayValue.length >= 30 ? '...' : ''}</small>
+                            <div style="font-weight:500;font-family:monospace;">\${${safeName}}</div>
+                            <small style="color:var(--text-secondary);">${escapeHtml(metaLabel)}: ${escapeHtml(displayMeta)}${displayMeta.length >= 30 ? '...' : ''}</small>
                         </div>
                         <span class="var-select-check" style="display:none;color:var(--success);font-size:20px;"><i class="ri-check-line"></i></span>
                     </div>
@@ -19525,7 +19706,10 @@ async function showSourceVariables(sourceId) {
     modal.classList.remove('hidden');
     
     try {
-        const result = await api.call('automation.variables.list');
+        const result = await api.call('automation.variables.list', {
+            source_id: sourceId,
+            include_meta: true
+        });
         if (result.code === 0 && result.data && result.data.variables) {
             // 过滤出属于该数据源的变量
             const vars = result.data.variables.filter(v => v.source_id === sourceId);
@@ -19551,7 +19735,7 @@ async function showSourceVariables(sourceId) {
                                 <td><code class="variable-name">${v.name}</code></td>
                                 <td><span class="type-badge type-${v.type || 'unknown'}">${v.type || '-'}</span></td>
                                 <td class="variable-value">${formatVariableValue(v.value, v.type)}</td>
-                                <td class="variable-time">${v.updated_at ? formatTimeAgo(v.updated_at) : '-'}</td>
+                                <td class="variable-time">${formatVariableUpdateTime(v)}</td>
                             </tr>
                         `).join('')}
                     </tbody>
@@ -21010,7 +21194,10 @@ async function openConditionVarSelector(rowId) {
     
     // 加载变量列表
     try {
-        const result = await api.call('automation.variables.list');
+        const result = await api.call('automation.variables.list', {
+            include_value: false,
+            include_meta: false
+        });
         const variables = result.data?.variables || [];
         
         document.getElementById('variable-select-loading').style.display = 'none';
@@ -21034,29 +21221,38 @@ async function openConditionVarSelector(rowId) {
         let html = '';
         for (const [sourceId, vars] of Object.entries(grouped)) {
             const groupId = `var-group-${sourceId.replace(/[^a-zA-Z0-9]/g, '_')}`;
-            html += `<div class="var-group" data-source="${sourceId}">
+            const safeSourceId = escapeHtml(sourceId);
+            const sourceLabel = sourceId === '_system'
+                ? (typeof t === 'function' ? t('automation.systemVariables') : 'System Variables')
+                : sourceId;
+            html += `<div class="var-group" data-source="${safeSourceId}">
                 <div class="var-group-header" style="padding:10px 12px;background:var(--bg-elevated);font-weight:600;border-bottom:1px solid var(--border);cursor:pointer;display:flex;align-items:center;justify-content:space-between;"
                      onclick="toggleVarGroup('${groupId}')">
-                    <span><i class="ri-archive-line"></i> ${sourceId === '_system' ? (typeof t === 'function' ? t('automation.systemVariables') : 'System Variables') : sourceId} <span style="font-weight:normal;color:var(--text-secondary);">(${vars.length})</span></span>
+                    <span><i class="ri-archive-line"></i> ${escapeHtml(sourceLabel)} <span style="font-weight:normal;color:var(--text-secondary);">(${vars.length})</span></span>
                     <span class="var-group-arrow" id="${groupId}-arrow" style="transition:transform 0.2s;">▶</span>
                 </div>
                 <div class="var-group-items" id="${groupId}" style="display:none;">`;
             
             vars.forEach(v => {
                 const typeIcon = { 'bool': '<i class="ri-record-circle-fill"></i>', 'int': '<i class="ri-numbers-line"></i>', 'float': '<i class="ri-bar-chart-line"></i>', 'string': '<i class="ri-file-text-line"></i>' }[v.type] || '<i class="ri-file-list-line"></i>';
-                const displayValue = v.value !== undefined ? String(v.value).substring(0, 30) : '-';
+                const rawName = v.name || '';
+                const safeName = escapeHtml(rawName);
+                const displayMeta = v.value !== undefined ? String(v.value).substring(0, 30) : (v.type || '-');
+                const metaLabel = v.value !== undefined
+                    ? (typeof t === 'function' ? t('sshPage.varTableValue') : '当前值')
+                    : (typeof t === 'function' ? t('common.type') : '类型');
                 html += `
-                    <div class="var-select-item" data-name="${v.name}" data-source="${sourceId}" style="
+                    <div class="var-select-item" data-name="${safeName}" data-source="${safeSourceId}" style="
                         display:flex;align-items:center;padding:10px 12px;padding-left:24px;
                         border-bottom:1px solid var(--border);cursor:pointer;
                         transition:background 0.2s;"
                         onmouseover="this.style.background='var(--bg-hover)'"
                         onmouseout="this.style.background='transparent'"
-                        onclick="selectVariable('${v.name}')">
+                        onclick="selectVariable(this.dataset.name)">
                         <span style="font-size:18px;margin-right:10px;">${typeIcon}</span>
                         <div style="flex:1;min-width:0;">
-                            <div style="font-weight:500;font-family:monospace;">${v.name}</div>
-                            <small style="color:var(--text-secondary);">当前值: ${displayValue}${displayValue.length >= 30 ? '...' : ''}</small>
+                            <div style="font-weight:500;font-family:monospace;">${safeName}</div>
+                            <small style="color:var(--text-secondary);">${escapeHtml(metaLabel)}: ${escapeHtml(displayMeta)}${displayMeta.length >= 30 ? '...' : ''}</small>
                         </div>
                     </div>
                 `;
@@ -21362,7 +21558,10 @@ async function showVariableSelectModalForCondition() {
     
     // 加载变量列表
     try {
-        const result = await api.call('automation.variables.list');
+        const result = await api.call('automation.variables.list', {
+            include_value: false,
+            include_meta: false
+        });
         const variables = result.data?.variables || [];
         
         document.getElementById('variable-select-loading').style.display = 'none';
@@ -21386,29 +21585,38 @@ async function showVariableSelectModalForCondition() {
         let html = '';
         for (const [sourceId, vars] of Object.entries(grouped)) {
             const groupId = `var-group-${sourceId.replace(/[^a-zA-Z0-9]/g, '_')}`;
-            html += `<div class="var-group" data-source="${sourceId}">
+            const safeSourceId = escapeHtml(sourceId);
+            const sourceLabel = sourceId === '_system'
+                ? (typeof t === 'function' ? t('automation.systemVariables') : 'System Variables')
+                : sourceId;
+            html += `<div class="var-group" data-source="${safeSourceId}">
                 <div class="var-group-header" style="padding:10px 12px;background:var(--bg-elevated);font-weight:600;border-bottom:1px solid var(--border);cursor:pointer;display:flex;align-items:center;justify-content:space-between;"
                      onclick="toggleVarGroup('${groupId}')">
-                    <span><i class="ri-archive-line"></i> ${sourceId === '_system' ? (typeof t === 'function' ? t('automation.systemVariables') : 'System Variables') : sourceId} <span style="font-weight:normal;color:var(--text-secondary);">(${vars.length})</span></span>
+                    <span><i class="ri-archive-line"></i> ${escapeHtml(sourceLabel)} <span style="font-weight:normal;color:var(--text-secondary);">(${vars.length})</span></span>
                     <span class="var-group-arrow" id="${groupId}-arrow" style="transition:transform 0.2s;">▶</span>
                 </div>
                 <div class="var-group-items" id="${groupId}" style="display:none;">`;
             
             vars.forEach(v => {
                 const typeIcon = { 'bool': '<i class="ri-record-circle-fill"></i>', 'int': '<i class="ri-numbers-line"></i>', 'float': '<i class="ri-bar-chart-line"></i>', 'string': '<i class="ri-file-text-line"></i>' }[v.type] || '<i class="ri-file-list-line"></i>';
-                const displayValue = v.value !== undefined ? String(v.value).substring(0, 30) : '-';
+                const rawName = v.name || '';
+                const safeName = escapeHtml(rawName);
+                const displayMeta = v.value !== undefined ? String(v.value).substring(0, 30) : (v.type || '-');
+                const metaLabel = v.value !== undefined
+                    ? (typeof t === 'function' ? t('sshPage.varTableValue') : '当前值')
+                    : (typeof t === 'function' ? t('common.type') : '类型');
                 html += `
-                    <div class="var-select-item" data-name="${v.name}" data-source="${sourceId}" style="
+                    <div class="var-select-item" data-name="${safeName}" data-source="${safeSourceId}" style="
                         display:flex;align-items:center;padding:10px 12px;padding-left:24px;
                         border-bottom:1px solid var(--border);cursor:pointer;
                         transition:background 0.2s;"
                         onmouseover="this.style.background='var(--bg-hover)'"
                         onmouseout="this.style.background='transparent'"
-                        onclick="selectVariable('${v.name}')">
+                        onclick="selectVariable(this.dataset.name)">
                         <span style="font-size:18px;margin-right:10px;">${typeIcon}</span>
                         <div style="flex:1;min-width:0;">
-                            <div style="font-weight:500;font-family:monospace;">${v.name}</div>
-                            <small style="color:var(--text-secondary);">当前值: ${displayValue}${displayValue.length >= 30 ? '...' : ''}</small>
+                            <div style="font-weight:500;font-family:monospace;">${safeName}</div>
+                            <small style="color:var(--text-secondary);">${escapeHtml(metaLabel)}: ${escapeHtml(displayMeta)}${displayMeta.length >= 30 ? '...' : ''}</small>
                         </div>
                     </div>
                 `;

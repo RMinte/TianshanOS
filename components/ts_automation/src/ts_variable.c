@@ -218,13 +218,21 @@ esp_err_t ts_variable_register(const ts_auto_variable_t *var)
     }
 
     xSemaphoreTake(s_var_ctx.mutex, portMAX_DELAY);
+    int64_t now_ms = esp_timer_get_time() / 1000;
 
     // 检查是否已存在
     int idx = find_variable_index(var->name);
     if (idx >= 0) {
         // 更新现有变量
+        int64_t last_change_ms = s_var_ctx.variables[idx].last_change_ms;
+        int64_t last_update_ms = s_var_ctx.variables[idx].last_update_ms;
+        if (!value_equal(&s_var_ctx.variables[idx].value, &var->value)) {
+            last_change_ms = now_ms;
+            last_update_ms = 0;
+        }
         memcpy(&s_var_ctx.variables[idx], var, sizeof(ts_auto_variable_t));
-        s_var_ctx.variables[idx].last_change_ms = esp_timer_get_time() / 1000;
+        s_var_ctx.variables[idx].last_change_ms = last_change_ms;
+        s_var_ctx.variables[idx].last_update_ms = last_update_ms;
         xSemaphoreGive(s_var_ctx.mutex);
         ESP_LOGD(TAG, "Updated variable: %s (type=%d)", var->name, var->value.type);
         return ESP_OK;
@@ -240,13 +248,64 @@ esp_err_t ts_variable_register(const ts_auto_variable_t *var)
 
     // 添加新变量
     memcpy(&s_var_ctx.variables[s_var_ctx.count], var, sizeof(ts_auto_variable_t));
-    s_var_ctx.variables[s_var_ctx.count].last_change_ms = esp_timer_get_time() / 1000;
+    s_var_ctx.variables[s_var_ctx.count].last_change_ms = now_ms;
+    s_var_ctx.variables[s_var_ctx.count].last_update_ms = 0;
     s_var_ctx.count++;
 
     xSemaphoreGive(s_var_ctx.mutex);
 
     ESP_LOGD(TAG, "Registered variable: %s (type=%d, total: %d)", 
              var->name, var->value.type, s_var_ctx.count);
+    return ESP_OK;
+}
+
+esp_err_t ts_variable_upsert(const ts_auto_variable_t *var)
+{
+    if (!var || !var->name[0]) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (!s_var_ctx.initialized) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    ts_auto_value_t old_value = {0};
+    bool changed = false;
+    bool existed = false;
+    int64_t now_ms = esp_timer_get_time() / 1000;
+
+    xSemaphoreTake(s_var_ctx.mutex, portMAX_DELAY);
+
+    int idx = find_variable_index(var->name);
+    if (idx >= 0) {
+        existed = true;
+        old_value = s_var_ctx.variables[idx].value;
+        changed = !value_equal(&old_value, &var->value);
+
+        int64_t last_change_ms = changed
+                                 ? now_ms
+                                 : s_var_ctx.variables[idx].last_change_ms;
+        memcpy(&s_var_ctx.variables[idx], var, sizeof(ts_auto_variable_t));
+        s_var_ctx.variables[idx].last_change_ms = last_change_ms;
+        s_var_ctx.variables[idx].last_update_ms = now_ms;
+    } else {
+        if (s_var_ctx.count >= s_var_ctx.capacity) {
+            xSemaphoreGive(s_var_ctx.mutex);
+            return ESP_ERR_NO_MEM;
+        }
+
+        memcpy(&s_var_ctx.variables[s_var_ctx.count], var, sizeof(ts_auto_variable_t));
+        s_var_ctx.variables[s_var_ctx.count].last_change_ms = now_ms;
+        s_var_ctx.variables[s_var_ctx.count].last_update_ms = now_ms;
+        s_var_ctx.count++;
+    }
+
+    xSemaphoreGive(s_var_ctx.mutex);
+
+    if (existed && changed) {
+        notify_change(var->name, &old_value, &var->value);
+    }
+
     return ESP_OK;
 }
 
@@ -460,6 +519,49 @@ esp_err_t ts_variable_get_string(const char *name, char *buffer, size_t buffer_s
     return ESP_OK;
 }
 
+static esp_err_t variable_get_info_impl(const char *name, ts_variable_info_t *info,
+                                        TickType_t ticks_to_wait)
+{
+    if (!name || !info) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (!s_var_ctx.initialized) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    if (xSemaphoreTake(s_var_ctx.mutex, ticks_to_wait) != pdTRUE) {
+        return ESP_ERR_TIMEOUT;
+    }
+
+    int idx = find_variable_index(name);
+    if (idx < 0) {
+        xSemaphoreGive(s_var_ctx.mutex);
+        return ESP_ERR_NOT_FOUND;
+    }
+
+    memset(info, 0, sizeof(ts_variable_info_t));
+    strncpy(info->name, s_var_ctx.variables[idx].name, sizeof(info->name) - 1);
+    strncpy(info->source_id, s_var_ctx.variables[idx].source_id, sizeof(info->source_id) - 1);
+    info->value = s_var_ctx.variables[idx].value;
+    info->flags = s_var_ctx.variables[idx].flags;
+    info->last_change_ms = s_var_ctx.variables[idx].last_change_ms;
+    info->last_update_ms = s_var_ctx.variables[idx].last_update_ms;
+
+    xSemaphoreGive(s_var_ctx.mutex);
+    return ESP_OK;
+}
+
+esp_err_t ts_variable_get_info(const char *name, ts_variable_info_t *info)
+{
+    return variable_get_info_impl(name, info, portMAX_DELAY);
+}
+
+esp_err_t ts_variable_get_info_try(const char *name, ts_variable_info_t *info)
+{
+    return variable_get_info_impl(name, info, 0);
+}
+
 /*===========================================================================*/
 /*                              值修改                                        */
 /*===========================================================================*/
@@ -494,11 +596,14 @@ static esp_err_t variable_set_impl(const char *name, const ts_auto_value_t *valu
         return ESP_ERR_NOT_ALLOWED;
     }
 
+    int64_t now_ms = esp_timer_get_time() / 1000;
+    var->last_update_ms = now_ms;
+
     // 检查值是否变化
     if (!value_equal(&var->value, value)) {
         ts_auto_value_t old_value = var->value;
         var->value = *value;
-        var->last_change_ms = esp_timer_get_time() / 1000;
+        var->last_change_ms = now_ms;
 
         xSemaphoreGive(s_var_ctx.mutex);
 
