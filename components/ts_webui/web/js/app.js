@@ -128,6 +128,7 @@ class SubscriptionManager {
 document.addEventListener('DOMContentLoaded', () => {
     // 初始化认证 UI
     updateAuthUI();
+    validateStoredSession();
     
     // 仅当 localStorage 无有效语言偏好时，才从设备 system.language 同步（不覆盖用户已有选择）
     (async function syncLanguageFromDevice() {
@@ -193,6 +194,26 @@ document.addEventListener('DOMContentLoaded', () => {
 // =========================================================================
 //                         认证
 // =========================================================================
+
+window.addEventListener('authExpired', () => {
+    updateAuthUI();
+    showLoginModal();
+});
+
+async function validateStoredSession() {
+    if (!api.isLoggedIn()) return;
+
+    try {
+        const status = await api.checkAuthStatus();
+        if (!status || !status.valid) {
+            api.clearAuth();
+            updateAuthUI();
+            showLoginModal();
+        }
+    } catch (error) {
+        console.debug('Stored session validation failed:', error);
+    }
+}
 
 function updateAuthUI() {
     const loginBtn = document.getElementById('login-btn');
@@ -1573,9 +1594,9 @@ function showFanAutoHelpModal() {
 
     modal.innerHTML = `
         <div class="modal-content modal-sm fan-auto-help-content">
-            <div class="modal-header">
+            <div class="modal-header fan-auto-help-header">
                 <h2><i class="ri-information-line"></i> ${safeTitle}</h2>
-                <button class="modal-close" onclick="closeFanAutoHelpModal()">&times;</button>
+                <button class="modal-close" onclick="closeFanAutoHelpModal()" aria-label="${safeCloseLabel}"><i class="ri-close-line"></i></button>
             </div>
             <div class="modal-body fan-auto-help-body">
                 ${paragraphs.map(text => `<p>${typeof escapeHtml === 'function' ? escapeHtml(text) : text}</p>`).join('')}
@@ -11581,6 +11602,82 @@ function clearExecResult() {
 //                         安全页面
 // =========================================================================
 
+async function submitAdminPasswordSet() {
+    const newPwdEl = document.getElementById('admin-new-password');
+    const confirmPwdEl = document.getElementById('admin-confirm-password');
+    const errorEl = document.getElementById('admin-password-error');
+    const newPwd = newPwdEl ? newPwdEl.value : '';
+    const confirmPwd = confirmPwdEl ? confirmPwdEl.value : '';
+
+    if (!errorEl) return;
+
+    errorEl.classList.add('hidden');
+    errorEl.textContent = '';
+
+    if (newPwd !== confirmPwd) {
+        errorEl.textContent = typeof t === 'function' ? t('securityPage.adminPasswordMismatch') : '两次输入的 admin 新密码不一致';
+        errorEl.classList.remove('hidden');
+        return;
+    }
+
+    if (newPwd.length < 4 || newPwd.length > 64) {
+        errorEl.textContent = typeof t === 'function' ? t('securityPage.adminPasswordLength') : 'admin 密码长度必须为 4-64 个字符';
+        errorEl.classList.remove('hidden');
+        return;
+    }
+
+    try {
+        const result = await api.setAdminPassword(newPwd);
+        if (result.success || result.code === 0 || result.code === 'OK') {
+            if (newPwdEl) newPwdEl.value = '';
+            if (confirmPwdEl) confirmPwdEl.value = '';
+            showToast(typeof t === 'function' ? t('securityPage.adminPasswordSetSuccess') : 'admin 密码已更新', 'success');
+        } else {
+            errorEl.textContent = result.message || result.error || (typeof t === 'function' ? t('toast.saveFailed') : '保存失败');
+            errorEl.classList.remove('hidden');
+        }
+    } catch (error) {
+        errorEl.textContent = error.message || (typeof t === 'function' ? t('login.networkError') : '网络错误');
+        errorEl.classList.remove('hidden');
+    }
+}
+
+async function resetAdminPasswordToDefault() {
+    const msg = typeof t === 'function'
+        ? t('securityPage.confirmResetAdminPassword')
+        : '确定要重置 admin 密码吗？\n\n此操作会将 admin 密码恢复为默认密码 rm01，并清除登录锁定状态。';
+
+    if (!confirm(msg)) return;
+
+    try {
+        const result = await api.resetAdminPassword();
+        if (result.success || result.code === 0 || result.code === 'OK') {
+            showToast(typeof t === 'function' ? t('securityPage.adminPasswordResetSuccess') : 'admin 密码已重置为默认密码 rm01', 'success');
+        } else {
+            showToast(result.message || result.error || (typeof t === 'function' ? t('toast.saveFailed') : '操作失败'), 'error');
+        }
+    } catch (error) {
+        showToast(error.message || (typeof t === 'function' ? t('login.networkError') : '网络错误'), 'error');
+    }
+}
+
+function toggleAdminPasswordVisibility(inputId, button) {
+    const input = document.getElementById(inputId);
+    if (!input || !button) return;
+
+    const showPassword = input.type === 'password';
+    input.type = showPassword ? 'text' : 'password';
+
+    const label = showPassword
+        ? (typeof t === 'function' ? t('securityPage.hidePassword') : '隐藏密码')
+        : (typeof t === 'function' ? t('securityPage.showPassword') : '显示密码');
+    const icon = button.querySelector('i');
+    if (icon) icon.className = 'ri-eye-line';
+    button.classList.toggle('active', showPassword);
+    button.title = label;
+    button.setAttribute('aria-label', label);
+}
+
 async function loadSecurityPage() {
     clearInterval(refreshInterval);
     
@@ -11590,8 +11687,48 @@ async function loadSecurityPage() {
     }
     
     const content = document.getElementById('page-content');
+    const showPasswordLabel = typeof t === 'function' ? t('securityPage.showPassword') : '显示密码';
+    const accountSecuritySection = api.isRoot() ? `
+            <div class="section account-security-section">
+                <h2>${typeof t === 'function' ? t('securityPage.accountSecurity') : '账号安全'}</h2>
+                <p class="account-security-desc">
+                    <i class="ri-information-line"></i>
+                    ${typeof t === 'function' ? t('securityPage.adminPasswordManagementDesc') : 'root 可在此恢复 admin 账号访问。'}
+                </p>
+                <div class="account-password-form">
+                    <div class="form-group account-password-group">
+                        <label>${typeof t === 'function' ? t('securityPage.newAdminPassword') : 'admin 新密码'}</label>
+                        <div class="account-password-field">
+                            <input class="account-password-input" type="password" id="admin-new-password" autocomplete="new-password" placeholder="${typeof t === 'function' ? t('securityPage.newAdminPasswordPlaceholder') : '输入 admin 新密码'}">
+                            <button type="button" class="password-visibility-toggle" onclick="toggleAdminPasswordVisibility('admin-new-password', this)" title="${showPasswordLabel}" aria-label="${showPasswordLabel}"><i class="ri-eye-line"></i></button>
+                        </div>
+                    </div>
+                    <div class="form-group account-password-group">
+                        <label>${typeof t === 'function' ? t('securityPage.confirmAdminPassword') : '确认新密码'}</label>
+                        <div class="account-password-field">
+                            <input class="account-password-input" type="password" id="admin-confirm-password" autocomplete="new-password" placeholder="${typeof t === 'function' ? t('securityPage.confirmAdminPasswordPlaceholder') : '再次输入新密码'}">
+                            <button type="button" class="password-visibility-toggle" onclick="toggleAdminPasswordVisibility('admin-confirm-password', this)" title="${showPasswordLabel}" aria-label="${showPasswordLabel}"><i class="ri-eye-line"></i></button>
+                        </div>
+                    </div>
+                    <div class="button-group account-security-actions">
+                        <button class="btn btn-sm btn-service-style" onclick="submitAdminPasswordSet()"><i class="ri-key-line"></i> ${typeof t === 'function' ? t('securityPage.setAdminPassword') : '设置 admin 新密码'}</button>
+                    </div>
+                </div>
+                <div id="admin-password-error" class="form-error hidden" style="margin-bottom:12px"></div>
+                <div class="account-danger-row">
+                    <div>
+                        <strong>${typeof t === 'function' ? t('securityPage.dangerZone') : '危险操作'}</strong>
+                        <div style="color:#6b7280;font-size:0.9em;margin-top:4px">
+                            ${typeof t === 'function' ? t('securityPage.resetAdminPasswordDesc') : '将 admin 密码恢复为默认密码 rm01，并清除登录锁定状态。'}
+                        </div>
+                    </div>
+                    <button class="btn btn-sm btn-danger" onclick="resetAdminPasswordToDefault()"><i class="ri-refresh-line"></i> ${typeof t === 'function' ? t('securityPage.resetAdminPassword') : '重置 admin 为默认密码'}</button>
+                </div>
+            </div>
+            ` : '';
     content.innerHTML = `
         <div class="page-security">
+            ${accountSecuritySection}
             <div class="section">
                 <h2>${t('security.keyManagement')}</h2>
                 <div class="button-group" style="margin-bottom:15px">

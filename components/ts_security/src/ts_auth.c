@@ -6,7 +6,7 @@
  * 
  * 安全设计：
  * - 密码哈希仅存储在 NVS，不导出到 SD 卡
- * - 忘记密码只能通过 idf.py erase-flash 恢复出厂
+ * - admin 密码可由 root 会话恢复，root 密码遗失需恢复出厂
  */
 
 #include "ts_security.h"
@@ -99,28 +99,43 @@ static esp_err_t save_user_credential(const char *username, const user_credentia
 }
 
 /**
+ * @brief 写入用户密码凭据，并清除失败计数/锁定状态
+ */
+static esp_err_t write_user_password_credential(const char *username, const char *password,
+                                                 bool password_changed)
+{
+    if (!username || !password) return ESP_ERR_INVALID_ARG;
+
+    size_t pwd_len = strlen(password);
+    if (pwd_len < 4 || pwd_len > 64) {
+        TS_LOGW(TAG, "Password length invalid (4-64 chars required)");
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    user_credential_t cred = {0};
+
+    esp_fill_random(cred.salt, SALT_LEN);
+
+    esp_err_t ret = compute_password_hash(cred.salt, password, cred.hash);
+    if (ret != ESP_OK) return ret;
+
+    cred.password_changed = password_changed;
+    cred.failed_attempts = 0;
+    cred.lockout_until = 0;
+
+    return save_user_credential(username, &cred);
+}
+
+/**
  * @brief 强制重新创建用户凭据
  */
 static esp_err_t force_create_user(const char *username, ts_perm_level_t level)
 {
-    user_credential_t cred;
-    
     /* 根据用户类型使用不同默认密码 */
     const char *default_pwd = (level == TS_PERM_ROOT) ? DEFAULT_PASSWORD_ROOT : DEFAULT_PASSWORD_ADMIN;
     TS_LOGI(TAG, "Creating/resetting user '%s'", username);
-    
-    /* 生成随机 salt */
-    esp_fill_random(cred.salt, SALT_LEN);
-    
-    /* 计算默认密码哈希 */
-    esp_err_t ret = compute_password_hash(cred.salt, default_pwd, cred.hash);
-    if (ret != ESP_OK) return ret;
-    
-    cred.password_changed = false;
-    cred.failed_attempts = 0;
-    cred.lockout_until = 0;
-    
-    return save_user_credential(username, &cred);
+
+    return write_user_password_credential(username, default_pwd, false);
 }
 
 /**
@@ -279,26 +294,24 @@ esp_err_t ts_auth_change_password(const char *username, const char *old_password
         return ret;
     }
     
-    /* 加载凭据 */
-    user_credential_t cred;
-    ret = load_user_credential(username, &cred);
-    if (ret != ESP_OK) return ret;
-    
-    /* 生成新 salt */
-    esp_fill_random(cred.salt, SALT_LEN);
-    
-    /* 计算新密码哈希 */
-    ret = compute_password_hash(cred.salt, new_password, cred.hash);
-    if (ret != ESP_OK) return ret;
-    
-    cred.password_changed = true;
-    cred.failed_attempts = 0;
-    
-    ret = save_user_credential(username, &cred);
+    ret = write_user_password_credential(username, new_password, true);
     if (ret == ESP_OK) {
         TS_LOGI(TAG, "Password changed for user %s", username);
     }
     
+    return ret;
+}
+
+/**
+ * @brief Root 管理功能：设置 admin 密码
+ */
+esp_err_t ts_auth_set_admin_password(const char *new_password)
+{
+    esp_err_t ret = write_user_password_credential("admin", new_password, true);
+    if (ret == ESP_OK) {
+        TS_LOGI(TAG, "Password set for admin by root");
+    }
+
     return ret;
 }
 
@@ -399,20 +412,7 @@ esp_err_t ts_auth_reset_password(const char *username)
         return ESP_ERR_NOT_FOUND;
     }
     
-    user_credential_t cred;
-    
-    /* 生成新 salt */
-    esp_fill_random(cred.salt, SALT_LEN);
-    
-    /* 使用默认密码 */
-    esp_err_t ret = compute_password_hash(cred.salt, default_pwd, cred.hash);
-    if (ret != ESP_OK) return ret;
-    
-    cred.password_changed = false;
-    cred.failed_attempts = 0;
-    cred.lockout_until = 0;
-    
-    ret = save_user_credential(username, &cred);
+    esp_err_t ret = write_user_password_credential(username, default_pwd, false);
     if (ret == ESP_OK) {
         TS_LOGI(TAG, "Password reset to default for user %s", username);
     }

@@ -3091,6 +3091,40 @@ button.btn-gray:hover,
     max-width: 460px;
 }
 
+.fan-auto-help-header {
+    position: relative;
+    display: flex;
+    align-items: center;
+    padding-right: 32px;
+}
+
+.fan-auto-help-header h2 {
+    height: 28px;
+    min-width: 0;
+    line-height: 28px;
+}
+
+.fan-auto-help-header .modal-close {
+    position: absolute;
+    top: 2px;
+    right: 0;
+    width: 24px;
+    height: 24px;
+    min-width: 24px;
+    margin-left: 0;
+    font-size: 1rem;
+    border-radius: var(--radius-sm);
+}
+
+.fan-auto-help-header .modal-close i {
+    line-height: 1;
+}
+
+.fan-auto-help-header .modal-close:hover {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+}
+
 .fan-auto-help-body {
     color: var(--text-secondary);
     font-size: 0.92rem;
@@ -3689,6 +3723,103 @@ button.btn-gray:hover,
     font-size: 1.15rem;
     font-weight: 600;
 }
+
+.account-security-desc {
+    color: var(--text-muted);
+    margin: 0 0 15px;
+}
+
+.account-password-form {
+    display: grid;
+    grid-template-columns: minmax(240px, 320px) minmax(240px, 320px) minmax(16px, 1fr) auto;
+    gap: 12px;
+    align-items: end;
+    margin-bottom: 12px;
+}
+
+.account-password-group,
+.account-security-actions {
+    margin-bottom: 0;
+}
+
+.account-security-actions {
+    grid-column: 4;
+    justify-self: end;
+}
+
+.account-password-field {
+    position: relative;
+}
+
+.form-group .account-password-input {
+    min-height: 38px;
+    padding-right: 38px;
+    line-height: 20px;
+    box-sizing: border-box;
+}
+
+.password-visibility-toggle {
+    position: absolute;
+    top: 50%;
+    right: 6px;
+    width: 28px;
+    height: 28px;
+    transform: translateY(-50%);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+}
+
+.password-visibility-toggle:hover {
+    background: var(--bg-tertiary);
+    color: var(--blue-600);
+}
+
+.password-visibility-toggle.active {
+    background: var(--blue-50);
+    color: var(--blue-600);
+}
+
+.account-danger-row {
+    border-top: 1px solid var(--border);
+    padding-top: 12px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 12px;
+    align-items: end;
+}
+
+.account-danger-row .btn {
+    justify-self: end;
+    align-self: end;
+}
+
+@media (max-width: 780px) {
+    .account-password-form {
+        grid-template-columns: 1fr;
+    }
+
+    .account-security-actions {
+        grid-column: 1;
+        justify-self: stretch;
+    }
+
+    .account-danger-row {
+        grid-template-columns: 1fr;
+    }
+
+    .account-security-actions .btn,
+    .account-danger-row .btn {
+        width: 100%;
+    }
+}
+
 .page-security .modal .modal-content h2 {
     font-size: 1.1rem;
 }

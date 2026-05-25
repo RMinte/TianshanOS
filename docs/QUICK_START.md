@@ -86,7 +86,7 @@ log <level>       - 设置日志级别
 2. 打开浏览器访问设备 IP 地址
 3. 默认登录凭据：
    - 用户名: `admin`
-   - 密码: `tianshan`
+   - 密码: `rm01`
 
 ### WebUI 页面导航
 
@@ -147,7 +147,7 @@ curl http://<device-ip>/api/v1/system/info
 # 登录获取 Token
 curl -X POST http://<device-ip>/api/v1/auth/login \
   -H "Content-Type: application/json" \
-  -d '{"username":"admin","password":"tianshan"}'
+  -d '{"username":"admin","password":"rm01"}'
 
 # 使用 Token 调用 API
 curl http://<device-ip>/api/v1/config/list \

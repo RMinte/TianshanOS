@@ -1,7 +1,7 @@
 /**
  * @file ts_ap
  * @brief Authentication API and
- * 提供 auth.login / auth.lout / auth.status / auth.change_password API
+ * 提供 auth.login / auth.logout / auth.status / auth.change_password API
  * 
  * @author TianShanOS Team
  * @version 1.0.0
@@ -30,6 +30,35 @@ static const char *perm_level_to_string(ts_perm_level_t level)
         case TS_PERM_ROOT:  return "root";
         default:            return "unknown";
     }
+}
+
+static esp_err_t validate_root_token(const cJSON *token_item, ts_api_result_t *result)
+{
+    if (!cJSON_IsString(token_item)) {
+        ts_api_result_error(result, TS_API_ERR_AUTH, "Missing token");
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    uint32_t session_id;
+    esp_err_t ret = ts_security_validate_token(token_item->valuestring, &session_id);
+    if (ret != ESP_OK) {
+        ts_api_result_error(result, TS_API_ERR_AUTH, "Invalid or expired token");
+        return ret;
+    }
+
+    ts_session_t session;
+    ret = ts_security_validate_session(session_id, &session);
+    if (ret != ESP_OK) {
+        ts_api_result_error(result, TS_API_ERR_AUTH, "Session expired");
+        return ret;
+    }
+
+    if (session.level != TS_PERM_ROOT) {
+        ts_api_result_error(result, TS_API_ERR_NO_PERMISSION, "Root permission required");
+        return ESP_ERR_NOT_ALLOWED;
+    }
+
+    return ESP_OK;
 }
 
 /*===========================================================================*/
@@ -255,6 +284,79 @@ static esp_err_t api_auth_change_password(const cJSON *params, ts_api_result_t *
     return ESP_OK;
 }
 
+/**
+ * @brief auth.admin.set_password - Root sets admin password
+ *
+ * Params: { "token": "...", "new_password": "..." }
+ * Returns: { "success": true, "username": "admin", "password_changed": true }
+ */
+static esp_err_t api_auth_admin_set_password(const cJSON *params, ts_api_result_t *result)
+{
+    const cJSON *token_item = cJSON_GetObjectItem(params, "token");
+    const cJSON *new_pwd_item = cJSON_GetObjectItem(params, "new_password");
+
+    esp_err_t ret = validate_root_token(token_item, result);
+    if (ret != ESP_OK) return ret;
+
+    if (!cJSON_IsString(new_pwd_item)) {
+        ts_api_result_error(result, TS_API_ERR_INVALID_ARG,
+                           "Missing required parameter: new_password");
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    const char *new_password = new_pwd_item->valuestring;
+    size_t len = strlen(new_password);
+    if (len < 4 || len > 64) {
+        ts_api_result_error(result, TS_API_ERR_INVALID_ARG,
+                           "Password must be 4-64 characters");
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    ret = ts_auth_set_admin_password(new_password);
+    if (ret != ESP_OK) {
+        ts_api_result_error(result, TS_API_ERR_INTERNAL, "Failed to set admin password");
+        return ret;
+    }
+
+    cJSON *data = cJSON_CreateObject();
+    cJSON_AddBoolToObject(data, "success", true);
+    cJSON_AddStringToObject(data, "username", "admin");
+    cJSON_AddBoolToObject(data, "password_changed", true);
+
+    ts_api_result_ok(result, data);
+    TS_LOGI(TAG, "Root set admin password");
+    return ESP_OK;
+}
+
+/**
+ * @brief auth.admin.reset_password - Root resets admin password to default
+ *
+ * Params: { "token": "..." }
+ * Returns: { "success": true, "username": "admin", "password_changed": false }
+ */
+static esp_err_t api_auth_admin_reset_password(const cJSON *params, ts_api_result_t *result)
+{
+    const cJSON *token_item = cJSON_GetObjectItem(params, "token");
+
+    esp_err_t ret = validate_root_token(token_item, result);
+    if (ret != ESP_OK) return ret;
+
+    ret = ts_auth_reset_password("admin");
+    if (ret != ESP_OK) {
+        ts_api_result_error(result, TS_API_ERR_INTERNAL, "Failed to reset admin password");
+        return ret;
+    }
+
+    cJSON *data = cJSON_CreateObject();
+    cJSON_AddBoolToObject(data, "success", true);
+    cJSON_AddStringToObject(data, "username", "admin");
+    cJSON_AddBoolToObject(data, "password_changed", false);
+
+    ts_api_result_ok(result, data);
+    TS_LOGI(TAG, "Root reset admin password to default");
+    return ESP_OK;
+}
+
 /*===========================================================================*/
 /*                          Registration                                      */
 /*===========================================================================*/
@@ -287,6 +389,20 @@ static const ts_api_endpoint_t s_auth_endpoints[] = {
         .category = TS_API_CAT_SECURITY,
         .handler = api_auth_change_password,
         .requires_auth = false,  /* 密码修改使用 token 验证 */
+    },
+    {
+        .name = "auth.admin.set_password",
+        .description = "Root sets admin password",
+        .category = TS_API_CAT_SECURITY,
+        .handler = api_auth_admin_set_password,
+        .requires_auth = false,  /* Handler validates root token */
+    },
+    {
+        .name = "auth.admin.reset_password",
+        .description = "Root resets admin password to default",
+        .category = TS_API_CAT_SECURITY,
+        .handler = api_auth_admin_reset_password,
+        .requires_auth = false,  /* Handler validates root token */
     },
 };
 

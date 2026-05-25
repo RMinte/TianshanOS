@@ -31,7 +31,9 @@ static const char *s_code_names[] = {
     [TS_API_ERR_NO_MEM]      = "NO_MEM",
     [TS_API_ERR_INTERNAL]    = "INTERNAL",
     [TS_API_ERR_NOT_SUPPORTED] = "NOT_SUPPORTED",
-    [TS_API_ERR_HARDWARE]    = "HARDWARE"
+    [TS_API_ERR_HARDWARE]    = "HARDWARE",
+    [TS_API_ERR_CONNECTION]  = "CONNECTION",
+    [TS_API_ERR_AUTH]        = "AUTH"
 };
 
 static const char *s_category_names[] = {

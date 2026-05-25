@@ -13,13 +13,54 @@ Content-Type: application/json
 
 {
   "username": "admin",
-  "password": "tianshan"
+  "password": "rm01"
 }
 
 Response:
 {
   "token": "...",
   "session_id": 12345
+}
+```
+
+### Root 设置 admin 新密码
+```
+POST /api/v1/auth/admin/set_password
+Content-Type: application/json
+
+{
+  "token": "<root-token>",
+  "new_password": "new-password"
+}
+
+Response:
+{
+  "code": 0,
+  "data": {
+    "success": true,
+    "username": "admin",
+    "password_changed": true
+  }
+}
+```
+
+### Root 重置 admin 为默认密码
+```
+POST /api/v1/auth/admin/reset_password
+Content-Type: application/json
+
+{
+  "token": "<root-token>"
+}
+
+Response:
+{
+  "code": 0,
+  "data": {
+    "success": true,
+    "username": "admin",
+    "password_changed": false
+  }
 }
 ```
 
