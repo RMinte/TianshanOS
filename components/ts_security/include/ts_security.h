@@ -157,6 +157,13 @@ esp_err_t ts_auth_change_password(const char *username, const char *old_password
                                    const char *new_password);
 
 /**
+ * @brief Set admin password without requiring the old admin password
+ * @param new_password New admin password (4-64 chars)
+ * @return ESP_OK on success
+ */
+esp_err_t ts_auth_set_admin_password(const char *new_password);
+
+/**
  * @brief Check if user has changed the default password
  */
 bool ts_auth_password_changed(const char *username);

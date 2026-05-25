@@ -49,14 +49,19 @@ class TianShanAPI {
         if (expires && Date.now() > parseInt(expires)) {
             // Token 已过期，清除
             console.log('Token expired, clearing...');
-            this.token = null;
-            this.username = null;
-            this.level = null;
-            localStorage.removeItem('ts_token');
-            localStorage.removeItem('ts_username');
-            localStorage.removeItem('ts_level');
-            localStorage.removeItem('ts_expires');
+            this.clearAuth();
         }
+    }
+
+    clearAuth() {
+        this.token = null;
+        this.username = null;
+        this.level = null;
+        this.passwordChanged = null;
+        localStorage.removeItem('ts_token');
+        localStorage.removeItem('ts_username');
+        localStorage.removeItem('ts_level');
+        localStorage.removeItem('ts_expires');
     }
     
     /**
@@ -118,6 +123,16 @@ class TianShanAPI {
             if (!response.ok && !json.code) {
                 throw new Error(json.message || json.error || 'Request failed');
             }
+
+            const isAuthEndpoint = endpoint === '/auth/login' || endpoint === '/auth/logout';
+            if (!isAuthEndpoint && json && json.code === 'AUTH') {
+                this.clearAuth();
+                const message = typeof window.t === 'function'
+                    ? window.t('login.sessionExpired')
+                    : '登录已过期，请重新登录';
+                json.message = message;
+                window.dispatchEvent(new CustomEvent('authExpired', { detail: { message } }));
+            }
             
             return json;
         } catch (error) {
@@ -171,7 +186,7 @@ class TianShanAPI {
     
     async login(username, password) {
         const result = await this.call('auth.login', { username, password }, 'POST');
-        if (result.code === 0 && result.data?.token) {
+        if ((result.success || result.code === 0 || result.code === 'OK') && result.data?.token) {
             this.token = result.data.token;
             this.username = result.data.username;
             this.level = result.data.level;
@@ -190,20 +205,14 @@ class TianShanAPI {
                 await this.call('auth.logout', { token: this.token }, 'POST');
             }
         } finally {
-            this.token = null;
-            this.username = null;
-            this.level = null;
-            localStorage.removeItem('ts_token');
-            localStorage.removeItem('ts_username');
-            localStorage.removeItem('ts_level');
-            localStorage.removeItem('ts_expires');
+            this.clearAuth();
         }
     }
     
     async checkAuthStatus() {
         if (!this.token) return { valid: false };
         const result = await this.call('auth.status', { token: this.token }, 'POST');
-        if (result.code === 0 && result.data) {
+        if ((result.success || result.code === 0 || result.code === 'OK') && result.data) {
             return result.data;
         }
         return { valid: false };
@@ -214,6 +223,19 @@ class TianShanAPI {
             token: this.token,
             old_password: oldPassword,
             new_password: newPassword
+        }, 'POST');
+    }
+
+    async setAdminPassword(newPassword) {
+        return this.call('auth.admin.set_password', {
+            token: this.token,
+            new_password: newPassword
+        }, 'POST');
+    }
+
+    async resetAdminPassword() {
+        return this.call('auth.admin.reset_password', {
+            token: this.token
         }, 'POST');
     }
     
@@ -238,7 +260,7 @@ class TianShanAPI {
         const parsed = expires ? parseInt(expires) : NaN;
         const expired = expires && Date.now() >= parsed;
         if (expired) {
-            this.logout();  // 清理过期的 token
+            this.clearAuth();
             return false;
         }
         return true;
