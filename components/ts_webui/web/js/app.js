@@ -1484,40 +1484,46 @@ function updateFanInfo(data) {
             const _autoHelpTitleSafe = typeof escapeHtml === 'function' ? escapeHtml(_autoHelpTitle) : _autoHelpTitle;
             const autoStateLabels = {
                 idle: typeof t === 'function' ? t('fanPage.autoStateIdle') : '待机',
-                baseline: typeof t === 'function' ? t('fanPage.autoStateBaseline') : '基线',
-                active: typeof t === 'function' ? t('fanPage.autoStateActive') : '自适应',
-                guard: typeof t === 'function' ? t('fanPage.autoStateGuard') : '保护',
-                stale: typeof t === 'function' ? t('fanPage.autoStateStale') : '失效',
+                baseline: typeof t === 'function' ? t('fanPage.autoStateBaseline') : '按曲线运行',
+                active: typeof t === 'function' ? t('fanPage.autoStateActive') : '自适应调速',
+                guard: typeof t === 'function' ? t('fanPage.autoStateGuard') : '保护介入',
+                stale: typeof t === 'function' ? t('fanPage.autoStateStale') : '温度失效',
                 unknown: typeof t === 'function' ? t('fanPage.autoStateUnknown') : '未知'
             };
             const autoState = fan.auto_state || 'unknown';
             const autoStateText = autoStateLabels[autoState] || autoState;
-            const guardLabel = typeof t === 'function' ? t('fanPage.guardTempShort') : '保护';
-            const predictedLabel = typeof t === 'function' ? t('fanPage.predictedTempShort') : '预测';
+            const guardLabel = typeof t === 'function' ? t('fanPage.guardTempShort') : '安全参考温度';
+            const predictedLabel = typeof t === 'function' ? t('fanPage.predictedTempShort') : '45秒预测';
+            const slopeLabel = typeof t === 'function' ? t('fanPage.slopeTempShort') : '升温速度';
+            const slopeUnit = typeof t === 'function' ? t('fanPage.slopeTempUnit') : '°C/分钟';
             const autoMeta = hasAutoTelemetry ? `
                 <div class="fan-auto-meta ${fan.guard_active ? 'is-guard' : ''} ${fan.temp_stale ? 'is-stale' : ''}">
                     <span>${autoStateText}</span>
                     ${typeof fan.guard_temperature === 'number' ? `<span>${guardLabel} ${fan.guard_temperature.toFixed(1)}°C</span>` : ''}
                     ${typeof fan.predicted_temperature === 'number' ? `<span>${predictedLabel} ${fan.predicted_temperature.toFixed(1)}°C</span>` : ''}
-                    ${typeof fan.slope_c_per_min === 'number' ? `<span>${fan.slope_c_per_min.toFixed(2)}°C/min</span>` : ''}
+                    ${typeof fan.slope_c_per_min === 'number' ? `<span>${slopeLabel} ${fan.slope_c_per_min.toFixed(2)}${slopeUnit}</span>` : ''}
                 </div>
             ` : '';
             
             return `
             <div class="fan-card ${isOff ? 'is-off' : ''}">
                 <div class="fan-header">
-                    <span class="fan-title">${_fanTitle}</span>
-                    <span class="fan-status-badge" style="background:${currentMode.color}20;color:${currentMode.color}" title="${currentMode.label}">
-                        <i class="${currentMode.iconRi}"></i>
-                    </span>
+                    <div class="fan-header-main">
+                        <span class="fan-title">${_fanTitle}</span>
+                        ${autoMeta}
+                    </div>
+                    <div class="fan-header-actions">
+                        ${mode === 'auto' ? `<button type="button" class="fan-auto-info-btn" onclick="showFanAutoHelpModal()" title="${_autoHelpTitleSafe}" aria-label="${_autoHelpTitleSafe}"><i class="ri-information-line"></i></button>` : ''}
+                        <span class="fan-status-badge" style="background:${currentMode.color}20;color:${currentMode.color}" title="${currentMode.label}">
+                            <i class="${currentMode.iconRi}"></i>
+                        </span>
+                    </div>
                 </div>
                 <div class="fan-speed-display">
                     <span class="fan-speed-num">${displayDuty}</span>
                     <span class="fan-speed-percent">%</span>
-                    ${mode === 'auto' ? `<button type="button" class="fan-auto-info-btn" onclick="showFanAutoHelpModal()" title="${_autoHelpTitleSafe}" aria-label="${_autoHelpTitleSafe}"><i class="ri-information-line"></i></button>` : ''}
                     ${rpm > 0 ? `<div class="fan-rpm-small">${rpm} RPM</div>` : ''}
                 </div>
-                ${autoMeta}
                 <div class="fan-mode-tabs">
                     <button class="fan-mode-tab ${mode === 'off' ? 'active off' : ''}" onclick="setFanMode(${fan.id}, 'off')">${_off}</button>
                     <button class="fan-mode-tab ${mode === 'manual' ? 'active manual' : ''}" onclick="setFanMode(${fan.id}, 'manual')">${_manual}</button>

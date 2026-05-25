@@ -39,6 +39,7 @@
 #define FAN_AUTO_GAIN_MAX              2.00f
 #define FAN_AUTO_RISE_RATE_PER_SEC     12.0f
 #define FAN_AUTO_FALL_RATE_PER_SEC     0.30f
+#define FAN_AUTO_STALE_DUTY            25
 #define FAN_AUTO_HISTORY_SIZE          32
 
 /*===========================================================================*/
@@ -405,16 +406,19 @@ static esp_err_t apply_adaptive_auto(fan_instance_t *fan, const ts_temp_data_t *
     int16_t control_temp = TS_TEMP_DEFAULT_VALUE;
     int16_t guard_temp = TS_TEMP_DEFAULT_VALUE;
     uint8_t old_duty = fan->current_duty;
+    bool recovered_from_stale = fan->temp_stale;
 
     if (!get_adaptive_temperatures(temp_data, &control_temp, &guard_temp)) {
         fan->temp_stale = true;
         fan->auto_state = TS_FAN_AUTO_STATE_STALE;
         fan->response_observing = false;
         fan->auto_fall_credit = 0.0f;
-        fan->target_duty = 100;
+        fan->guard_active = false;
+        fan->guard_release_since_ms = 0;
+        fan->target_duty = FAN_AUTO_STALE_DUTY;
         fan->predicted_temperature = fan->control_temperature;
         fan->last_auto_update_ms = now_ms;
-        return update_pwm(fan, 100);
+        return update_pwm(fan, FAN_AUTO_STALE_DUTY);
     }
 
     fan->temp_stale = false;
@@ -494,11 +498,16 @@ static esp_err_t apply_adaptive_auto(fan_instance_t *fan, const ts_temp_data_t *
 
     bool allow_down = (guard_temp <= FAN_AUTO_GUARD_RELEASE_TEMP) &&
                       (!slope_valid || fan->slope_c_per_min <= 0.0f);
-    if (target < fan->current_duty && !allow_down) {
+    if (target < fan->current_duty && !allow_down && !recovered_from_stale) {
         target = fan->current_duty;
     }
 
-    target = apply_auto_rate_limit(fan, target, allow_down, now_ms);
+    if (recovered_from_stale && target < fan->current_duty) {
+        fan->auto_fall_credit = 0.0f;
+        fan->last_auto_update_ms = now_ms;
+    } else {
+        target = apply_auto_rate_limit(fan, target, allow_down, now_ms);
+    }
     fan->target_duty = target;
     esp_err_t ret = update_pwm(fan, target);
 

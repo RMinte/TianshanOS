@@ -3001,13 +3001,32 @@ button.btn-gray:hover,
 .fan-header {
     display: flex;
     justify-content: space-between;
-    align-items: center;
+    align-items: flex-start;
+    gap: 12px;
     margin-bottom: 16px;
+}
+
+.fan-header-main {
+    display: flex;
+    align-items: center;
+    flex: 1;
+    flex-wrap: wrap;
+    gap: 8px 10px;
+    min-width: 0;
+}
+
+.fan-header-actions {
+    display: flex;
+    align-items: center;
+    flex: 0 0 auto;
+    gap: 8px;
 }
 
 .fan-title {
     font-size: 1.1rem;
     font-weight: 600;
+    line-height: 1.5;
+    white-space: nowrap;
 }
 
 .fan-status-badge {
@@ -3038,26 +3057,23 @@ button.btn-gray:hover,
 }
 
 .fan-auto-info-btn {
-    width: 24px;
-    height: 24px;
+    width: 22px;
+    height: 22px;
     padding: 0;
-    margin-left: 6px;
-    border: 1px solid var(--border-color);
+    border: none;
     border-radius: 50%;
-    background: var(--bg-elevated);
+    background: transparent;
     color: var(--text-muted);
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    vertical-align: 16px;
     cursor: pointer;
     transition: all var(--t-fast);
 }
 
 .fan-auto-info-btn:hover {
     color: var(--text-primary);
-    background: var(--bg-card);
-    border-color: var(--text-muted);
+    background: transparent;
 }
 
 .fan-auto-info-btn i {
@@ -3094,9 +3110,10 @@ button.btn-gray:hover,
     flex-wrap: wrap;
     gap: 6px;
     align-items: center;
-    margin: -4px 0 14px;
+    margin: 0;
     font-size: 0.75rem;
     color: var(--text-light);
+    min-width: 0;
 }
 
 .fan-auto-meta span {
