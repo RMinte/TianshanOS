@@ -10,6 +10,7 @@
 #include "ts_scp.h"
 #include "ts_ssh_client.h"
 #include "ts_ssh_hosts_config.h"
+#include "ts_usb_mux.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -400,6 +401,18 @@ static esp_err_t api_lpmu_access_start(const cJSON *params, ts_api_result_t *res
     if (s_status.running || s_lpmu_task != NULL) {
         lpmu_unlock();
         ts_api_result_error(result, TS_API_ERR_BUSY, "LPMU access task is already running");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    if (!ts_usb_mux_is_configured()) {
+        lpmu_unlock();
+        ts_api_result_error(result, TS_API_ERR_HARDWARE, "USB MUX 未配置，无法确认是否已切换到 LPMU");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    if (ts_usb_mux_get_target() != TS_USB_MUX_LPMU) {
+        lpmu_unlock();
+        ts_api_result_error(result, TS_API_ERR_HARDWARE, "请先将 USB 切换到 LPMU 后再接入上层网络");
         return ESP_ERR_INVALID_STATE;
     }
 
