@@ -20,7 +20,16 @@ static bool s_running = false;
 
 static esp_err_t static_file_handler(ts_http_request_t *req, void *user_data)
 {
-    const char *uri = req->uri;
+    char uri_buf[96];
+    const char *query = strchr(req->uri, '?');
+    size_t uri_len = query ? (size_t)(query - req->uri) : strlen(req->uri);
+    if (uri_len >= sizeof(uri_buf)) {
+        uri_len = sizeof(uri_buf) - 1;
+    }
+    memcpy(uri_buf, req->uri, uri_len);
+    uri_buf[uri_len] = '\0';
+
+    const char *uri = uri_buf;
     char filepath[128];
     
 #ifdef CONFIG_TS_WEBUI_STATIC_PATH

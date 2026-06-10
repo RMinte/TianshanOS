@@ -758,10 +758,13 @@ static esp_err_t create_manifest_file(const char *firmware_version, const char *
     }
     
     if (firmware_version) {
+        cJSON_AddStringToObject(manifest, "version", firmware_version);
         cJSON_AddStringToObject(manifest, "firmware_version", firmware_version);
+        cJSON_AddStringToObject(manifest, "firmware", "TianShanOS.bin");
     }
     if (www_version) {
         cJSON_AddStringToObject(manifest, "www_version", www_version);
+        cJSON_AddStringToObject(manifest, "www", "www.bin");
     }
     cJSON_AddBoolToObject(manifest, "force", force);
     cJSON_AddBoolToObject(manifest, "delete_after", true);

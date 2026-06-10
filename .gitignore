@@ -1,5 +1,15 @@
-# Build output
-build/
+# Build intermediates
+build/*
+!build/TianShanOS.bin
+!build/www.bin
+!build/ota_data_initial.bin
+!build/flasher_args.json
+!build/bootloader/
+build/bootloader/*
+!build/bootloader/bootloader.bin
+!build/partition_table/
+build/partition_table/*
+!build/partition_table/partition-table.bin
 
 # ESP-IDF managed components (downloaded dependencies)
 managed_components/

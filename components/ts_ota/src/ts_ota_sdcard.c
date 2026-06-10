@@ -23,6 +23,7 @@ static const char *TAG = "ts_ota_sdcard";
 // OTA task handle
 static TaskHandle_t s_ota_task_handle = NULL;
 static ts_ota_config_t s_ota_config;
+static char *s_ota_url = NULL;
 static bool s_ota_running = false;
 
 // Forward declarations
@@ -51,8 +52,22 @@ esp_err_t ts_ota_start_sdcard(const ts_ota_config_t *config)
 
     ESP_LOGI(TAG, "Firmware file: %s, size: %ld bytes", config->url, st.st_size);
 
-    // Copy config
+    size_t url_len = strlen(config->url) + 1;
+    char *url_copy = OTA_MALLOC(url_len);
+    if (!url_copy) {
+        ESP_LOGE(TAG, "Failed to allocate URL buffer");
+        return ESP_ERR_NO_MEM;
+    }
+    memcpy(url_copy, config->url, url_len);
+
+    if (s_ota_url) {
+        free(s_ota_url);
+    }
+    s_ota_url = url_copy;
+
+    // Copy config and keep the file path valid for the OTA task lifetime.
     memcpy(&s_ota_config, config, sizeof(ts_ota_config_t));
+    s_ota_config.url = s_ota_url;
     
     // Create OTA task
     BaseType_t ret = xTaskCreate(
@@ -66,6 +81,9 @@ esp_err_t ts_ota_start_sdcard(const ts_ota_config_t *config)
 
     if (ret != pdPASS) {
         ESP_LOGE(TAG, "Failed to create OTA task");
+        free(s_ota_url);
+        s_ota_url = NULL;
+        s_ota_config.url = NULL;
         return ESP_ERR_NO_MEM;
     }
 
@@ -314,6 +332,11 @@ cleanup:
 
     s_ota_running = false;
     s_ota_task_handle = NULL;
+    if (s_ota_url) {
+        free(s_ota_url);
+        s_ota_url = NULL;
+        s_ota_config.url = NULL;
+    }
     vTaskDelete(NULL);
 }
 

@@ -36,6 +36,40 @@ DEFAULT_PORT = 57807
 BUILD_DIR = Path(__file__).parent.parent / "build"
 FIRMWARE_NAME = "TianShanOS.bin"
 WWW_NAME = "www.bin"
+ESP_APP_DESC_MAGIC = 0xABCD5432
+ESP_APP_DESC_OFFSET = 0x20
+ESP_APP_DESC_SIZE = 0xC4
+
+
+def read_c_string(data, start, end):
+    """Read a null-terminated UTF-8 string from a fixed-width binary field."""
+    return data[start:end].split(b'\x00', 1)[0].decode('utf-8', errors='replace')
+
+
+def parse_firmware_app_desc(firmware_path):
+    """Parse ESP-IDF esp_app_desc_t metadata embedded in an app image."""
+    try:
+        with open(firmware_path, 'rb') as f:
+            f.seek(ESP_APP_DESC_OFFSET)
+            app_desc = f.read(ESP_APP_DESC_SIZE)
+    except OSError:
+        return None
+
+    if len(app_desc) < ESP_APP_DESC_SIZE:
+        return None
+
+    magic = struct.unpack('<I', app_desc[0:4])[0]
+    if magic != ESP_APP_DESC_MAGIC:
+        return None
+
+    return {
+        'version': read_c_string(app_desc, 0x10, 0x30),
+        'project': read_c_string(app_desc, 0x30, 0x50) or "TianShanOS",
+        'compile_time': read_c_string(app_desc, 0x50, 0x60),
+        'compile_date': read_c_string(app_desc, 0x60, 0x70),
+        'idf_version': read_c_string(app_desc, 0x70, 0x90),
+        'secure_version': struct.unpack('<I', app_desc[4:8])[0],
+    }
 
 class OTAHandler(http.server.BaseHTTPRequestHandler):
     """OTA HTTP 请求处理器"""
@@ -76,7 +110,7 @@ class OTAHandler(http.server.BaseHTTPRequestHandler):
                 self.end_headers()
             else:
                 self.send_error(404, "Firmware not found")
-        elif path == '/www.bin':
+        elif path == '/www' or path == '/www.bin':
             www_path = BUILD_DIR / WWW_NAME
             if www_path.exists():
                 stat = www_path.stat()
@@ -101,7 +135,7 @@ class OTAHandler(http.server.BaseHTTPRequestHandler):
             self.handle_version()
         elif path == '/firmware' or path == '/firmware.bin' or path == '/TianShanOS.bin':
             self.handle_firmware()
-        elif path == '/www.bin':
+        elif path == '/www' or path == '/www.bin':
             self.handle_www()
         elif path == '/info':
             self.handle_info()
@@ -117,13 +151,27 @@ class OTAHandler(http.server.BaseHTTPRequestHandler):
         
         stat = firmware_path.stat()
         
-        # 尝试从 project_description.json 获取版本信息
+        # Prefer the version embedded in the exact binary being served.
         version = "unknown"
         project = "TianShanOS"
         idf_version = "unknown"
+        secure_version = 0
+        compile_time = datetime.fromtimestamp(stat.st_mtime)
+        compile_date_str = compile_time.strftime('%b %d %Y')
+        compile_time_str = compile_time.strftime('%H:%M:%S')
+
+        app_desc = parse_firmware_app_desc(firmware_path)
+        if app_desc:
+            version = app_desc.get('version') or version
+            project = app_desc.get('project') or project
+            idf_version = app_desc.get('idf_version') or idf_version
+            secure_version = app_desc.get('secure_version') or 0
+            compile_date_str = app_desc.get('compile_date') or compile_date_str
+            compile_time_str = app_desc.get('compile_time') or compile_time_str
         
+        # Fallback for full ESP-IDF build directories.
         desc_path = BUILD_DIR / "project_description.json"
-        if desc_path.exists():
+        if not app_desc and desc_path.exists():
             try:
                 with open(desc_path, 'r') as f:
                     desc = json.load(f)
@@ -139,17 +187,16 @@ class OTAHandler(http.server.BaseHTTPRequestHandler):
             for chunk in iter(lambda: f.read(8192), b''):
                 sha256.update(chunk)
         
-        # 获取编译时间（使用文件修改时间）
-        compile_time = datetime.fromtimestamp(stat.st_mtime)
-        
         return {
             'version': version,
             'project': project,
+            'project_name': project,
             'idf_version': idf_version,
+            'secure_version': secure_version,
             'size': stat.st_size,
             'sha256': sha256.hexdigest(),
-            'compile_date': compile_time.strftime('%b %d %Y'),
-            'compile_time': compile_time.strftime('%H:%M:%S'),
+            'compile_date': compile_date_str,
+            'compile_time': compile_time_str,
             'timestamp': int(stat.st_mtime),
             'filename': FIRMWARE_NAME,
         }
@@ -243,6 +290,9 @@ class OTAHandler(http.server.BaseHTTPRequestHandler):
         version_info = {
             'version': info['version'],
             'project': info['project'],
+            'project_name': info['project_name'],
+            'idf_version': info['idf_version'],
+            'secure_version': info['secure_version'],
             'size': info['size'],
             'sha256': info['sha256'],
             'timestamp': info['timestamp'],
