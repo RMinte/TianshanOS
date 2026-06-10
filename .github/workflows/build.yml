@@ -77,6 +77,10 @@ jobs:
       - name: Set target
         run: |
           source ~/esp/esp-idf/export.sh
+          # The repository tracks release artifacts under build/, but that
+          # checkout is not a complete CMake build tree. Remove it before
+          # idf.py set-target, otherwise ESP-IDF refuses its implicit fullclean.
+          rm -rf build
           idf.py set-target ${{ env.TARGET }}
 
       - name: Build firmware

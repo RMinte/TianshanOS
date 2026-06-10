@@ -43,7 +43,12 @@ def is_git_dirty(repo_path: Path) -> bool:
             timeout=5
         )
         if result.returncode == 0:
-            return bool(result.stdout.strip())
+            for line in result.stdout.splitlines():
+                path = line[3:]
+                if path.startswith('build/'):
+                    continue
+                return True
+            return False
     except Exception:
         pass
     return False

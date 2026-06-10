@@ -110,7 +110,7 @@ class OTAHandler(http.server.BaseHTTPRequestHandler):
                 self.end_headers()
             else:
                 self.send_error(404, "Firmware not found")
-        elif path == '/www.bin':
+        elif path == '/www' or path == '/www.bin':
             www_path = BUILD_DIR / WWW_NAME
             if www_path.exists():
                 stat = www_path.stat()
@@ -135,7 +135,7 @@ class OTAHandler(http.server.BaseHTTPRequestHandler):
             self.handle_version()
         elif path == '/firmware' or path == '/firmware.bin' or path == '/TianShanOS.bin':
             self.handle_firmware()
-        elif path == '/www.bin':
+        elif path == '/www' or path == '/www.bin':
             self.handle_www()
         elif path == '/info':
             self.handle_info()

@@ -16826,7 +16826,7 @@ async function upgradeViaProxy(serverUrl) {
         // ===== 第三步：处理 WebUI（如果启用）=====
         if (includeWww) {
             updateStep(3, '下载 WebUI...');
-            const wwwUrl = serverUrl.replace(/\/$/, '') + '/www';
+            const wwwUrl = serverUrl.replace(/\/$/, '') + '/www.bin';
             messageEl.textContent = typeof t === 'function' ? t('otaPage.downloadingFromServer') : '从 OTA 服务器下载';
             progressBar.style.width = '0%';
             progressPercent.textContent = '0%';
@@ -16854,17 +16854,16 @@ async function upgradeViaProxy(serverUrl) {
                 const wwwResult = await uploadWwwToDevice(wwwData);
                 
                 if (!wwwResult.success) {
-                    console.warn('WWW upload failed:', wwwResult.error);
-                    showToast(typeof t === 'function' ? t('toast.webuiUpgradeSkipped', { msg: wwwResult.error }) : 'WebUI 升级跳过: ' + wwwResult.error, 'warning');
-                } else {
-                    console.log('Proxy OTA: WWW uploaded to device');
-                    showToast(typeof t === 'function' ? t('toast.webuiWriteComplete') : 'WebUI 写入完成！', 'success');
-                    progressBar.style.width = '100%';
-                    progressPercent.textContent = '';
+                    throw new Error(wwwResult.error || 'WebUI 上传失败');
                 }
+
+                console.log('Proxy OTA: WWW uploaded to device');
+                showToast(typeof t === 'function' ? t('toast.webuiWriteComplete') : 'WebUI 写入完成！', 'success');
+                progressBar.style.width = '100%';
+                progressPercent.textContent = '';
             } catch (wwwError) {
                 console.warn('WWW download/upload failed:', wwwError);
-                showToast(typeof t === 'function' ? t('toast.webuiUpgradeSkipped', { msg: wwwError.message }) : 'WebUI 升级跳过: ' + wwwError.message, 'warning');
+                throw new Error('WebUI 升级失败: ' + (wwwError.message || wwwError));
             }
         }
         
