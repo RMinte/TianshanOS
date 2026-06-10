@@ -467,7 +467,7 @@ esp_err_t ts_ota_www_get_progress(ts_ota_progress_t *progress);
  *
  * Recovery will:
  * 1. Flash firmware to OTA partition
- * 2. Flash WebUI to www partition (if present)
+ * 2. Flash WebUI to www partition unless manifest sets "www" to an empty string
  * 3. Delete recovery files (if delete_after is true)
  * 4. Reboot device
  *

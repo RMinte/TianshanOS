@@ -15931,6 +15931,74 @@ async function refreshOtaInfo() {
 let otaStep = 'idle'; // 'idle' | 'app' | 'www'
 let wwwOtaEnabled = true;  // 是否启用 WebUI 升级
 let sdcardOtaSource = '';  // SD卡升级时的文件路径，用于推导 www.bin 路径
+let sdcardWwwSource = '';  // SD卡升级时实际匹配到的 www.bin 路径
+
+function inferSdcardWwwPath(source) {
+    if (!source) return '';
+    return source.match(/\.bin$/i)
+        ? source.replace(/[^\/]+\.bin$/i, 'www.bin')
+        : source.replace(/\/?$/, '/www.bin');
+}
+
+async function resolveSdcardOtaPaths(input, includeWww) {
+    const source = input.trim();
+    if (!source) {
+        throw new Error('请输入文件或目录路径');
+    }
+
+    if (source.match(/\.bin$/i)) {
+        const name = source.substring(source.lastIndexOf('/') + 1).toLowerCase();
+        if (name === 'www.bin') {
+            const dir = source.substring(0, source.lastIndexOf('/')) || '/sdcard';
+            const resolved = await resolveSdcardOtaPaths(dir, includeWww);
+            return {
+                firmware: resolved.firmware,
+                www: includeWww ? source : ''
+            };
+        }
+
+        const firmwareInfo = await api.storageInfo(source);
+        if (firmwareInfo.code !== 0 || firmwareInfo.data?.type !== 'file') {
+            throw new Error(`未找到固件文件: ${source}`);
+        }
+
+        const wwwPath = inferSdcardWwwPath(source);
+        if (includeWww) {
+            const wwwInfo = await api.storageInfo(wwwPath);
+            if (wwwInfo.code !== 0 || wwwInfo.data?.type !== 'file') {
+                throw new Error(`未找到 WebUI 文件: ${wwwPath}`);
+            }
+        }
+
+        return { firmware: source, www: includeWww ? wwwPath : '' };
+    }
+
+    const dir = source.replace(/\/+$/, '') || '/sdcard';
+    const list = await api.storageList(dir);
+    if (list.code !== 0 || !Array.isArray(list.data?.entries)) {
+        throw new Error(`无法读取目录: ${dir}`);
+    }
+
+    const files = list.data.entries.filter(entry => entry.type === 'file');
+    const firmware = files.find(entry => entry.name === 'TianShanOS.bin') ||
+        files.find(entry => entry.name.toLowerCase() === 'tianshanos.bin') ||
+        files.find(entry => entry.name.toLowerCase().endsWith('.bin') && entry.name.toLowerCase() !== 'www.bin');
+
+    if (!firmware) {
+        throw new Error(`目录中未找到固件 .bin: ${dir}`);
+    }
+
+    let wwwPath = '';
+    if (includeWww) {
+        const www = files.find(entry => entry.name.toLowerCase() === 'www.bin');
+        if (!www) {
+            throw new Error(`目录中未找到 WebUI 文件: ${dir}/www.bin`);
+        }
+        wwwPath = `${dir}/${www.name}`;
+    }
+
+    return { firmware: `${dir}/${firmware.name}`, www: wwwPath };
+}
 
 async function refreshOtaProgress() {
     try {
@@ -16051,11 +16119,7 @@ async function startWwwOta() {
         if (sdcardOtaSource) {
             // SD卡升级：推导 www.bin 路径
             isFromSdcard = true;
-            if (sdcardOtaSource.match(/\.bin$/i)) {
-                wwwSource = sdcardOtaSource.replace(/[^\/]+\.bin$/i, 'www.bin');
-            } else {
-                wwwSource = sdcardOtaSource.replace(/\/?$/, '/www.bin');
-            }
+            wwwSource = sdcardWwwSource || inferSdcardWwwPath(sdcardOtaSource);
         } else {
             // HTTP 升级：从服务器 URL 推导
             const serverUrl = document.getElementById('ota-server-input').value.trim() ||
@@ -16079,6 +16143,7 @@ async function startWwwOta() {
             console.log('No www source configured, skipping WebUI upgrade');
             wwwOtaEnabled = false;
             sdcardOtaSource = '';  // 重置
+            sdcardWwwSource = '';
             return;
         }
         
@@ -16104,36 +16169,36 @@ async function startWwwOta() {
             });
         }
         
-        sdcardOtaSource = '';  // 重置
-        
         if (result.code !== 0) {
             showToast(typeof t === 'function' ? t('toast.webuiUpgradeStartFailed') + ': ' + result.message : 'WebUI 升级启动失败: ' + result.message, 'error');
-            // 即使 www 失败也继续重启（因为 app 已经更新）
             otaStep = 'idle';
             clearInterval(refreshInterval);
             refreshInterval = null;
             
-            document.getElementById('ota-state-text').textContent = typeof t === 'function' ? t('otaPage.firmwareOnlyComplete') : '固件升级完成（WebUI 跳过）';
+            document.getElementById('ota-state-text').textContent = typeof t === 'function' ? t('otaPage.stateError') : '错误';
             document.getElementById('ota-message').innerHTML = `
                 <div style="text-align:center">
-                    <p>固件已更新，WebUI 升级跳过，设备正在重启...</p>
-                    <p id="reboot-countdown" style="color:#9ca3af;margin-top:5px">正在触发重启...</p>
+                    <p>固件已写入，但 WebUI 升级失败，已停止重启。</p>
+                    <p style="color:#9ca3af;margin-top:5px">${result.message || '请确认 www.bin 与固件在同一目录后重试'}</p>
+                    <button class="btn btn-service-style btn-small" onclick="startWwwOta()" style="margin-top:10px">重试 WebUI 升级</button>
                 </div>
             `;
-            
-            // 触发设备重启
-            try {
-                await api.call('system.reboot', { delay: 1 });
-            } catch (e) {
-                console.log('Reboot triggered (connection may have closed)');
-            }
-            
-            startRebootDetection();
+            document.getElementById('ota-abort-btn').style.display = 'none';
+            return;
         }
+
+        sdcardOtaSource = '';  // 重置
+        sdcardWwwSource = '';
+        if (!refreshInterval) {
+            refreshInterval = setInterval(refreshOtaProgress, 1000);
+        }
+        await refreshOtaProgress();
     } catch (error) {
         console.error('Failed to start WWW OTA:', error);
         otaStep = 'idle';
-        sdcardOtaSource = '';  // 重置
+        document.getElementById('ota-state-text').textContent = typeof t === 'function' ? t('otaPage.stateError') : '错误';
+        document.getElementById('ota-message').textContent = error.message || 'WebUI 升级启动失败';
+        document.getElementById('ota-abort-btn').style.display = 'none';
     }
 }
 
@@ -16264,23 +16329,32 @@ async function otaFromUrl() {
 }
 
 async function otaFromFile() {
-    const filepath = document.getElementById('ota-file-input').value.trim();
-    if (!filepath) {
+    const inputPath = document.getElementById('ota-file-input').value.trim();
+    if (!inputPath) {
         showToast(typeof t === 'function' ? t('toast.enterFilePath') : '请输入文件路径', 'error');
         return;
     }
     
     const includeWww = document.getElementById('ota-file-include-www').checked;
+
+    let paths;
+    try {
+        paths = await resolveSdcardOtaPaths(inputPath, includeWww);
+    } catch (error) {
+        showToast(error.message || '无法解析 SD 卡升级文件', 'error');
+        return;
+    }
     
     const params = {
-        file: filepath,
+        file: paths.firmware,
         no_reboot: true  // 不自动重启，由前端控制流程
     };
     
     // 设置 OTA 步骤
     otaStep = 'app';
     wwwOtaEnabled = includeWww;  // 根据用户选择决定是否升级 www
-    sdcardOtaSource = filepath;  // 保存 SD 卡路径用于推导 www.bin 路径
+    sdcardOtaSource = paths.firmware;  // 保存 SD 卡路径用于推导 www.bin 路径
+    sdcardWwwSource = paths.www;
     
     // 立即显示进度区域
     const progressSection = document.getElementById('ota-progress-section');
@@ -16290,7 +16364,7 @@ async function otaFromFile() {
     document.getElementById('ota-progress-bar').style.width = '0%';
     document.getElementById('ota-progress-percent').textContent = '0%';
     document.getElementById('ota-progress-size').textContent = typeof t === 'function' ? t('otaPage.preparing') : '准备中...';
-    document.getElementById('ota-message').textContent = filepath;
+    document.getElementById('ota-message').textContent = paths.firmware;
     document.getElementById('ota-abort-btn').style.display = 'inline-block';
     
     try {
@@ -16926,6 +17000,7 @@ async function uploadWwwToDevice(wwwData) {
 window.loadOtaPage = loadOtaPage;
 window.otaFromUrl = otaFromUrl;
 window.otaFromFile = otaFromFile;
+window.startWwwOta = startWwwOta;
 window.validateOta = validateOta;
 window.confirmRollback = confirmRollback;
 window.rollbackOta = rollbackOta;

@@ -41,9 +41,9 @@
     .modal-content{background:var(--bg-card);border-radius:var(--radius-lg);max-width:600px;width:95%;max-height:90vh;overflow-y:auto;box-shadow:var(--shadow-lg)}
     </style>
     <!-- 主 CSS 异步加载（非阻塞渲染） -->
-    <link rel="preload" href="/css/style.css" as="style" onload="this.onload=null;this.rel='stylesheet'">
-    <noscript><link rel="stylesheet" href="/css/style.css"></noscript>
-    <link rel="stylesheet" href="/fonts/remixicon.css">
+    <link rel="preload" href="/css/style.css?v=20260611-ota-path" as="style" onload="this.onload=null;this.rel='stylesheet'">
+    <noscript><link rel="stylesheet" href="/css/style.css?v=20260611-ota-path"></noscript>
+    <link rel="stylesheet" href="/fonts/remixicon.css?v=20260611-ota-path">
     <link rel="icon" href="/favicon.ico" type="image/x-icon" sizes="any">
     <link rel="icon" type="image/png" sizes="32x32" href="/images/tslogo-32.png">
     <link rel="icon" type="image/png" sizes="48x48" href="/images/tslogo-48.png">
@@ -247,6 +247,7 @@
     <!-- i18n 国际化（内联避免 ERR_CONNECTION_RESET 导致 i18n 未定义） -->
     <script>
     (function(){
+    window.TS_ASSET_VERSION = '20260611-ota-path';
     var i18n = (function() {
         var currentLang = 'zh-CN';
         var languages = {};
@@ -345,7 +346,7 @@
         /* 如果语言包尚未加载，先动态加载 */
         if (!window._loadedLangs || !window._loadedLangs[lang]) {
             var s = document.createElement('script');
-            s.src = '/js/lang/' + lang + '.js';
+            s.src = '/js/lang/' + lang + '.js?v=' + window.TS_ASSET_VERSION;
             s.onload = function() {
                 window._loadedLangs = window._loadedLangs || {};
                 window._loadedLangs[lang] = true;
@@ -363,7 +364,7 @@
         var nameEl = document.getElementById('lang-name');
         if (nameEl) nameEl.textContent = cur === 'zh-CN' ? '\u4e2d\u6587' : 'English';
         var s = document.createElement('script');
-        s.src = '/js/lang/' + cur + '.js';
+        s.src = '/js/lang/' + cur + '.js?v=' + window.TS_ASSET_VERSION;
         s.onload = function() {
             window._loadedLangs = {};
             window._loadedLangs[cur] = true;
@@ -378,10 +379,10 @@
     })();
     </script>
     
-    <script defer src="/js/api.js"></script>
-    <script defer src="/js/router.js"></script>
-    <script defer src="/js/terminal.js"></script>
-    <script defer src="/js/dragSort.js"></script>
-    <script defer src="/js/app.js"></script>
+    <script defer src="/js/api.js?v=20260611-ota-path"></script>
+    <script defer src="/js/router.js?v=20260611-ota-path"></script>
+    <script defer src="/js/terminal.js?v=20260611-ota-path"></script>
+    <script defer src="/js/dragSort.js?v=20260611-ota-path"></script>
+    <script defer src="/js/app.js?v=20260611-ota-path"></script>
 </body>
 </html>

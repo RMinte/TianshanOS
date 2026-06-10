@@ -11,7 +11,7 @@
  * 目录结构：
  * /sdcard/recovery/
  * ├── TianShanOS.bin   # 固件文件
- * ├── www.bin          # WebUI 文件（可选）
+ * ├── www.bin          # WebUI 文件
  * └── manifest.json    # 版本清单
  *
  * manifest.json 格式：
@@ -21,6 +21,8 @@
  *   "firmware": "TianShanOS.bin",
  *   "www": "www.bin"
  * }
+ *
+ * 如确需 app-only 恢复，可在 manifest 中显式设置 "www": ""。
  *
  * @author TianShanOS Team
  * @version 1.0.0
@@ -475,6 +477,16 @@ esp_err_t ts_ota_check_recovery(void)
         return ESP_ERR_NOT_FOUND;
     }
 
+    /* Boot-time recovery is a complete package path. Validate the WebUI image
+     * before changing the boot partition so a partial SD card package cannot
+     * leave the device with a new app but no usable /www UI.
+     */
+    if (manifest.www[0] && stat(www_path, &st) != 0) {
+        ESP_LOGE(TAG, "WebUI file required for recovery but not found: %s", www_path);
+        ESP_LOGE(TAG, "Copy www.bin next to TianShanOS.bin or set manifest www to an empty string for app-only recovery");
+        return ESP_ERR_NOT_FOUND;
+    }
+
     // 执行固件恢复
     ret = do_firmware_recovery(firmware_path);
     if (ret != ESP_OK) {
@@ -483,14 +495,14 @@ esp_err_t ts_ota_check_recovery(void)
     }
     firmware_done = true;
 
-    // 执行 WebUI 恢复（可选）
-    if (stat(www_path, &st) == 0) {
+    // 执行 WebUI 恢复
+    if (manifest.www[0]) {
         ret = do_www_recovery(www_path);
         if (ret != ESP_OK) {
-            ESP_LOGW(TAG, "WebUI recovery failed (non-fatal): %s", esp_err_to_name(ret));
-        } else {
-            www_done = true;
+            ESP_LOGE(TAG, "❌ WebUI recovery failed: %s", esp_err_to_name(ret));
+            return ret;
         }
+        www_done = true;
     }
 
     // 清理 recovery 文件
