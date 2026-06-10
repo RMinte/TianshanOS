@@ -1,6 +1,3 @@
-# Build output
-build/
-
 # ESP-IDF managed components (downloaded dependencies)
 managed_components/
 
