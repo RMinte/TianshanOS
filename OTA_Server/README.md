@@ -40,7 +40,7 @@ python OTA_Server/server.py 8080
 
 1. 打开 TianShanOS WebUI
 2. 导航到 OTA 页面
-3. 在"服务器设置"中输入 OTA 服务器地址：`http://YOUR_IP:8070`
+3. 在"服务器设置"中输入 OTA 服务器地址：`http://YOUR_IP:57807`
 4. 点击"保存"
 5. 点击"检查更新"
 
