@@ -329,6 +329,50 @@ static esp_err_t api_auth_admin_set_password(const cJSON *params, ts_api_result_
 }
 
 /**
+ * @brief auth.root.set_password - Root sets root password
+ *
+ * Params: { "token": "...", "new_password": "..." }
+ * Returns: { "success": true, "username": "root", "password_changed": true }
+ */
+static esp_err_t api_auth_root_set_password(const cJSON *params, ts_api_result_t *result)
+{
+    const cJSON *token_item = cJSON_GetObjectItem(params, "token");
+    const cJSON *new_pwd_item = cJSON_GetObjectItem(params, "new_password");
+
+    esp_err_t ret = validate_root_token(token_item, result);
+    if (ret != ESP_OK) return ret;
+
+    if (!cJSON_IsString(new_pwd_item)) {
+        ts_api_result_error(result, TS_API_ERR_INVALID_ARG,
+                           "Missing required parameter: new_password");
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    const char *new_password = new_pwd_item->valuestring;
+    size_t len = strlen(new_password);
+    if (len < 4 || len > 64) {
+        ts_api_result_error(result, TS_API_ERR_INVALID_ARG,
+                           "Password must be 4-64 characters");
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    ret = ts_auth_set_root_password(new_password);
+    if (ret != ESP_OK) {
+        ts_api_result_error(result, TS_API_ERR_INTERNAL, "Failed to set root password");
+        return ret;
+    }
+
+    cJSON *data = cJSON_CreateObject();
+    cJSON_AddBoolToObject(data, "success", true);
+    cJSON_AddStringToObject(data, "username", "root");
+    cJSON_AddBoolToObject(data, "password_changed", true);
+
+    ts_api_result_ok(result, data);
+    TS_LOGI(TAG, "Root set root password");
+    return ESP_OK;
+}
+
+/**
  * @brief auth.admin.reset_password - Root resets admin password to default
  *
  * Params: { "token": "..." }
@@ -395,6 +439,13 @@ static const ts_api_endpoint_t s_auth_endpoints[] = {
         .description = "Root sets admin password",
         .category = TS_API_CAT_SECURITY,
         .handler = api_auth_admin_set_password,
+        .requires_auth = false,  /* Handler validates root token */
+    },
+    {
+        .name = "auth.root.set_password",
+        .description = "Root sets root password",
+        .category = TS_API_CAT_SECURITY,
+        .handler = api_auth_root_set_password,
         .requires_auth = false,  /* Handler validates root token */
     },
     {

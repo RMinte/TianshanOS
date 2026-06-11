@@ -233,6 +233,13 @@ class TianShanAPI {
         }, 'POST');
     }
 
+    async setRootPassword(newPassword) {
+        return this.call('auth.root.set_password', {
+            token: this.token,
+            new_password: newPassword
+        }, 'POST');
+    }
+
     async resetAdminPassword() {
         return this.call('auth.admin.reset_password', {
             token: this.token

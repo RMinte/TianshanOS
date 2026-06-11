@@ -750,13 +750,18 @@ esp_err_t ts_service_get_stats(ts_service_stats_t *stats)
 
 void ts_service_dump(void)
 {
+    ts_service_stats_t stats;
+    if (ts_service_get_stats(&stats) != ESP_OK) {
+        memset(&stats, 0, sizeof(stats));
+    }
+
     ESP_LOGI(TAG, "=== Service Status ===");
     ESP_LOGI(TAG, "Total: %lu, Running: %lu, Stopped: %lu, Error: %lu",
-             (unsigned long)s_svc_ctx.stats.total_services,
-             (unsigned long)s_svc_ctx.stats.running_services,
-             (unsigned long)s_svc_ctx.stats.stopped_services,
-             (unsigned long)s_svc_ctx.stats.error_services);
-    ESP_LOGI(TAG, "Startup time: %lu ms", (unsigned long)s_svc_ctx.stats.startup_time_ms);
+             (unsigned long)stats.total_services,
+             (unsigned long)stats.running_services,
+             (unsigned long)stats.stopped_services,
+             (unsigned long)stats.error_services);
+    ESP_LOGI(TAG, "Startup time: %lu ms", (unsigned long)stats.startup_time_ms);
 
     xSemaphoreTake(s_svc_ctx.mutex, portMAX_DELAY);
 

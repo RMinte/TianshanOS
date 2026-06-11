@@ -159,6 +159,9 @@ jobs:
       - name: Check if release already exists (main branch)
         if: github.ref == 'refs/heads/main'
         id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
           TAG="${{ steps.release_tag.outputs.tag }}"
           if gh release view "$TAG" 2>/dev/null; then
