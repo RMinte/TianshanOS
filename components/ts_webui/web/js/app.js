@@ -16812,7 +16812,7 @@ async function upgradeViaProxy(serverUrl) {
         
         // 调用 ESP32 上传接口（复用现有的 /api/v1/ota/firmware）
         // 注意：不自动重启，等 www 也完成后再重启
-        const uploadResult = await uploadFirmwareToDevice(firmwareData, !includeWww);
+        const uploadResult = await uploadFirmwareToDevice(firmwareData, false);
         
         if (!uploadResult.success) {
             throw new Error(uploadResult.error || '上传固件失败');

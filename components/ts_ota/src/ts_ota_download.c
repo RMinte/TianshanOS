@@ -36,9 +36,9 @@ static const char *TAG = "ts_ota_download";
 
 /* Recovery 目录路径 */
 #define RECOVERY_DIR        "/sdcard/recovery"
-#define RECOVERY_FIRMWARE   RECOVERY_DIR "/TianShanOS.bin"
-#define RECOVERY_WWW        RECOVERY_DIR "/www.bin"
-#define RECOVERY_MANIFEST   RECOVERY_DIR "/manifest.json"
+#define RECOVERY_FIRMWARE   TS_OTA_RECOVERY_FIRMWARE_PATH
+#define RECOVERY_WWW        TS_OTA_RECOVERY_WWW_PATH
+#define RECOVERY_MANIFEST   TS_OTA_RECOVERY_MANIFEST_PATH
 #define RECOVERY_TEMP       RECOVERY_DIR "/temp.bin"
 
 /* PSRAM-first allocation */
@@ -69,8 +69,9 @@ static bool s_download_running = false;
 static void download_task(void *arg);
 static esp_err_t download_file_to_sdcard(const char *url, const char *dest_path, 
                                           bool skip_cert_verify, size_t *out_size);
+static esp_err_t read_firmware_file_version(const char *path, char *version, size_t version_len);
 static esp_err_t verify_firmware_file(const char *path, char *version, size_t version_len);
-static esp_err_t create_manifest_file(const char *firmware_version, const char *www_version, bool force);
+static esp_err_t create_manifest_file(const char *firmware_version, const char *www_name, bool force, bool armed);
 
 
 /**
@@ -249,10 +250,12 @@ esp_err_t ts_ota_save_upload(const void *data, size_t len, bool is_firmware, boo
             return ret;
         }
         
-        // 创建 manifest
-        ret = create_manifest_file(version, NULL, true);
-        if (ret != ESP_OK) {
-            ESP_LOGW(TAG, "Failed to create manifest (non-fatal)");
+        if (auto_flash) {
+            // Keep legacy auto-flash behavior armed for boot-time recovery.
+            ret = create_manifest_file(version, NULL, true, true);
+            if (ret != ESP_OK) {
+                ESP_LOGW(TAG, "Failed to create manifest (non-fatal)");
+            }
         }
     }
     
@@ -266,6 +269,37 @@ esp_err_t ts_ota_save_upload(const void *data, size_t len, bool is_firmware, boo
     }
     
     return ESP_OK;
+}
+
+esp_err_t ts_ota_write_recovery_manifest_from_files(bool include_www, bool force, bool armed)
+{
+    esp_err_t ret = ensure_recovery_dir();
+    if (ret != ESP_OK) {
+        return ret;
+    }
+
+    char version[64] = {0};
+    ret = read_firmware_file_version(RECOVERY_FIRMWARE, version, sizeof(version));
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Recovery firmware is not valid for manifest: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
+    const char *www_name = "";
+    if (include_www) {
+        struct stat st;
+        if (stat(RECOVERY_WWW, &st) != 0) {
+            ESP_LOGE(TAG, "Recovery www not found for manifest: %s", RECOVERY_WWW);
+            return ESP_ERR_NOT_FOUND;
+        }
+        if (st.st_size <= 0) {
+            ESP_LOGE(TAG, "Recovery www is empty");
+            return ESP_ERR_INVALID_SIZE;
+        }
+        www_name = "www.bin";
+    }
+
+    return create_manifest_file(version, www_name, force, armed);
 }
 
 /**
@@ -424,8 +458,8 @@ static void download_task(void *arg)
         
         ESP_LOGI(TAG, "Firmware verified: version=%s", version);
         
-        // 创建 manifest
-        create_manifest_file(version, NULL, false);
+        // Download-only recovery is an armed app-only package.
+        create_manifest_file(version, "", false, true);
     }
     
     ts_ota_update_progress(TS_OTA_STATE_IDLE, file_size, file_size, "下载完成");
@@ -697,14 +731,10 @@ static esp_err_t download_file_to_sdcard(const char *url, const char *dest_path,
     return (ret == ESP_OK) ? ESP_FAIL : ret;
 }
 
-/**
- * @brief 验证固件文件
- */
-static esp_err_t verify_firmware_file(const char *path, char *version, size_t version_len)
+static esp_err_t read_firmware_file_version(const char *path, char *version, size_t version_len)
 {
     FILE *f = fopen(path, "rb");
     if (!f) {
-        ts_ota_set_error(TS_OTA_ERR_FILE_NOT_FOUND, "固件文件不存在");
         return ESP_ERR_NOT_FOUND;
     }
     
@@ -713,7 +743,6 @@ static esp_err_t verify_firmware_file(const char *path, char *version, size_t ve
     uint8_t *header = OTA_MALLOC(header_size);
     if (!header) {
         fclose(f);
-        ts_ota_set_error(TS_OTA_ERR_INTERNAL, "内存不足");
         return ESP_ERR_NO_MEM;
     }
     
@@ -722,7 +751,6 @@ static esp_err_t verify_firmware_file(const char *path, char *version, size_t ve
     
     if (read < header_size) {
         OTA_FREE(header);
-        ts_ota_set_error(TS_OTA_ERR_VERIFY_FAILED, "固件文件过小");
         return ESP_ERR_INVALID_SIZE;
     }
     
@@ -731,7 +759,6 @@ static esp_err_t verify_firmware_file(const char *path, char *version, size_t ve
     
     if (app_desc->magic_word != ESP_APP_DESC_MAGIC_WORD) {
         OTA_FREE(header);
-        ts_ota_set_error(TS_OTA_ERR_VERIFY_FAILED, "无效的固件格式");
         return ESP_ERR_INVALID_ARG;
     }
     
@@ -748,9 +775,27 @@ static esp_err_t verify_firmware_file(const char *path, char *version, size_t ve
 }
 
 /**
+ * @brief 验证固件文件
+ */
+static esp_err_t verify_firmware_file(const char *path, char *version, size_t version_len)
+{
+    esp_err_t ret = read_firmware_file_version(path, version, version_len);
+    if (ret == ESP_ERR_NOT_FOUND) {
+        ts_ota_set_error(TS_OTA_ERR_FILE_NOT_FOUND, "固件文件不存在");
+    } else if (ret == ESP_ERR_NO_MEM) {
+        ts_ota_set_error(TS_OTA_ERR_INTERNAL, "内存不足");
+    } else if (ret == ESP_ERR_INVALID_SIZE) {
+        ts_ota_set_error(TS_OTA_ERR_VERIFY_FAILED, "固件文件过小");
+    } else if (ret == ESP_ERR_INVALID_ARG) {
+        ts_ota_set_error(TS_OTA_ERR_VERIFY_FAILED, "无效的固件格式");
+    }
+    return ret;
+}
+
+/**
  * @brief 创建 manifest 文件
  */
-static esp_err_t create_manifest_file(const char *firmware_version, const char *www_version, bool force)
+static esp_err_t create_manifest_file(const char *firmware_version, const char *www_name, bool force, bool armed)
 {
     cJSON *manifest = cJSON_CreateObject();
     if (!manifest) {
@@ -762,10 +807,10 @@ static esp_err_t create_manifest_file(const char *firmware_version, const char *
         cJSON_AddStringToObject(manifest, "firmware_version", firmware_version);
         cJSON_AddStringToObject(manifest, "firmware", "TianShanOS.bin");
     }
-    if (www_version) {
-        cJSON_AddStringToObject(manifest, "www_version", www_version);
-        cJSON_AddStringToObject(manifest, "www", "www.bin");
+    if (www_name) {
+        cJSON_AddStringToObject(manifest, "www", www_name);
     }
+    cJSON_AddBoolToObject(manifest, "armed", armed);
     cJSON_AddBoolToObject(manifest, "force", force);
     cJSON_AddBoolToObject(manifest, "delete_after", true);
     
@@ -776,7 +821,7 @@ static esp_err_t create_manifest_file(const char *firmware_version, const char *
             cJSON_AddStringToObject(manifest, "firmware_sha256", sha256);
         }
     }
-    if (ts_storage_exists(RECOVERY_WWW)) {
+    if (www_name && www_name[0] && ts_storage_exists(RECOVERY_WWW)) {
         if (calculate_file_sha256(RECOVERY_WWW, sha256, sizeof(sha256)) == ESP_OK) {
             cJSON_AddStringToObject(manifest, "www_sha256", sha256);
         }

@@ -8,6 +8,7 @@
  */
 
 #include <string.h>
+#include <stdio.h>
 #include <sys/stat.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -18,6 +19,8 @@
 
 /* PSRAM-first allocation for OTA buffers */
 #define OTA_MALLOC(size) ({ void *p = heap_caps_malloc((size), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT); p ? p : malloc(size); })
+#define WWW_FLASH_BUFFER_SIZE       4096
+#define WWW_FLASH_ERASE_CHUNK_SIZE  (64 * 1024)
 #include "esp_crt_bundle.h"
 #include "esp_partition.h"
 #include "ts_ota.h"
@@ -476,6 +479,186 @@ esp_err_t ts_ota_www_start_sdcard(const char *filepath,
     
     s_www_ota_running = true;
     return ESP_OK;
+}
+
+/**
+ * @brief Synchronously flash WWW partition from a local file
+ */
+esp_err_t ts_ota_www_flash_file_sync(const char *filepath,
+                                      ts_ota_progress_cb_t progress_cb,
+                                      void *user_data)
+{
+    esp_err_t ret = ESP_OK;
+    FILE *f = NULL;
+    char *buffer = NULL;
+    const esp_partition_t *www_partition = NULL;
+    size_t file_size = 0;
+
+    if (!filepath || strlen(filepath) == 0) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (s_www_ota_running) {
+        ESP_LOGE(TAG, "WWW OTA already running");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    if (!s_www_progress_mutex) {
+        ret = ts_ota_www_init();
+        if (ret != ESP_OK) {
+            return ret;
+        }
+    }
+
+    s_www_ota_abort_requested = false;
+    strncpy(s_www_config.url, filepath, sizeof(s_www_config.url) - 1);
+    s_www_config.url[sizeof(s_www_config.url) - 1] = '\0';
+    s_www_config.from_sdcard = true;
+    s_www_config.progress_cb = progress_cb;
+    s_www_config.user_data = user_data;
+    s_www_ota_running = true;
+
+    ESP_LOGI(TAG, "Synchronously flashing WWW from file: %s", filepath);
+    www_ota_update_progress(TS_OTA_STATE_DOWNLOADING, 0, 0, "正在读取文件...");
+
+    struct stat st;
+    if (stat(filepath, &st) != 0) {
+        ESP_LOGE(TAG, "File not found: %s", filepath);
+        www_ota_update_progress(TS_OTA_STATE_ERROR, 0, 0, "WebUI 文件不存在");
+        ret = ESP_ERR_NOT_FOUND;
+        goto cleanup;
+    }
+
+    if (st.st_size <= 0) {
+        ESP_LOGE(TAG, "Invalid WWW file size: %ld", (long)st.st_size);
+        www_ota_update_progress(TS_OTA_STATE_ERROR, 0, 0, "WebUI 文件为空");
+        ret = ESP_ERR_INVALID_SIZE;
+        goto cleanup;
+    }
+
+    file_size = (size_t)st.st_size;
+
+    www_partition = esp_partition_find_first(
+        ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_SPIFFS, "www");
+    if (!www_partition) {
+        ESP_LOGE(TAG, "WWW partition not found");
+        www_ota_update_progress(TS_OTA_STATE_ERROR, 0, 0, "找不到 www 分区");
+        ret = ESP_ERR_NOT_FOUND;
+        goto cleanup;
+    }
+
+    ESP_LOGI(TAG, "WWW partition: addr=0x%lx, size=%lu",
+             www_partition->address, www_partition->size);
+    ESP_LOGI(TAG, "WWW file size: %zu bytes", file_size);
+
+    if (file_size > www_partition->size) {
+        ESP_LOGE(TAG, "File too large: %zu > %lu", file_size, www_partition->size);
+        www_ota_update_progress(TS_OTA_STATE_ERROR, 0, 0, "文件太大，超出分区容量");
+        ret = ESP_ERR_INVALID_SIZE;
+        goto cleanup;
+    }
+
+    f = fopen(filepath, "rb");
+    if (!f) {
+        ESP_LOGE(TAG, "Failed to open file: %s", filepath);
+        www_ota_update_progress(TS_OTA_STATE_ERROR, 0, 0, "打开文件失败");
+        ret = ESP_FAIL;
+        goto cleanup;
+    }
+
+    buffer = heap_caps_malloc(WWW_FLASH_BUFFER_SIZE, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    if (!buffer) {
+        ESP_LOGE(TAG, "Failed to allocate internal flash buffer");
+        www_ota_update_progress(TS_OTA_STATE_ERROR, 0, 0, "内部内存不足");
+        ret = ESP_ERR_NO_MEM;
+        goto cleanup;
+    }
+
+    ESP_LOGI(TAG, "Erasing www partition synchronously...");
+    www_ota_update_progress(TS_OTA_STATE_WRITING, 0, file_size, "正在擦除分区...");
+
+    size_t erased = 0;
+    while (erased < www_partition->size) {
+        if (s_www_ota_abort_requested) {
+            ESP_LOGI(TAG, "WWW OTA aborted during erase");
+            www_ota_update_progress(TS_OTA_STATE_IDLE, 0, 0, "已中止");
+            ret = ESP_ERR_INVALID_STATE;
+            goto cleanup;
+        }
+
+        size_t remaining = www_partition->size - erased;
+        size_t erase_size = remaining > WWW_FLASH_ERASE_CHUNK_SIZE
+                            ? WWW_FLASH_ERASE_CHUNK_SIZE
+                            : remaining;
+        ret = esp_partition_erase_range(www_partition, erased, erase_size);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to erase partition at offset %zu: %s",
+                     erased, esp_err_to_name(ret));
+            www_ota_update_progress(TS_OTA_STATE_ERROR, 0, 0, "擦除分区失败");
+            goto cleanup;
+        }
+
+        erased += erase_size;
+        vTaskDelay(pdMS_TO_TICKS(1));
+    }
+
+    size_t written = 0;
+    size_t last_reported = 0;
+    while (written < file_size) {
+        if (s_www_ota_abort_requested) {
+            ESP_LOGI(TAG, "WWW OTA aborted during write");
+            www_ota_update_progress(TS_OTA_STATE_IDLE, 0, 0, "已中止");
+            ret = ESP_ERR_INVALID_STATE;
+            goto cleanup;
+        }
+
+        size_t to_read = file_size - written;
+        if (to_read > WWW_FLASH_BUFFER_SIZE) {
+            to_read = WWW_FLASH_BUFFER_SIZE;
+        }
+
+        size_t read_len = fread(buffer, 1, to_read, f);
+        if (read_len != to_read) {
+            ESP_LOGE(TAG, "Read error: %zu / %zu bytes", read_len, to_read);
+            www_ota_update_progress(TS_OTA_STATE_ERROR, written, file_size, "读取失败");
+            ret = ESP_FAIL;
+            goto cleanup;
+        }
+
+        ret = esp_partition_write(www_partition, written, buffer, read_len);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Write error at offset %zu: %s", written, esp_err_to_name(ret));
+            www_ota_update_progress(TS_OTA_STATE_ERROR, written, file_size, "写入失败");
+            goto cleanup;
+        }
+
+        written += read_len;
+        if (written == file_size || written - last_reported >= WWW_FLASH_ERASE_CHUNK_SIZE) {
+            int percent = (written * 100) / file_size;
+            ESP_LOGI(TAG, "Written: %zu / %zu bytes (%d%%)", written, file_size, percent);
+            www_ota_update_progress(TS_OTA_STATE_WRITING, written, file_size, "正在写入 WebUI...");
+            last_reported = written;
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(1));
+    }
+
+    ESP_LOGI(TAG, "Synchronous WWW flash completed! Total: %zu bytes", written);
+    www_ota_update_progress(TS_OTA_STATE_PENDING_REBOOT, written, written, "WebUI 升级完成");
+    ts_event_post(TS_EVENT_BASE_OTA, TS_EVENT_OTA_COMPLETED, NULL, 0, 0);
+
+cleanup:
+    if (f) {
+        fclose(f);
+    }
+    if (buffer) {
+        free(buffer);
+    }
+
+    s_www_ota_running = false;
+    s_www_ota_abort_requested = false;
+    s_www_ota_task_handle = NULL;
+    return ret;
 }
 
 /**

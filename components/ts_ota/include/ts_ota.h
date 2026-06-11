@@ -176,6 +176,32 @@ esp_err_t ts_ota_deinit(void);
 esp_err_t ts_ota_start(const ts_ota_config_t *config);
 
 /**
+ * @brief Synchronously flash app firmware from a local file
+ *
+ * This call only returns ESP_OK after the firmware image has been written to
+ * the next OTA partition and that partition has been selected for next boot.
+ *
+ * @param filepath Path to TianShanOS.bin
+ * @param allow_downgrade Allow flashing a version lower than the running app
+ * @param progress_cb Progress callback (optional)
+ * @param user_data User data for callback
+ * @return ESP_OK when the app partition write has completed successfully
+ */
+esp_err_t ts_ota_flash_file_sync(const char *filepath,
+                                  bool allow_downgrade,
+                                  ts_ota_progress_cb_t progress_cb,
+                                  void *user_data);
+
+/**
+ * @brief Check if SD card/local-file app OTA is running
+ *
+ * Covers both asynchronous SD-card OTA and synchronous local-file flashing.
+ *
+ * @return true when app partition is being written from a local file
+ */
+bool ts_ota_sdcard_is_running(void);
+
+/**
  * @brief Abort ongoing OTA update
  *
  * @return ESP_OK on success
@@ -400,6 +426,13 @@ bool ts_ota_https_is_running(void);
 // ============================================================================
 
 /**
+ * @brief Canonical recovery image paths
+ */
+#define TS_OTA_RECOVERY_FIRMWARE_PATH "/sdcard/recovery/TianShanOS.bin"
+#define TS_OTA_RECOVERY_WWW_PATH "/sdcard/recovery/www.bin"
+#define TS_OTA_RECOVERY_MANIFEST_PATH "/sdcard/recovery/manifest.json"
+
+/**
  * @brief Initialize WWW OTA module
  * @return ESP_OK on success
  */
@@ -433,6 +466,21 @@ esp_err_t ts_ota_www_start(const char *url, bool skip_cert_verify,
 esp_err_t ts_ota_www_start_sdcard(const char *filepath,
                                    ts_ota_progress_cb_t progress_cb,
                                    void *user_data);
+
+/**
+ * @brief Synchronously flash WWW partition from a local file
+ *
+ * This call only returns ESP_OK after the file has been written to the www
+ * partition and the WebUI OTA progress state is pending reboot.
+ *
+ * @param filepath Path to www.bin file
+ * @param progress_cb Progress callback (optional)
+ * @param user_data User data for callback
+ * @return ESP_OK when the partition write has completed successfully
+ */
+esp_err_t ts_ota_www_flash_file_sync(const char *filepath,
+                                      ts_ota_progress_cb_t progress_cb,
+                                      void *user_data);
 
 /**
  * @brief Abort WWW partition OTA
@@ -489,6 +537,19 @@ esp_err_t ts_ota_check_recovery(void);
  * @return ESP_OK on success
  */
 esp_err_t ts_ota_create_recovery_manifest(const char *version, bool force);
+
+/**
+ * @brief Write recovery manifest from files currently in /sdcard/recovery
+ *
+ * Browser-proxy OTA uses this to keep recovery files as cached artifacts
+ * without arming boot-time recovery.
+ *
+ * @param include_www Include /sdcard/recovery/www.bin in the manifest
+ * @param force Force recovery regardless of version when armed
+ * @param armed Allow boot-time recovery to consume this manifest
+ * @return ESP_OK on success
+ */
+esp_err_t ts_ota_write_recovery_manifest_from_files(bool include_www, bool force, bool armed);
 
 // ============================================================================
 //                    Unified Download API (Recovery Directory Mode)
