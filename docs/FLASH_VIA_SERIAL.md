@@ -48,7 +48,7 @@ idf.py build
 
 构建成功后，可在 `build/` 下看到：
 
-- `TianshanOS.bin` — 应用固件（烧录到 ota_0）
+- `TianShanOS.bin` — 应用固件（烧录到 ota_0）
 - `bootloader.bin` — 引导程序
 - `partition-table.bin` — 分区表
 - `www.bin` — Web 资源 SPIFFS 镜像（烧录到 www 分区）
@@ -117,7 +117,7 @@ idf.py -p <PORT> flash monitor
 |------------|----------|------|
 | bootloader | 0x0      | build/bootloader/bootloader.bin |
 | 分区表     | 0x8000   | build/partition_table/partition-table.bin |
-| 应用 ota_0 | 0x20000  | build/TianshanOS.bin |
+| 应用 ota_0 | 0x20000  | build/TianShanOS.bin |
 | www        | 0x6A0000 | build/www.bin |
 
 在 `build` 目录下执行（把 `<PORT>` 换成实际串口）：
@@ -128,7 +128,7 @@ cd build
 esptool.py --chip esp32s3 -p <PORT> write_flash \
   0x0       bootloader/bootloader.bin \
   0x8000    partition_table/partition-table.bin \
-  0x20000   TianshanOS.bin \
+  0x20000   TianShanOS.bin \
   0x6A0000  www.bin
 ```
 

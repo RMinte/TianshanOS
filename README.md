@@ -123,7 +123,7 @@ idf.py -p /dev/ttyACM0 flash monitor
 esptool.py --chip esp32s3 -p /dev/ttyACM0 write_flash \
     0x0 bootloader.bin \
     0x8000 partition-table.bin \
-    0x10000 TianshanOS.bin
+    0x20000 TianShanOS.bin
 ```
 
 ### VS Code 开发
@@ -139,6 +139,8 @@ esptool.py --chip esp32s3 -p /dev/ttyACM0 write_flash \
 | 文档 | 描述 |
 |-----|------|
 | [快速入门](docs/QUICK_START.md) | 环境搭建与首次运行 |
+| [串口刷机](docs/FLASH_VIA_SERIAL.md) | 串口烧录与分区偏移说明 |
+| [Root 密码恢复固件](docs/ROOT_PASSWORD_RESET_FIRMWARE.md) | root 用户密码恢复固件的构建与刷写流程 |
 | [架构设计](docs/ARCHITECTURE_DESIGN.md) | 系统架构与设计决策 |
 | [配置系统设计](docs/CONFIG_SYSTEM_DESIGN.md) | 统一配置系统详细设计 |
 | [自动化引擎](docs/AUTOMATION_ENGINE.md) | 触发器-条件-动作系统 |

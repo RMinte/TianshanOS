@@ -1,5 +1,6 @@
 # Build intermediates
 build/*
+build-root-reset/
 !build/TianShanOS.bin
 !build/www.bin
 !build/ota_data_initial.bin
