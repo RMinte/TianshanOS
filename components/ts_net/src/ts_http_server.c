@@ -292,16 +292,14 @@ esp_err_t ts_http_send_file(ts_http_request_t *req, const char *filepath)
         httpd_resp_set_hdr(req->req, "Vary", "Accept-Encoding");
     }
     
-    /* Static filenames are not content-hashed, so JS/CSS must revalidate after
-     * a WebUI partition update. Fonts/images can still be cached briefly.
+    /* index.html 不缓存（确保 OTA 后拿到新版本），其他静态资源长期缓存。
+     * JS/CSS/字体等通过 index.html 中的 ?v= 版本参数实现缓存失效。
      */
     const char *basename = strrchr(filepath, '/');
     if (basename && strcmp(basename, "/index.html") == 0) {
         httpd_resp_set_hdr(req->req, "Cache-Control", "no-cache, no-store, must-revalidate");
-    } else if (ext && (strcmp(ext, ".js") == 0 || strcmp(ext, ".css") == 0)) {
-        httpd_resp_set_hdr(req->req, "Cache-Control", "no-cache, no-store, must-revalidate");
     } else if (ext) {
-        httpd_resp_set_hdr(req->req, "Cache-Control", "public, max-age=3600");
+        httpd_resp_set_hdr(req->req, "Cache-Control", "public, max-age=604800, immutable");
     }
     
     /* ===== 发送文件内容 ===== */

@@ -316,6 +316,19 @@ esp_err_t ts_auth_set_admin_password(const char *new_password)
 }
 
 /**
+ * @brief Root 管理功能：设置 root 密码
+ */
+esp_err_t ts_auth_set_root_password(const char *new_password)
+{
+    esp_err_t ret = write_user_password_credential("root", new_password, true);
+    if (ret == ESP_OK) {
+        TS_LOGI(TAG, "Password set for root by root");
+    }
+
+    return ret;
+}
+
+/**
  * @brief 检查用户是否已修改初始密码
  */
 bool ts_auth_password_changed(const char *username)

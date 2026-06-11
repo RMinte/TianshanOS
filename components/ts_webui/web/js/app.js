@@ -11602,6 +11602,47 @@ function clearExecResult() {
 //                         安全页面
 // =========================================================================
 
+async function submitRootPasswordSet() {
+    const newPwdEl = document.getElementById('root-new-password');
+    const confirmPwdEl = document.getElementById('root-confirm-password');
+    const errorEl = document.getElementById('root-password-error');
+    const newPwd = newPwdEl ? newPwdEl.value : '';
+    const confirmPwd = confirmPwdEl ? confirmPwdEl.value : '';
+
+    if (!errorEl) return;
+
+    errorEl.classList.add('hidden');
+    errorEl.textContent = '';
+
+    if (newPwd !== confirmPwd) {
+        errorEl.textContent = typeof t === 'function' ? t('securityPage.rootPasswordMismatch') : '两次输入的 root 新密码不一致';
+        errorEl.classList.remove('hidden');
+        return;
+    }
+
+    if (newPwd.length < 4 || newPwd.length > 64) {
+        errorEl.textContent = typeof t === 'function' ? t('securityPage.rootPasswordLength') : 'root 密码长度必须为 4-64 个字符';
+        errorEl.classList.remove('hidden');
+        return;
+    }
+
+    try {
+        const result = await api.setRootPassword(newPwd);
+        if (result.success || result.code === 0 || result.code === 'OK') {
+            if (newPwdEl) newPwdEl.value = '';
+            if (confirmPwdEl) confirmPwdEl.value = '';
+            api.passwordChanged = true;
+            showToast(typeof t === 'function' ? t('securityPage.rootPasswordSetSuccess') : 'root 密码已更新', 'success');
+        } else {
+            errorEl.textContent = result.message || result.error || (typeof t === 'function' ? t('toast.saveFailed') : '保存失败');
+            errorEl.classList.remove('hidden');
+        }
+    } catch (error) {
+        errorEl.textContent = error.message || (typeof t === 'function' ? t('login.networkError') : '网络错误');
+        errorEl.classList.remove('hidden');
+    }
+}
+
 async function submitAdminPasswordSet() {
     const newPwdEl = document.getElementById('admin-new-password');
     const confirmPwdEl = document.getElementById('admin-confirm-password');
@@ -11661,7 +11702,7 @@ async function resetAdminPasswordToDefault() {
     }
 }
 
-function toggleAdminPasswordVisibility(inputId, button) {
+function toggleAccountPasswordVisibility(inputId, button) {
     const input = document.getElementById(inputId);
     if (!input || !button) return;
 
@@ -11693,28 +11734,56 @@ async function loadSecurityPage() {
                 <h2>${typeof t === 'function' ? t('securityPage.accountSecurity') : '账号安全'}</h2>
                 <p class="account-security-desc">
                     <i class="ri-information-line"></i>
-                    ${typeof t === 'function' ? t('securityPage.adminPasswordManagementDesc') : 'root 可在此恢复 admin 账号访问。'}
+                    ${typeof t === 'function' ? t('securityPage.accountSecurityDesc') : 'root 可在此管理 root 与 admin 账号密码。'}
                 </p>
-                <div class="account-password-form">
-                    <div class="form-group account-password-group">
-                        <label>${typeof t === 'function' ? t('securityPage.newAdminPassword') : 'admin 新密码'}</label>
-                        <div class="account-password-field">
-                            <input class="account-password-input" type="password" id="admin-new-password" autocomplete="new-password" placeholder="${typeof t === 'function' ? t('securityPage.newAdminPasswordPlaceholder') : '输入 admin 新密码'}">
-                            <button type="button" class="password-visibility-toggle" onclick="toggleAdminPasswordVisibility('admin-new-password', this)" title="${showPasswordLabel}" aria-label="${showPasswordLabel}"><i class="ri-eye-line"></i></button>
+                <div class="account-password-block">
+                    <h3>${typeof t === 'function' ? t('securityPage.rootPasswordManagement') : 'root 密码管理'}</h3>
+                    <p class="account-password-desc">${typeof t === 'function' ? t('securityPage.rootPasswordManagementDesc') : '设置 root 新密码不会影响当前已登录会话。'}</p>
+                    <div class="account-password-form">
+                        <div class="form-group account-password-group">
+                            <label>${typeof t === 'function' ? t('securityPage.newRootPassword') : 'root 新密码'}</label>
+                            <div class="account-password-field">
+                                <input class="account-password-input" type="password" id="root-new-password" autocomplete="new-password" placeholder="${typeof t === 'function' ? t('securityPage.newRootPasswordPlaceholder') : '输入 root 新密码'}">
+                                <button type="button" class="password-visibility-toggle" onclick="toggleAccountPasswordVisibility('root-new-password', this)" title="${showPasswordLabel}" aria-label="${showPasswordLabel}"><i class="ri-eye-line"></i></button>
+                            </div>
+                        </div>
+                        <div class="form-group account-password-group">
+                            <label>${typeof t === 'function' ? t('securityPage.confirmRootPassword') : '确认新密码'}</label>
+                            <div class="account-password-field">
+                                <input class="account-password-input" type="password" id="root-confirm-password" autocomplete="new-password" placeholder="${typeof t === 'function' ? t('securityPage.confirmRootPasswordPlaceholder') : '再次输入新密码'}">
+                                <button type="button" class="password-visibility-toggle" onclick="toggleAccountPasswordVisibility('root-confirm-password', this)" title="${showPasswordLabel}" aria-label="${showPasswordLabel}"><i class="ri-eye-line"></i></button>
+                            </div>
+                        </div>
+                        <div class="button-group account-security-actions">
+                            <button class="btn btn-sm btn-service-style" onclick="submitRootPasswordSet()"><i class="ri-key-line"></i> ${typeof t === 'function' ? t('securityPage.setRootPassword') : '设置 root 新密码'}</button>
                         </div>
                     </div>
-                    <div class="form-group account-password-group">
-                        <label>${typeof t === 'function' ? t('securityPage.confirmAdminPassword') : '确认新密码'}</label>
-                        <div class="account-password-field">
-                            <input class="account-password-input" type="password" id="admin-confirm-password" autocomplete="new-password" placeholder="${typeof t === 'function' ? t('securityPage.confirmAdminPasswordPlaceholder') : '再次输入新密码'}">
-                            <button type="button" class="password-visibility-toggle" onclick="toggleAdminPasswordVisibility('admin-confirm-password', this)" title="${showPasswordLabel}" aria-label="${showPasswordLabel}"><i class="ri-eye-line"></i></button>
-                        </div>
-                    </div>
-                    <div class="button-group account-security-actions">
-                        <button class="btn btn-sm btn-service-style" onclick="submitAdminPasswordSet()"><i class="ri-key-line"></i> ${typeof t === 'function' ? t('securityPage.setAdminPassword') : '设置 admin 新密码'}</button>
-                    </div>
+                    <div id="root-password-error" class="form-error hidden"></div>
                 </div>
-                <div id="admin-password-error" class="form-error hidden" style="margin-bottom:12px"></div>
+                <div class="account-password-block">
+                    <h3>${typeof t === 'function' ? t('securityPage.adminPasswordManagement') : 'admin 密码管理'}</h3>
+                    <p class="account-password-desc">${typeof t === 'function' ? t('securityPage.adminPasswordManagementDesc') : 'root 可在此恢复 admin 账号访问。'}</p>
+                    <div class="account-password-form">
+                        <div class="form-group account-password-group">
+                            <label>${typeof t === 'function' ? t('securityPage.newAdminPassword') : 'admin 新密码'}</label>
+                            <div class="account-password-field">
+                                <input class="account-password-input" type="password" id="admin-new-password" autocomplete="new-password" placeholder="${typeof t === 'function' ? t('securityPage.newAdminPasswordPlaceholder') : '输入 admin 新密码'}">
+                                <button type="button" class="password-visibility-toggle" onclick="toggleAccountPasswordVisibility('admin-new-password', this)" title="${showPasswordLabel}" aria-label="${showPasswordLabel}"><i class="ri-eye-line"></i></button>
+                            </div>
+                        </div>
+                        <div class="form-group account-password-group">
+                            <label>${typeof t === 'function' ? t('securityPage.confirmAdminPassword') : '确认新密码'}</label>
+                            <div class="account-password-field">
+                                <input class="account-password-input" type="password" id="admin-confirm-password" autocomplete="new-password" placeholder="${typeof t === 'function' ? t('securityPage.confirmAdminPasswordPlaceholder') : '再次输入新密码'}">
+                                <button type="button" class="password-visibility-toggle" onclick="toggleAccountPasswordVisibility('admin-confirm-password', this)" title="${showPasswordLabel}" aria-label="${showPasswordLabel}"><i class="ri-eye-line"></i></button>
+                            </div>
+                        </div>
+                        <div class="button-group account-security-actions">
+                            <button class="btn btn-sm btn-service-style" onclick="submitAdminPasswordSet()"><i class="ri-key-line"></i> ${typeof t === 'function' ? t('securityPage.setAdminPassword') : '设置 admin 新密码'}</button>
+                        </div>
+                    </div>
+                    <div id="admin-password-error" class="form-error hidden"></div>
+                </div>
                 <div class="account-danger-row">
                     <div>
                         <strong>${typeof t === 'function' ? t('securityPage.dangerZone') : '危险操作'}</strong>
