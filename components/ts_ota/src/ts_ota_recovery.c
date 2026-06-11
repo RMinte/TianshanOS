@@ -17,6 +17,7 @@
  * manifest.json 格式：
  * {
  *   "version": "0.3.0",
+ *   "armed": true,
  *   "force": false,
  *   "firmware": "TianShanOS.bin",
  *   "www": "www.bin"
@@ -49,17 +50,13 @@ static const char *TAG = "ts_recovery";
 
 // Recovery 目录和文件路径
 #define RECOVERY_DIR            "/sdcard/recovery"
-#define RECOVERY_MANIFEST       RECOVERY_DIR "/manifest.json"
-#define RECOVERY_FIRMWARE       RECOVERY_DIR "/TianShanOS.bin"
-#define RECOVERY_WWW            RECOVERY_DIR "/www.bin"
+#define RECOVERY_MANIFEST       TS_OTA_RECOVERY_MANIFEST_PATH
+#define RECOVERY_FIRMWARE       TS_OTA_RECOVERY_FIRMWARE_PATH
+#define RECOVERY_WWW            TS_OTA_RECOVERY_WWW_PATH
 #define RECOVERY_BUFFER_SIZE    4096
 
-// 使用 PSRAM 如果可用
-#if CONFIG_SPIRAM
-#define RECOVERY_MALLOC(size)   heap_caps_malloc(size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)
-#else
-#define RECOVERY_MALLOC(size)   malloc(size)
-#endif
+// Flash writes must not read from PSRAM while cache is disabled.
+#define RECOVERY_MALLOC(size)   heap_caps_malloc(size, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)
 
 /**
  * @brief Recovery manifest 结构
@@ -68,6 +65,7 @@ typedef struct {
     char version[32];       // 目标版本
     char firmware[64];      // 固件文件名
     char www[64];           // WebUI 文件名
+    bool armed;             // 是否允许启动时自动恢复
     bool force;             // 强制恢复（忽略版本比对）
     bool delete_after;      // 成功后删除 recovery 文件
 } recovery_manifest_t;
@@ -116,6 +114,7 @@ static esp_err_t read_manifest(recovery_manifest_t *manifest)
     memset(manifest, 0, sizeof(*manifest));
     strcpy(manifest->firmware, "TianShanOS.bin");
     strcpy(manifest->www, "www.bin");
+    manifest->armed = true;
     manifest->delete_after = true;
 
     // 读取字段
@@ -137,6 +136,11 @@ static esp_err_t read_manifest(recovery_manifest_t *manifest)
     cJSON *force = cJSON_GetObjectItem(root, "force");
     if (force && cJSON_IsBool(force)) {
         manifest->force = cJSON_IsTrue(force);
+    }
+
+    cJSON *armed = cJSON_GetObjectItem(root, "armed");
+    if (armed && cJSON_IsBool(armed)) {
+        manifest->armed = cJSON_IsTrue(armed);
     }
 
     cJSON *delete_after = cJSON_GetObjectItem(root, "delete_after");
@@ -445,6 +449,7 @@ esp_err_t ts_ota_check_recovery(void)
             memset(&manifest, 0, sizeof(manifest));
             strcpy(manifest.firmware, "TianShanOS.bin");
             strcpy(manifest.www, "www.bin");
+            manifest.armed = true;
             manifest.force = true;  // 无 manifest 时强制恢复
             manifest.delete_after = true;
         } else {
@@ -453,8 +458,13 @@ esp_err_t ts_ota_check_recovery(void)
         }
     }
 
-    ESP_LOGI(TAG, "Recovery manifest: version=%s, force=%d, firmware=%s, www=%s",
-             manifest.version, manifest.force, manifest.firmware, manifest.www);
+    ESP_LOGI(TAG, "Recovery manifest: version=%s, armed=%d, force=%d, firmware=%s, www=%s",
+             manifest.version, manifest.armed, manifest.force, manifest.firmware, manifest.www);
+
+    if (!manifest.armed) {
+        ESP_LOGI(TAG, "Recovery manifest is not armed, skipping boot-time recovery");
+        return ESP_OK;
+    }
 
     // 检查是否需要恢复
     if (!need_recovery(&manifest)) {
@@ -546,6 +556,7 @@ esp_err_t ts_ota_create_recovery_manifest(const char *version, bool force)
     }
 
     cJSON_AddStringToObject(root, "version", version ? version : "");
+    cJSON_AddBoolToObject(root, "armed", true);
     cJSON_AddBoolToObject(root, "force", force);
     cJSON_AddStringToObject(root, "firmware", "TianShanOS.bin");
     cJSON_AddStringToObject(root, "www", "www.bin");

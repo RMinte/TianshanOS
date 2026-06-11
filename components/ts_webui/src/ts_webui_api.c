@@ -13,8 +13,12 @@
 #include "ts_config_pack.h"
 #include "ts_ws_subscriptions.h"
 #include "cJSON.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "esp_http_server.h"
+#include "esp_system.h"
 #include <string.h>
+#include <stdint.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #include "esp_heap_caps.h"
@@ -24,11 +28,64 @@
 
 #define TAG "webui_api"
 
+#define OTA_UPLOAD_REBOOT_DELAY_MS 2000
+
 #ifdef CONFIG_TS_WEBUI_API_PREFIX
 #define API_PREFIX CONFIG_TS_WEBUI_API_PREFIX
 #else
 #define API_PREFIX "/api/v1"
 #endif
+
+static bool is_binary_upload_complete(ts_http_request_t *req)
+{
+    return req && req->req && req->body_len == (size_t)req->req->content_len;
+}
+
+static void delayed_reboot_task(void *arg)
+{
+    uint32_t delay_ms = (uint32_t)(uintptr_t)arg;
+    vTaskDelay(pdMS_TO_TICKS(delay_ms));
+    esp_restart();
+}
+
+static void schedule_reboot_after_response(uint32_t delay_ms)
+{
+    BaseType_t ret = xTaskCreate(
+        delayed_reboot_task,
+        "ota_reboot",
+        2048,
+        (void *)(uintptr_t)delay_ms,
+        1,
+        NULL
+    );
+    if (ret != pdPASS) {
+        TS_LOGE(TAG, "Failed to create OTA reboot task");
+    }
+}
+
+static void clear_recovery_manifest(const char *reason)
+{
+    if (unlink(TS_OTA_RECOVERY_MANIFEST_PATH) == 0) {
+        TS_LOGI(TAG, "Removed recovery manifest: %s", reason);
+    }
+}
+
+static void clean_recovery_after_browser_ota_failure(const char *reason)
+{
+    TS_LOGW(TAG, "Cleaning recovery cache after browser OTA failure: %s", reason);
+    esp_err_t ret = ts_ota_clean_recovery();
+    if (ret != ESP_OK) {
+        TS_LOGW(TAG, "Recovery cleanup failed: %s", esp_err_to_name(ret));
+    }
+}
+
+static bool is_browser_ota_busy(void)
+{
+    return ts_ota_sdcard_is_running()
+        || ts_ota_https_is_running()
+        || ts_ota_download_is_running()
+        || ts_ota_www_is_running();
+}
 
 /**
  * @brief Check authentication for API requests
@@ -567,9 +624,19 @@ static esp_err_t ota_firmware_upload_handler(ts_http_request_t *req, void *user_
     ts_http_set_cors(req, "*");
 #endif
 
+    if (!is_binary_upload_complete(req)) {
+        TS_LOGW(TAG, "Incomplete firmware upload: got %zu of %zu bytes",
+                req->body_len, req->req ? (size_t)req->req->content_len : 0);
+        return ts_http_send_error(req, 400, "Incomplete upload");
+    }
+
     // 检查请求体
     if (!req->body || req->body_len == 0) {
         return ts_http_send_error(req, 400, "Empty firmware content");
+    }
+
+    if (is_browser_ota_busy()) {
+        return ts_http_send_error(req, 409, "OTA already in progress");
     }
     
     // 获取 auto_reboot 参数
@@ -579,31 +646,58 @@ static esp_err_t ota_firmware_upload_handler(ts_http_request_t *req, void *user_
     
     TS_LOGI(TAG, "OTA firmware upload: %zu bytes, auto_reboot=%d", req->body_len, auto_reboot);
     
-    // 使用统一的 recovery 目录模式
-    esp_err_t ret = ts_ota_save_upload(req->body, req->body_len, true, auto_reboot);
+    // 新固件上传开始时先移除旧 manifest 和旧 WebUI，避免失败路径留下旧恢复指令。
+    clear_recovery_manifest("firmware upload");
+    if (unlink(TS_OTA_RECOVERY_WWW_PATH) == 0) {
+        TS_LOGI(TAG, "Removed stale recovery www.bin");
+    }
+
+    // 先保存到 recovery 目录，保持恢复素材；刷写成功后再写 disabled manifest。
+    esp_err_t ret = ts_ota_save_upload(req->body, req->body_len, true, false);
     if (ret != ESP_OK) {
         TS_LOGE(TAG, "ts_ota_save_upload failed: %s", esp_err_to_name(ret));
+        clean_recovery_after_browser_ota_failure("firmware save failed");
+        return ts_http_send_error(req, 500, "Firmware save failed");
+    }
+
+    ret = ts_ota_flash_file_sync(TS_OTA_RECOVERY_FIRMWARE_PATH, true, NULL, NULL);
+    if (ret != ESP_OK) {
+        TS_LOGE(TAG, "ts_ota_flash_file_sync failed: %s", esp_err_to_name(ret));
+        clean_recovery_after_browser_ota_failure("firmware flash failed");
         if (ret == ESP_ERR_INVALID_STATE) {
             return ts_http_send_error(req, 409, "OTA already in progress");
         }
-        return ts_http_send_error(req, 500, "Firmware save/flash failed");
+        if (ret == ESP_ERR_INVALID_SIZE || ret == ESP_ERR_INVALID_ARG) {
+            return ts_http_send_error(req, 400, "Invalid firmware image");
+        }
+        return ts_http_send_error(req, 500, "Firmware flash failed");
     }
-    
-    // 如果 auto_reboot=true，设备会重启，不会执行到这里
+
+    ret = ts_ota_write_recovery_manifest_from_files(false, false, false);
+    if (ret != ESP_OK) {
+        TS_LOGE(TAG, "failed to write disabled app-only recovery manifest: %s", esp_err_to_name(ret));
+        clean_recovery_after_browser_ota_failure("firmware manifest update failed");
+        return ts_http_send_error(req, 500, "Recovery manifest update failed");
+    }
+
     TS_LOGI(TAG, "OTA firmware upload successful");
     
     // 返回成功响应
     cJSON *response = cJSON_CreateObject();
     cJSON_AddStringToObject(response, "status", "success");
     cJSON_AddNumberToObject(response, "size", req->body_len);
-    cJSON_AddBoolToObject(response, "reboot_pending", auto_reboot);
-    cJSON_AddStringToObject(response, "message", auto_reboot ? "Firmware uploaded, rebooting..." : "Firmware uploaded, pending reboot");
+    cJSON_AddBoolToObject(response, "reboot_pending", true);
+    cJSON_AddBoolToObject(response, "auto_reboot_requested", auto_reboot);
+    cJSON_AddStringToObject(response, "message", "Firmware uploaded and flashed, pending reboot");
     
     char *json = cJSON_PrintUnformatted(response);
     cJSON_Delete(response);
     
     ret = ts_http_send_json(req, 200, json);
     free(json);
+    if (ret == ESP_OK && auto_reboot) {
+        schedule_reboot_after_response(OTA_UPLOAD_REBOOT_DELAY_MS);
+    }
     return ret;
 }
 
@@ -622,18 +716,56 @@ static esp_err_t ota_www_upload_handler(ts_http_request_t *req, void *user_data)
     ts_http_set_cors(req, "*");
 #endif
 
+    if (!is_binary_upload_complete(req)) {
+        TS_LOGW(TAG, "Incomplete WWW upload: got %zu of %zu bytes",
+                req->body_len, req->req ? (size_t)req->req->content_len : 0);
+        return ts_http_send_error(req, 400, "Incomplete upload");
+    }
+
     // 检查请求体
     if (!req->body || req->body_len == 0) {
         return ts_http_send_error(req, 400, "Empty www content");
     }
+
+    if (is_browser_ota_busy()) {
+        return ts_http_send_error(req, 409, "OTA already in progress");
+    }
     
     TS_LOGI(TAG, "WWW partition upload: %zu bytes", req->body_len);
     
-    // 使用统一的 recovery 目录模式
-    esp_err_t ret = ts_ota_save_upload(req->body, req->body_len, false, true);
+    // WebUI 上传会重写 disabled manifest；先清掉旧 manifest 避免失败路径沿用旧恢复指令。
+    clear_recovery_manifest("www upload");
+
+    // 先保存到 recovery 目录，保持完整恢复包；再同步刷入 www 分区。
+    esp_err_t ret = ts_ota_save_upload(req->body, req->body_len, false, false);
     if (ret != ESP_OK) {
         TS_LOGE(TAG, "ts_ota_save_upload failed: %s", esp_err_to_name(ret));
-        return ts_http_send_error(req, 500, "WWW partition save/flash failed");
+        clean_recovery_after_browser_ota_failure("www save failed");
+        return ts_http_send_error(req, 500, "WWW partition save failed");
+    }
+
+    ret = ts_ota_www_flash_file_sync(TS_OTA_RECOVERY_WWW_PATH, NULL, NULL);
+    if (ret != ESP_OK) {
+        TS_LOGE(TAG, "ts_ota_www_flash_file_sync failed: %s", esp_err_to_name(ret));
+        clean_recovery_after_browser_ota_failure("www flash failed");
+        if (ret == ESP_ERR_INVALID_STATE) {
+            return ts_http_send_error(req, 409, "WWW OTA already in progress");
+        }
+        if (ret == ESP_ERR_INVALID_SIZE) {
+            return ts_http_send_error(req, 400, "Invalid WWW image size");
+        }
+        return ts_http_send_error(req, 500, "WWW partition flash failed");
+    }
+
+    if (ts_storage_exists(TS_OTA_RECOVERY_FIRMWARE_PATH)) {
+        ret = ts_ota_write_recovery_manifest_from_files(true, false, false);
+        if (ret != ESP_OK) {
+            TS_LOGW(TAG, "Full recovery manifest update failed: %s", esp_err_to_name(ret));
+            clean_recovery_after_browser_ota_failure("www manifest update failed");
+        }
+    } else {
+        TS_LOGW(TAG, "Recovery firmware missing after WebUI upload");
+        clean_recovery_after_browser_ota_failure("recovery firmware missing after www upload");
     }
     
     TS_LOGI(TAG, "WWW partition upload successful");
