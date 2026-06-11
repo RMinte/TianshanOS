@@ -18,6 +18,7 @@ idf_component_register(
     REQUIRES
         ts_core
         ts_automation
+        ts_auth_layout
         mbedtls
         nvs_flash
         lwip

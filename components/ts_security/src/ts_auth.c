@@ -10,6 +10,7 @@
  */
 
 #include "ts_security.h"
+#include "ts_auth_layout.h"
 #include "ts_crypto.h"
 #include "ts_log.h"
 #include "nvs_flash.h"
@@ -20,23 +21,11 @@
 
 #define TAG "ts_auth"
 
-#define NVS_AUTH_NAMESPACE    "ts_auth"
-#define SALT_LEN              16
-#define HASH_LEN              32
 #define DEFAULT_PASSWORD_ADMIN "rm01"
-#define DEFAULT_PASSWORD_ROOT  "rm01"
 #define MAX_LOGIN_ATTEMPTS    5
 #define LOGIN_LOCKOUT_SEC     300  /* 5 分钟锁定 */
-#define AUTH_CONFIG_VERSION   3    /* 增加此版本号可强制重置所有用户密码 */
 
-/* 用户信息结构 */
-typedef struct {
-    uint8_t salt[SALT_LEN];
-    uint8_t hash[HASH_LEN];
-    bool password_changed;       /* 是否已修改过初始密码 */
-    uint32_t failed_attempts;
-    uint32_t lockout_until;      /* 锁定截止时间 (秒) */
-} user_credential_t;
+typedef ts_auth_user_credential_t user_credential_t;
 
 static nvs_handle_t s_auth_nvs;
 static bool s_auth_initialized = false;
@@ -53,14 +42,14 @@ static esp_err_t compute_password_hash(const uint8_t *salt, const char *password
 {
     /* 拼接 salt + password */
     size_t pwd_len = strlen(password);
-    size_t total_len = SALT_LEN + pwd_len;
+    size_t total_len = TS_AUTH_SALT_LEN + pwd_len;
     uint8_t *buf = malloc(total_len);
     if (!buf) return ESP_ERR_NO_MEM;
     
-    memcpy(buf, salt, SALT_LEN);
-    memcpy(buf + SALT_LEN, password, pwd_len);
+    memcpy(buf, salt, TS_AUTH_SALT_LEN);
+    memcpy(buf + TS_AUTH_SALT_LEN, password, pwd_len);
     
-    esp_err_t ret = ts_crypto_hash(TS_HASH_SHA256, buf, total_len, hash_out, HASH_LEN);
+    esp_err_t ret = ts_crypto_hash(TS_HASH_SHA256, buf, total_len, hash_out, TS_AUTH_HASH_LEN);
     
     /* 清除敏感数据 */
     memset(buf, 0, total_len);
@@ -114,7 +103,7 @@ static esp_err_t write_user_password_credential(const char *username, const char
 
     user_credential_t cred = {0};
 
-    esp_fill_random(cred.salt, SALT_LEN);
+    esp_fill_random(cred.salt, TS_AUTH_SALT_LEN);
 
     esp_err_t ret = compute_password_hash(cred.salt, password, cred.hash);
     if (ret != ESP_OK) return ret;
@@ -132,7 +121,7 @@ static esp_err_t write_user_password_credential(const char *username, const char
 static esp_err_t force_create_user(const char *username, ts_perm_level_t level)
 {
     /* 根据用户类型使用不同默认密码 */
-    const char *default_pwd = (level == TS_PERM_ROOT) ? DEFAULT_PASSWORD_ROOT : DEFAULT_PASSWORD_ADMIN;
+    const char *default_pwd = (level == TS_PERM_ROOT) ? TS_AUTH_DEFAULT_ROOT_PASSWORD : DEFAULT_PASSWORD_ADMIN;
     TS_LOGI(TAG, "Creating/resetting user '%s'", username);
 
     return write_user_password_credential(username, default_pwd, false);
@@ -172,7 +161,7 @@ esp_err_t ts_auth_init(void)
 {
     if (s_auth_initialized) return ESP_OK;
     
-    esp_err_t ret = nvs_open(NVS_AUTH_NAMESPACE, NVS_READWRITE, &s_auth_nvs);
+    esp_err_t ret = nvs_open(TS_AUTH_NVS_NAMESPACE, NVS_READWRITE, &s_auth_nvs);
     if (ret != ESP_OK) {
         TS_LOGE(TAG, "Failed to open NVS namespace: %s", esp_err_to_name(ret));
         return ret;
@@ -180,16 +169,16 @@ esp_err_t ts_auth_init(void)
     
     /* 检查配置版本，版本变化时强制重置所有用户 */
     uint8_t stored_version = 0;
-    nvs_get_u8(s_auth_nvs, "cfg_version", &stored_version);
+    nvs_get_u8(s_auth_nvs, TS_AUTH_CONFIG_VERSION_KEY, &stored_version);
     
-    if (stored_version != AUTH_CONFIG_VERSION) {
+    if (stored_version != TS_AUTH_CONFIG_VERSION) {
         TS_LOGW(TAG, "Auth config version changed (%d -> %d), resetting all users",
-                stored_version, AUTH_CONFIG_VERSION);
+                stored_version, TS_AUTH_CONFIG_VERSION);
         /* 强制重新创建所有用户 */
         force_create_user("admin", TS_PERM_ADMIN);
         force_create_user("root", TS_PERM_ROOT);
         /* 保存新版本号 */
-        nvs_set_u8(s_auth_nvs, "cfg_version", AUTH_CONFIG_VERSION);
+        nvs_set_u8(s_auth_nvs, TS_AUTH_CONFIG_VERSION_KEY, TS_AUTH_CONFIG_VERSION);
         nvs_commit(s_auth_nvs);
     } else {
         /* 初始化默认用户（如果不存在） */
@@ -198,7 +187,7 @@ esp_err_t ts_auth_init(void)
     }
     
     s_auth_initialized = true;
-    TS_LOGI(TAG, "Auth module initialized (version %d)", AUTH_CONFIG_VERSION);
+    TS_LOGI(TAG, "Auth module initialized (version %d)", TS_AUTH_CONFIG_VERSION);
     return ESP_OK;
 }
 
@@ -237,13 +226,13 @@ esp_err_t ts_auth_verify_password(const char *username, const char *password,
     }
     
     /* 计算输入密码的哈希 */
-    uint8_t computed_hash[HASH_LEN];
+    uint8_t computed_hash[TS_AUTH_HASH_LEN];
     ret = compute_password_hash(cred.salt, password, computed_hash);
     if (ret != ESP_OK) return ret;
     
     /* 比较哈希（恒定时间比较防止时序攻击） */
     uint8_t diff = 0;
-    for (int i = 0; i < HASH_LEN; i++) {
+    for (int i = 0; i < TS_AUTH_HASH_LEN; i++) {
         diff |= computed_hash[i] ^ cred.hash[i];
     }
     
@@ -420,7 +409,7 @@ esp_err_t ts_auth_reset_password(const char *username)
     if (strcmp(username, "admin") == 0) {
         default_pwd = DEFAULT_PASSWORD_ADMIN;
     } else if (strcmp(username, "root") == 0) {
-        default_pwd = DEFAULT_PASSWORD_ROOT;
+        default_pwd = TS_AUTH_DEFAULT_ROOT_PASSWORD;
     } else {
         return ESP_ERR_NOT_FOUND;
     }
