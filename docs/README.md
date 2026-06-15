@@ -13,6 +13,8 @@
 | 文档 | 描述 |
 |------|------|
 | [快速入门](QUICK_START.md) | 5 分钟快速上手指南：环境准备、编译烧录、首次配置 |
+| [串口刷机指南](FLASH_VIA_SERIAL.md) | 串口烧录、手动分区偏移和常见刷机问题 |
+| [Root/Admin 密码恢复固件](ROOT_PASSWORD_RESET_FIRMWARE.md) | root/admin 用户密码恢复固件的构建、OTA 和串口使用流程 |
 | [命令参考](COMMAND_REFERENCE.md) | CLI 命令完整手册：系统、网络、LED、设备、配置等 |
 | [配置指南](CONFIGURATION_GUIDE.md) | 板级配置、GPIO 映射、运行时配置说明 |
 
