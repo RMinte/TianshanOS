@@ -1,5 +1,5 @@
 #!/bin/bash
-# Build the temporary root password reset firmware.
+# Build the temporary root/admin password reset firmware.
 
 set -e
 
@@ -22,7 +22,7 @@ fi
 GIT_SHORT_SHA="$(git rev-parse --short=6 HEAD 2>/dev/null || echo nogit)"
 RUN_ID="$(date -u +%H%M%S).${GIT_SHORT_SHA}"
 
-echo "构建 root 密码恢复固件..."
+echo "构建 root/admin 密码恢复固件..."
 echo "Run ID: ${RUN_ID}"
 if [ -n "$ROOT_RESET_VERSION" ]; then
     echo "Version override: ${ROOT_RESET_VERSION}"
@@ -105,7 +105,7 @@ PY
 cp "$BUILD_DIR/TianShanOS.bin" "$BUILD_DIR/TianShanOS-RootReset.bin"
 
 echo ""
-echo "恢复固件已生成:"
+echo "root/admin 密码恢复固件已生成:"
 echo "  $BUILD_DIR/TianShanOS.bin"
 echo "  $BUILD_DIR/TianShanOS-RootReset.bin"
 echo ""

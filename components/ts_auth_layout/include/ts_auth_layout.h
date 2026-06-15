@@ -12,8 +12,10 @@
 
 #define TS_AUTH_NVS_NAMESPACE           "ts_auth"
 #define TS_AUTH_ROOT_CRED_KEY           "cred_root"
+#define TS_AUTH_ADMIN_CRED_KEY          "cred_admin"
 #define TS_AUTH_CONFIG_VERSION_KEY      "cfg_version"
 #define TS_AUTH_DEFAULT_ROOT_PASSWORD   "rm01"
+#define TS_AUTH_DEFAULT_ADMIN_PASSWORD  "rm01"
 #define TS_AUTH_CONFIG_VERSION          3
 
 #define TS_AUTH_SALT_LEN                16

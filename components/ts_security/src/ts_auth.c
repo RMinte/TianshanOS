@@ -6,7 +6,7 @@
  * 
  * 安全设计：
  * - 密码哈希仅存储在 NVS，不导出到 SD 卡
- * - admin 密码可由 root 会话恢复，root 密码遗失需恢复出厂
+ * - admin 密码可由 root 会话恢复；root/admin 均可通过受控恢复固件恢复默认密码
  */
 
 #include "ts_security.h"
@@ -21,7 +21,6 @@
 
 #define TAG "ts_auth"
 
-#define DEFAULT_PASSWORD_ADMIN "rm01"
 #define MAX_LOGIN_ATTEMPTS    5
 #define LOGIN_LOCKOUT_SEC     300  /* 5 分钟锁定 */
 
@@ -121,7 +120,9 @@ static esp_err_t write_user_password_credential(const char *username, const char
 static esp_err_t force_create_user(const char *username, ts_perm_level_t level)
 {
     /* 根据用户类型使用不同默认密码 */
-    const char *default_pwd = (level == TS_PERM_ROOT) ? TS_AUTH_DEFAULT_ROOT_PASSWORD : DEFAULT_PASSWORD_ADMIN;
+    const char *default_pwd = (level == TS_PERM_ROOT)
+                                  ? TS_AUTH_DEFAULT_ROOT_PASSWORD
+                                  : TS_AUTH_DEFAULT_ADMIN_PASSWORD;
     TS_LOGI(TAG, "Creating/resetting user '%s'", username);
 
     return write_user_password_credential(username, default_pwd, false);
@@ -407,7 +408,7 @@ esp_err_t ts_auth_reset_password(const char *username)
     /* 只允许重置 admin 和 root */
     const char *default_pwd;
     if (strcmp(username, "admin") == 0) {
-        default_pwd = DEFAULT_PASSWORD_ADMIN;
+        default_pwd = TS_AUTH_DEFAULT_ADMIN_PASSWORD;
     } else if (strcmp(username, "root") == 0) {
         default_pwd = TS_AUTH_DEFAULT_ROOT_PASSWORD;
     } else {
