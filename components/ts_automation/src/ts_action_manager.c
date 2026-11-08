@@ -1,3 +1,4 @@
+#include "ts_http_fetch.h"
 #include "ts_action_codec.h"
 #include "ts_action_filter.h"
 #include "ts_automation_config.h"
@@ -34,7 +35,6 @@
 #include "ts_led_animation.h"
 #include "ts_hal.h"
 #include "ts_device_ctrl.h"
-#include "esp_http_client.h"
 #include "ts_core.h"
 #include "ts_console.h"
 #include "ts_storage.h"
@@ -705,13 +705,13 @@ static esp_err_t exec_ssh_bound(const ts_auto_action_ssh_t *ssh,const ts_action_
             config.auth.key.private_key = (const uint8_t *)key_data;
             config.auth.key.private_key_len = key_len;
             config.auth.key.private_key_path = NULL;
-            ESP_LOGI(TAG, "Loaded SSH key '%s' from keystore (%zu bytes)", keyid, key_len);
+            ESP_LOGI(TAG, "Loaded SSH key from keystore (%zu bytes)", key_len);
         } else {
             free(key_data);
             free(expanded_cmd);
             result->reason="ssh_key_unavailable";
             result->status=TS_ACTION_STATUS_FAILED;
-            snprintf(result->output,sizeof(result->output),"SSH key unavailable: %s",keyid);
+            snprintf(result->output,sizeof(result->output),"SSH key unavailable");
             return ret==ESP_OK?ESP_ERR_INVALID_STATE:ret;
         }
     } else {
@@ -1385,54 +1385,21 @@ static esp_err_t execute_webhook(const ts_auto_action_t *action)
         return ESP_ERR_INVALID_ARG;
     }
 
-    ESP_LOGI(TAG, "Webhook action: url=%s, method=%s",
-             action->webhook.url, action->webhook.method);
+    ESP_LOGI(TAG, "Webhook action started");
 
-    esp_http_client_config_t config = {
-        .url = action->webhook.url,
-        .timeout_ms = 5000,  // 默认 5 秒超时
-    };
-
-    esp_http_client_handle_t client = esp_http_client_init(&config);
-    if (!client) {
-        ESP_LOGE(TAG, "Failed to create HTTP client");
-        return ESP_ERR_NO_MEM;
-    }
-
-    // 设置方法
-    if (strcasecmp(action->webhook.method, "POST") == 0) {
-        esp_http_client_set_method(client, HTTP_METHOD_POST);
-    } else if (strcasecmp(action->webhook.method, "PUT") == 0) {
-        esp_http_client_set_method(client, HTTP_METHOD_PUT);
-    } else {
-        esp_http_client_set_method(client, HTTP_METHOD_GET);
-    }
-
-    // 设置 Content-Type (对于 POST/PUT)
-    if (strcasecmp(action->webhook.method, "POST") == 0 ||
-        strcasecmp(action->webhook.method, "PUT") == 0) {
-        esp_http_client_set_header(client, "Content-Type", "application/json");
-    }
-
-    // 设置 body（使用 body_template）
-    if (action->webhook.body_template[0] != '\0') {
-        esp_http_client_set_post_field(client, action->webhook.body_template,
-                                       strlen(action->webhook.body_template));
-    }
-
-    esp_err_t ret = esp_http_client_perform(client);
-    if (ret == ESP_OK) {
-        int status = esp_http_client_get_status_code(client);
-        ESP_LOGI(TAG, "Webhook response: %d", status);
-
-        if (status < 200 || status >= 300) {
-            ret = ESP_FAIL;  // 非 2xx 视为失败
-        }
-    } else {
-        ESP_LOGE(TAG, "Webhook request failed: %s", esp_err_to_name(ret));
-    }
-
-    esp_http_client_cleanup(client);
+    esp_http_client_method_t method;
+    if (!strcasecmp(action->webhook.method, "POST")) method = HTTP_METHOD_POST;
+    else if (!strcasecmp(action->webhook.method, "PUT")) method = HTTP_METHOD_PUT;
+    else if (!strcasecmp(action->webhook.method, "GET")) method = HTTP_METHOD_GET;
+    else return ESP_ERR_INVALID_ARG;
+    ts_http_fetch_config_t request = {.url = action->webhook.url, .method = method,
+        .content_type = method == HTTP_METHOD_POST || method == HTTP_METHOD_PUT ? "application/json" : NULL,
+        .body = action->webhook.body_template[0] ? action->webhook.body_template : NULL,
+        .timeout_ms = 5000, .maximum_body = 8192, .headers_only = true};
+    ts_http_fetch_result_t reply = {0};
+    esp_err_t ret = ts_http_fetch(&request, &reply);
+    if (ret == ESP_OK && (reply.status < 200 || reply.status >= 300)) ret = ESP_FAIL;
+    free(reply.body);
     return ret;
 }
 
@@ -1632,8 +1599,7 @@ static esp_err_t exec_ssh_ref_bound(const ts_auto_action_ssh_ref_t *ssh_ref,
 
     ESP_LOGI(TAG, "SSH ref [%s]: host=%s, command_bytes=%u", ssh_ref->cmd_id, cmd_config.host_id,
              (unsigned)strlen(cmd_config.command));
-    ESP_LOGI(TAG, "SSH ref config: var_name='%s', nohup=%d, service_mode=%d, ready_pattern='%s'",
-             cmd_config.var_name, cmd_config.nohup, cmd_config.service_mode, cmd_config.ready_pattern);
+    ESP_LOGI(TAG, "SSH service options: nohup=%d, service_mode=%d, has_ready_pattern=%d", cmd_config.nohup, cmd_config.service_mode, cmd_config.ready_pattern[0] != 0);
     
     const ts_action_ssh_host_t host=binding->host;
 
@@ -1703,12 +1669,12 @@ static esp_err_t exec_ssh_ref_bound(const ts_auto_action_ssh_ref_t *ssh_ref,
             config.auth.key.private_key = (const uint8_t *)key_data;
             config.auth.key.private_key_len = key_len;
             config.auth.key.private_key_path = NULL;
-            ESP_LOGI(TAG, "Loaded SSH key '%s' from keystore (%zu bytes)", keyid, key_len);
+            ESP_LOGI(TAG, "Loaded SSH key from keystore (%zu bytes)", key_len);
         } else {
             if(cmd_config.nohup)ts_ssh_service_set_operation_reason(run_id,launch_id,"ssh_key_unavailable");
             free(key_data);free(expanded_cmd);free(nohup_cmd);
             result->reason="ssh_key_unavailable";result->status=TS_ACTION_STATUS_FAILED;
-            snprintf(result->output,sizeof(result->output),"SSH key unavailable: %s",keyid);
+            snprintf(result->output,sizeof(result->output),"SSH key unavailable");
             return ret==ESP_OK?ESP_ERR_INVALID_STATE:ret;
         }
     } else {
@@ -1837,8 +1803,7 @@ static esp_err_t exec_ssh_ref_bound(const ts_auto_action_ssh_ref_t *ssh_ref,
             if (watch_ret != ESP_OK)
                 ts_ssh_service_observe(run_id, run_generation, "unknown");
             if (watch_ret == ESP_OK) {
-                ESP_LOGI(TAG, "🔍 Service mode: watching log for '%s' (fail='%s', timeout: %us)", 
-                         cmd_config.ready_pattern, cmd_config.service_fail_pattern, watch_config.timeout_sec);
+                ESP_LOGI(TAG, "Service log watch started (timeout=%u s)", watch_config.timeout_sec);
             } else {
                 ESP_LOGW(TAG, "Failed to start log watch: %s", esp_err_to_name(watch_ret));
             }

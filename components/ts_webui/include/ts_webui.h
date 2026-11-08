@@ -71,6 +71,7 @@ typedef enum {
 typedef struct { char boot_id[33], result_key[33]; } ts_webui_ssh_receipt_t;
 typedef struct {
     ts_webui_ssh_receipt_t *receipt; /**< Private query capability, returned only to the initiating request. */
+    uint32_t owner_session_id; /**< Trusted C caller identity; zero denotes internal work. */
     const char *expect_pattern;    /**< 期望匹配的模式（简单字符串包含检查）*/
     const char *fail_pattern;      /**< 失败模式（匹配则视为失败）*/
     const char *extract_pattern;   /**< 提取模式，格式: "prefix(capture)suffix" */
@@ -145,8 +146,14 @@ esp_err_t ts_webui_ssh_exec_start_ex(const char *host, uint16_t port,
  * @return esp_err_t ESP_OK on success
  */
 esp_err_t ts_webui_ssh_exec_cancel(uint32_t session_id);
+
+/** Unbound control requires the private receipt. The authenticated initiating
+ * session may omit both receipt fields when cancelling its own active job. */
+esp_err_t ts_webui_ssh_exec_cancel_with_receipt(uint32_t session_id, const char *boot_id, const char *result_key);
+esp_err_t ts_webui_ssh_exec_cancel_for_session(uint32_t session_id, const char *boot_id, const char *result_key, uint32_t caller_session_id);
 /* Authenticated API also requires the initiating request's unbroadcast capability. */
 char *ts_webui_ssh_exec_status(uint32_t id, const char *boot_id, const char *result_key, esp_err_t *error);
+char *ts_webui_ssh_exec_status_for_session(uint32_t session_id, const char *boot_id, const char *result_key, uint32_t caller_session_id, esp_err_t *error);
 
 /**
  * @brief Check if SSH exec session is running

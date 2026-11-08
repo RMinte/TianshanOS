@@ -9,7 +9,7 @@ import urllib.parse
 import urllib.request
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from check_release import validate
+from check_release import validate, validate_security_artifacts
 
 
 def query(path):
@@ -81,6 +81,9 @@ def main():
         mode, tag = 'main', 'v' + Path('version.txt').read_text().strip()
     else:
         raise ValueError('Preflight invoked without a release route')
+    identity = validate_security_artifacts(Path(os.environ.get("RELEASE_ARTIFACT_DIR", "firmware")))
+    if identity["version"] != version:
+        raise ValueError("Release artifact version differs from the actual build version")
     validate(tag, version)
     commit = os.environ['BUILD_COMMIT']
     if subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip() != commit:

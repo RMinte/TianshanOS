@@ -260,7 +260,7 @@ static int do_file_get(const char *host, int port, const char *user,
     esp_err_t ret = ts_storage_check_write_path(local_path, false);
     if (ret != ESP_OK) {
         ts_console_printf(ret == ESP_ERR_NOT_ALLOWED
-            ? "This file belongs to Automation. Choose another download path.\n"
+            ? "This path is protected. Choose another download path.\n"
             : "Invalid local download path.\n");
         return 1;
     }
@@ -314,7 +314,7 @@ static int do_file_get(const char *host, int port, const char *user,
         return 0;
     } else {
         ts_console_printf(ret == ESP_ERR_NOT_ALLOWED
-            ? "This file belongs to Automation. Choose another download path.\n" : "✗ Download failed\n");
+            ? "This path is protected. Choose another download path.\n" : "✗ Download failed\n");
         return 1;
     }
 }

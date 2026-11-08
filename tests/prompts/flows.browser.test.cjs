@@ -98,6 +98,7 @@ after(() => {
 // A scenario: id, setup(page, names) -> DOM the handler needs, act(page, names) -> runs the handler, device {endpoint: answer},
 // show: 'toast' | {inline: selector} | {field: id}. `names` are the user's own names for the objects, in the language of the run.
 const NAMES = {rule: ['夜间关灯', 'Night off'], action: ['重启 AGX', 'Restart AGX'], source: ['温度', 'Temperature']};
+const rootMessageFixtures=new Set(["monitor/set_server", "monitor/start", "monitor/stop", "hosts/remove", "hosts/update", "hosts/clear", "network/lpmu_access/start", "network/lpmu_access/status", "network/lpmu_access/log", "automation/config/refresh", "automation/config/backup", "automation/config/enable", "automation/reload", "automation/variables/set", "automation/variables/delete", "automation/rules/add", "automation/rules/update", "automation/rules/delete", "automation/sources/add", "automation/sources/update", "automation/sources/delete", "automation/sources/add_mapping", "automation/sources/remove_mapping", "automation/actions/add", "automation/actions/update", "automation/actions/delete", "automation/config/preview", "automation/config/apply", "automation/sources/export", "automation/sources/import", "automation/rules/export", "automation/rules/import", "automation/actions/export", "automation/actions/import", "automation/test/ssh", "automation/proxy/websocket_test", "automation/proxy/socketio_test"]);
 function scenarioTests(file, scenarios) {
     for (const language of ['zh-CN', 'en-US']) {
         for (const scenario of scenarios) {
@@ -125,6 +126,7 @@ function scenarioTests(file, scenarios) {
                             return fetchOnce(url,options);
                         };
                     });
+                    if(Object.keys(scenario.device??{}).some(name=>rootMessageFixtures.has(name)))await page.evaluate(()=>{api.token='fixture-root';api.level='root';api.username='root';});
                     await scenario.setup?.(page, names);
                     const show = scenario.show ?? 'toast';
                     const acting = Promise.resolve(scenario.act(page, names));
@@ -180,6 +182,7 @@ const rulesList = (name = 'night-off') => ok({...shownConfiguration, rules: [{id
 // answer to a write, a batch, a dialog result box) so that the golden sentences below can be read like a document.
 const dom = html => p => p.evaluate(html => document.body.insertAdjacentHTML('beforeend', html), html);
 const sure = p => p.evaluate(() => { confirmAction = async () => true; });
+const asRoot = p => p.evaluate(() => {api.token='fixture-root';api.level='root';api.username='root';});
 scenarioTests('system', [
     // ---- sign in (the reason stays in the form)
     ...[['wrong-password', '{"code":3,"error":"Invalid username or password"}'], ['locked', '{"code":3,"error":"Account locked due to too many failed attempts"}'], ['no-answer', DROP]].map(([name, answer]) => ({
@@ -188,12 +191,12 @@ scenarioTests('system', [
     // ---- device
     {id: 'device.reboot.no-answer', setup: sure, device: {'system/reboot': DROP},
      act: async p => { await p.evaluate(() => confirmReboot()); await p.waitForFunction(() => document.getElementById('toast').classList.contains('toast-warning')); }},
-    {id: 'service.restart.busy', act: p => p.evaluate(() => serviceAction('automation', 'restart')), device: {'service/restart': '{"code":4,"error":"busy"}'}},
-    {id: 'service.stop.no-answer', act: p => p.evaluate(() => serviceAction('automation', 'stop')), device: {'service/stop': DROP}},
+    {id: 'service.restart.busy', setup: p => p.evaluate(() => {api.token='fixture-root';api.level='root';api.username='root';}), act: p => p.evaluate(() => serviceAction('automation', 'restart')), device: {'service/restart': '{"code":4,"error":"busy"}'}},
+    {id: 'service.stop.no-answer', setup: p => p.evaluate(() => {api.token='fixture-root';api.level='root';api.username='root';}), act: p => p.evaluate(() => serviceAction('automation', 'stop')), device: {'service/stop': DROP}},
     {id: 'fan.setspeed.rejected', setup: p => p.evaluate(() => { refreshFans = async () => {}; }), act: p => p.evaluate(() => setFanSpeed(2, 60)), device: {'fan/set': '{"code":1,"error":"Invalid fan id"}'}},
     {id: 'led.brightness.device-not-found', act: p => p.evaluate(() => setBrightness('matrix', 50)), device: {'led/brightness': '{"code":2,"error":"Device not found"}'}},
     // ---- files
-    {id: 'file.mount.failed', setup: p => p.evaluate(() => { refreshFilesPage = async () => {}; }), act: p => p.evaluate(() => mountSdCard()), device: {'storage/mount': '{"code":7,"error":"Failed to mount SD card"}'}},
+    {id: 'file.mount.failed', setup: async p => {await asRoot(p);await p.evaluate(() => { refreshFilesPage = async () => {}; });}, act: p => p.evaluate(() => mountSdCard()), device: {'storage/mount': '{"code":7,"error":"Failed to mount SD card"}'}},
     {id: 'file.delete.not-found', setup: async p => { await sure(p); await p.evaluate(() => { refreshFilesPage = async () => {}; }); }, act: p => p.evaluate(() => deleteFile('/sdcard/a.txt')), device: {'storage/delete': '{"code":2,"error":"File not found"}'}},
     {id: 'file.delete.batch-mixed', show: {inline: '#operation-summary'},
      setup: async p => { await sure(p); await p.evaluate(() => { refreshFilesPage = async () => {}; selectedFiles.clear(); selectedFiles.add('/sdcard/a.txt'); selectedFiles.add('/sdcard/b.txt'); selectedFiles.add('/sdcard'); }); },
@@ -202,21 +205,21 @@ scenarioTests('system', [
     {id: 'file.createdir.no-answer', setup: async p => { await dom('<input id="new-folder-name" value="logs"><div id="newfolder-modal" class="hidden"></div>')(p); await p.evaluate(() => { currentFilePath = '/sdcard'; }); },
      act: p => p.evaluate(() => createNewFolder()), device: {'storage/mkdir': DROP}},
     // ---- network
-    {id: 'wifi.scan.wrong-mode', setup: dom('<div id="wifi-scan-section" class="hidden"><div id="wifi-scan-results"></div></div>'), show: {inline: '#wifi-scan-results'},
+    {id: 'wifi.scan.wrong-mode', setup: async p => {await asRoot(p); await dom('<div id="wifi-scan-section" class="hidden"><div id="wifi-scan-results"></div></div>')(p);}, show: {inline: '#wifi-scan-results'},
      act: p => p.evaluate(() => showWifiScan()), device: {'network/wifi/scan': '{"code":8,"error":"WiFi scan requires STA or APSTA mode"}'}},
-    {id: 'network.nat.no-upstream', setup: p => p.evaluate(() => { refreshNetworkPage = async () => {}; }), act: p => p.evaluate(() => toggleNat()),
+    {id: 'network.nat.no-upstream', setup: async p => {await asRoot(p); await p.evaluate(() => { refreshNetworkPage = async () => {}; });}, act: p => p.evaluate(() => toggleNat()),
      device: {'nat/status': ok({enabled: false}), 'nat/enable': '{"code":7,"error":"WiFi STA not connected"}'}},
-    {id: 'system.hostname.rejected', setup: dom('<input id="hostname-input" value="bad name">'), act: p => p.evaluate(() => setHostname()), device: {'network/hostname': '{"code":1,"error":"Invalid hostname"}'}},
+    {id: 'system.hostname.rejected', setup: async p => {await asRoot(p); await dom('<input id="hostname-input" value="bad name">')(p);}, act: p => p.evaluate(() => setHostname()), device: {'network/hostname': '{"code":1,"error":"Invalid hostname"}'}},
     // ---- OTA
     {id: 'ota.path.firmware-missing', setup: dom('<input id="ota-file-input" value="/sdcard/ota/TianShanOS.bin"><input type="checkbox" id="ota-file-include-www">'),
      act: p => p.evaluate(() => otaFromFile()), device: {'storage/info': '{"code":2,"error":"File not found"}'}},
     {id: 'ota.path.nothing-entered', setup: dom('<input id="ota-file-input" value="/sdcard/ota"><input type="checkbox" id="ota-file-include-www">'),
      act: p => p.evaluate(() => otaFromFile()), device: {'storage/list': ok({entries: [{name: 'notes.txt', type: 'file'}]})}},
-    {id: 'ota.check.server-unreachable', setup: dom('<input id="ota-server-input" value="http://127.0.0.1:9"><div id="ota-update-status"></div>'), show: {inline: '#ota-update-status'},
+    {id: 'ota.check.server-unreachable', setup: async p => {await asRoot(p); await dom('<input id="ota-server-input" value="http://127.0.0.1:9"><div id="ota-update-status"></div>')(p);}, show: {inline: '#ota-update-status'},
      act: p => p.evaluate(() => checkForUpdates()), device: {'ota/test_connection': '{"code":1,"error":"x"}'}},
-    {id: 'ota.upload.device-refused', act: p => p.evaluate(async () => { try { await uploadFirmwareToDevice(new ArrayBuffer(3), false); } catch (error) { reportFailure({ op: 'ota.upgrade', error, endpoint: 'ota.proxy', write: true }); } }),
+    {id: 'ota.upload.device-refused', setup: p => p.evaluate(() => {api.token='fixture-root';api.level='root';api.username='root';}), act: p => p.evaluate(async () => { try { await uploadFirmwareToDevice(new ArrayBuffer(3), false); } catch (error) { reportFailure({ op: 'ota.upgrade', error, endpoint: 'ota.proxy', write: true }); } }),
      device: {'ota/firmware': '{"status":"error","message":"Not enough space"}'}},
-    {id: 'ota.upload.no-answer', act: p => p.evaluate(async () => { try { await uploadFirmwareToDevice(new ArrayBuffer(3), false); } catch (error) { reportFailure({ op: 'ota.upgrade', error, endpoint: 'ota.proxy', write: true }); } }),
+    {id: 'ota.upload.no-answer', setup: p => p.evaluate(() => {api.token='fixture-root';api.level='root';api.username='root';}), act: p => p.evaluate(async () => { try { await uploadFirmwareToDevice(new ArrayBuffer(3), false); } catch (error) { reportFailure({ op: 'ota.upgrade', error, endpoint: 'ota.proxy', write: true }); } }),
      device: {'ota/firmware': DROP}},
     // ---- certificates and config packs (the result boxes of their dialogs)
     {id: 'cert.install.no-keypair', show: {inline: '#cert-install-result'},
@@ -451,9 +454,9 @@ scenarioTests('ssh-commands', [
      device: startedCommand},
     {id: 'command.run.error-text-from-old-firmware', setup: onCommands, act: async p => { await p.evaluate(() => executeCommand(0)); await p.evaluate(() => handleSshExecMessage({type: 'ssh_exec_error', session_id: 5, error: 'SSH connection failed (code=259)'})); },
      device: startedCommand},
-    {id: 'command.cancel.no-session', setup: async p => { await onCommands(p); await p.evaluate(() => { document.getElementById('exec-result-section').style.display = ''; claimExecDisplay('ssh', document.getElementById('exec-result')); currentExecSessionId = 5; }); }, act: p => p.evaluate(() => cancelExecution()),
+    {id: 'command.cancel.no-session', setup: async p => { await onCommands(p); await p.evaluate(() => { document.getElementById('exec-result-section').style.display = ''; const owner=claimExecDisplay('ssh', document.getElementById('exec-result')); rememberExecReceipt(owner,{session_id:5,boot_id:'a'.repeat(32),result_key:'b'.repeat(32)}); currentExecSessionId = 5; }); }, act: p => p.evaluate(() => cancelExecution()),
      device: commandsDevice({'ssh/cancel': '{"code":2,"message":"ssh_no_session"}'})},
-    {id: 'command.cancel.no-answer', setup: async p => { await onCommands(p); await p.evaluate(() => { document.getElementById('exec-result-section').style.display = ''; claimExecDisplay('ssh', document.getElementById('exec-result')); currentExecSessionId = 5; }); }, act: p => p.evaluate(() => cancelExecution()),
+    {id: 'command.cancel.no-answer', setup: async p => { await onCommands(p); await p.evaluate(() => { document.getElementById('exec-result-section').style.display = ''; const owner=claimExecDisplay('ssh', document.getElementById('exec-result')); rememberExecReceipt(owner,{session_id:5,boot_id:'a'.repeat(32),result_key:'b'.repeat(32)}); currentExecSessionId = 5; }); }, act: p => p.evaluate(() => cancelExecution()),
      device: commandsDevice({'ssh/cancel': DROP})},
     {id: 'host.list.commands-page-refused', act: p => p.evaluate(() => { document.body.insertAdjacentHTML('beforeend', '<div id="host-selector"></div>'); return loadHostSelector(); }), device: {'ssh/hosts/list': '{"code":7,"message":"Failed to list hosts"}'}, show: {inline: '#host-selector'}},
     {id: 'pack.export-command.not-allowed', setup: async p => { await onCommands(p); await p.evaluate(() => showExportSshCommandModal('restart')); }, act: p => p.evaluate(() => doExportSshCommandFromModal('restart')),

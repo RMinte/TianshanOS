@@ -77,7 +77,7 @@ function renderConfigurationSummary() {
 async function refreshConfigurationStatus(check = false) {
     const current = configurationRead('config-status');
     const endpoint = check ? 'automation.config.refresh' : 'automation.config.status';
-    const result = await api.call(endpoint, {});
+    const result = await api.call(endpoint, {}, check ? 'POST' : 'GET');
     if (!current()) return null;
     await configurationResult(result);
     requireApiSuccess(result, endpoint);
@@ -104,7 +104,7 @@ function bindConfigurationEditor(modal, kind, version) {
     buttons.forEach(button => button.disabled = !context.version);
     context.ready = (async () => {
         if (!context.version) {
-            const result = requireApiSuccess(await api.call('automation.config.status', {}), 'automation.config.status');
+            const result = requireApiSuccess(await api.call('automation.config.status', {}, 'GET'), 'automation.config.status');
             if (!context.current()) return;
             context.version = result.data.active_version; context.source = result.data.source;
         }
@@ -234,11 +234,11 @@ async function automationConfigOperation(operation, modal = document.getElementB
     box.textContent = t('toast.processing');
     try {
         let result;
-        if (operation === 'check') result = await api.call('automation.config.refresh', {});
-        else if (operation === 'backup') result = await api.call('automation.config.backup', {active_version: status.active_version});
-        else if (operation === 'enable' || operation === 'disable') result = await api.call('automation.config.enable', {enabled: operation === 'enable', active_version: status.active_version});
+        if (operation === 'check') result = await api.call('automation.config.refresh', {}, 'POST');
+        else if (operation === 'backup') result = await api.call('automation.config.backup', {active_version: status.active_version}, 'POST');
+        else if (operation === 'enable' || operation === 'disable') result = await api.call('automation.config.enable', {enabled: operation === 'enable', active_version: status.active_version}, 'POST');
         else {
-            const preview = requireApiSuccess(await api.call('automation.config.preview', {operation}), 'automation.config.preview').data;
+            const preview = requireApiSuccess(await api.call('automation.config.preview', {operation}, 'POST'), 'automation.config.preview').data;
             if (!current() || !modal.isConnected) return;
             modal.classList.add('hidden');
             const confirmation = confirmSheet({title: configText(operation), primary: configText(operation),
@@ -249,7 +249,7 @@ async function automationConfigOperation(operation, modal = document.getElementB
             const accepted = await confirmation; dialog = null;
             modal.classList.remove('hidden');
             if (!accepted || !current() || !modal.isConnected) return;
-            result = await api.call('automation.config.apply', {operation, active_version: preview.active_version, target_version: preview.target_version});
+            result = await api.call('automation.config.apply', {operation, active_version: preview.active_version, target_version: preview.target_version}, 'POST');
         }
         if (!current() || !modal.isConnected) return;
         await configurationResult(result);
@@ -429,7 +429,7 @@ async function refreshUserVariables() {
     const body = document.getElementById('user-variables-body'), current = configurationRead('variables');
     if (!body) return;
     try {
-        const result = requireApiSuccess(await api.call('automation.variables.list', {configured_only: true}), 'automation.variables.list');
+        const result = requireApiSuccess(await api.call('automation.variables.list', {configured_only: true}, 'GET'), 'automation.variables.list');
         if (!current() || !body.isConnected) return;
         const variables = (result.data.variables || []).map(variable => ({...variable, id: variable.name}));
         recordConfigurationList('variables', result.data, variables);
@@ -919,7 +919,7 @@ async function submitPasswordChange() {
 
 async function updateFooterVersion() {
     try {
-        const versionData = await api.call('ota.version');
+        const versionData = await api.call('ota.version', null, 'GET');
         if (versionData?.data?.version) {
             const versionEl = document.getElementById('footer-version');
             if (versionEl) {
@@ -1528,7 +1528,7 @@ function usbMuxDisplayName(target) {
 async function refreshUsbMuxStatus() {
     const pageCurrent = capturePageValidity();
     try {
-        const result = await api.call('device.usb.status');
+        const result = await api.call('device.usb.status', null, 'GET');
         if (!pageCurrent()) return;
         if (result.code === 0 && result.data) {
             usbMuxConfigured = result.data.configured !== false;
@@ -1645,7 +1645,7 @@ let agxPowerState = false; // false=断电(HIGH), true=上电(LOW)
 async function refreshAgxPowerState() {
     const pageCurrent = capturePageValidity();
     try {
-        const result = await api.call('device.status', { device: 'agx' });
+        const result = await api.call('device.status', { device: 'agx' }, 'GET');
         if (!pageCurrent()) return;
         if (result.code === 0 && result.data) {
             agxPowerState = result.data.state === 'on' || result.data.state === 'booting';
@@ -1737,7 +1737,7 @@ function startLpmuStatePolling(wasOnline = false) {
         pending = true;
         let reachable = null;
         try {
-            const result = requireApiSuccess(await api.call('device.ping', {host: '10.10.99.99', timeout: 1000}), 'device.ping');
+            const result = requireApiSuccess(await api.call('device.ping', {host: '10.10.99.99', timeout: 1000}, 'POST'), 'device.ping');
             if (typeof result.data?.reachable === 'boolean') reachable = result.data.reachable;
         } catch (error) { console.warn('LPMU reachability check failed', error); }
         finally { pending = false; }
@@ -1789,7 +1789,7 @@ async function refreshLpmuState() {
     if (lpmuPollingInterval) return;
 
     try {
-        const result = await api.call('device.ping', { host: '10.10.99.99', timeout: 1000 });
+        const result = await api.call('device.ping', { host: '10.10.99.99', timeout: 1000 }, 'POST');
         if (!pageCurrent()) return;
         if (result.code === 0 && typeof result.data?.reachable === 'boolean') {
             lpmuState = result.data.reachable ? 'online' : 'offline';
@@ -2156,7 +2156,7 @@ async function applyTestTemp() {
 
     try {
         // 使用 temp.manual API 设置手动温度
-        const result = await api.call('temp.manual', { temperature: temp });
+        const result = await api.call('temp.manual', { temperature: temp }, 'POST');
 
         if (result.code === 0) {
             showToast((typeof t === 'function' ? t('fan.testTempSet', { temp }) : `测试温度已设置为 ${temp}°C`), 'success');
@@ -2177,7 +2177,7 @@ async function applyTestTemp() {
 async function clearTestTemp() {
     try {
         // 清除手动温度，恢复自动模式
-        const result = await api.call('temp.select', { source: 'variable' });
+        const result = await api.call('temp.select', { source: 'variable' }, 'POST');
 
         if (result.code === 0) {
             showToast((typeof t === 'function' ? t('fan.testTempCleared') : '测试温度已清除，恢复正常模式'), 'success');
@@ -2228,7 +2228,7 @@ async function setFanSpeed(id, speed) {
 
 async function setFanMode(id, mode) {
     try {
-        requireApiSuccess(await api.call('fan.mode', { id: id, mode: mode }), 'call');
+        requireApiSuccess(await api.call('fan.mode', { id: id, mode: mode }, 'POST'), 'call');
         showToast(typeof t === 'function' ? t('fan.modeSwitch', { id, mode: t({off:'common.disabled', manual:'common.manual', auto:'fanPage.modeSmart', curve:'fan.curve'}[mode] || 'common.unknown') }) : `风扇 ${id} 模式已切换为 ${mode}`, 'success');
         await refreshFans();
     } catch (e) { reportFailure({ op: 'fan.setmode', error: e, write: true }); }
@@ -2253,7 +2253,7 @@ function markFanOutputsUnknown(id = null) {
 
 async function refreshFans() {
     try {
-        const result = requireApiSuccess(await api.call('fan.status'), 'fan.status');
+        const result = requireApiSuccess(await api.call('fan.status', null, 'GET'), 'fan.status');
         if (result.data) updateFanInfo(result.data);
         else markFanOutputsUnknown();
     } catch (e) {
@@ -2329,7 +2329,7 @@ async function loadFanCurveConfig(owner, fanId) {
     status.textContent = t('modalSettings.loading');
     updateFanCurveControls(owner);
     try {
-        const result = await api.call('fan.config', { id: fanId });
+        const result = await api.call('fan.config', { id: fanId }, 'GET');
         if (!fanCurveReadCurrent(owner, 'curveRequest', request)) return;
         if (result.code !== 0 || !result.data) {
             status.textContent = fanCurveDraftNotice();
@@ -2748,7 +2748,7 @@ async function loadTempSourceStatus(owner = fanCurveModalOwner) {
     owner.modal.querySelector('#temp-source-hint').textContent = t('modalSettings.loading');
     updateFanCurveControls(owner);
     try {
-        const result = await api.call('temp.status');
+        const result = await api.call('temp.status', null, 'GET');
         if (!fanCurveReadCurrent(owner, 'bindingRequest', request)) return;
         if (result.code !== 0 || !result.data) owner.bindingError = true;
         if (result.code === 0 && result.data) {
@@ -2789,7 +2789,7 @@ async function loadVariableBindStatus(owner, request) {
         const varsResult = await api.call('automation.variables.list', {
             include_value: true,
             include_meta: false
-        });
+        }, 'GET');
         if (!fanCurveReadCurrent(owner, 'bindingRequest', request)) return;
         if (varsResult.code !== 0 || !varsResult.data?.variables) owner.bindingError = true;
         if (varsResult.code === 0 && varsResult.data?.variables) {
@@ -2813,7 +2813,7 @@ async function loadVariableBindStatus(owner, request) {
     }
 
     try {
-        const bindResult = await api.call('temp.bind');
+        const bindResult = await api.call('temp.bind', null, 'POST');
         if (!fanCurveReadCurrent(owner, 'bindingRequest', request)) return;
         if (bindResult.code !== 0 || !bindResult.data) owner.bindingError = true;
         const statusEl = document.getElementById('variable-bind-status');
@@ -2933,10 +2933,10 @@ async function bindTempVariable() {
             weight: Math.max(0, Math.min(1, b.weight || 0))
         }));
 
-        const result = await api.call('temp.bind', { variables });
+        const result = await api.call('temp.bind', { variables }, 'POST');
 
         if (result.code === 0) {
-            requireApiSuccess(await api.call('temp.select', { source: 'variable' }), 'call');
+            requireApiSuccess(await api.call('temp.select', { source: 'variable' }, 'POST'), 'call');
 
             showToast(t('fanPage.tempBoundWeighted', { count: variables.length }), 'success');
 
@@ -2965,7 +2965,7 @@ async function unbindTempVariable() {
     owner.bindingWriting = true;
     updateFanCurveControls(owner);
     try {
-        const result = await api.call('temp.bind', { variables: [] });
+        const result = await api.call('temp.bind', { variables: [] }, 'POST');
 
         if (result.code === 0) {
             if (fanCurveReadCurrent(owner, 'bindingRequest', request)) tempVarBindings = [];
@@ -3032,7 +3032,7 @@ async function applyFanCurve() {
             id: fanId,
             min_duty: minDuty,
             max_duty: maxDuty
-        });
+        }, 'POST');
 
         requireApiSuccess(limitsResult, 'fan.limits');
 
@@ -3042,7 +3042,7 @@ async function applyFanCurve() {
             curve: sortedCurve,
             hysteresis: hysteresis,
             min_interval: minInterval
-        });
+        }, 'POST');
 
         requireApiSuccess(curveResult, 'fan.curve');
 
@@ -3050,7 +3050,7 @@ async function applyFanCurve() {
         const modeResult = await api.call('fan.mode', {
             id: fanId,
             mode: 'curve'
-        });
+        }, 'POST');
 
         requireApiSuccess(modeResult, 'fan.mode');
 
@@ -3422,7 +3422,7 @@ async function loadDataWidgets() {
     const revision = dataWidgetsRevision;
     try {
         // 1. 尝试从后端加载
-        const response = requireApiSuccess(await api.call('ui.widgets.get'), 'ui.widgets.get');
+        const response = requireApiSuccess(await api.call('ui.widgets.get', null, 'GET'), 'ui.widgets.get');
         if (!pageCurrent()) return;
         if (revision !== dataWidgetsRevision) return dataWidgetsLoaded;
         // API 响应格式: {code: 0, data: {widgets: [...], refresh_interval: 5000, source: "sdcard"}}
@@ -4103,7 +4103,7 @@ async function refreshDataWidgets() {
         const variables = Object.create(null);
         if (varNames.size > 0) {
             try {
-                const resp = await api.call('automation.variables.list', { include_meta: false });
+                const resp = await api.call('automation.variables.list', { include_meta: false }, 'GET');
                 if (!pageCurrent()) return;
                 if (resp.code === 0 && resp.data?.variables) {
                     for (const v of resp.data.variables) {
@@ -4262,7 +4262,7 @@ async function refreshLogOnce(widgetId) {
         }
         
         const varName = varMatch[1].trim();
-        const result = await api.call('automation.variables.get', { name: varName });
+        const result = await api.call('automation.variables.get', { name: varName }, 'GET');
         if (!pageCurrent()) return;
         
         if (result.code !== 0 || result.data?.value === undefined) {
@@ -4721,7 +4721,7 @@ function startAutomaticStartRefresh() {
         if(document.hidden||reading)return;
         reading=true;
         try {
-            const response=await api.call('automation.status');
+            const response=await api.call('automation.status', null, 'GET');
             if(current()&&response.code===0)renderAutomaticStarts(response.data?.automatic_starts||[]);
         } catch (_) { /* Existing page connection state reports transport failures. */ }
         finally {reading=false;}
@@ -4739,7 +4739,7 @@ async function refreshQuickActions() {
     }
     
     try {
-        const result = await api.call('automation.rules.list');
+        const result = await api.call('automation.rules.list', null, 'GET');
         if (!pageCurrent()) return;
         recordConfigurationList('quick-rules', result.data || {}, result.data?.rules || []);
         if (result.code === 0 && result.data && result.data.rules) {
@@ -4953,7 +4953,7 @@ function refreshServiceStates() {
     serviceStatusRead = read;
     read.promise = (async () => {
         try {
-            const result = requireApiSuccess(await api.call('automation.services.list',{}),'automation.services.list');
+            const result = requireApiSuccess(await api.call('automation.services.list',{}, 'GET'),'automation.services.list');
             if (!read.current() || serviceStatusRead !== read) return;
             const records = new Map();
             for (const run of result.data.items || []) {
@@ -4972,7 +4972,7 @@ function refreshServiceStates() {
 async function waitServiceOperation(runId, operationId, isCurrent) {
     const deadline = Date.now()+60000;
     while (isCurrent() && Date.now()<deadline) {
-        const result = requireApiSuccess(await api.call('automation.services.status',{run_id:runId}),'automation.services.status');
+        const result = requireApiSuccess(await api.call('automation.services.status',{run_id:runId}, 'GET'),'automation.services.status');
         if (!isCurrent()) return null;
         const data = result.data;
         if (data.run_id !== runId || data.operation_id !== operationId) throw pageFailure('service_operation_changed');
@@ -5043,7 +5043,7 @@ async function showServiceRunLog(runId, follow = false) {
         try {
             const file="'"+run.log_file.replace(/'/g,"'\\''")+"'";
             const result = requireApiSuccess(await api.call('ssh.exec',{host:run.host,port:run.port,user:run.username,keyid:run.keyid,
-                command:`if [ ! -e ${file} ]; then exit 44; fi; tail -100 -- ${file}`,timeout_ms:5000}),'ssh.exec');
+                command:`if [ ! -e ${file} ]; then exit 44; fi; tail -100 -- ${file}`,timeout_ms:5000}, 'POST'),'ssh.exec');
             if (!current()) return;
             if(result.data?.exit_code===44){
                 stop();modal.querySelector('[data-run-log]').textContent=serviceRunText('logMissing');
@@ -5136,7 +5136,7 @@ async function triggerQuickAction(ruleId) {
             iconEl.innerHTML = '<span class="spinner-small"><svg class="i"><use href="#ri-refresh-line"/></svg></span>';
         }
         
-        const result = await api.call('automation.rules.trigger', {id:ruleId,active_version:configurationVersion('quick-rules')});
+        const result = await api.call('automation.rules.trigger', {id:ruleId,active_version:configurationVersion('quick-rules')}, 'POST');
         
         if (!card.isConnected || document.getElementById(card.id) !== card) return;
         if (result.code === 0) {
@@ -5390,7 +5390,7 @@ async function allLedsOff() {
     let success = 0; const failures = [];
     for (const dev of devices) {
         try {
-            requireApiSuccess(await api.call('led.clear', {device: dev.name, off: true}), 'ledClear');
+            requireApiSuccess(await api.call('led.clear', {device: dev.name, off: true}, 'POST'), 'ledClear');
             success++;
             ledStates[dev.name] = false;
             updateLedCardState(dev.name, false);
@@ -5750,7 +5750,7 @@ async function displayImageFromModal() {
     }
     
     try {
-        requireApiSuccess(await api.call('led.image', { device: 'matrix', path, center }), 'call');
+        requireApiSuccess(await api.call('led.image', { device: 'matrix', path, center }, 'POST'), 'call');
         showToast((typeof t === 'function' ? t('toast.imageDisplayed') : '图像已显示'), 'success');
     } catch (e) {
         reportFailure({ op: 'led.image', error: e, write: true });
@@ -5770,7 +5770,7 @@ async function generateQrCodeFromModal() {
     }
     
     try {
-        requireApiSuccess(await api.call('led.qrcode', { device: 'matrix', text, ecc, color: fg, bg_image: bgImage || undefined }), 'call');
+        requireApiSuccess(await api.call('led.qrcode', { device: 'matrix', text, ecc, color: fg, bg_image: bgImage || undefined }, 'POST'), 'call');
         showToast((typeof t === 'function' ? t('toast.qrGenerated') : 'QR 码已生成'), 'success');
     } catch (e) {
         reportFailure({ op: 'led.qr', error: e, write: true });
@@ -5857,7 +5857,7 @@ async function displayTextFromModal() {
             params.x = x;
             params.y = y;
         }
-        requireApiSuccess(await api.call('led.text', params), 'call');
+        requireApiSuccess(await api.call('led.text', params, 'POST'), 'call');
         showToast((typeof t === 'function' ? t('toast.textDisplayed') : '文本已显示'), 'success');
     } catch (e) {
         reportFailure({ op: 'led.text', error: e, write: true });
@@ -5867,7 +5867,7 @@ async function displayTextFromModal() {
 // 模态框内停止文本
 async function stopTextFromModal() {
     try {
-        requireApiSuccess(await api.call('led.text.stop', { device: 'matrix' }), 'call');
+        requireApiSuccess(await api.call('led.text.stop', { device: 'matrix' }, 'POST'), 'call');
         showToast((typeof t === 'function' ? t('toast.textScrollStopped') : '文本滚动已停止'), 'success');
     } catch (e) {
         reportFailure({ op: 'led.stoptext', error: e, write: true });
@@ -5931,7 +5931,7 @@ async function applyFilterFromModal() {
     }
     
     try {
-        requireApiSuccess(await api.call('led.filter.start', params), 'call');
+        requireApiSuccess(await api.call('led.filter.start', params, 'POST'), 'call');
         showToast(typeof t === 'function' ? t('toast.filterApplied', { filter: filterDisplayName(selectedModalFilter) }) : `滤镜 ${selectedModalFilter} 已应用`, 'success');
     } catch (e) {
         reportFailure({ op: 'led.filterapply', error: e, write: true });
@@ -5941,7 +5941,7 @@ async function applyFilterFromModal() {
 // 模态框内停止滤镜
 async function stopFilterFromModal() {
     try {
-        requireApiSuccess(await api.call('led.filter.stop', { device: 'matrix' }), 'call');
+        requireApiSuccess(await api.call('led.filter.stop', { device: 'matrix' }, 'POST'), 'call');
         showToast((typeof t === 'function' ? t('toast.filterStopped') : '滤镜已停止'), 'success');
     } catch (e) {
         reportFailure({ op: 'led.filterstop', error: e, write: true });
@@ -6198,7 +6198,7 @@ async function toggleLed(device) {
     try {
         if (isOn) {
             // 当前是开启状态，关闭它
-            requireApiSuccess(await api.call('led.clear', {device, off: true}), 'ledClear');
+            requireApiSuccess(await api.call('led.clear', {device, off: true}, 'POST'), 'ledClear');
             ledStates[device] = false;
             updateLedCardState(device, false);
             showToast(typeof t === 'function' ? t('toast.ledTurnedOff', { device: getDeviceDescription(device) }) : `${device} 已关闭`, 'success');
@@ -6232,7 +6232,7 @@ async function stopEffect(device) {
 
 async function saveLedConfig(device) {
     try {
-        const response = requireApiSuccess(await api.call('led.save', {device}), 'led.save');
+        const response = requireApiSuccess(await api.call('led.save', {device}, 'POST'), 'led.save');
         const result = response.data || {};
         if (result.animation) {
             showToast(typeof t === 'function' ? t('toast.ledConfigSavedWithAnim', { device: getDeviceDescription(device), animation: effectDisplayName(result.animation) }) : `${device} 配置已保存: ${result.animation}`, 'success');
@@ -8257,7 +8257,7 @@ let sshCommands = {};
 async function loadSshCommands() {
     const pageCurrent = configurationRead('commands');
     try {
-        const result = await api.call('ssh.commands.list', {});
+        const result = await api.call('ssh.commands.list', {}, 'GET');
         if (!pageCurrent()) return;
         if (result && result.data && result.data.commands) {
             recordConfigurationList('commands', result.data, result.data.commands);
@@ -8391,6 +8391,15 @@ function renderQuickActionNotice(container, state, reason) {
         (isRoot ? '<button type="button" class="btn sm" onclick="window.location.hash=\'/automation\'">' + t('quickActionNotice.goAutomation') + '</button>' : '') + '</div>';
 }
 
+function commandSelectionEmptyState() {
+    return `<div class="command-empty">
+        <div class="command-empty-icon"><svg class="i" aria-hidden="true"><use href="#ri-file-list-line"/></svg></div>
+        <h1 class="command-empty-title">${t('ssh.selectHostFirst')}</h1>
+        <p class="command-empty-description">${t('ssh.selectHostHint')}</p>
+        <button type="button" class="btn command-empty-action" onclick="showAddCommandModal()"><svg class="i" aria-hidden="true"><use href="#ri-add-line"/></svg>${t('ssh.createFirstCommand')}</button>
+    </div>`;
+}
+
 async function loadCommandsPage() {
     const pageCurrent = capturePageValidity();
     clearInterval(refreshInterval);
@@ -8426,7 +8435,7 @@ async function loadCommandsPage() {
                     <div class="acts"></div>
                 </div>
                 <div id="commands-list">
-                    <div class="empty"><p class="t-note">${t('ssh.selectHostFirst')}</p></div>
+                    ${commandSelectionEmptyState()}
                 </div>
             </div>
             
@@ -8545,7 +8554,7 @@ async function loadHostSelector() {
     const container = document.getElementById('host-selector');
     
     try {
-        const result = await api.call('ssh.hosts.list', {});
+        const result = await api.call('ssh.hosts.list', {}, 'GET');
         if (!pageCurrent()) return;
         if (result.code !== 0) {   // an error is not an empty list
             container.innerHTML = `<p class="t-note" style="color:var(--bad)">${failureNote({ op: 'host.list', result, endpoint: 'ssh.hosts.list', write: false })}</p>`;
@@ -8614,11 +8623,44 @@ function selectHost(hostId) {
     refreshCommandsList();
 }
 
+async function loadFileIcon(image, path, onFailure) {
+    const token = api.token;
+    try {
+        const blob = await api.fileDownload(path);
+        if (!image.isConnected || api.token !== token) return;
+        const url = URL.createObjectURL(blob);
+        const release = () => URL.revokeObjectURL(url);
+        image.onload = () => {
+            release();
+            if (api.token !== token) image.removeAttribute('src');
+        };
+        image.onerror = () => { release(); if (image.isConnected && api.token === token) onFailure(); };
+        image.src = url;
+    } catch (error) {
+        if (image.isConnected && api.token === token) onFailure();
+    }
+}
+
+function updateFileIconPreview(id, path) {
+    const preview = document.getElementById(id);
+    const placeholder = (failed) => {
+        const note = document.createElement('span');
+        note.className = 'preview-placeholder';
+        note.textContent = t(failed ? 'sshPage.iconPreviewFailed' : 'sshPage.iconPreviewNone');
+        preview.replaceChildren(note);
+    };
+    if (!path || !path.startsWith('/sdcard/')) { placeholder(false); return; }
+    const image = document.createElement('img');
+    image.alt = 'icon';
+    preview.replaceChildren(image);
+    void loadFileIcon(image, path, () => placeholder(true));
+}
+
 function commandImageUnavailable(image) {
     if(!image.isConnected)return;
     image.hidden=true;
     const note=image.closest('.command-card')?.querySelector('[data-command-image-note]');
-    if(note){note.hidden=false;note.title=new URL(image.src,location.href).searchParams.get('path')||'';}
+    if(note){note.hidden=false;note.title=image.dataset.filePath||'';}
 }
 
 function refreshCommandsList() {
@@ -8627,7 +8669,7 @@ function refreshCommandsList() {
     const empty = (msgKey) => `<div class="empty"><p class="t-note">${t(msgKey)}</p>${createFirstBtn}</div>`;
     
     if (!selectedHostId) {
-        container.innerHTML = empty('ssh.selectHostFirst');
+        container.innerHTML = commandSelectionEmptyState();
         return;
     }
     
@@ -8654,7 +8696,7 @@ function refreshCommandsList() {
         const iconValue = cmd.icon || 'ri-rocket-line';
         let iconHtml;
         if (iconValue.startsWith('/sdcard/')) {
-            iconHtml = `<img src="/api/v1/file/download?path=${encodeURIComponent(iconValue)}" alt="${escapeHtml(t('automation.iconLabel'))}" style="width:16px;height:16px;object-fit:contain" onerror="commandImageUnavailable(this)">`;
+            iconHtml = `<img data-file-path="${escapeHtml(iconValue)}" alt="${escapeHtml(t('automation.iconLabel'))}" style="width:16px;height:16px;object-fit:contain">`;
         } else if (iconValue.startsWith('ri-')) {
             iconHtml = `<svg class="i"><use href="#${escapeHtml(iconValue)}"/></svg>`;
         } else {
@@ -8702,6 +8744,9 @@ function refreshCommandsList() {
     });
     if(container.querySelector('[data-service-commands]')){void refreshServiceStates();startServiceStatusRefresh();}
 
+    container.querySelectorAll('img[data-file-path]').forEach(image => {
+        void loadFileIcon(image, image.dataset.filePath, () => commandImageUnavailable(image));
+    });
 }
 
 function showAddCommandModal() {
@@ -8812,7 +8857,7 @@ async function showCommandVariables(varName) {
         const result = await api.call('automation.variables.list', {
             prefix: `${varName}.`,
             include_meta: true
-        });
+        }, 'GET');
         if (result.code === 0 && result.data && result.data.variables) {
             const vars = result.data.variables.filter(v => 
                 v.source_id === varName || v.name.startsWith(varName + '.'));
@@ -8966,13 +9011,7 @@ async function browseCmdIconImage() {
  * 更新图标图片预览
  */
 function updateCmdIconPreview(path) {
-    const preview = document.getElementById('cmd-icon-preview');
-    if (path && path.startsWith('/sdcard/')) {
-        const loadFailed = typeof t === 'function' ? t('sshPage.iconPreviewFailed') : '加载失败';
-        preview.innerHTML = `<img src="/api/v1/file/download?path=${encodeURIComponent(path)}" alt="icon" onerror="this.parentElement.innerHTML='<span class=\\'preview-placeholder\\'>${loadFailed}</span>'">`;
-    } else {
-        preview.innerHTML = '<span class="preview-placeholder">' + (typeof t === 'function' ? t('sshPage.iconPreviewNone') : '无') + '</span>';
-    }
+    updateFileIconPreview('cmd-icon-preview', path);
 }
 
 /**
@@ -9309,7 +9348,7 @@ async function doExportSshCommand(cmdId, recipientCert, includeHost) {
         params.recipient_cert = recipientCert;
     }
     
-    const result = await api.call('ssh.commands.export', params);
+    const result = await api.call('ssh.commands.export', params, 'POST');
     
     if (result.code !== 0) throw new ApiOperationError(result, 'ssh.commands.export');
     
@@ -9532,7 +9571,7 @@ async function executeCommand(idx) {
             if (ownsExecDisplay(owner)) { owner.finished = true; cancel.style.display = 'none'; }
             return;
         }
-        const result=requireApiSuccess(await api.call('ssh.exec_stream',params),'ssh.exec_stream');
+        const result=requireApiSuccess(await api.call('ssh.exec_stream',params, 'POST'),'ssh.exec_stream');
         if (!Number.isInteger(result.data?.session_id)) throw new ApiOperationError({},'ssh.exec_stream',{kind:'format',uncertain:true});
         if (!ownsExecDisplay(owner)) return;
         output.textContent+=t('promptRepair.sessionWaiting',{id:result.data.session_id});
@@ -9575,7 +9614,7 @@ async function cancelExecution() {
     cancelBtn.textContent = typeof t === 'function' ? t('ui.cancelling') : '取消中...';
     
     try {
-        requireApiSuccess(await api.call('ssh.cancel', { session_id: sessionId }), 'ssh.cancel');
+        requireApiSuccess(await api.call('ssh.cancel', { session_id: sessionId }, 'POST'), 'ssh.cancel');
         if (!ownsExecDisplay(owner)) return;
         showToast((typeof t === 'function' ? t('toast.cancelSent') : '取消请求已发送'), 'info');
     } catch (e) {
@@ -10406,7 +10445,7 @@ async function loadSshHostsData() {
     const version = ++sshHostsLoadVersion;
     const pageCurrent = configurationRead('hosts');
     try {
-        const result = requireApiSuccess(await api.call('ssh.hosts.list', {}), 'ssh.hosts.list');
+        const result = requireApiSuccess(await api.call('ssh.hosts.list', {}, 'GET'), 'ssh.hosts.list');
         if (!pageCurrent()) return false;
         if (version !== sshHostsLoadVersion) return null; // Superseded, leave the newer list alone.
         const hosts = result.data?.hosts;
@@ -10482,7 +10521,7 @@ async function refreshKnownHostsList() {
     if (!tbody) return;
     
     try {
-        const result = await api.call('hosts.list', {});
+        const result = await api.call('hosts.list', {}, 'GET');
         if (!pageCurrent()) return;
         if (result.code !== 0) {
             tbody.innerHTML = `<div class="tr table-message"><span class="state bad">${failureNote({ op: 'knownHost.list', result, endpoint: 'hosts.list', write: false })}</span></div>`;
@@ -10559,7 +10598,7 @@ async function removeKnownHost(index) {
     
     const params = { host: `${host.host}:${host.port}` };
     try {
-        const result = await api.call('hosts.remove', { host: host.host, port: host.port });
+        const result = await api.call('hosts.remove', { host: host.host, port: host.port }, 'POST');
         if (result.code === 0) {
             showToast(t('failure.ops.knownHost.remove.done', params), 'success');
             await refreshKnownHostsList();
@@ -10593,7 +10632,7 @@ async function testSshHostByIndex(index) {
             command: 'echo "TianshanOS SSH Test OK"',
             trust_new: false
         };
-        let execResult = await api.call('ssh.exec', params);
+        let execResult = await api.call('ssh.exec', params, 'POST');
         if ([1001, 1002].includes(execResult.code)) {
             const changed = execResult.code === 1001;
             const fingerprint = execResult.data?.fingerprint || execResult.data?.current_fingerprint;
@@ -10620,7 +10659,7 @@ async function testSshHostByIndex(index) {
             params.confirmed_fingerprint = fingerprint;
             params.trust_new = execResult.code === 1002;
             params.accept_changed = execResult.code === 1001;
-            execResult = await api.call('ssh.exec', params);
+            execResult = await api.call('ssh.exec', params, 'POST');
             if ([1001, 1002].includes(execResult.code)) {   // a different key now: never trust it silently
                 reportFailure({ op: 'ssh.connect', params: messageParams, result: execResult, token: 'ssh_fingerprint_mismatch', endpoint: 'ssh.exec' });
                 return;
@@ -10721,7 +10760,7 @@ async function doExportSshHost(hostId, recipientCert) {
         params.recipient_cert = recipientCert;
     }
     
-    const result = await api.call('ssh.hosts.export', params);
+    const result = await api.call('ssh.hosts.export', params, 'POST');
     
     if (result.code !== 0) throw new ApiOperationError(result, 'ssh.hosts.export');
     
@@ -10907,7 +10946,7 @@ async function saveSourceEdit() {
 async function deleteKey(id) {
     const current = capturePageValidity();
     let details = null;
-    try {details = requireApiSuccess(await api.call('key.delete', {id, preview: true}), 'key.delete').data;} catch (_) { /* The final user decision remains available when the impact cannot be read. */ }
+    try {details = requireApiSuccess(await api.call('key.delete', {id, preview: true}, 'POST'), 'key.delete').data;} catch (_) { /* The final user decision remains available when the impact cannot be read. */ }
     if (!current()) return;
     const lines = [t('ui.confirmDeleteKey', {id}), configText('keyDeleteImpact')];
     if (!details?.complete) lines.push(configText('keyImpactUnknown'));
@@ -13227,14 +13266,14 @@ async function loadOtaData() {
     const pageCurrent = capturePageValidity();
     try {
         // 1. 加载 OTA 服务器地址
-        const serverResult = await api.call('ota.server.get');
+        const serverResult = await api.call('ota.server.get', null, 'GET');
         if (!pageCurrent()) return;
         if (serverResult?.code === 0 && serverResult.data?.url) {
             document.getElementById('ota-server-input').value = serverResult.data.url;
         }
         
         // 2. 加载版本信息
-        const versionResult = await api.call('ota.version');
+        const versionResult = await api.call('ota.version', null, 'GET');
         if (!pageCurrent()) return;
         if (versionResult?.code === 0 && versionResult.data) {
             const v = versionResult.data;
@@ -13245,9 +13284,9 @@ async function loadOtaData() {
         }
         
         // 3. 加载分区信息
-        const partResult = await api.call('ota.partitions');
+        const partResult = await api.call('ota.partitions', null, 'GET');
         if (!pageCurrent()) return;
-        if (partResult?.code === 0 && partResult.data) {
+        if (partResult?.code === 0 && partResult.data?.next) {
             displayPartitionsCompact(partResult.data);
         }
         
@@ -13439,9 +13478,9 @@ async function refreshOtaProgress() {
         // 根据当前步骤获取不同的进度
         let result;
         if (otaStep === 'www') {
-            result = await api.call('ota.www.progress');
+            result = await api.call('ota.www.progress', null, 'GET');
         } else {
-            result = await api.call('ota.progress');
+            result = await api.call('ota.progress', null, 'GET');
         }
         if (!current()) return;
         
@@ -13569,13 +13608,13 @@ async function startWwwOta() {
             // SD卡方式
             result = await api.call('ota.www.start_sdcard', {
                 file: wwwSource
-            });
+            }, 'POST');
         } else {
             // HTTP 方式
             result = await api.call('ota.www.start', {
                 url: wwwSource,
                 skip_verify: upgrade.skipVerify
-            });
+            }, 'POST');
         }
         if (otaUpgrade !== upgrade || upgrade.phase !== 'www') return;
         
@@ -13616,7 +13655,7 @@ async function completeOtaUpgrade(upgrade) {
     // The written inactive partition is the target for every source, including
     // local files, downgrades and same-version reflashes. No server metadata is needed.
     try {
-        const result = requireApiSuccess(await api.call('ota.partitions'), 'ota.partitions');
+        const result = requireApiSuccess(await api.call('ota.partitions', null, 'GET'), 'ota.partitions');
         if (otaUpgrade !== upgrade || upgrade.phase !== 'reboot') return;
         const next = result.data?.next;
         if (!next?.is_bootable || !next.version || !next.label || next.label === result.data?.running?.label) {
@@ -13644,7 +13683,7 @@ async function completeOtaUpgrade(upgrade) {
 
     try {
         // system.reboot's delay is in milliseconds.
-        requireApiSuccess(await api.call('system.reboot', { delay: 1000 }), 'system.reboot');
+        requireApiSuccess(await api.call('system.reboot', { delay: 1000 }, 'POST'), 'system.reboot');
     } catch (error) {
         if (otaUpgrade !== upgrade || upgrade.phase !== 'reboot') return;
         const failure = { op: 'device.reboot', error, endpoint: 'system.reboot', write: true };
@@ -13686,7 +13725,7 @@ function startRebootDetection(upgrade) {
         }
         checking = true;
         try {
-            const result = requireApiSuccess(await api.call('ota.partitions'), 'ota.partitions');
+            const result = requireApiSuccess(await api.call('ota.partitions', null, 'GET'), 'ota.partitions');
             if (!current()) return;
             const running = result.data?.running;
             lastRunning = running || null;
@@ -13764,7 +13803,7 @@ async function otaFromUrl() {
     
     try {
         showToast(typeof t === 'function' ? t('toast.twoStepUpgrade') : '开始两步升级：固件 + WebUI', 'info');
-        const result = await api.call('ota.upgrade_url', params);
+        const result = await api.call('ota.upgrade_url', params, 'POST');
         if (otaUpgrade !== upgrade || upgrade.phase !== 'app') return;
         
         if (result.code === 0) {
@@ -13835,7 +13874,7 @@ async function otaFromFile() {
     
     try {
         showToast(typeof t === 'function' ? t('toast.startingFileUpgrade') : '开始从文件升级固件...', 'info');
-        const result = await api.call('ota.upgrade_file', params);
+        const result = await api.call('ota.upgrade_file', params, 'POST');
         if (otaUpgrade !== upgrade || upgrade.phase !== 'app') return;
         
         if (result.code === 0) {
@@ -13861,7 +13900,7 @@ async function validateOta() {
     }
     
     try {
-        const result = await api.call('ota.validate');
+        const result = await api.call('ota.validate', null, 'POST');
         
         if (result.code === 0) {
             showToast(typeof t === 'function' ? t('toast.firmwareValidated') : '固件已标记为有效', 'success');
@@ -13885,7 +13924,7 @@ async function confirmRollback() {
 async function rollbackOta() {
     try {
         showToast(typeof t === 'function' ? t('toast.rollingBack') : '正在回滚固件...', 'info');
-        const result = await api.call('ota.rollback');
+        const result = await api.call('ota.rollback', null, 'POST');
         
         if (result.code === 0) {
             showToast(typeof t === 'function' ? t('toast.rollbackSuccess') : '回滚成功！系统将在 3 秒后重启...', 'success');
@@ -13915,9 +13954,9 @@ async function abortOta() {
         // 根据当前步骤中止相应的 OTA
         let result;
         if (otaStep === 'www') {
-            result = await api.call('ota.www.abort');
+            result = await api.call('ota.www.abort', null, 'POST');
         } else {
-            result = await api.call('ota.abort');
+            result = await api.call('ota.abort', null, 'POST');
         }
         if (otaUpgrade !== upgrade) return;
         
@@ -14030,7 +14069,7 @@ async function saveOtaServer() {
         const result = await api.call('ota.server.set', {
             url: serverUrl,
             save: true  // 保存到 NVS
-        });
+        }, 'POST');
         
         if (result.code === 0) {
             if (serverUrl) {
@@ -14100,7 +14139,7 @@ async function checkForUpdates() {
         
         // 获取当前版本
         if (!currentFirmwareVersion) {
-            const localResult = await api.call('ota.version');
+            const localResult = await api.call('ota.version', null, 'GET');
             if (localResult && localResult.code === 0 && localResult.data) {
                 currentFirmwareVersion = localResult.data;
             }
@@ -14803,7 +14842,7 @@ async function refreshAutomationStatus() {
     if (!container) return;
     
     try {
-        const result = await api.call('automation.status');
+        const result = await api.call('automation.status', null, 'GET');
         if (!pageCurrent()) return;
         if (result.code === 0 && result.data) {
             const d = result.data;
@@ -14861,7 +14900,7 @@ async function refreshRules() {
     if (!container) return;
     
     try {
-        const result = await api.call('automation.rules.list');
+        const result = await api.call('automation.rules.list', null, 'GET');
         if (!pageCurrent()) return;
         if (result.code === 0 && result.data && result.data.rules) {
             const rules = result.data.rules;
@@ -14958,7 +14997,7 @@ async function refreshSources() {
     if (!container) return;
     
     try {
-        const result = await api.call('automation.sources.list');
+        const result = await api.call('automation.sources.list', null, 'GET');
         if (!pageCurrent()) return;
         if (result.code === 0 && result.data && result.data.sources) {
             const sources = result.data.sources;
@@ -15070,7 +15109,7 @@ async function refreshActions() {
     if (!container) return;
     
     try {
-        const result = await api.call('automation.actions.list', {});
+        const result = await api.call('automation.actions.list', {}, 'GET');
         if (!pageCurrent()) return;
         if (result.code !== 0) {
             container.innerHTML = '<div class="empty"><p class="t-note" style="color:var(--bad)">' + failureNote({ op: 'action.list', result, endpoint: 'automation.actions.list' }) + '</p></div>';
@@ -15465,7 +15504,7 @@ async function loadSshCommandsForAction() {
         const select = document.getElementById('action-ssh-cmd-id');
         if (!select) return;
         
-        const result = await api.call('ssh.commands.list', {});
+        const result = await api.call('ssh.commands.list', {}, 'GET');
         if (!await accept(result.data)) return;
         select.innerHTML = ("<option value=\"\">" + t('automation.selectCommand') + "</option>");
         
@@ -15502,7 +15541,7 @@ async function updateSshCmdRefPreview() {
     
     // 从 API 获取完整指令信息
     try {
-        const result = await api.call('ssh.commands.get', { id: cmdId });
+        const result = await api.call('ssh.commands.get', { id: cmdId }, 'GET');
         if (!await accept(result.data) || select.value !== cmdId) return;
         console.log('SSH command get result:', result);
         if (result.code === 0 && result.data) {
@@ -15830,7 +15869,7 @@ async function loadVarSelectList(asExpr = false) {
         const result = await api.call('automation.variables.list', {
             include_value: false,
             include_meta: false
-        });
+        }, 'GET');
         if (result.code !== 0) throw new ApiOperationError(result, 'automation.variables.list');
         const variables = result.data?.variables || [];
         document.getElementById('variable-select-loading').style.display = 'none';
@@ -16080,7 +16119,7 @@ async function editAction(id) {
     const current = configurationRead('editAction');
     const params = { name: actionNames.get(id) || id };
     try {
-        const result = await api.call('automation.actions.get', { id });
+        const result = await api.call('automation.actions.get', { id }, 'GET');
         if (!current()) return;
         if (result.code !== 0) {
             reportFailure({ op: 'action.load', params, result, endpoint: 'automation.actions.get' });
@@ -16392,7 +16431,7 @@ async function showSourceVariables(sourceId) {
         const result = await api.call('automation.variables.list', {
             source_id: sourceId,
             include_meta: true
-        });
+        }, 'GET');
         if (result.code === 0 && result.data && result.data.variables) {
             const vars = result.data.variables.filter(v => v.source_id === sourceId);
             
@@ -16618,7 +16657,7 @@ async function editRule(id) {
     const params = { name: ruleNames.get(id) || id };
     try {
         // 获取规则详情
-        const result = await api.call('automation.rules.get', { id });
+        const result = await api.call('automation.rules.get', { id }, 'GET');
         if (!current()) return;
         if (result.code !== 0 || !result.data) {
             reportFailure({ op: 'rule.load', params, result, endpoint: 'automation.rules.get' });
@@ -16753,7 +16792,7 @@ async function testRestConnection() {
             url, 
             method,
             headers: auth ? { 'Authorization': auth } : {}
-        });
+        }, 'POST');
         if (!current()) return;
         
         if (result.code === 0 && result.data) {
@@ -16815,7 +16854,7 @@ async function testWsConnection() {
     
     try {
         // 通过 ESP32 测试 WebSocket（获取第一条消息）
-        const result = await api.call('automation.proxy.websocket_test', { uri, timeout_ms: 5000 });
+        const result = await api.call('automation.proxy.websocket_test', { uri, timeout_ms: 5000 }, 'POST');
         if (!current()) return;
         
         if (result.code === 0 && result.data) {
@@ -16878,7 +16917,7 @@ async function testSioConnection() {
         const params = { url, timeout_ms: timeout };
         if (event) params.event = event;
         
-        const result = await api.call('automation.proxy.socketio_test', params);
+        const result = await api.call('automation.proxy.socketio_test', params, 'POST');
         if (!current()) return;
         
         if (result.code === 0 && result.data) {
@@ -16919,7 +16958,7 @@ async function testSioConnection() {
             
             // 显示详细错误
             if (result.data && result.data.error) {
-                modal.querySelector('#sio-json-preview').textContent = result.data.error;
+                modal.querySelector('#sio-json-preview').textContent = failureText({ op: 'source.testSio', params: { url: shortUrl(url) }, result, endpoint: 'automation.proxy.socketio_test', write: false });
                 modal.querySelector('#sio-json-preview').style.display = 'block';
             }
         }
@@ -17121,7 +17160,7 @@ async function loadSshHostsForSource() {
     if (varsListDiv) varsListDiv.innerHTML = `<span class="text-muted">${typeof t === 'function' ? t('automation.selectHostCmdFirst') : 'Please select SSH host and command first'}</span>`;
     
     try {
-        const result = await api.call('ssh.hosts.list');
+        const result = await api.call('ssh.hosts.list', null, 'GET');
         if (!await accept(result.data)) return;
         if (result.code === 0 && result.data && result.data.hosts) {
             const hosts = result.data.hosts;
@@ -17157,7 +17196,7 @@ async function onSshHostChangeForSource() {
     if (!hostId) {select.innerHTML = `<option value="">${t('automation.selectHostFirst')}</option>`;return;}
     select.innerHTML = `<option value="">${t('common.loading')}</option>`;
     try {
-        const result = requireApiSuccess(await api.call('ssh.commands.list', {host_id: hostId}), 'ssh.commands.list');
+        const result = requireApiSuccess(await api.call('ssh.commands.list', {host_id: hostId}, 'GET'), 'ssh.commands.list');
         if (!await accept(result.data) || document.getElementById('source-ssh-host').value !== hostId) return;
         modal._sourceCommands = result.data.commands || [];
         select.innerHTML = `<option value="">${t('promptRepair.chooseCommand')}</option>` + modal._sourceCommands.map((command,index) =>
@@ -17586,13 +17625,7 @@ async function browseRuleIconImage() {
 }
 
 function updateRuleIconPreview(path) {
-    const preview = document.getElementById('rule-icon-preview');
-    if (path && path.startsWith('/sdcard/')) {
-        const loadFailed = typeof t === 'function' ? t('sshPage.iconPreviewFailed') : '加载失败';
-        preview.innerHTML = `<img src="/api/v1/file/download?path=${encodeURIComponent(path)}" alt="icon" onerror="this.parentElement.innerHTML='<span class=\\'preview-placeholder\\'>${loadFailed}</span>'">`;
-    } else {
-        preview.innerHTML = '<span class="preview-placeholder">' + (typeof t === 'function' ? t('sshPage.iconPreviewNone') : '无') + '</span>';
-    }
+    updateFileIconPreview('rule-icon-preview', path);
 }
 
 function clearRuleIconImage() {
@@ -17737,7 +17770,7 @@ async function loadActionTemplatesForRule() {
     const modal = document.getElementById('add-rule-modal');
     const accept = configurationEditorRead('add-rule-modal');
     try {
-        const result = await api.call('automation.actions.list', {});
+        const result = await api.call('automation.actions.list', {}, 'GET');
         if (!await accept(result.data)) return {token: 'configuration_changed', write: false};
         if (result.code === 0 && result.data?.templates) {
             modal._actionTemplates = result.data.templates;
@@ -18208,7 +18241,7 @@ async function doExportSource(sourceId) {
         const params = { id: sourceId };
         if (certText) params.recipient_cert = certText;
         
-        const result = await api.call('automation.sources.export', params);
+        const result = await api.call('automation.sources.export', params, 'POST');
         if (result.code !== 0) { packBox(resultBox, { op: 'pack.export', params: packParams, result, endpoint: 'automation.sources.export', write: false }); return; }
         
         const data = result.data;
@@ -18284,7 +18317,7 @@ async function doExportRule(ruleId) {
         const params = { id: ruleId };
         if (certText) params.recipient_cert = certText;
         
-        const result = await api.call('automation.rules.export', params);
+        const result = await api.call('automation.rules.export', params, 'POST');
         if (result.code !== 0) { packBox(resultBox, { op: 'pack.export', params: packParams, result, endpoint: 'automation.rules.export', write: false }); return; }
         
         const data = result.data;
@@ -18359,7 +18392,7 @@ async function doExportAction(actionId) {
         const params = { id: actionId };
         if (certText) params.recipient_cert = certText;
         
-        const result = await api.call('automation.actions.export', params);
+        const result = await api.call('automation.actions.export', params, 'POST');
         if (result.code !== 0) { packBox(resultBox, { op: 'pack.export', params: packParams, result, endpoint: 'automation.actions.export', write: false }); return; }
         
         const data = result.data;

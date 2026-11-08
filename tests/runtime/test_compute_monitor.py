@@ -9,6 +9,20 @@ assert RTOS.count('int held;} *TaskHandle_t;') == 1
 code = RTOS.replace('int held;} *TaskHandle_t;', 'int held;atomic_bool deleted;} *TaskHandle_t;') + r'''
 #include "ts_compute_monitor.h"
 #include "cJSON.h"
+#include "ts_http_fetch.h"
+#include <stdarg.h>
+static char monitor_diagnostics[32768];
+static pthread_mutex_t diagnostics_mutex=PTHREAD_MUTEX_INITIALIZER;
+static void monitor_log(const char *tag,const char *format,...){(void)tag;pthread_mutex_lock(&diagnostics_mutex);size_t used=strlen(monitor_diagnostics);va_list args;va_start(args,format);vsnprintf(monitor_diagnostics+used,sizeof(monitor_diagnostics)-used,format,args);va_end(args);pthread_mutex_unlock(&diagnostics_mutex);}
+#undef ESP_LOGI
+#undef ESP_LOGD
+#undef ESP_LOGW
+#undef ESP_LOGE
+#define ESP_LOGI monitor_log
+#define ESP_LOGD monitor_log
+#define ESP_LOGW monitor_log
+#define ESP_LOGE monitor_log
+
 #ifndef ESP_ERR_NOT_ALLOWED
 #define ESP_ERR_NOT_ALLOWED 0x10d
 #endif
@@ -20,8 +34,6 @@ enum {NVS_READONLY,NVS_READWRITE,
  TS_EVT_AGX_CONNECTED=100,TS_EVT_AGX_DISCONNECTED,TS_EVT_AGX_ERROR,TS_EVT_AGX_DATA_UPDATED,
  WEBSOCKET_EVENT_ANY=-1,WEBSOCKET_EVENT_CONNECTED=1,WEBSOCKET_EVENT_DISCONNECTED,
  WEBSOCKET_EVENT_DATA,WEBSOCKET_EVENT_ERROR};
-typedef struct {const char *url;int timeout_ms;} esp_http_client_config_t;
-typedef void *esp_http_client_handle_t;
 typedef struct {const char *uri;int buffer_size,reconnect_timeout_ms,network_timeout_ms,ping_interval_sec;} esp_websocket_client_config_t;
 typedef struct {const char *data_ptr;int data_len;} esp_websocket_event_data_t;
 typedef void (*ws_callback_t)(void *,esp_event_base_t,int32_t,void *);
@@ -37,8 +49,15 @@ static atomic_int mode,http_calls,http_cleanup,ws_creates,ws_destroys,ws_alive,p
 static atomic_int other_cleanup,data_posts,callback_data,retry_count,retry_skip;
 static int control_result,init_result,self_stop_result,self_deinit_result,self_driver_result;
 static bool self_check,fail_binary;
+static atomic_ulong json_allocations,json_releases;
+static void *count_json_alloc(size_t size){void *value=malloc(size);if(value)++json_allocations;return value;}
+static void count_json_release(void *value){if(value)++json_releases;free(value);}
+
 static unsigned retry_ms[16];
 static char last_ws_url[256];
+static const char *handshake_payload="0{\"sid\":\"fixture-session\"}";
+static int handshake_status=200;
+
 static SemaphoreHandle_t notifications[128];
 static pthread_mutex_t notification_mutex=PTHREAD_MUTEX_INITIALIZER;
 static SemaphoreHandle_t notification(TaskHandle_t task) {
@@ -98,20 +117,17 @@ static int local_post(int base,int event,const void *data,size_t len,unsigned ti
  }
  return ESP_OK;
 }
-static esp_http_client_handle_t esp_http_client_init(const esp_http_client_config_t *cfg){
- assert(cfg->timeout_ms==5000);return (void *)1;
-}
-static int esp_http_client_open(void *client,int n){
- (void)client;(void)n;++http_calls;
+esp_err_t ts_http_fetch(const ts_http_fetch_config_t *request,ts_http_fetch_result_t *reply){
+ assert(request->timeout_ms==5000&&request->maximum_body>0&&request->current&&request->context);
+ ++http_calls;memset(reply,0,sizeof(*reply));
  if(hold_http){xSemaphoreGive(http_entered);assert(xSemaphoreTake(http_release,portMAX_DELAY));}
- return mode==1?ESP_FAIL:ESP_OK;
+ ++http_cleanup;
+ if(!request->current(request->context))return ESP_ERR_INVALID_STATE;
+ if(mode==1)return ESP_FAIL;
+ const char *payload=handshake_payload;
+ reply->status=handshake_status;reply->body=strdup(payload);reply->length=strlen(payload);reply->content_length=reply->length;
+ return reply->body?ESP_OK:ESP_ERR_NO_MEM;
 }
-static int esp_http_client_fetch_headers(void *client){(void)client;return 24;}
-static int esp_http_client_read(void *client,char *out,int n){
- (void)client;const char *reply="0{\"sid\":\"fixture-session\"}";assert(n>(int)strlen(reply));strcpy(out,reply);return strlen(reply);
-}
-static int esp_http_client_close(void *client){(void)client;return ESP_OK;}
-static int esp_http_client_cleanup(void *client){(void)client;++http_cleanup;return ESP_OK;}
 static int esp_websocket_client_send_text(esp_websocket_client_handle_t client,const char *text,int n,unsigned timeout){
  (void)client;(void)timeout;assert(!strcmp(text,"2probe")||!strcmp(text,"5")||!strcmp(text,"3"));return n;
 }
@@ -122,7 +138,7 @@ static void *ws_entry(void *arg){
  struct task local={0};current_task=&local;esp_websocket_client_handle_t client=arg;
  if(mode!=4){
   emit(client,WEBSOCKET_EVENT_CONNECTED,NULL);emit(client,WEBSOCKET_EVENT_DATA,"3probe");
-  emit(client,WEBSOCKET_EVENT_DATA,"42[\"tegrastats_update\",{\"temperature\":{\"cpu\":42.5},\"ram\":{\"used\":20,\"total\":100},\"gpu\":{\"gr3d_freq\":17}}]");
+  emit(client,WEBSOCKET_EVENT_DATA,"42[\"tegrastats_update\",{\"temperature\":{\"cpu\":42.5},\"ram\":{\"used\":20,\"total\":100},\"gpu\":{\"gr3d_freq\":17},\"private_canary\":\"SYNTHETIC_RAW_MONITOR_CANARY\"}]");
  }
  while(!client->stop)vTaskDelay(1);return NULL;
 }
@@ -190,7 +206,10 @@ static bool cli_query_initialized(void);
 #define ts_compute_monitor_is_initialized cli_query_initialized
 '''
 code += body('components/ts_api/src/ts_api_monitor.c', 'api_monitor_config')
+# Observe the real CLI freeing its cJSON_PrintUnformatted buffer through libc free.
+code += '\n#define free count_json_release\n'
 code += body('components/ts_console/commands/ts_cmd_monitor.c', 'do_monitor_config')
+code += '\n#undef free\n'
 code += '\n#undef ts_compute_monitor_is_running\n#undef ts_compute_monitor_is_initialized\n'
 
 code += r'''
@@ -241,6 +260,7 @@ static void reset(void){
 }
 static pthread_t begin_control(int op){pthread_t t;control_done=false;assert(!pthread_create(&t,NULL,control,(void *)(intptr_t)op));return t;}
 int main(void){
+ cJSON_Hooks json_hooks={.malloc_fn=count_json_alloc,.free_fn=count_json_release};cJSON_InitHooks(&json_hooks);
  SemaphoreHandle_t *signals[]={&init_entered,&init_release,&entry_entered,&entry_release,&create_entered,&create_release,
  &notify_entered,&notify_release,&cleanup_entered,&http_entered,&http_release,&retry_entered,&callback_entered,&callback_release,&tail_entered,&tail_release};
  for(unsigned i=0;i<sizeof(signals)/sizeof(signals[0]);i++)*signals[i]=semaphore(true);
@@ -372,7 +392,20 @@ int main(void){
  assert(stopped_config==0&&absent_config==0);
  puts("PASS actual CLI continues configuration when another real controller already completed stop/deinit; BUSY and self errors stay distinct");
 
+ reset();assert(ts_compute_monitor_init(NULL)==ESP_OK);atomic_store(&s_ctx->should_stop,false);
+ const char *invalid_sid[]={"{}","0{\"sid\":\"\"}","0{\"sid\":3}","0{\"sid\":\"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789\"}"};
+ for(unsigned i=0;i<sizeof(invalid_sid)/sizeof(*invalid_sid);i++){handshake_payload=invalid_sid[i];assert(socketio_handshake()!=ESP_OK);}
+ handshake_payload="0{\"sid\":\"fixture-session\"}";handshake_status=503;assert(socketio_handshake()!=ESP_OK);
+ handshake_status=200;assert(socketio_handshake()==ESP_OK&&!strcmp(s_ctx->session_id,"fixture-session"));
+ assert(ts_compute_monitor_deinit()==ESP_OK);join_workers();
+ assert(!strstr(monitor_diagnostics,"fixture-session")&&!strstr(monitor_diagnostics,"SYNTHETIC_RAW_MONITOR_CANARY"));
+ puts("PASS actual monitor rejects empty/typed/oversized SID and bad status;global diagnostics contain neither session IDs nor raw response/event canaries");
  for(unsigned i=0;i<sizeof(signals)/sizeof(signals[0]);i++)vSemaphoreDelete(*signals[i]);
+ assert(json_allocations==json_releases);cJSON_InitHooks(NULL);
+ puts("PASS all actual monitor JSON trees and event processing allocations are released;no serialized/reparsed orphan buffer");
 }
 '''
-run_native(code, [IDF / 'components/json/cJSON/cJSON.c'])
+headers={'ts_http_fetch.h':Path('components/ts_http_fetch/include/ts_http_fetch.h').read_text(),
+ 'esp_http_client.h':Path('tests/runtime/http_fetch_stubs/esp_http_client.h').read_text()}
+headers['esp_err.h']=Path('tests/runtime/rule_pack/stubs/esp_err.h').read_text()+'\n#define ESP_ERR_NOT_FINISHED 0x10c\n#define ESP_ERR_INVALID_RESPONSE 0x108\n'
+run_native(code, [IDF / 'components/json/cJSON/cJSON.c'],headers)

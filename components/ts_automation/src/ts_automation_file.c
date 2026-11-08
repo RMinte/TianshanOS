@@ -1,9 +1,9 @@
 #include "ts_automation_file.h"
+#include "ts_file_store.h"
 #include "ts_config_partitions.h"
 #include "ts_crypto.h"
 #include "cJSON.h"
 #include "esp_heap_caps.h"
-#include "esp_log.h"
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -12,11 +12,8 @@
 #include <unistd.h>
 
 #define MAX_BYTES 0x200000U
-static const char *TAG = "automation_file";
 
-typedef struct {
-    const char *current, *pending, *previous;
-} paths_t;
+typedef ts_file_store_paths_t paths_t;
 
 static const paths_t s_paths[] = {
     {TS_CONFIG_AUTO_SD_DIR "/state.json", TS_CONFIG_AUTO_SD_DIR "/state.pending",
@@ -28,18 +25,6 @@ static const paths_t s_paths[] = {
 static esp_err_t io_error(void)
 {
     return errno == ENOSPC ? ESP_ERR_INVALID_SIZE : ESP_FAIL;
-}
-
-static int exists(const char *path)
-{
-    struct stat st;
-    if (stat(path, &st) == 0) return 1;
-    return errno == ENOENT ? 0 : -1;
-}
-
-static bool remove_file(const char *path)
-{
-    return unlink(path) == 0 || errno == ENOENT;
 }
 
 static bool valid_document(const char *text, size_t size)
@@ -88,48 +73,13 @@ static esp_err_t read_file(const char *path, char **out)
     return ret;
 }
 
-static esp_err_t write_pending(const char *path, const char *json)
+static esp_err_t validate_file(const char *path, void *context)
 {
-    FILE *file = fopen(path, "wb");
-    if (!file) return io_error();
-    size_t size = strlen(json);
-    esp_err_t ret = fwrite(json, 1, size, file) == size ? ESP_OK : io_error();
-    if (fflush(file) != 0 && ret == ESP_OK) ret = io_error();
-    if (fsync(fileno(file)) != 0 && ret == ESP_OK) ret = io_error();
-    if (fclose(file) != 0 && ret == ESP_OK) ret = io_error();
-    if (ret != ESP_OK) return ret;
-    char *readback = NULL;
-    ret = read_file(path, &readback);
-    if (ret == ESP_OK && strcmp(readback, json)) ret = ESP_FAIL;
-    free(readback);
+    (void)context;
+    char *text = NULL;
+    esp_err_t ret = read_file(path, &text);
+    free(text);
     return ret;
-}
-
-/* Complete just one interrupted replacement. No search of legacy stores,
- * source switching, or persistent history is performed here. */
-static esp_err_t recover(const paths_t *p, bool writing)
-{
-    int current = exists(p->current), pending = exists(p->pending), previous = exists(p->previous);
-    if (current < 0 || pending < 0 || previous < 0) return ESP_ERR_NOT_FINISHED;
-    if (pending) {
-        if (previous) {
-            if (current) return ESP_ERR_NOT_FINISHED;
-            if (rename(p->previous, p->current) != 0) return ESP_ERR_NOT_FINISHED;
-        }
-        return remove_file(p->pending) ? ESP_OK : ESP_FAIL;
-    }
-    if (!previous) return ESP_OK;
-    if (!current)
-        return rename(p->previous, p->current) == 0 ? ESP_OK : ESP_ERR_NOT_FINISHED;
-    char *committed = NULL;
-    esp_err_t ret = read_file(p->current, &committed);
-    free(committed);
-    if (ret != ESP_OK) return ESP_ERR_NOT_FINISHED;
-    if (!remove_file(p->previous)) {
-        ESP_LOGW(TAG, "Configuration saved; previous-file cleanup is pending");
-        return writing ? ESP_FAIL : ESP_OK;
-    }
-    return ESP_OK;
 }
 
 static esp_err_t ensure_sd_directory(void)
@@ -150,7 +100,7 @@ esp_err_t ts_auto_file_load(ts_auto_file_location_t location, char **json)
         return ESP_ERR_INVALID_ARG;
     *json = NULL;
     const paths_t *p = &s_paths[location];
-    esp_err_t ret = recover(p, false);
+    esp_err_t ret = ts_file_store_recover(p, false, validate_file, NULL);
     return ret == ESP_OK ? read_file(p->current, json) : ret;
 }
 
@@ -159,7 +109,7 @@ esp_err_t ts_auto_file_fingerprint(ts_auto_file_location_t location,char digest[
     if(!digest || (unsigned)location>=sizeof(s_paths)/sizeof(s_paths[0]))return ESP_ERR_INVALID_ARG;
     digest[0]=0;
     const paths_t *paths=&s_paths[location];
-    esp_err_t ret=recover(paths,false);
+    esp_err_t ret=ts_file_store_recover(paths, false, validate_file, NULL);
     char *bytes=NULL;size_t length=0;unsigned char hash[32];
     if(ret==ESP_OK)ret=read_bytes(paths->current,&bytes,&length);
     if(ret==ESP_OK)ret=ts_crypto_hash(TS_HASH_SHA256,bytes,length,hash,sizeof(hash));
@@ -176,37 +126,6 @@ esp_err_t ts_auto_file_save(ts_auto_file_location_t location, const char *json)
     if (!valid_document(json, size)) return ESP_ERR_INVALID_ARG;
     esp_err_t ret = location == TS_AUTO_FILE_SD ? ensure_sd_directory() : ESP_OK;
     const paths_t *p = &s_paths[location];
-    if (ret == ESP_OK) ret = recover(p, true);
     if (ret != ESP_OK) return ret;
-    ret = write_pending(p->pending, json);
-    if (ret != ESP_OK) goto uncommitted;
-    int current = exists(p->current);
-    if (current < 0) { ret = ESP_FAIL; goto uncommitted; }
-    if (current && rename(p->current, p->previous) != 0) {
-        ret = io_error();
-        goto uncommitted;
-    }
-    if (rename(p->pending, p->current) != 0) {
-        ret = io_error();
-        /* Some drivers report an error after rename took effect. Check the
-         * actual installed bytes before saying the save failed. */
-        char *installed = NULL;
-        int pending = exists(p->pending);
-        esp_err_t observed = read_file(p->current, &installed);
-        bool committed = pending == 0 && observed == ESP_OK && !strcmp(installed, json);
-        free(installed);
-        if (!committed) {
-            if (pending != 1 || (observed != ESP_ERR_NOT_FOUND && observed != ESP_OK))
-                return ESP_ERR_NOT_FINISHED;
-            goto uncommitted;
-        }
-    }
-    /* The new complete document now has the target name: commit succeeded.
-     * Cleanup failure cannot turn it into a reported failed save. */
-    if (!remove_file(p->previous))
-        ESP_LOGW(TAG, "Configuration saved; previous-file cleanup is pending");
-    return ESP_OK;
-
-uncommitted:
-    return recover(p, false) == ESP_OK ? ret : ESP_ERR_NOT_FINISHED;
+    return ts_file_store_replace(p, json, size, TS_FILE_STORE_FIXED, validate_file, NULL);
 }

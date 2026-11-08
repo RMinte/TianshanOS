@@ -8,6 +8,7 @@
  */
 
 #include "ts_console.h"
+#include "ts_ota.h"
 #include "ts_console_args.h"
 #include "ts_i18n.h"
 #include "ts_log.h"

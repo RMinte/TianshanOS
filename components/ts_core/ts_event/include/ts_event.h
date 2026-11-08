@@ -280,14 +280,7 @@ typedef struct {
  * OTA 事件 ID
  * ========================================================================== */
 
-/** OTA 进度更新 */
-#define TS_EVENT_OTA_PROGRESS_UPDATE        0x0601
-/** OTA 开始 */
-#define TS_EVENT_OTA_STARTED                0x0602
-/** OTA 完成 */
-#define TS_EVENT_OTA_FINISHED               0x0603
-/** OTA 失败 */
-#define TS_EVENT_OTA_FAILED                 0x0604
+#include "ts_ota_events.h"
 
 /* ============================================================================
  * 事件基础别名（兼容旧代码）

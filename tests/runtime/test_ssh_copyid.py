@@ -1,10 +1,11 @@
 """Execute production ssh.copyid with synthetic SSH and registration failures."""
+from host_paths import build_dir
 from pathlib import Path
 import os
 import re
 import subprocess
 
-build = Path('/tmp/tianshan-ssh-host-tests')
+build = build_dir('ssh-copyid')
 build.mkdir(exist_ok=True)
 idf = Path(os.environ.get('IDF_PATH', '/Users/massif/esp/v5.5.2/esp-idf'))
 
@@ -123,6 +124,7 @@ static esp_err_t ts_http_send_json(void *req,int status,const char *json) {
 static esp_err_t ts_http_send_error(void *req,int status,const char *msg) {return ESP_FAIL;}
 static esp_err_t send_result(esp_err_t ret,ts_api_result_t result) {
     void *req=NULL;
+    const bool response_may_have_effect=false;
 """ + web_source[start:end] + '\nreturn ESP_FAIL;\n}\n'
 code += r'''
 static cJSON *item(ts_api_result_t *r,const char *key) {return cJSON_GetObjectItem(r->data,key);}

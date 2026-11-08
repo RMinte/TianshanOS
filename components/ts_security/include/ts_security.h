@@ -113,17 +113,23 @@ esp_err_t ts_security_validate_session(uint32_t session_id, ts_session_t *sessio
 esp_err_t ts_security_destroy_session(uint32_t session_id);
 
 /**
+ * @brief Revoke every session belonging to a trusted client identity.
+ * @note Caller must derive client_id from trusted C state, never request JSON.
+ */
+void ts_security_destroy_sessions_by_client(const char *client_id);
+
+/**
  * @brief Check permission
  */
 bool ts_security_check_permission(uint32_t session_id, ts_perm_level_t required);
 
 /**
- * @brief Generate auth token
+ * @brief Generate opaque 16-random-byte Base64 auth token
  */
 esp_err_t ts_security_generate_token(uint32_t session_id, char *token, size_t max_len);
 
 /**
- * @brief Validate auth token
+ * @brief Match the complete issued credential, then validate its session
  */
 esp_err_t ts_security_validate_token(const char *token, uint32_t *session_id);
 

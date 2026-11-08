@@ -13,6 +13,8 @@
 #include "ts_config_module.h"
 #include "ts_log.h"
 #include <string.h>
+#include <math.h>
+#include <stdint.h>
 
 #define TAG "api_fan"
 
@@ -296,15 +298,30 @@ static esp_err_t api_fan_limits(const cJSON *params, ts_api_result_t *result)
         return ESP_ERR_INVALID_ARG;
     }
     
-    int fan_id = id_item->valueint;
-    if (fan_id < 0 || fan_id >= TS_FAN_MAX) {
+    double id = id_item->valuedouble;
+    if (!isfinite(id) || id < 0 || id >= TS_FAN_MAX || floor(id) != id) {
         ts_api_result_error(result, TS_API_ERR_INVALID_ARG, "Invalid fan ID");
         return ESP_ERR_INVALID_ARG;
+    }
+    int fan_id = (int)id;
+    const cJSON *limits[] = { min_item, max_item };
+    for (unsigned i = 0; i < 2; ++i) {
+        const cJSON *item = limits[i];
+        if (item && (!cJSON_IsNumber(item) || !isfinite(item->valuedouble) ||
+                     item->valuedouble < 0 || item->valuedouble > 100 ||
+                     floor(item->valuedouble) != item->valuedouble)) {
+            ts_api_result_error(result, TS_API_ERR_INVALID_ARG, "Invalid duty limits (0-100, min <= max)");
+            return ESP_ERR_INVALID_ARG;
+        }
     }
     
     // 获取当前配置作为默认值
     ts_fan_config_t cfg;
-    ts_fan_get_config(fan_id, &cfg);
+    esp_err_t ret = ts_fan_get_config(fan_id, &cfg);
+    if (ret != ESP_OK) {
+        ts_api_result_error(result, TS_API_ERR_HARDWARE, "Failed to get fan config");
+        return ret;
+    }
     
     uint8_t min_duty = cfg.min_duty;
     uint8_t max_duty = cfg.max_duty;
@@ -321,7 +338,7 @@ static esp_err_t api_fan_limits(const cJSON *params, ts_api_result_t *result)
         return ESP_ERR_INVALID_ARG;
     }
     
-    esp_err_t ret = ts_fan_set_limits(fan_id, min_duty, max_duty);
+    ret = ts_fan_set_limits(fan_id, min_duty, max_duty);
     if (ret != ESP_OK) {
         ts_api_result_error(result, TS_API_ERR_HARDWARE, "Failed to set fan limits");
         return ret;
@@ -371,11 +388,12 @@ static esp_err_t api_fan_curve(const cJSON *params, ts_api_result_t *result)
         return ESP_ERR_INVALID_ARG;
     }
     
-    int fan_id = id_item->valueint;
-    if (fan_id < 0 || fan_id >= TS_FAN_MAX) {
+    double id = id_item->valuedouble;
+    if (!isfinite(id) || id < 0 || id >= TS_FAN_MAX || floor(id) != id) {
         ts_api_result_error(result, TS_API_ERR_INVALID_ARG, "Invalid fan ID");
         return ESP_ERR_INVALID_ARG;
     }
+    int fan_id = (int)id;
     
     int count = cJSON_GetArraySize(curve_item);
     if (count > TS_FAN_MAX_CURVE_POINTS) {
@@ -393,11 +411,46 @@ static esp_err_t api_fan_curve(const cJSON *params, ts_api_result_t *result)
             ts_api_result_error(result, TS_API_ERR_INVALID_ARG, "Invalid curve point format");
             return ESP_ERR_INVALID_ARG;
         }
+        if (!isfinite(temp->valuedouble) || temp->valuedouble < INT16_MIN / 10.0 ||
+            temp->valuedouble > INT16_MAX / 10.0 ||
+            !isfinite(duty->valuedouble) || duty->valuedouble < 0 ||
+            duty->valuedouble > 100 || floor(duty->valuedouble) != duty->valuedouble) {
+            ts_api_result_error(result, TS_API_ERR_INVALID_ARG, "Invalid curve point format");
+            return ESP_ERR_INVALID_ARG;
+        }
         
         curve[i].temp = (int16_t)(temp->valuedouble * 10);  /* Convert to 0.1°C */
         curve[i].duty = (uint8_t)duty->valueint;
     }
     
+    bool set_hysteresis = hysteresis_item || interval_item;
+    int16_t hysteresis = 0;
+    uint32_t min_interval = 0;
+    if (set_hysteresis) {
+        if ((hysteresis_item && (!cJSON_IsNumber(hysteresis_item) ||
+             !isfinite(hysteresis_item->valuedouble) || hysteresis_item->valuedouble < 0 ||
+             hysteresis_item->valuedouble > 20)) ||
+            (interval_item && (!cJSON_IsNumber(interval_item) ||
+             !isfinite(interval_item->valuedouble) || interval_item->valuedouble < 100 ||
+             interval_item->valuedouble > 60000 ||
+             floor(interval_item->valuedouble) != interval_item->valuedouble))) {
+            ts_api_result_error(result, TS_API_ERR_INVALID_ARG, "Invalid fan hysteresis or interval");
+            return ESP_ERR_INVALID_ARG;
+        }
+        ts_fan_config_t cfg;
+        esp_err_t ret = ts_fan_get_config(fan_id, &cfg);
+        if (ret != ESP_OK) {
+            ts_api_result_error(result, TS_API_ERR_HARDWARE, "Failed to get fan config");
+            return ret;
+        }
+        hysteresis = hysteresis_item ? (int16_t)(hysteresis_item->valuedouble * 10) : cfg.hysteresis;
+        min_interval = interval_item ? (uint32_t)interval_item->valuedouble : cfg.min_interval;
+        if (hysteresis < 0 || hysteresis > 200 || min_interval < 100 || min_interval > 60000) {
+            ts_api_result_error(result, TS_API_ERR_INVALID_ARG, "Invalid fan hysteresis or interval");
+            return ESP_ERR_INVALID_ARG;
+        }
+    }
+
     esp_err_t ret = ts_fan_set_curve(fan_id, curve, count);
     if (ret != ESP_OK) {
         ts_api_result_error(result, TS_API_ERR_HARDWARE, "Failed to set fan curve");
@@ -405,24 +458,11 @@ static esp_err_t api_fan_curve(const cJSON *params, ts_api_result_t *result)
     }
     
     // 如果提供了 hysteresis 或 min_interval，也一并设置
-    if (cJSON_IsNumber(hysteresis_item) || cJSON_IsNumber(interval_item)) {
-        // 获取当前配置作为默认值
-        ts_fan_config_t cfg;
-        ts_fan_get_config(fan_id, &cfg);
-        
-        int16_t hysteresis = cfg.hysteresis;
-        uint32_t min_interval = cfg.min_interval;
-        
-        if (cJSON_IsNumber(hysteresis_item)) {
-            hysteresis = (int16_t)(hysteresis_item->valuedouble * 10);  /* Convert to 0.1°C */
-        }
-        if (cJSON_IsNumber(interval_item)) {
-            min_interval = (uint32_t)interval_item->valueint;
-        }
-        
+    if (set_hysteresis) {
         ret = ts_fan_set_hysteresis(fan_id, hysteresis, min_interval);
         if (ret != ESP_OK) {
-            TS_LOGW(TAG, "Failed to set hysteresis: %s", esp_err_to_name(ret));
+            ts_api_result_error(result, TS_API_ERR_HARDWARE, "Failed to set fan hysteresis");
+            return ret;
         }
     }
     
@@ -545,6 +585,8 @@ static esp_err_t api_fan_config(const cJSON *params, ts_api_result_t *result)
 static const ts_api_endpoint_t s_fan_endpoints[] = {
     {
         .name = "fan.status",
+        .external_access = TS_API_ACCESS_PUBLIC,
+        .allowed_methods = TS_API_METHOD_READ,
         .description = "Get fan status",
         .category = TS_API_CAT_FAN,
         .handler = api_fan_status,
@@ -552,52 +594,66 @@ static const ts_api_endpoint_t s_fan_endpoints[] = {
     },
     {
         .name = "fan.set",
+        .external_access = TS_API_ACCESS_ADMIN,
+        .allowed_methods = TS_API_METHOD_WRITE,
         .description = "Set fan speed (manual mode)",
         .category = TS_API_CAT_FAN,
         .handler = api_fan_set,
-        .requires_auth = false,
+        .requires_auth = true,
     },
     {
         .name = "fan.mode",
+        .external_access = TS_API_ACCESS_ADMIN,
+        .allowed_methods = TS_API_METHOD_WRITE,
         .description = "Set fan operating mode",
         .category = TS_API_CAT_FAN,
         .handler = api_fan_mode,
-        .requires_auth = false,
+        .requires_auth = true,
     },
     {
         .name = "fan.enable",
+        .external_access = TS_API_ACCESS_ADMIN,
+        .allowed_methods = TS_API_METHOD_WRITE,
         .description = "Enable or disable a fan",
         .category = TS_API_CAT_FAN,
         .handler = api_fan_enable,
-        .requires_auth = false,
+        .requires_auth = true,
     },
     {
         .name = "fan.limits",
+        .external_access = TS_API_ACCESS_ADMIN,
+        .allowed_methods = TS_API_METHOD_WRITE,
         .description = "Set duty cycle limits (min/max)",
         .category = TS_API_CAT_FAN,
         .handler = api_fan_limits,
-        .requires_auth = false,
+        .requires_auth = true,
     },
     {
         .name = "fan.curve",
+        .external_access = TS_API_ACCESS_ADMIN,
+        .allowed_methods = TS_API_METHOD_WRITE,
         .description = "Set temperature curve for fan",
         .category = TS_API_CAT_FAN,
         .handler = api_fan_curve,
-        .requires_auth = false,
+        .requires_auth = true,
     },
     {
         .name = "fan.save",
+        .external_access = TS_API_ACCESS_ADMIN,
+        .allowed_methods = TS_API_METHOD_WRITE,
         .description = "Save fan configuration to NVS",
         .category = TS_API_CAT_FAN,
         .handler = api_fan_save,
-        .requires_auth = false,
+        .requires_auth = true,
     },
     {
         .name = "fan.config",
+        .external_access = TS_API_ACCESS_READ,
+        .allowed_methods = TS_API_METHOD_READ,
         .description = "Get fan configuration including curve",
         .category = TS_API_CAT_FAN,
         .handler = api_fan_config,
-        .requires_auth = false,
+        .requires_auth = true,
     },
 };
 

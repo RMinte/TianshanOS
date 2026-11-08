@@ -1,8 +1,9 @@
 #!/bin/bash
 set -euo pipefail
 cd "$(dirname "$0")/../.."
+source tests/runtime/host_env.sh
 : "${IDF_PATH:=/Users/massif/esp/v5.5.2/esp-idf}"
-: "${SERVICE_TEST_BUILD:=/tmp/tianshan-service-runs-tests}"
+: "${SERVICE_TEST_BUILD:=$TS_TEST_BUILD_ROOT/service-runs}"
 mkdir -p "$SERVICE_TEST_BUILD"
 cc -std=c11 -D_DEFAULT_SOURCE -g -fsanitize=address,undefined -Wno-deprecated-declarations \
   -Itests/runtime/state_stubs -Itests/runtime/ssh_stubs -Itests/runtime/stubs \

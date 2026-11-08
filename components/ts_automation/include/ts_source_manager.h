@@ -171,8 +171,9 @@ bool ts_source_ws_is_connected(const char *id);
 /*                           Socket.IO Sources                                */
 /*===========================================================================*/
 
-/* Both the test and the runtime upgrade the same polling URL. */
-void ts_source_sio_websocket_url(const char *base_url, const char *sid, char *out, size_t size);
+/* Shared by runtime and diagnostics: NULL sid builds polling; otherwise WS
+ * upgrade. Validates the base, escapes the opaque sid, never truncates output. */
+bool ts_source_sio_url(const char *base_url, const char *sid, char *out, size_t size);
 
 /**
  * @brief Connect Socket.IO source

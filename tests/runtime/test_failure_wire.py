@@ -6,6 +6,7 @@ engine tasks are controlled boundaries here. API reply functions and the HTTP se
 come directly from production. Chrome replays these bytes in the current page flows.
 Use UPDATE_FIXTURES=1 only for an intentional protocol change.
 """
+from host_paths import build_dir
 from pathlib import Path
 import json
 import os
@@ -13,7 +14,7 @@ import re
 import subprocess
 import sys
 
-build = Path('/tmp/tianshan-runtime-tests')
+build = build_dir('failure-wire')
 build.mkdir(exist_ok=True)
 wire_dir = build / 'failure-wire'
 wire_dir.mkdir(exist_ok=True)
@@ -90,6 +91,7 @@ static esp_err_t ts_http_send_json(void *req,int status,const char *json) {
 static esp_err_t ts_http_send_error(void *req,int status,const char *msg) {return ESP_FAIL;}
 static esp_err_t send_result(esp_err_t ret,ts_api_result_t result) {
     void *req=NULL;
+    const bool response_may_have_effect=false;
 ''' + web_source[start:end] + '\n}\n'
 code += r'''
 static void save(const char *name) {
@@ -185,6 +187,7 @@ int main(void) {
     {char body[400];memset(body,'x',sizeof body);body[399]=0;ts_api_result_t r={0};proxy_http_error(&r,500,body);
      cJSON *d=cJSON_GetObjectItem(r.data,"data");(void)d;assert(strlen(cJSON_GetObjectItem(r.data,"detail")->valuestring)==160&&cJSON_GetObjectItem(r.data,"status")->valueint==500);ts_api_result_free(&r);}
     {ts_api_result_t r={0};proxy_http_error(&r,404,NULL);assert(cJSON_GetObjectItem(r.data,"status")->valueint==404&&!cJSON_GetObjectItem(r.data,"detail"));ts_api_result_free(&r);}
+    {ts_api_result_t r={0};pack_failure(&r,TS_CONFIG_PACK_ERR_UNSUPPORTED);sent_with_detail(r,"wire-pack-unsupported.json",TS_API_ERR_NOT_SUPPORTED,"pack_apply_unsupported","Generic configuration pack application is not supported");}
     /* config packs: every result has a reason token of its own, the library's English text goes to the details */
     {ts_api_result_t r={0};pack_failure(&r,TS_CONFIG_PACK_ERR_RECIPIENT);sent_with_detail(r,"wire-pack-wrong-device.json",TS_API_ERR_INVALID_ARG,"pack_wrong_device","Not intended for this device");}
     {ts_api_result_t r={0};pack_failure(&r,TS_CONFIG_PACK_ERR_SIGNATURE);sent_with_detail(r,"wire-pack-signature.json",TS_API_ERR_INVALID_ARG,"pack_signature_invalid","Signature verification failed");}
@@ -197,6 +200,7 @@ int main(void) {
         assert(token&&token[0]&&strcmp(token,"pack_verify_failed"));    /* every real failure has its own token */
         for(const char *c=token;*c;c++) assert((*c>='a'&&*c<='z')||(*c>='0'&&*c<='9')||*c=='_');
     }
+    assert(!strcmp(ts_config_pack_reason(TS_CONFIG_PACK_OK),"ok"));
     assert(!strcmp(ts_config_pack_reason((ts_config_pack_result_t)99),"pack_verify_failed"));
     /* every refusal state of the engine has a token, and the token depends only on the state and on start / pause */
     assert(!strcmp(engine_refusal_token(TS_AUTO_STATE_PAUSED,false),"engine_paused")&&!strcmp(engine_refusal_token(TS_AUTO_STATE_PAUSED,true),"engine_paused"));

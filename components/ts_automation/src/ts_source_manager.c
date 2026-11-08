@@ -1,3 +1,5 @@
+#include "ts_http_fetch.h"
+#include "ts_http_url.h"
 #include "ts_action_codec.h"
 /**
  * @file ts_source_manager.c
@@ -29,7 +31,6 @@
 #include "freertos/idf_additions.h"
 
 // HTTP 客户端（用于 REST 源）
-#include "esp_http_client.h"
 #include "esp_crt_bundle.h"
 #include "esp_websocket_client.h"
 #include "cJSON.h"
@@ -84,6 +85,7 @@ typedef struct {
     atomic_uint last_message_ms;            // 最近消息毫秒值，按无符号差计算超时
     TaskHandle_t task_handle;                // 连接任务句柄
     atomic_bool should_stop;                 // 停止标志
+    atomic_bool reconnect_requested;         // Socket.IO task must obtain a new SID
     atomic_bool allocated;
     ts_auto_source_type_t type;
     uint64_t source_instance;
@@ -369,7 +371,7 @@ static int auto_discover_json_fields(ts_auto_source_t *src, cJSON *json_data,
 
                     ret = ts_variable_upsert(&new_var);
                     if (ret == ESP_OK) {
-                        ESP_LOGD(TAG, "Auto-discovered variable: %s", var_name);
+                        ESP_LOGD(TAG, "Source variable discovered");
                         count++;
                     }
                     // 存储满时不再尝试创建，继续更新已有变量
@@ -479,11 +481,10 @@ static int process_source_mappings(ts_auto_source_t *src, cJSON *json_data)
 
             ret = ts_variable_upsert(&new_var);
             if (ret == ESP_OK) {
-                ESP_LOGD(TAG, "Auto-created variable '%s' from mapping", mapping->var_name);
+                ESP_LOGD(TAG, "Mapped source variable created");
                 processed++;
             } else {
-                ESP_LOGW(TAG, "Failed to create variable '%s': %s",
-                         mapping->var_name, esp_err_to_name(ret));
+                ESP_LOGW(TAG, "Source variable creation failed: %s", esp_err_to_name(ret));
             }
         } else if (ret == ESP_OK) {
             processed++;
@@ -549,11 +550,12 @@ static esp_err_t read_rest_source(ts_auto_source_t *src, ts_auto_value_t *value)
     const char *url = src->rest.url;
     const char *path = src->rest.path;
 
-    ESP_LOGD(TAG, "Reading REST source: %s, path: %s", url, path);
+    ESP_LOGD(TAG, "Reading REST source");
 
     // 检测是否是本地 API 调用
-    bool is_local = (strstr(url, "://127.0.0.1") != NULL ||
-                     strstr(url, "://localhost") != NULL);
+    struct http_parser_url parsed;
+    if (!ts_http_url_parse(url, &parsed)) return ESP_ERR_INVALID_ARG;
+    bool is_local = ts_http_url_is_local_api(url, &parsed);
 
     cJSON *response_json = NULL;
     esp_err_t ret = ESP_OK;
@@ -562,7 +564,7 @@ static esp_err_t read_rest_source(ts_auto_source_t *src, ts_auto_value_t *value)
         // 本地 API 调用 - 解析路径并直接调用
         const char *api_path = strstr(url, "/api/v1/");
         if (!api_path) {
-            ESP_LOGW(TAG, "Invalid local API URL: %s", url);
+            ESP_LOGW(TAG, "Invalid local API URL");
             return ESP_ERR_INVALID_ARG;
         }
         api_path += 8;  // 跳过 "/api/v1/"
@@ -582,7 +584,7 @@ static esp_err_t read_rest_source(ts_auto_source_t *src, ts_auto_value_t *value)
         }
         api_name[j] = '\0';
 
-        ESP_LOGD(TAG, "Local API call: %s", api_name);
+        ESP_LOGD(TAG, "Calling local source API");
 
         // 调用本地 API
         ts_api_result_t api_result = {0};
@@ -601,8 +603,7 @@ static esp_err_t read_rest_source(ts_auto_source_t *src, ts_auto_value_t *value)
         if (ret == ESP_OK && api_result.code == TS_API_OK && api_result.data) {
             response_json = cJSON_Duplicate(api_result.data, true);
         } else {
-            ESP_LOGW(TAG, "Local API call failed: %s, code=%d",
-                     api_result.message ? api_result.message : "unknown", api_result.code);
+            ESP_LOGW(TAG, "Local source API failed (code=%d)", api_result.code);
             ret = ESP_FAIL;
         }
 
@@ -612,64 +613,17 @@ static esp_err_t read_rest_source(ts_auto_source_t *src, ts_auto_value_t *value)
 
     } else {
         // 外部 HTTP 请求
-        char *response_buf = heap_caps_malloc(4096, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-        if (!response_buf) {
-            response_buf = malloc(4096);
-        }
-        if (!response_buf) {
-            return ESP_ERR_NO_MEM;
-        }
-
-        int response_len = 0;
-
-        esp_http_client_config_t config = {
-            .url = url,
+        ts_http_fetch_config_t request = {.url = url,
             .method = !strcmp(src->rest.method, "POST") ? HTTP_METHOD_POST : HTTP_METHOD_GET,
-            .timeout_ms = 10000,
-            .buffer_size = 2048,
-            .skip_cert_common_name_check = true,
-            .crt_bundle_attach = esp_crt_bundle_attach,
-        };
-
-        esp_http_client_handle_t client = esp_http_client_init(&config);
-        if (!client) {
-            free(response_buf);
-            return ESP_ERR_NO_MEM;
-        }
-
-        // 添加认证头
-        if (src->rest.auth_header[0] != '\0') {
-            esp_http_client_set_header(client, "Authorization", src->rest.auth_header);
-        }
-
-        ret = esp_http_client_open(client, 0);
+            .authorization = src->rest.auth_header[0] ? src->rest.auth_header : NULL,
+            .timeout_ms = 10000, .maximum_body = 4095};
+        ts_http_fetch_result_t reply = {0};
+        ret = ts_http_fetch(&request, &reply);
         if (ret == ESP_OK) {
-            esp_http_client_fetch_headers(client);  // 获取头部（返回值未使用，chunked 模式下可能为负数）
-            int status_code = esp_http_client_get_status_code(client);
-
-            if (status_code == 200) {
-                response_len = esp_http_client_read(client, response_buf, 4095);
-                if (response_len > 0) {
-                    response_buf[response_len] = '\0';
-                    response_json = cJSON_Parse(response_buf);
-                    if (!response_json) {
-                        ESP_LOGW(TAG, "Failed to parse JSON response");
-                        ret = ESP_ERR_INVALID_RESPONSE;
-                    }
-                } else {
-                    ret = ESP_ERR_INVALID_RESPONSE;
-                }
-            } else {
-                ESP_LOGW(TAG, "HTTP request failed with status: %d, URL: %s", status_code, url);
-                ret = ESP_FAIL;
-            }
-        } else {
-            ESP_LOGW(TAG, "HTTP connection failed: %s", esp_err_to_name(ret));
+            if (reply.status != 200) ret = ESP_FAIL;
+            else if (!reply.length || !(response_json = cJSON_Parse(reply.body))) ret = ESP_ERR_INVALID_RESPONSE;
         }
-
-        esp_http_client_close(client);
-        esp_http_client_cleanup(client);
-        free(response_buf);
+        free(reply.body);
     }
 
     // 处理 JSON 响应
@@ -713,7 +667,7 @@ static esp_err_t read_rest_source(ts_auto_source_t *src, ts_auto_value_t *value)
             // 对于本地 API，response_json 已经是 data 对象
             if (is_local && strncmp(path, "data.", 5) == 0) {
                 actual_path = path + 5;
-                ESP_LOGD(TAG, "Local API: stripped 'data.' prefix, using path: %s", actual_path);
+                ESP_LOGD(TAG, "Using local source data path");
             }
 
             // 使用 JSONPath 提取
@@ -725,7 +679,7 @@ static esp_err_t read_rest_source(ts_auto_source_t *src, ts_auto_value_t *value)
                 // Fallback 到旧方法
                 ret = extract_json_value(response_json, actual_path, value);
                 if (ret != ESP_OK) {
-                    ESP_LOGW(TAG, "Failed to extract path '%s' from response", actual_path);
+                    ESP_LOGW(TAG, "Source response path was not available");
                 }
             }
         } else if (value && src->mapping_count == 0 && !src->auto_discover) {
@@ -797,8 +751,7 @@ static esp_err_t read_variable_source(ts_auto_source_t *src, ts_auto_value_t *va
             }
         }
 
-        ESP_LOGD(TAG, "Variable source '%s': read %d variables from prefix '%s'",
-                 src->id, count, alias);
+        ESP_LOGD(TAG, "Variable source read (count=%d)", count);
 
         if (count > 0) {
             // 返回主要状态变量
@@ -815,8 +768,7 @@ static esp_err_t read_variable_source(ts_auto_source_t *src, ts_auto_value_t *va
         }
 
         // 变量不存在（指令可能尚未执行）
-        ESP_LOGD(TAG, "Variable source '%s': no variables found for prefix '%s' (command may not have been executed yet)",
-                 src->id, alias);
+        ESP_LOGD(TAG, "Variable source not populated");
         return ESP_ERR_NOT_FOUND;
     }
 
@@ -860,8 +812,7 @@ static esp_err_t read_variable_source(ts_auto_source_t *src, ts_auto_value_t *va
             }
         }
 
-        ESP_LOGD(TAG, "Variable source '%s': synced %d variables from prefix '%s'",
-                 src->id, count, var_prefix);
+        ESP_LOGD(TAG, "Variable source synchronized (count=%d)", count);
 
         if (count > 0) {
             value->type = TS_AUTO_VAL_INT;
@@ -1048,12 +999,41 @@ bool ts_source_ws_is_connected(const char *id)
 /**
  * 查找 Socket.IO 连接
  */
-void ts_source_sio_websocket_url(const char *base_url, const char *sid, char *out, size_t size)
+bool ts_source_sio_url(const char *base_url, const char *sid, char *out, size_t size)
 {
-    const char *host = strstr(base_url, "://");
-    host = host ? host + 3 : base_url;
-    snprintf(out, size, "%s://%s/socket.io/?EIO=4&transport=websocket&sid=%s",
-             !strncmp(base_url, "https://", 8) ? "wss" : "ws", host, sid);
+    if (!out || !size) return false;
+    out[0] = 0;
+    struct http_parser_url parsed;
+    if (!ts_http_url_parse(base_url, &parsed) ||
+        (parsed.field_set & ((1U << UF_QUERY) | (1U << UF_FRAGMENT)))) return false;
+    size_t scheme = parsed.field_data[UF_SCHEMA].len;
+    const char *authority = base_url + parsed.field_data[UF_SCHEMA].off + scheme + 3;
+    size_t base_length = strlen(authority);
+    while (base_length && authority[base_length - 1] == '/') --base_length;
+    const char *prefix = sid ? (scheme == 5 ? "wss://" : "ws://") : (scheme == 5 ? "https://" : "http://");
+    const char *suffix = sid ? "/socket.io/?EIO=4&transport=websocket&sid=" : "/socket.io/?EIO=4&transport=polling";
+    size_t encoded = 0, sid_length = sid ? strnlen(sid, 64) : 0;
+    if (sid && (!sid_length || sid_length >= 64)) return false;
+    for (size_t i = 0; i < sid_length; ++i) {
+        unsigned char c = (unsigned char)sid[i];
+        if (c <= 0x20 || c == 0x7f) return false;
+        bool unreserved = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+            (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.' || c == '~';
+        encoded += unreserved ? 1 : 3;
+    }
+    size_t length = strlen(prefix) + base_length + strlen(suffix);
+    if (length + encoded >= size) return false;
+    snprintf(out, size, "%s%.*s%s", prefix, (int)base_length, authority, suffix);
+    static const char hex[] = "0123456789ABCDEF";
+    for (size_t i = 0; i < sid_length; ++i) {
+        unsigned char c = (unsigned char)sid[i];
+        bool unreserved = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+            (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.' || c == '~';
+        if (unreserved) out[length++] = (char)c;
+        else { out[length++] = '%'; out[length++] = hex[c >> 4]; out[length++] = hex[c & 15]; }
+    }
+    out[length] = 0;
+    return true;
 }
 
 /* Caller owns the connection mutex; slots never move while a task uses them. */
@@ -1140,7 +1120,7 @@ static void sio_handle_event_message(sio_connection_t *conn, const char *msg)
         return;
     }
 
-    ESP_LOGD(TAG, "SIO event: %s from source %s", event_name->valuestring, conn->source_id);
+    ESP_LOGD(TAG, "SIO event received");
 
     // 查找关联的数据源
     xSemaphoreTake(ts_source_runtime.mutex, portMAX_DELAY);
@@ -1150,7 +1130,7 @@ static void sio_handle_event_message(sio_connection_t *conn, const char *msg)
 
         // 检查是否是我们订阅的事件
         if (strcmp(event_name->valuestring, src->socketio.event) == 0 && event_data) {
-            ESP_LOGD(TAG, "Matched subscribed event '%s', updating source value...", event_name->valuestring);
+            ESP_LOGD(TAG, "Subscribed event received; updating source");
 
             // 更新源的 last_value
             // 由于 str_val 只有 64 字节，存储摘要而非完整 JSON
@@ -1167,7 +1147,7 @@ static void sio_handle_event_message(sio_connection_t *conn, const char *msg)
                     strncpy(src->last_value.str_val, json_str, sizeof(src->last_value.str_val) - 1);
                     src->last_value.str_val[sizeof(src->last_value.str_val) - 1] = '\0';
                 }
-                ESP_LOGD(TAG, "Source '%s' last_value: %s", src->id, src->last_value.str_val);
+                ESP_LOGD(TAG, "SIO source value updated (bytes=%zu)", json_len);
 
                 // 处理数据到变量 - 所有处理都在主任务中执行，避免栈溢出
                 // （mapping 可能需要递归展开数组/对象，auto_discover 也是递归的）
@@ -1249,7 +1229,6 @@ static void sio_websocket_event_handler(void *arg, esp_event_base_t event_base,
             break;
 
         case WEBSOCKET_EVENT_CLOSED:
-            if (conn->type != TS_AUTO_SRC_WEBSOCKET) break;
             /* A clean server close has a distinct event in esp-websocket. */
             /* fall through */
         case WEBSOCKET_EVENT_DISCONNECTED:
@@ -1257,6 +1236,10 @@ static void sio_websocket_event_handler(void *arg, esp_event_base_t event_base,
             conn->connected = false;
             conn->upgraded = false;
             if (conn->type == TS_AUTO_SRC_WEBSOCKET) conn->msg_buf_len = 0;
+            else {
+                conn->reconnect_requested = true;
+                if (conn->task_handle) xTaskNotifyGive(conn->task_handle);
+            }
             // 更新源状态
             xSemaphoreTake(ts_source_runtime.mutex, portMAX_DELAY);
             int idx = current_connection_index(conn);
@@ -1325,8 +1308,7 @@ static void sio_websocket_event_handler(void *arg, esp_event_base_t event_base,
                     // 完整的单帧消息
                     char *msg = strndup(data->data_ptr, data->data_len);
                     if (msg) {
-                        ESP_LOGD(TAG, "SIO [%s] recv: %.100s%s", conn->source_id, msg,
-                                 strlen(msg) > 100 ? "..." : "");
+                        ESP_LOGD(TAG, "SIO frame received (bytes=%zu)", strlen(msg));
 
                         // 处理 Socket.IO 协议消息
                         if (conn->type == TS_AUTO_SRC_WEBSOCKET) {
@@ -1375,52 +1357,29 @@ static void sio_websocket_event_handler(void *arg, esp_event_base_t event_base,
  */
 static esp_err_t sio_http_handshake(const char *base_url, char *sid_out, size_t sid_len)
 {
-    char handshake_url[256];
-    snprintf(handshake_url, sizeof(handshake_url),
-             "%s/socket.io/?EIO=4&transport=polling", base_url);
-
-    char *response_buf = heap_caps_malloc(1024, MALLOC_CAP_SPIRAM);
-    if (!response_buf) response_buf = malloc(1024);
-    if (!response_buf) return ESP_ERR_NO_MEM;
-
-    esp_http_client_config_t config = {
-        .url = handshake_url,
-        .method = HTTP_METHOD_GET,
-        .timeout_ms = 10000,
-        .crt_bundle_attach = esp_crt_bundle_attach,
-    };
-
-    esp_http_client_handle_t client = esp_http_client_init(&config);
-    esp_err_t ret = ESP_FAIL;
-
-    if (esp_http_client_open(client, 0) == ESP_OK) {
-        esp_http_client_fetch_headers(client);
-        int len = esp_http_client_read(client, response_buf, 1023);
-        if (len > 0) {
-            response_buf[len] = '\0';
-            ESP_LOGD(TAG, "SIO handshake response: %s", response_buf);
-
-            // 响应格式：0{"sid":"xxx","upgrades":["websocket"],...}
-            char *json_start = strchr(response_buf, '{');
-            if (json_start) {
-                cJSON *root = cJSON_Parse(json_start);
-                if (root) {
-                    cJSON *sid = cJSON_GetObjectItem(root, "sid");
-                    if (sid && cJSON_IsString(sid)) {
-                        strncpy(sid_out, sid->valuestring, sid_len - 1);
-                        ret = ESP_OK;
-                        ESP_LOGD(TAG, "SIO got session ID: %s", sid_out);
-                    }
-                    cJSON_Delete(root);
-                }
+    if (!base_url || !sid_out || sid_len < 2) return ESP_ERR_INVALID_ARG;
+    sid_out[0] = 0;
+    char handshake_url[512];
+    if (!ts_source_sio_url(base_url, NULL, handshake_url, sizeof(handshake_url))) return ESP_ERR_INVALID_ARG;
+    ts_http_fetch_config_t request = {.url = handshake_url, .method = HTTP_METHOD_GET,
+        .timeout_ms = 10000, .maximum_body = 1023};
+    ts_http_fetch_result_t reply = {0};
+    esp_err_t ret = ts_http_fetch(&request, &reply);
+    if (ret == ESP_OK) {
+        ret = ESP_ERR_INVALID_RESPONSE;
+        const char *start = reply.status == 200 && reply.body ? strchr(reply.body, '{') : NULL;
+        cJSON *json = start ? cJSON_Parse(start) : NULL;
+        const cJSON *sid = json ? cJSON_GetObjectItemCaseSensitive(json, "sid") : NULL;
+        if (cJSON_IsString(sid)) {
+            size_t length = strlen(sid->valuestring);
+            if (length && length < sid_len) {
+                memcpy(sid_out, sid->valuestring, length + 1);
+                ret = ESP_OK;
             }
         }
+        cJSON_Delete(json);
     }
-
-    esp_http_client_close(client);
-    esp_http_client_cleanup(client);
-    free(response_buf);
-
+    free(reply.body);
     return ret;
 }
 
@@ -1487,7 +1446,7 @@ connection_retry:
                            : retry_delay_ms * 2;
         }
 
-        ESP_LOGD(TAG, "SIO [%s] attempting connection to %s", conn->source_id, base_url);
+        ESP_LOGD(TAG, "SIO connection attempt");
 
         if (conn->type == TS_AUTO_SRC_WEBSOCKET) break;
 
@@ -1525,14 +1484,16 @@ connection_retry:
     xSemaphoreGive(ts_source_runtime.mutex);
 
     // 2. 构建 WebSocket URL
-    char ws_url[256];
+    char ws_url[512];
     if (conn->type == TS_AUTO_SRC_WEBSOCKET) {
+        struct http_parser_url parsed;
+        if (!ts_ws_url_parse(ws_base_url, &parsed)) goto task_exit;
         snprintf(ws_url, sizeof(ws_url), "%s", ws_base_url);
     } else {
-        ts_source_sio_websocket_url(ws_base_url, conn->session_id, ws_url, sizeof(ws_url));
+        if (!ts_source_sio_url(ws_base_url, conn->session_id, ws_url, sizeof(ws_url))) goto task_exit;
     }
 
-    ESP_LOGD(TAG, "SIO [%s] WebSocket URL: %s", conn->source_id, ws_url);
+    ESP_LOGD(TAG, "SIO WebSocket target prepared");
 
     // 3. 创建 WebSocket 连接
     esp_websocket_client_config_t ws_cfg = {
@@ -1540,11 +1501,13 @@ connection_retry:
         .buffer_size = 2048,
         .reconnect_timeout_ms = conn->type == TS_AUTO_SRC_WEBSOCKET && ws_reconnect_ms ? ws_reconnect_ms : 10000,
         .enable_close_reconnect = conn->type == TS_AUTO_SRC_WEBSOCKET,
+        .disable_auto_reconnect = conn->type == TS_AUTO_SRC_SOCKETIO,
         .network_timeout_ms = 10000,     /* 网络超时 10s */
         .ping_interval_sec = 0,          /* 禁用 WebSocket ping，使用 Socket.IO ping */
         .crt_bundle_attach = esp_crt_bundle_attach,
     };
 
+    conn->reconnect_requested = false;
     conn->client = esp_websocket_client_init(&ws_cfg);
     if (!conn->client) {
         ESP_LOGE(TAG, "SIO [%s] failed to init WebSocket client", conn->source_id);
@@ -1565,6 +1528,7 @@ connection_retry:
     while (!conn->should_stop) {
         ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(200));
         if (conn->should_stop) break;
+        if (conn->type == TS_AUTO_SRC_SOCKETIO && conn->reconnect_requested) break;
 
         // 处理待处理的自动发现数据（在此任务中执行，有足够栈空间）
         if (xSemaphoreTake(conn->pending_mutex, 0) == pdTRUE) {

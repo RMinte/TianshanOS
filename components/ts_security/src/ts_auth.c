@@ -2,7 +2,7 @@
  * @file ts_auth.c
  * @brief Authentication Helpers - 用户认证与会话管理
  * 
- * 支持 admin 和 root 两个用户，密码使用 SHA256+salt 哈希存储于 NVS
+ * 支持 admin 和 root 两个用户，密码使用原有加盐 SHA-256 存储于 NVS
  * 
  * 安全设计：
  * - 密码哈希仅存储在 NVS，不导出到 SD 卡
@@ -17,6 +17,8 @@
 #include "nvs.h"
 #include "esp_random.h"
 #include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #include <string.h>
 
 #define TAG "ts_auth"
@@ -28,34 +30,18 @@ typedef ts_auth_user_credential_t user_credential_t;
 
 static nvs_handle_t s_auth_nvs;
 static bool s_auth_initialized = false;
+static uint8_t s_auth_format_version;
+/* Serialize password verification + session issuance with credential updates.
+ * Otherwise a login verified before a change can issue a session after revocation. */
+static StaticSemaphore_t s_auth_gate_storage;
+static SemaphoreHandle_t s_auth_gate;
+/* Per-boot monotonic deadlines; on-flash nonzero lockout_until is only a marker.
+ * Never compare a previous boot's uptime to this boot's clock. */
+static uint32_t s_lockout_deadlines[2]; /* admin, root */
 
 /*===========================================================================*/
 /*                          内部函数                                          */
 /*===========================================================================*/
-
-/**
- * @brief 计算密码哈希 (SHA256(salt + password))
- */
-static esp_err_t compute_password_hash(const uint8_t *salt, const char *password,
-                                        uint8_t *hash_out)
-{
-    /* 拼接 salt + password */
-    size_t pwd_len = strlen(password);
-    size_t total_len = TS_AUTH_SALT_LEN + pwd_len;
-    uint8_t *buf = malloc(total_len);
-    if (!buf) return ESP_ERR_NO_MEM;
-    
-    memcpy(buf, salt, TS_AUTH_SALT_LEN);
-    memcpy(buf + TS_AUTH_SALT_LEN, password, pwd_len);
-    
-    esp_err_t ret = ts_crypto_hash(TS_HASH_SHA256, buf, total_len, hash_out, TS_AUTH_HASH_LEN);
-    
-    /* 清除敏感数据 */
-    memset(buf, 0, total_len);
-    free(buf);
-    
-    return ret;
-}
 
 /**
  * @brief 获取用户凭据
@@ -65,27 +51,60 @@ static esp_err_t load_user_credential(const char *username, user_credential_t *c
     char key[32];
     snprintf(key, sizeof(key), "cred_%s", username);
     
-    size_t len = sizeof(user_credential_t);
-    esp_err_t ret = nvs_get_blob(s_auth_nvs, key, cred, &len);
-    
+    unsigned char bytes[TS_AUTH_MAX_CREDENTIAL_SIZE];
+    size_t len = sizeof(bytes);
+    esp_err_t ret = nvs_get_blob(s_auth_nvs, key, bytes, &len);
+    if (ret == ESP_OK) ret = ts_auth_credential_decode(bytes, len, cred);
+    memset(bytes, 0, sizeof(bytes));
     return ret;
 }
 
 /**
  * @brief 保存用户凭据
  */
-static esp_err_t save_user_credential(const char *username, const user_credential_t *cred)
+static esp_err_t save_user_credential(const char *username, const user_credential_t *cred, bool revoke_sessions)
 {
     char key[32];
     snprintf(key, sizeof(key), "cred_%s", username);
     
-    esp_err_t ret = nvs_set_blob(s_auth_nvs, key, cred, sizeof(user_credential_t));
+    size_t length = cred->format ? sizeof(*cred) : TS_AUTH_LEGACY_CREDENTIAL_SIZE;
+    esp_err_t ret = nvs_set_blob(s_auth_nvs, key, cred, length);
+    if (ret != ESP_OK) return ret;
+    /* A failed commit may already expose the new credential. Never let an old
+     * session survive a password replacement accepted by the storage owner. */
+    if (revoke_sessions) ts_security_destroy_sessions_by_client(username);
+    ret = nvs_commit(s_auth_nvs);
     if (ret == ESP_OK) {
-        nvs_commit(s_auth_nvs);
+        user_credential_t readback;
+        ret = load_user_credential(username, &readback);
+        if (ret == ESP_OK && memcmp(cred, &readback, sizeof(readback))) ret = ESP_FAIL;
+        memset(&readback, 0, sizeof(readback));
     }
-    return ret;
+    return ret != ESP_OK && revoke_sessions ? ESP_ERR_NOT_FINISHED : ret;
 }
 
+/* Only retire the unreleased prototype marker after both stored records are
+ * actually readable by stock 0.6.4. Never relabel an unreadable credential. */
+static esp_err_t finish_credential_migration(void)
+{
+    if (s_auth_format_version == TS_AUTH_CONFIG_VERSION) return ESP_OK;
+    const char *users[] = {"admin", "root"};
+    for (unsigned i = 0; i < 2; ++i) {
+        user_credential_t credential;
+        esp_err_t ret = load_user_credential(users[i], &credential);
+        bool original = ret == ESP_OK && credential.format == 0;
+        memset(&credential, 0, sizeof(credential));
+        if (ret != ESP_OK) return ret;
+        if (!original) return ESP_ERR_NOT_FINISHED;
+    }
+    esp_err_t ret = nvs_set_u8(s_auth_nvs, TS_AUTH_CONFIG_VERSION_KEY, TS_AUTH_CONFIG_VERSION);
+    if (ret == ESP_OK) ret = nvs_commit(s_auth_nvs);
+    uint8_t readback = 0;
+    if (ret == ESP_OK) ret = nvs_get_u8(s_auth_nvs, TS_AUTH_CONFIG_VERSION_KEY, &readback);
+    if (ret == ESP_OK && readback != TS_AUTH_CONFIG_VERSION) ret = ESP_FAIL;
+    if (ret == ESP_OK) s_auth_format_version = TS_AUTH_CONFIG_VERSION;
+    return ret;
+}
 /**
  * @brief 写入用户密码凭据，并清除失败计数/锁定状态
  */
@@ -100,18 +119,18 @@ static esp_err_t write_user_password_credential(const char *username, const char
         return ESP_ERR_INVALID_ARG;
     }
 
-    user_credential_t cred = {0};
-
-    esp_fill_random(cred.salt, TS_AUTH_SALT_LEN);
-
-    esp_err_t ret = compute_password_hash(cred.salt, password, cred.hash);
+    user_credential_t cred;
+    esp_err_t ret = ts_auth_credential_create(password, password_changed, &cred);
     if (ret != ESP_OK) return ret;
-
-    cred.password_changed = password_changed;
-    cred.failed_attempts = 0;
-    cred.lockout_until = 0;
-
-    return save_user_credential(username, &cred);
+    ret = save_user_credential(username, &cred, true);
+    if (ret == ESP_OK) {
+        esp_err_t migrated = finish_credential_migration();
+        if (migrated != ESP_OK && migrated != ESP_ERR_NOT_FINISHED) ret = ESP_ERR_NOT_FINISHED;
+    }
+    memset(&cred, 0, sizeof(cred));
+    if (ret == ESP_OK)
+        s_lockout_deadlines[strcmp(username, "root") == 0 ? 1 : 0] = 0;
+    return ret;
 }
 
 /**
@@ -129,31 +148,47 @@ static esp_err_t force_create_user(const char *username, ts_perm_level_t level)
 }
 
 /**
- * @brief 初始化用户（如果不存在则创建默认密码）
- */
-static esp_err_t init_user_if_needed(const char *username, ts_perm_level_t level)
-{
-    user_credential_t cred;
-    
-    if (load_user_credential(username, &cred) == ESP_OK) {
-        /* 开机计时相关的临时锁定不能沿用到本次启动。 */
-        if (cred.failed_attempts || cred.lockout_until) {
-            cred.failed_attempts = 0;
-            cred.lockout_until = 0;
-            return save_user_credential(username, &cred);
-        }
-        return ESP_OK;
-    }
-    
-    return force_create_user(username, level);
-}
-
-/**
  * @brief 获取当前时间（秒）
  */
 static uint32_t get_current_time_sec(void)
 {
     return (uint32_t)(esp_timer_get_time() / 1000000);
+}
+
+static bool credential_is_locked(const user_credential_t *cred)
+{
+    return cred->lockout_until != 0 || cred->failed_attempts >= MAX_LOGIN_ATTEMPTS;
+}
+
+/**
+ * @brief 准备已有用户；读取失败不能当作恢复默认口令的授权
+ */
+static esp_err_t init_existing_user(const char *username)
+{
+    user_credential_t cred;
+    esp_err_t ret = load_user_credential(username, &cred);
+    if (ret == ESP_OK && credential_is_locked(&cred)) {
+        unsigned index = strcmp(username, "root") == 0 ? 1 : 0;
+        s_lockout_deadlines[index] = get_current_time_sec() + LOGIN_LOCKOUT_SEC;
+    }
+    if (ret == ESP_OK && cred.format == TS_AUTH_CREDENTIAL_MAGIC) {
+        const char *password = !strcmp(username, "root") ? TS_AUTH_DEFAULT_ROOT_PASSWORD : TS_AUTH_DEFAULT_ADMIN_PASSWORD;
+        bool matches = false;
+        ret = ts_auth_credential_verify(&cred, password, &matches);
+        if (ret == ESP_OK && matches) {
+            user_credential_t original;
+            ret = ts_auth_credential_create(password, cred.password_changed, &original);
+            if (ret == ESP_OK) {
+                original.failed_attempts = cred.failed_attempts;
+                original.lockout_until = cred.lockout_until;
+                ret = save_user_credential(username, &original, false);
+            }
+            memset(&original, 0, sizeof(original));
+        }
+    }
+    memset(&cred, 0, sizeof(cred));
+    /* Preserve the retry budget; prototype conversion never resets a password. */
+    return ret;
 }
 
 /*===========================================================================*/
@@ -166,6 +201,8 @@ static uint32_t get_current_time_sec(void)
 esp_err_t ts_auth_init(void)
 {
     if (s_auth_initialized) return ESP_OK;
+    if (!s_auth_gate) s_auth_gate = xSemaphoreCreateMutexStatic(&s_auth_gate_storage);
+    if (!s_auth_gate) return ESP_ERR_NO_MEM;
     
     esp_err_t ret = nvs_open(TS_AUTH_NVS_NAMESPACE, NVS_READWRITE, &s_auth_nvs);
     if (ret != ESP_OK) {
@@ -173,38 +210,61 @@ esp_err_t ts_auth_init(void)
         return ret;
     }
     
-    /* 检查配置版本，版本变化时强制重置所有用户 */
+    memset(s_lockout_deadlines, 0, sizeof(s_lockout_deadlines));
+
+    /* Only an empty, unversioned namespace is a new device. Errors or unknown
+     * layouts are not permission to overwrite an existing credential. */
     uint8_t stored_version = 0;
-    nvs_get_u8(s_auth_nvs, TS_AUTH_CONFIG_VERSION_KEY, &stored_version);
-    
-    if (stored_version != TS_AUTH_CONFIG_VERSION) {
-        TS_LOGW(TAG, "Auth config version changed (%d -> %d), resetting all users",
-                stored_version, TS_AUTH_CONFIG_VERSION);
-        /* 强制重新创建所有用户 */
-        force_create_user("admin", TS_PERM_ADMIN);
-        force_create_user("root", TS_PERM_ROOT);
-        /* 保存新版本号 */
-        nvs_set_u8(s_auth_nvs, TS_AUTH_CONFIG_VERSION_KEY, TS_AUTH_CONFIG_VERSION);
-        nvs_commit(s_auth_nvs);
-    } else {
-        /* 初始化默认用户（如果不存在） */
-        ret = init_user_if_needed("admin", TS_PERM_ADMIN);
-        if (ret == ESP_OK) ret = init_user_if_needed("root", TS_PERM_ROOT);
-        if (ret != ESP_OK) {
-            nvs_close(s_auth_nvs);
-            return ret;
+    ret = nvs_get_u8(s_auth_nvs, TS_AUTH_CONFIG_VERSION_KEY, &stored_version);
+    if (ret == ESP_ERR_NVS_NOT_FOUND) {
+        user_credential_t existing;
+        ret = load_user_credential("admin", &existing);
+        if (ret != ESP_ERR_NVS_NOT_FOUND) {
+            if (ret == ESP_OK) ret = ESP_ERR_INVALID_STATE;
+            goto failed;
         }
+        ret = load_user_credential("root", &existing);
+        if (ret != ESP_ERR_NVS_NOT_FOUND) {
+            if (ret == ESP_OK) ret = ESP_ERR_INVALID_STATE;
+            goto failed;
+        }
+        s_auth_format_version = TS_AUTH_CONFIG_VERSION;
+        ret = force_create_user("admin", TS_PERM_ADMIN);
+        if (ret == ESP_OK) ret = force_create_user("root", TS_PERM_ROOT);
+        if (ret == ESP_OK)
+            ret = nvs_set_u8(s_auth_nvs, TS_AUTH_CONFIG_VERSION_KEY, TS_AUTH_CONFIG_VERSION);
+        if (ret == ESP_OK) ret = nvs_commit(s_auth_nvs);
+        if (ret != ESP_OK) goto failed;
+    } else if (ret == ESP_OK && (stored_version == TS_AUTH_CONFIG_VERSION ||
+                                stored_version == TS_AUTH_PROTOTYPE_CONFIG_VERSION)) {
+        s_auth_format_version = stored_version;
+        ret = init_existing_user("admin");
+        if (ret == ESP_OK) ret = init_existing_user("root");
+        if (ret != ESP_OK) goto failed;
+        ret = finish_credential_migration();
+        if (ret != ESP_OK && ret != ESP_ERR_NOT_FINISHED) goto failed;
+    } else {
+        if (ret == ESP_OK) {
+            TS_LOGE(TAG, "Unsupported auth config version %u; migration required", stored_version);
+            ret = ESP_ERR_INVALID_STATE;
+        }
+        goto failed;
     }
     
     s_auth_initialized = true;
     TS_LOGI(TAG, "Auth module initialized (version %d)", TS_AUTH_CONFIG_VERSION);
     return ESP_OK;
+
+failed:
+    nvs_close(s_auth_nvs);
+    s_auth_nvs = 0;
+    return ret;
 }
 
 /**
  * @brief 验证用户密码
  */
-esp_err_t ts_auth_verify_password(const char *username, const char *password,
+static esp_err_t verify_password_locked(const char *username, const char *password,
                                    ts_perm_level_t *level)
 {
     if (!username || !password) return ESP_ERR_INVALID_ARG;
@@ -229,47 +289,69 @@ esp_err_t ts_auth_verify_password(const char *username, const char *password,
     
     /* 检查是否被锁定 */
     uint32_t now = get_current_time_sec();
-    if (cred.lockout_until > now) {
+    unsigned index = user_level == TS_PERM_ROOT ? 1 : 0;
+    if (s_lockout_deadlines[index] > now) {
         TS_LOGW(TAG, "User %s is locked out for %lu more seconds",
-                username, (unsigned long)(cred.lockout_until - now));
+                username, (unsigned long)(s_lockout_deadlines[index] - now));
         return ESP_ERR_INVALID_STATE;
     }
-    
-    /* 计算输入密码的哈希 */
-    uint8_t computed_hash[TS_AUTH_HASH_LEN];
-    ret = compute_password_hash(cred.salt, password, computed_hash);
-    if (ret != ESP_OK) return ret;
-    
-    /* 比较哈希（恒定时间比较防止时序攻击） */
-    uint8_t diff = 0;
-    for (int i = 0; i < TS_AUTH_HASH_LEN; i++) {
-        diff |= computed_hash[i] ^ cred.hash[i];
+    bool expired_lock = credential_is_locked(&cred);
+    if (expired_lock) {
+        cred.lockout_until = 0;
+        cred.failed_attempts = 0;
     }
     
-    /* 清除敏感数据 */
-    memset(computed_hash, 0, sizeof(computed_hash));
-    
-    if (diff != 0) {
+    bool matches;
+    ret = ts_auth_credential_verify(&cred, password, &matches);
+    if (ret != ESP_OK) return ret;
+
+    if (!matches) {
         /* 密码错误，增加失败计数 */
         cred.failed_attempts++;
         if (cred.failed_attempts >= MAX_LOGIN_ATTEMPTS) {
-            cred.lockout_until = now + LOGIN_LOCKOUT_SEC;
+            cred.lockout_until = 1; /* persistent marker, not an uptime deadline */
+            s_lockout_deadlines[index] = now + LOGIN_LOCKOUT_SEC;
             cred.failed_attempts = 0;
             TS_LOGW(TAG, "User %s locked out due to too many failed attempts", username);
         }
-        save_user_credential(username, &cred);
-        return ESP_ERR_INVALID_ARG;
+        ret = save_user_credential(username, &cred, false);
+        return ret == ESP_OK ? ESP_ERR_INVALID_ARG : ret;
     }
     
-    /* 密码正确，清除失败计数及已过期的锁定。 */
-    if (cred.failed_attempts || cred.lockout_until) {
+    /* Restore the original verifier after a successful prototype verification.
+     * A crash leaves either the old or new complete blob under the same key. */
+    bool migrated = cred.format == TS_AUTH_CREDENTIAL_MAGIC;
+    if (migrated) {
+        user_credential_t upgraded;
+        ret = ts_auth_credential_create(password, cred.password_changed, &upgraded);
+        if (ret != ESP_OK) return ret;
+        cred = upgraded;
+        memset(&upgraded, 0, sizeof(upgraded));
+    }
+    if (migrated || expired_lock || cred.failed_attempts || cred.lockout_until) {
         cred.failed_attempts = 0;
         cred.lockout_until = 0;
-        save_user_credential(username, &cred);
+        ret = save_user_credential(username, &cred, false);
+        if (ret != ESP_OK) return ret;
+        if (migrated) {
+            ret = finish_credential_migration();
+            if (ret != ESP_OK && ret != ESP_ERR_NOT_FINISHED) return ret;
+        }
     }
+    s_lockout_deadlines[index] = 0;
     
     if (level) *level = user_level;
     return ESP_OK;
+}
+
+esp_err_t ts_auth_verify_password(const char *username, const char *password,
+                                   ts_perm_level_t *level)
+{
+    if (!s_auth_initialized) return ESP_ERR_INVALID_STATE;
+    xSemaphoreTake(s_auth_gate, portMAX_DELAY);
+    esp_err_t ret = verify_password_locked(username, password, level);
+    xSemaphoreGive(s_auth_gate);
+    return ret;
 }
 
 /**
@@ -287,14 +369,18 @@ esp_err_t ts_auth_change_password(const char *username, const char *old_password
         return ESP_ERR_INVALID_ARG;
     }
     
-    /* 验证旧密码 */
-    esp_err_t ret = ts_auth_verify_password(username, old_password, NULL);
+    if (!s_auth_initialized) return ESP_ERR_INVALID_STATE;
+    xSemaphoreTake(s_auth_gate, portMAX_DELAY);
+    /* Verify and replace under the same gate as login. */
+    esp_err_t ret = verify_password_locked(username, old_password, NULL);
     if (ret != ESP_OK) {
         TS_LOGW(TAG, "Old password verification failed for %s", username);
+        xSemaphoreGive(s_auth_gate);
         return ret;
     }
     
     ret = write_user_password_credential(username, new_password, true);
+    xSemaphoreGive(s_auth_gate);
     if (ret == ESP_OK) {
         TS_LOGI(TAG, "Password changed for user %s", username);
     }
@@ -307,7 +393,10 @@ esp_err_t ts_auth_change_password(const char *username, const char *old_password
  */
 esp_err_t ts_auth_set_admin_password(const char *new_password)
 {
+    if (!s_auth_initialized) return ESP_ERR_INVALID_STATE;
+    xSemaphoreTake(s_auth_gate, portMAX_DELAY);
     esp_err_t ret = write_user_password_credential("admin", new_password, true);
+    xSemaphoreGive(s_auth_gate);
     if (ret == ESP_OK) {
         TS_LOGI(TAG, "Password set for admin by root");
     }
@@ -320,7 +409,10 @@ esp_err_t ts_auth_set_admin_password(const char *new_password)
  */
 esp_err_t ts_auth_set_root_password(const char *new_password)
 {
+    if (!s_auth_initialized) return ESP_ERR_INVALID_STATE;
+    xSemaphoreTake(s_auth_gate, portMAX_DELAY);
     esp_err_t ret = write_user_password_credential("root", new_password, true);
+    xSemaphoreGive(s_auth_gate);
     if (ret == ESP_OK) {
         TS_LOGI(TAG, "Password set for root by root");
     }
@@ -349,17 +441,19 @@ bool ts_auth_password_changed(const char *username)
 esp_err_t ts_auth_login(const char *username, const char *password,
                          uint32_t *session_id, char *token, size_t token_len)
 {
+    if (!s_auth_initialized) return ESP_ERR_INVALID_STATE;
+    xSemaphoreTake(s_auth_gate, portMAX_DELAY);
     ts_perm_level_t level;
-    esp_err_t ret = ts_auth_verify_password(username, password, &level);
+    esp_err_t ret = verify_password_locked(username, password, &level);
     if (ret != ESP_OK) {
         TS_LOGW(TAG, "Login failed for user: %s", username);
-        return ret;
+        goto done;
     }
     
     ret = ts_security_create_session(username, level, session_id);
     if (ret != ESP_OK) {
         TS_LOGE(TAG, "Failed to create session for %s", username);
-        return ret;
+        goto done;
     }
     
     /* 生成 token */
@@ -367,12 +461,14 @@ esp_err_t ts_auth_login(const char *username, const char *password,
         ret = ts_security_generate_token(*session_id, token, token_len);
         if (ret != ESP_OK) {
             ts_security_destroy_session(*session_id);
-            return ret;
+            goto done;
         }
     }
     
     TS_LOGI(TAG, "User %s logged in (level %d)", username, level);
-    return ESP_OK;
+done:
+    xSemaphoreGive(s_auth_gate);
+    return ret;
 }
 
 /**
@@ -424,7 +520,10 @@ esp_err_t ts_auth_reset_password(const char *username)
         return ESP_ERR_NOT_FOUND;
     }
     
+    if (!s_auth_initialized) return ESP_ERR_INVALID_STATE;
+    xSemaphoreTake(s_auth_gate, portMAX_DELAY);
     esp_err_t ret = write_user_password_credential(username, default_pwd, false);
+    xSemaphoreGive(s_auth_gate);
     if (ret == ESP_OK) {
         TS_LOGI(TAG, "Password reset to default for user %s", username);
     }

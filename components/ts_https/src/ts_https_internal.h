@@ -14,7 +14,9 @@ extern "C" {
 #endif
 
 /**
- * @brief Extract authentication info from certificate
+ * @brief Extract identity from a peer certificate already validated by TLS.
+ * Missing/unknown OU has no protected role; duplicate or malformed role OU fails.
+ * A failure clears the output identity. This function does not verify the chain.
  */
 esp_err_t ts_https_auth_from_cert(const mbedtls_x509_crt *cert, ts_https_auth_t *auth);
 

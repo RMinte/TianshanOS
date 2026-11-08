@@ -231,7 +231,7 @@ static esp_err_t api_sftp_get(const cJSON *params, ts_api_result_t *result)
         return ESP_ERR_INVALID_ARG;
     }
     
-    esp_err_t ret = ts_storage_check_write_path(local->valuestring, false);
+    esp_err_t ret = ts_storage_check_external_write_path(local->valuestring, false);
     if (ret != ESP_OK) {
         ts_api_result_error(result, ret == ESP_ERR_NOT_ALLOWED ? TS_API_ERR_NO_PERMISSION : TS_API_ERR_INVALID_ARG,
             ret == ESP_ERR_NOT_ALLOWED ? "automation_configuration_managed" : "storage_path_invalid");
@@ -482,6 +482,8 @@ static const ts_api_endpoint_t sftp_endpoints[] = {
         .description = "List remote directory via SFTP",
         .category = TS_API_CAT_SECURITY,
         .handler = api_sftp_ls,
+        .external_access = TS_API_ACCESS_ADMIN,
+        .allowed_methods = TS_API_METHOD_WRITE,
         .requires_auth = true,
     },
     {
@@ -489,6 +491,8 @@ static const ts_api_endpoint_t sftp_endpoints[] = {
         .description = "Download file via SFTP",
         .category = TS_API_CAT_SECURITY,
         .handler = api_sftp_get,
+        .external_access = TS_API_ACCESS_ADMIN,
+        .allowed_methods = TS_API_METHOD_WRITE,
         .requires_auth = true,
     },
     {
@@ -496,6 +500,8 @@ static const ts_api_endpoint_t sftp_endpoints[] = {
         .description = "Upload file via SFTP",
         .category = TS_API_CAT_SECURITY,
         .handler = api_sftp_put,
+        .external_access = TS_API_ACCESS_ADMIN,
+        .allowed_methods = TS_API_METHOD_WRITE,
         .requires_auth = true,
     },
     {
@@ -503,6 +509,8 @@ static const ts_api_endpoint_t sftp_endpoints[] = {
         .description = "Delete remote file via SFTP",
         .category = TS_API_CAT_SECURITY,
         .handler = api_sftp_rm,
+        .external_access = TS_API_ACCESS_ADMIN,
+        .allowed_methods = TS_API_METHOD_WRITE,
         .requires_auth = true,
     },
     {
@@ -510,6 +518,8 @@ static const ts_api_endpoint_t sftp_endpoints[] = {
         .description = "Create remote directory via SFTP",
         .category = TS_API_CAT_SECURITY,
         .handler = api_sftp_mkdir,
+        .external_access = TS_API_ACCESS_ADMIN,
+        .allowed_methods = TS_API_METHOD_WRITE,
         .requires_auth = true,
     },
     {
@@ -517,6 +527,8 @@ static const ts_api_endpoint_t sftp_endpoints[] = {
         .description = "Get remote file information via SFTP",
         .category = TS_API_CAT_SECURITY,
         .handler = api_sftp_stat,
+        .external_access = TS_API_ACCESS_ADMIN,
+        .allowed_methods = TS_API_METHOD_WRITE,
         .requires_auth = true,
     },
 };

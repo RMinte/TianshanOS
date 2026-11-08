@@ -5,16 +5,23 @@ import os,re,subprocess,tempfile
 root=Path(__file__).resolve().parents[2]
 idf=Path(os.environ.get('IDF_PATH','/Users/massif/esp/v5.5.2/esp-idf'))
 source=Path(os.environ.get('TS_KEYSTORE_TEST_SOURCE', root/'components/ts_security/src/ts_keystore.c')).read_text()
-api_source=(root/'components/ts_api/src/ts_api_key.c').read_text()
+api_source=Path(os.environ.get('TS_KEYSTORE_TEST_API_SOURCE',root/'components/ts_api/src/ts_api_key.c')).read_text()
 a=api_source.index('static esp_err_t api_key_generate(');api_handler=api_source[a:api_source.index('\n}',a)+2]
+read_names=['key_type_desc','key_info_json','api_key_list_impl','api_key_info_impl','api_key_export_impl','api_key_export_private','key_read_visibility','api_key_list','key_read_for_session','private_export_read','api_key_info','api_key_export','api_key_list_for_session','api_key_info_for_session','api_key_export_for_session','api_key_export_private_for_session']
+read_handlers='typedef esp_err_t (*key_read_handler_t)(const cJSON *, bool, ts_api_result_t *);\n'
+for name in read_names:
+ match=re.search(r'^static (?:const char \*|cJSON \*|esp_err_t )'+name+r'\([\s\S]*?^}',api_source,re.M)
+ assert match,name
+ read_handlers+=match.group()+'\n'
 core_api=(root/'components/ts_api/src/ts_api.c').read_text()
 a=core_api.index('void ts_api_parse_query(');query_parser=core_api[a:core_api.index('\n}',a)+2]
 web_source=(root/'components/ts_webui/src/ts_webui_api.c').read_text()
-a=web_source.index('static esp_err_t send_key_generate_result(');web_handler=web_source[a:web_source.index('\nstatic esp_err_t',a+1)]
-a=web_source.index('static esp_err_t api_handler(');web_handler+=web_source[a:web_source.index('\nstatic esp_err_t login_handler',a)]
+a=web_source.index('static esp_err_t send_key_generate_result(');web_handler=web_source[a:web_source.index('\n}',a)+2]+'\n'
+a=web_source.index('static bool api_request_access(') if 'static bool api_request_access(' in web_source else web_source.index('static esp_err_t api_handler(');web_handler+=web_source[a:web_source.index('\nstatic esp_err_t login_handler',a)]
 a=web_source.index('static bool is_binary_upload_complete(');body_complete=web_source[a:web_source.index('\n}',a)+2]
 pack_source=(root/'components/ts_config_pack/src/ts_config_pack.c').read_text()
 a=pack_source.index('static bool unambiguous_json(');strict_json=pack_source[a:pack_source.index('\nstatic const char *TAG',a)]
+store_adapter='\n#define STORE_OPTS(id,pair,type,opts) '+('create_key(id,pair,type,opts,NULL)' if 'static esp_err_t create_key(' in source else 'ts_keystore_store_key_ex(id,pair,type,opts)')+'\n'
 source=re.sub(r'^#include .*$', '',source,flags=re.M)
 platform=(root/'tests/certificate/stubs/platform.h').read_text()
 platform=platform[:platform.index('typedef void *ts_keypair_t;')]+'\n#endif\n'
@@ -25,26 +32,44 @@ prefix=r'''
 #include "ts_keystore.h"
 #include "ts_crypto.h"
 #include "ts_api.h"
+#include "ts_security.h"
+#include <stdarg.h>
+#include <errno.h>
+#define CONFIG_TS_WEBUI_AUTH_REQUIRED 1
 #include "ts_config_partitions.h"
 #include "ts_storage.h"
 #include <stdatomic.h>
 #include <ctype.h>
 #include <sys/stat.h>
+#include <unistd.h>
 #define CONFIG_TS_CONFIG_PACK_MAX_SIZE 65536
 #define TS_LOGI(...) ((void)0)
 #define TS_LOGE(...) ((void)0)
 #define TS_LOGD(...) ((void)0)
 #define API_PREFIX "/api/v1"
+#define TS_HTTP_GET 0
+#define TS_HTTP_POST 1
+#define TS_HTTP_PUT 2
+#define TS_HTTP_DELETE 3
 #define TS_API_MALLOC malloc
 typedef struct {size_t content_len,query_len;} test_http_req_t;
 typedef struct {const char *uri;const char *body;size_t body_len;int method;test_http_req_t *req;} ts_http_request_t;
 /* This suite uses an authenticated caller; role boundaries have their own suite. */
-enum { TS_PERM_NONE=0, TS_PERM_READ=1, TS_PERM_ROOT=4 };
+static int validation_calls, revoke_on_validation, downgrade_on_validation;
+esp_err_t ts_security_validate_session(uint32_t sid, ts_session_t *session) {
+ ++validation_calls;
+ if (!sid || validation_calls == revoke_on_validation) return ESP_ERR_NOT_FOUND;
+ session->level = sid == 3 ? TS_PERM_ROOT : sid == 2 ? TS_PERM_ADMIN : sid == 1 ? TS_PERM_READ : TS_PERM_NONE;
+ if (validation_calls == downgrade_on_validation) session->level = TS_PERM_READ;
+ return ESP_OK;
+}
+static void ts_httpd_set_body_receive_budget(uint32_t milliseconds){(void)milliseconds;}
 static esp_err_t check_auth(ts_http_request_t *req,uint32_t *session,int required) {(void)req;(void)required;*session=1;return ESP_OK;}
 cJSON *ts_api_get_info(const char *name) {
  (void)name;cJSON *info=cJSON_CreateObject();cJSON_AddBoolToObject(info,"requires_auth",true);return info;
 }
 esp_err_t ts_storage_check_write_path(const char *path,bool internal) {(void)path;(void)internal;assert(!"unexpected storage read in keystore test");return ESP_FAIL;}
+esp_err_t ts_api_get_access(const char *name,ts_api_access_t *access){(void)name;access->requires_auth=true;access->minimum_level=TS_PERM_READ;access->allowed_methods=TS_API_METHOD_ALL;return ESP_OK;}
 static size_t httpd_req_get_url_query_len(void *p){return p?((test_http_req_t *)p)->query_len:0;}
 static esp_err_t httpd_req_get_url_query_str(void *p,char *b,size_t n){return ESP_FAIL;}
 esp_err_t ts_http_send_json(ts_http_request_t *,int,const char *);
@@ -54,6 +79,27 @@ static unsigned rule_dispatch_calls;
 #include "cJSON.h"
 static size_t allocation_size_fail;
 static void *key_alloc(size_t n){return n==allocation_size_fail?NULL:malloc(n);}
+void *heap_caps_malloc(size_t n,unsigned caps){(void)caps;return key_alloc(n);}
+static char diagnostics[16384];
+static pthread_mutex_t diagnostics_lock=PTHREAD_MUTEX_INITIALIZER;
+static void capture_log(const char *tag,const char *format,...) {
+ pthread_mutex_lock(&diagnostics_lock);(void)tag;size_t used=strlen(diagnostics);va_list ap;va_start(ap,format);
+ vsnprintf(diagnostics+used,sizeof diagnostics-used,format,ap);va_end(ap);pthread_mutex_unlock(&diagnostics_lock);
+}
+#undef ESP_LOGI
+#undef ESP_LOGW
+#undef ESP_LOGE
+#undef ESP_LOGD
+#define ESP_LOGI capture_log
+#define ESP_LOGW capture_log
+#define ESP_LOGE capture_log
+#define ESP_LOGD capture_log
+#undef TS_LOGI
+#undef TS_LOGE
+#undef TS_LOGD
+#define TS_LOGI capture_log
+#define TS_LOGE capture_log
+#define TS_LOGD capture_log
 #define TS_MALLOC_PSRAM key_alloc
 #define TS_STRDUP_PSRAM strdup
 #define ESP_ERR_INVALID_RESPONSE 0x108
@@ -86,8 +132,15 @@ static pthread_mutex_t gate_lock=PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t gate_cond=PTHREAD_COND_INITIALIZER;
 static bool gate_enabled;static int gate_arrived,gate_target;
 static char sent_json[4096];static int send_status;
+static const char *pause_read;
+static bool read_arrived, read_release, writer_started;
+static atomic_bool writer_done;
 static entry *find(const char *key) {for(int i=0;i<40;i++)if(db[i].used&&!strcmp(db[i].key,key))return &db[i];return NULL;}
-static esp_err_t get(const char *key,void *out,size_t *len){if(fail_get&&!strcmp(fail_get,key))return ESP_FAIL;entry *e=find(key);if(!e)return ESP_ERR_NVS_NOT_FOUND;if(out&&*len<e->len)return ESP_ERR_NVS_INVALID_LENGTH;if(out)memcpy(out,e->data,e->len);*len=e->len;return ESP_OK;}
+static esp_err_t get(const char *key,void *out,size_t *len){if(fail_get&&!strcmp(fail_get,key))return ESP_FAIL;entry *e=find(key);if(!e)return ESP_ERR_NVS_NOT_FOUND;if(out&&*len<e->len)return ESP_ERR_NVS_INVALID_LENGTH;if(out&&pause_read&&!strcmp(key,pause_read)){
+ pthread_mutex_lock(&gate_lock);read_arrived=true;pthread_cond_broadcast(&gate_cond);
+ while(!read_release)pthread_cond_wait(&gate_cond,&gate_lock);pthread_mutex_unlock(&gate_lock);
+ }
+ if(out)memcpy(out,e->data,e->len);*len=e->len;return ESP_OK;}
 static esp_err_t set(const char *key,const void *data,size_t len){
  writes++;bool failed=fail_key&&!strcmp(fail_key,key)&&++write_hits==fail_write_at;
  if(fail_restore&&!strcmp(key,"_index")&&!strcmp(data,"keep"))failed=true;
@@ -126,12 +179,12 @@ esp_err_t ts_api_call_for_session(const char *name,const cJSON *params,uint32_t 
 esp_err_t ts_api_automation_proxy_fetch_for_session(const cJSON *params,uint32_t session_id,ts_api_result_t *result){
  (void)params;(void)session_id;(void)result;assert(!"unexpected proxy call in keystore test");return ESP_FAIL;
 }
-void ts_api_result_error(ts_api_result_t *r,ts_api_result_code_t c,const char *s){r->code=c;r->message=strdup(s);}
+void ts_api_result_error(ts_api_result_t *r,ts_api_result_code_t c,const char *s){free(r->message);cJSON_Delete(r->data);r->data=NULL;r->code=c;r->message=strdup(s);}
 void ts_api_result_ok(ts_api_result_t *r,cJSON *data){r->code=0;r->data=data;}
 void ts_api_result_free(ts_api_result_t *r){free(r->message);cJSON_Delete(r->data);memset(r,0,sizeof(*r));}
 esp_err_t ts_http_send_json(ts_http_request_t *r,int status,const char *j){strcpy(sent_json,j);send_status=status;return ESP_OK;}
 esp_err_t ts_http_send_error(ts_http_request_t *r,int status,const char *j){strcpy(sent_json,j);send_status=status;return ESP_OK;}
-static void reset(void){assert(!live_crypto);memset(db,0,sizeof(db));fail_key=fail_get=fail_erase=NULL;fail_write_at=fail_commit_at=commit_calls=writes=write_hits=0;fail_partial=fail_restore=false;crypto_calls=crypto_error=private_error=public_error=0;private_empty=false;gate_enabled=false;gate_arrived=gate_target=0;allocation_size_fail=0;fail_response_alloc=false;}
+static void reset(void){diagnostics[0]=0;validation_calls=revoke_on_validation=downgrade_on_validation=0;pause_read=NULL;read_arrived=read_release=writer_started=false;writer_done=false;assert(!live_crypto);memset(db,0,sizeof(db));fail_key=fail_get=fail_erase=NULL;fail_write_at=fail_commit_at=commit_calls=writes=write_hits=0;fail_partial=fail_restore=false;crypto_calls=crypto_error=private_error=public_error=0;private_empty=false;gate_enabled=false;gate_arrived=gate_target=0;allocation_size_fail=0;fail_response_alloc=false;}
 static esp_err_t store(const char *id){ts_keystore_keypair_t p={"SYNTHETIC",10,"SYNTHETIC",10};return ts_keystore_store_key(id,&p,TS_KEYSTORE_TYPE_RSA_2048,NULL);}
 static ts_keystore_generate_result_t detail;
 static esp_err_t generate(const char *id){return ts_keystore_generate_key_with_result(id,TS_KEYSTORE_TYPE_RSA_2048,NULL,&detail);}
@@ -142,9 +195,123 @@ static void *work(void *arg){struct worker *w=arg;w->result=ts_keystore_generate
 static void *always_fail(size_t n){return NULL;}
 static int json_alloc_count,json_fail_at;
 static void *fail_one_json_alloc(size_t n){return ++json_alloc_count==json_fail_at?NULL:malloc(n);}
+
+struct read_work {bool private;ts_keystore_key_info_t info;char *bytes;size_t length;esp_err_t result;};
+static void *read_work(void *arg){struct read_work *w=arg;w->result=w->private?
+ ts_keystore_read_exportable_private_record("same",&w->info,&w->bytes,&w->length):
+ ts_keystore_read_public_record("same",true,&w->info,&w->bytes,&w->length);return NULL;}
+static void *replace_work(void *arg){(void)arg;pthread_mutex_lock(&gate_lock);writer_started=true;pthread_cond_broadcast(&gate_cond);pthread_mutex_unlock(&gate_lock);
+ ts_keystore_keypair_t pair={"NEW-PRIVATE",12,"NEW-PUBLIC",11};ts_keystore_gen_opts_t opts={.comment="new",.exportable=false};
+ assert(ts_keystore_delete_key("same")==ESP_OK);
+ assert(STORE_OPTS("same",&pair,TS_KEYSTORE_TYPE_ECDSA_P256,&opts)==ESP_OK);writer_done=true;return NULL;}
+static void read_result(esp_err_t ret,ts_api_result_t *r,bool okay) {
+ assert((ret==ESP_OK)==okay);assert((r->code==TS_API_OK)==okay);if(!okay)assert(!r->data);
+ ts_api_result_free(r);
+}
 int main(int argc,char **argv){
  assert(ts_keystore_init()==ESP_OK);reset();
 
+
+ if(!strcmp(argv[1],"visibility")){
+  assert(store("visible")==ESP_OK);
+  ts_keystore_keypair_t pair={"SECRET-PRIVATE",15,"SECRET-PUBLIC",14};
+  ts_keystore_gen_opts_t opts={.comment="SECRET-COMMENT",.alias="SECRET-ALIAS",.hidden=true,.exportable=true};
+  assert(STORE_OPTS("vault42",&pair,TS_KEYSTORE_TYPE_ECDSA_P384,&opts)==ESP_OK);
+  cJSON *p=cJSON_Parse("{\"id\":\"vault42\",\"show_hidden\":true,\"role\":\"root\",\"session_id\":3}");
+  for(uint32_t sid=0;sid<=4;++sid){
+   ts_api_result_t r={0};esp_err_t ret=api_key_list_for_session(p,sid,&r);
+   if(sid==0||sid==4)read_result(ret,&r,false);
+   else {assert(ret==ESP_OK&&r.code==0);char *json=cJSON_PrintUnformatted(r.data);assert((strstr(json,"SECRET-")!=NULL)==(sid==2||sid==3));assert(cJSON_GetObjectItem(r.data,"count")->valueint==((sid==2||sid==3)?2:1));free(json);ts_api_result_free(&r);}
+   read_result(api_key_info_for_session(p,sid,&r),&r,sid==2||sid==3);
+   read_result(api_key_export_for_session(p,sid,&r),&r,sid==2||sid==3);
+   read_result(api_key_export_private_for_session(p,sid,&r),&r,sid==2||sid==3);
+  }
+  ts_api_result_t r={0};read_result(api_key_list(p,&r),&r,true);read_result(api_key_info(p,&r),&r,true);read_result(api_key_export(p,&r),&r,true);
+  cJSON_ReplaceItemInObject(p,"id",cJSON_CreateString("visible"));
+  for(uint32_t sid=1;sid<=3;++sid){read_result(api_key_info_for_session(p,sid,&r),&r,true);read_result(api_key_export_for_session(p,sid,&r),&r,true);read_result(api_key_export_private_for_session(p,sid,&r),&r,false);}
+  char *raw=NULL;size_t len=0;assert(ts_keystore_load_private_key("visible",&raw,&len)==ESP_OK&&len==9);secure_free_key(raw,len);
+  assert(ts_keystore_export_private_key_to_file("visible","unused")==ESP_ERR_NOT_ALLOWED);
+  cJSON_ReplaceItemInObject(p,"id",cJSON_CreateString("vault42"));
+  for(int which=0;which<4;++which)for(int downgrade=0;downgrade<2;++downgrade){
+   validation_calls=0;revoke_on_validation=downgrade?0:2;downgrade_on_validation=downgrade?2:0;
+   esp_err_t (*handlers[])(const cJSON*,uint32_t,ts_api_result_t*)={api_key_list_for_session,api_key_info_for_session,api_key_export_for_session,api_key_export_private_for_session};
+   read_result(handlers[which](p,3,&r),&r,false);
+  }
+  revoke_on_validation=downgrade_on_validation=0;
+  for(int which=0;which<4;++which)for(int n=1;n<=96;++n){
+   json_alloc_count=0;json_fail_at=n;cJSON_Hooks hooks={fail_one_json_alloc,free};cJSON_InitHooks(&hooks);
+   esp_err_t (*handlers[])(const cJSON*,uint32_t,ts_api_result_t*)={api_key_list_for_session,api_key_info_for_session,api_key_export_for_session,api_key_export_private_for_session};
+   esp_err_t ret=handlers[which](p,3,&r);cJSON_InitHooks(NULL);
+   if(ret==ESP_OK){assert(r.data);if(which>=2)assert(cJSON_GetObjectItem(r.data,which==3?"private_key":"public_key")&&cJSON_GetObjectItem(r.data,"comment"));else if(which==1)assert(cJSON_GetObjectItem(r.data,"alias"));else assert(cJSON_GetArraySize(cJSON_GetObjectItem(r.data,"keys"))==2);}else assert(r.code!=TS_API_OK&&!r.data);
+   ts_api_result_free(&r);
+  }
+  assert(!strstr(diagnostics,"vault42")&&!strstr(diagnostics,"SECRET-")&&!strstr(diagnostics,"visible"));
+  cJSON_Delete(p);
+ }
+ if(!strcmp(argv[1],"read_bounds")){
+  assert(store("one")==ESP_OK&&store("two")==ESP_OK);
+  struct {uint32_t before;ts_keystore_key_info_t info[1];uint32_t after;} bounded={.before=0x12345678,.after=0x87654321};
+  size_t count=1;assert(ts_keystore_list_keys_ex(bounded.info,&count,false)==ESP_OK&&count==1&&bounded.before==0x12345678&&bounded.after==0x87654321);
+  count=0;assert(ts_keystore_list_keys(bounded.info,&count)==ESP_OK&&!count);
+  fail_get="one_meta";count=1;assert(ts_keystore_list_keys_ex(bounded.info,&count,false)!=ESP_OK&&!count);fail_get=NULL;
+  const char *invalid[]={"[]","{}","{\"type\":1}","{\"type\":\"future\"}","{\"type\":\"rsa2048\",\"hidden\":0}","{\"type\":\"rsa2048\",\"hidden\":true,\"hidden\":false}","{\"type\":\"rsa2048\",\"comment\":null}","{\"type\":\"rsa2048\",\"created_at\":-1}","{\"type\":\"rsa2048\",\"created_at\":4294967296}","{\"type\":\"rsa2048\",\"created_at\":0.5}","{\"type\":\"rsa2048\",\"exportable\":\"true\"}","{\"type\":\"rsa2048\",\"future_secret\":true}","{\"type\":\"rsa2048\"} {}"};
+  for(unsigned i=0;i<sizeof invalid/sizeof *invalid;++i){
+   set("one_meta",invalid[i],strlen(invalid[i])+1);ts_keystore_key_info_t info;char *pub=(char*)1;size_t size=99;
+   assert(ts_keystore_read_public_record("one",false,&info,&pub,&size)!=ESP_OK&&!pub&&!size&&!info.id[0]);
+   count=1;assert(ts_keystore_list_keys_ex(bounded.info,&count,false)!=ESP_OK&&!count);
+  }
+  reset();assert(store("one")==ESP_OK);ts_keystore_key_info_t info;char *pub=NULL;size_t size;
+  fail_get="one_meta";assert(ts_keystore_read_public_record("one",true,&info,&pub,&size)==ESP_FAIL&&!pub);fail_get=NULL;
+  assert(ts_keystore_read_public_record("missing",false,&info,&pub,&size)==ESP_ERR_NOT_FOUND);
+  char too_big[1100];memset(too_big,'x',sizeof too_big);set("one_pub",too_big,sizeof too_big);assert(ts_keystore_read_public_record("one",true,&info,&pub,&size)==ESP_ERR_INVALID_SIZE&&!pub&&!size);
+  const char *bad_bytes[]={"", "PUB\0hidden"};const size_t bad_sizes[]={1,11};
+  for(unsigned i=0;i<2;++i){set("one_pub",bad_bytes[i],bad_sizes[i]);assert(ts_keystore_read_public_record("one",true,&info,&pub,&size)==ESP_ERR_INVALID_RESPONSE&&!pub&&!size);}
+  const char *bad_index[]={"one,","one,,two","12345678901234567890123456789012","a,b,c,d,e,f,g,h,i"};
+  for(unsigned i=0;i<sizeof bad_index/sizeof *bad_index;++i){set("_index",bad_index[i],strlen(bad_index[i])+1);count=1;assert(ts_keystore_list_keys_ex(bounded.info,&count,false)!=ESP_OK&&!count);}
+  ts_keystore_gen_opts_t opts={0};char escaped[64];memset(escaped,'\n',63);escaped[63]=0;opts.comment=opts.alias=escaped;
+  reset();ts_keystore_keypair_t pair={"PRIVATE",8,"PUBLIC",7};assert(STORE_OPTS("escaped",&pair,TS_KEYSTORE_TYPE_UNKNOWN,&opts)==ESP_OK);assert(ts_keystore_get_key_info("escaped",&info)==ESP_OK&&!strcmp(info.comment,escaped));
+ }
+ if(!strcmp(argv[1],"read_snapshot")){
+  for(int private=0;private<2;++private){
+   reset();ts_keystore_keypair_t pair={"OLD-PRIVATE",12,"OLD-PUBLIC",11};ts_keystore_gen_opts_t opts={.comment="old",.exportable=true};
+   assert(STORE_OPTS("same",&pair,TS_KEYSTORE_TYPE_RSA_2048,&opts)==ESP_OK);
+   pause_read=private?"same_priv":"same_pub";struct read_work w={.private=private};pthread_t reader,writer;
+   pthread_create(&reader,NULL,read_work,&w);pthread_mutex_lock(&gate_lock);while(!read_arrived)pthread_cond_wait(&gate_cond,&gate_lock);pthread_mutex_unlock(&gate_lock);
+   pthread_create(&writer,NULL,replace_work,NULL);pthread_mutex_lock(&gate_lock);while(!writer_started)pthread_cond_wait(&gate_cond,&gate_lock);
+   assert(pthread_mutex_trylock(s_keystore.write_lock)==EBUSY&&!writer_done);read_release=true;pthread_cond_broadcast(&gate_cond);pthread_mutex_unlock(&gate_lock);
+   pthread_join(reader,NULL);pthread_join(writer,NULL);assert(w.result==ESP_OK&&!strcmp(w.info.comment,"old")&&w.info.type==TS_KEYSTORE_TYPE_RSA_2048&&!strcmp(w.bytes,private?"OLD-PRIVATE":"OLD-PUBLIC"));secure_free_key(w.bytes,w.length);
+   pause_read=NULL;char *bytes=NULL;size_t length=0;assert(ts_keystore_read_exportable_private_record("same",&w.info,&bytes,&length)==ESP_ERR_NOT_ALLOWED&&!bytes);
+   assert(ts_keystore_load_private_key("same",&bytes,&length)==ESP_OK&&!strcmp(bytes,"NEW-PRIVATE"));secure_free_key(bytes,length);
+  }
+ }
+
+ if(!strcmp(argv[1],"create_only")){
+  ts_keystore_keypair_t old={"OLD-PRIVATE",12,"OLD-PUBLIC",11},next={"NEW-PRIVATE",12,"NEW-PUBLIC",11};
+  ts_keystore_gen_opts_t old_opts={.exportable=true,.hidden=true},new_opts={.exportable=false};
+  assert(STORE_OPTS("same",&old,TS_KEYSTORE_TYPE_RSA_2048,&old_opts)==ESP_OK);entry snapshot[40];memcpy(snapshot,db,sizeof db);int before=writes;
+  fail_key="same_meta";fail_write_at=1;write_hits=0;
+  assert(STORE_OPTS("same",&next,TS_KEYSTORE_TYPE_ECDSA_P256,&new_opts)==ESP_ERR_INVALID_STATE&&writes==before&&!memcmp(snapshot,db,sizeof db));
+  assert(ts_keystore_store_key("same",&next,TS_KEYSTORE_TYPE_ECDSA_P256,"attempt")==ESP_ERR_INVALID_STATE&&writes==before&&!memcmp(snapshot,db,sizeof db));
+  fail_key=NULL;ts_keystore_key_info_t info;char *bytes=NULL;size_t len=0;assert(ts_keystore_read_exportable_private_record("same",&info,&bytes,&len)==ESP_OK&&!strcmp(bytes,"OLD-PRIVATE")&&info.hidden&&info.exportable);secure_free_key(bytes,len);
+  for(int fragment=0;fragment<4;++fragment){reset();set((const char*[]){"new_priv","new_pub","new_meta","_index"}[fragment],fragment==3?"new":"fragment",fragment==3?4:9);memcpy(snapshot,db,sizeof db);before=writes;assert(ts_keystore_store_key("new",&next,TS_KEYSTORE_TYPE_RSA_2048,NULL)==ESP_ERR_INVALID_STATE&&writes==before&&!memcmp(snapshot,db,sizeof db));}
+  reset();fail_get="new_meta";before=writes;assert(ts_keystore_store_key("new",&next,TS_KEYSTORE_TYPE_RSA_2048,NULL)==ESP_FAIL&&writes==before);fail_get=NULL;
+  reset();assert(STORE_OPTS("same",&old,TS_KEYSTORE_TYPE_RSA_2048,&old_opts)==ESP_OK);assert(ts_keystore_delete_key("same")==ESP_OK);assert(STORE_OPTS("same",&next,TS_KEYSTORE_TYPE_ECDSA_P256,&new_opts)==ESP_OK);assert(ts_keystore_read_exportable_private_record("same",&info,&bytes,&len)==ESP_ERR_NOT_ALLOWED);
+  const char *parts[]={"new_priv","new_pub","new_meta","_index",NULL};
+  for(int partial=0;partial<2;++partial)for(int stage=0;stage<5;++stage){reset();assert(store("keep")==ESP_OK);fail_key=parts[stage];fail_write_at=1;fail_partial=partial;if(stage==4)fail_commit_at=commit_calls+1;assert(ts_keystore_store_key("new",&next,TS_KEYSTORE_TYPE_RSA_2048,NULL)!=ESP_OK);absent("new");kept();}
+  reset();assert(store("keep")==ESP_OK);fail_key="new_meta";fail_write_at=1;fail_erase="new_priv";assert(ts_keystore_store_key("new",&next,TS_KEYSTORE_TYPE_RSA_2048,NULL)==ESP_ERR_NOT_FINISHED&&find("new_priv"));fail_key=fail_erase=NULL;before=writes;assert(ts_keystore_store_key("new",&next,TS_KEYSTORE_TYPE_RSA_2048,NULL)==ESP_ERR_INVALID_STATE&&writes==before);kept();
+  reset();ts_keystore_keypair_t bad=next;bad.private_key="A\0B";bad.private_key_len=4;assert(ts_keystore_store_key("new",&bad,TS_KEYSTORE_TYPE_UNKNOWN,NULL)==ESP_ERR_INVALID_ARG&&!writes);
+  bad=next;bad.public_key=NULL;assert(ts_keystore_store_key("new",&bad,TS_KEYSTORE_TYPE_UNKNOWN,NULL)==ESP_ERR_INVALID_ARG&&!writes);
+  reset();cJSON *params=cJSON_Parse("{\"id\":\"hide-log\",\"hidden\":true}");ts_api_result_t r={0};assert(api_key_generate(params,&r)==ESP_OK&&!strcmp(cJSON_GetObjectItem(r.data,"id")->valuestring,"hide-log")&&!strstr(diagnostics,"hide-log"));ts_api_result_free(&r);cJSON_Delete(params);
+  reset();fail_response_alloc=true;params=cJSON_Parse("{\"id\":\"hide-log\",\"hidden\":true}");assert(api_key_generate(params,&r)==ESP_ERR_NO_MEM);cJSON_InitHooks(NULL);assert(find("hide-log_priv")&&!strstr(diagnostics,"hide-log"));ts_api_result_free(&r);cJSON_Delete(params);
+ }
+ if(!strcmp(argv[1],"file_import")){
+  char path[]="/tmp/ts-keystore-input-XXXXXX";int fd=mkstemp(path);assert(fd>=0);FILE *file=fdopen(fd,"wb");assert(file);const char *private_text="-----BEGIN RSA PRIVATE KEY-----\nSYNTHETIC\n-----END RSA PRIVATE KEY-----\n";assert(fwrite(private_text,1,strlen(private_text),file)==strlen(private_text)&&!fclose(file));
+  assert(ts_keystore_import_from_file("import",path,"note")==ESP_OK);ts_keystore_key_info_t info;assert(ts_keystore_get_key_info("import",&info)==ESP_OK&&!info.exportable&&!info.has_public_key);
+  entry snapshot[40];memcpy(snapshot,db,sizeof db);assert(ts_keystore_import_from_file("import",path,NULL)==ESP_ERR_INVALID_STATE&&!memcmp(snapshot,db,sizeof db));
+  char public_path[256];snprintf(public_path,sizeof public_path,"%s.pub",path);file=fopen(public_path,"wb");assert(file&&fwrite("ssh-rsa SYNTHETIC",1,17,file)==17&&!fclose(file));assert(ts_keystore_import_from_file("pair",path,NULL)==ESP_OK&&ts_keystore_get_key_info("pair",&info)==ESP_OK&&info.has_public_key);
+  file=fopen(public_path,"wb");assert(file);for(int i=0;i<TS_KEYSTORE_PUBKEY_MAX_LEN+1;++i)fputc('x',file);assert(!fclose(file));int before=writes;assert(ts_keystore_import_from_file("large",path,NULL)==ESP_ERR_INVALID_SIZE&&writes==before);absent("large");
+  assert(!unlink(public_path));file=fopen(path,"wb");assert(file&&!fclose(file));assert(ts_keystore_import_from_file("empty",path,NULL)==ESP_ERR_INVALID_SIZE&&writes==before);assert(!unlink(path));
+ }
  if(!strcmp(argv[1],"deletion")){
   const char *erasures[]={"keep_priv","keep_pub","keep_meta"};
   for(unsigned i=0;i<3;++i){reset();assert(store("keep")==ESP_OK);fail_erase=erasures[i];assert(ts_keystore_delete_key("keep")!=ESP_OK);assert(find(erasures[i]));fail_erase=NULL;assert(ts_keystore_delete_key("keep")==ESP_OK);absent("keep");}
@@ -232,11 +399,11 @@ int main(int argc,char **argv){
 '''
 
 with tempfile.TemporaryDirectory(prefix='ts-keystore-') as tmp:
- p=Path(tmp);(p/'platform.h').write_text(platform);(p/'esp_err.h').write_text('#include "platform.h"\n');(p/'test.c').write_text(prefix+query_parser+strict_json+body_complete+source+api_handler+web_handler+boundaries)
+ p=Path(tmp);(p/'platform.h').write_text(platform);(p/'esp_err.h').write_text('#include "platform.h"\n');(p/'test.c').write_text(prefix+query_parser+strict_json+body_complete+store_adapter+source+read_handlers+api_handler+web_handler+boundaries)
  env={**os.environ,'DEVELOPER_DIR':'/Library/Developer/CommandLineTools'}
  subprocess.run(['cc','-std=c11','-g','-Wno-deprecated-declarations','-fsanitize=address,undefined','-I'+tmp,'-I'+str(root/'components/ts_security/include'),'-I'+str(root/'components/ts_api/include'),'-I'+str(root/'components/ts_core/ts_config/include'),'-I'+str(root/'components/ts_storage/include'),'-I'+str(idf/'components/json/cJSON'),str(p/'test.c'),str(idf/'components/json/cJSON/cJSON.c'),'-lm','-lpthread','-o',str(p/'test')],check=True,env=env)
  failures=[]
- for case in ['deletion','metadata','index','prefix','matrix','admission','concurrency','compatibility','api','allocations','lifecycle']:
+ for case in ['deletion','metadata','index','prefix','matrix','admission','concurrency','compatibility','api','allocations','lifecycle','visibility','read_bounds','read_snapshot','create_only','file_import']:
   result=subprocess.run([str(p/'test'),case],env=env,capture_output=True,text=True)
   print(case,result.stdout or result.stderr.strip());
   if result.returncode:failures.append(case)

@@ -217,6 +217,8 @@ esp_err_t ts_api_wifi_register(void)
             .description = "Get WiFi status",
             .category = TS_API_CAT_NETWORK,
             .handler = api_wifi_status,
+            .external_access = TS_API_ACCESS_PUBLIC,
+            .allowed_methods = TS_API_METHOD_READ,
             .requires_auth = false,
         },
         {
@@ -224,13 +226,17 @@ esp_err_t ts_api_wifi_register(void)
             .description = "Scan for WiFi networks",
             .category = TS_API_CAT_NETWORK,
             .handler = api_wifi_scan,
-            .requires_auth = false,
+            .external_access = TS_API_ACCESS_ADMIN,
+            .allowed_methods = TS_API_METHOD_WRITE,
+            .requires_auth = true,
         },
         {
             .name = "wifi.connect",
             .description = "Connect to WiFi network",
             .category = TS_API_CAT_NETWORK,
             .handler = api_wifi_connect,
+            .external_access = TS_API_ACCESS_ADMIN,
+            .allowed_methods = TS_API_METHOD_WRITE,
             .requires_auth = true,
         },
         {
@@ -238,6 +244,8 @@ esp_err_t ts_api_wifi_register(void)
             .description = "Disconnect from WiFi",
             .category = TS_API_CAT_NETWORK,
             .handler = api_wifi_disconnect,
+            .external_access = TS_API_ACCESS_ADMIN,
+            .allowed_methods = TS_API_METHOD_WRITE,
             .requires_auth = true,
         },
     };

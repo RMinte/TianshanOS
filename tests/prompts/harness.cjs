@@ -1,7 +1,7 @@
 const fs = require('node:fs');
 const vm = require('node:vm');
 const path = require('node:path');
-const root = path.resolve(__dirname, '../../components/ts_webui/web');
+const root = process.env.TS_TEST_WEB_ROOT ? path.resolve(process.env.TS_TEST_WEB_ROOT) : path.resolve(__dirname, '../../components/ts_webui/web');
 const read = file => fs.readFileSync(path.join(root,file),'utf8');
 class Element {
     constructor(tag, doc) { this.tagName=tag.toUpperCase();this.doc=doc;this.children=[];this.style={};this.dataset={};this.attributes={};this.className='';this.textContent='';this.value='';this.disabled=false;this.hidden=false;

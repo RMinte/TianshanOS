@@ -99,6 +99,7 @@ static esp_err_t api_network_status(const cJSON *params, ts_api_result_t *result
     cJSON *data = cJSON_CreateObject();
     
     cJSON_AddStringToObject(data, "hostname", ts_net_get_hostname());
+    cJSON_AddStringToObject(data, "wifi_mode", wifi_mode_to_str(ts_wifi_get_mode()));
     
     // Ethernet status
     cJSON *eth = cJSON_AddObjectToObject(data, "ethernet");
@@ -484,6 +485,8 @@ static const ts_api_endpoint_t network_endpoints[] = {
         .description = "Get overall network status",
         .category = TS_API_CAT_NETWORK,
         .handler = api_network_status,
+        .external_access = TS_API_ACCESS_PUBLIC,
+        .allowed_methods = TS_API_METHOD_READ,
         .requires_auth = false,
     },
     {
@@ -491,6 +494,8 @@ static const ts_api_endpoint_t network_endpoints[] = {
         .description = "Get/set WiFi mode",
         .category = TS_API_CAT_NETWORK,
         .handler = api_network_wifi_mode,
+        .external_access = TS_API_ACCESS_ADMIN,
+        .allowed_methods = TS_API_METHOD_WRITE,
         .requires_auth = true,
         .permission = "network.config",
     },
@@ -499,13 +504,17 @@ static const ts_api_endpoint_t network_endpoints[] = {
         .description = "Scan for WiFi networks",
         .category = TS_API_CAT_NETWORK,
         .handler = api_network_wifi_scan,
-        .requires_auth = false,
+        .external_access = TS_API_ACCESS_ADMIN,
+        .allowed_methods = TS_API_METHOD_WRITE,
+        .requires_auth = true,
     },
     {
         .name = "network.wifi.connect",
         .description = "Connect to WiFi network",
         .category = TS_API_CAT_NETWORK,
         .handler = api_network_wifi_connect,
+        .external_access = TS_API_ACCESS_ADMIN,
+        .allowed_methods = TS_API_METHOD_WRITE,
         .requires_auth = true,
         .permission = "network.config",
     },
@@ -514,6 +523,8 @@ static const ts_api_endpoint_t network_endpoints[] = {
         .description = "Disconnect from WiFi",
         .category = TS_API_CAT_NETWORK,
         .handler = api_network_wifi_disconnect,
+        .external_access = TS_API_ACCESS_ADMIN,
+        .allowed_methods = TS_API_METHOD_WRITE,
         .requires_auth = true,
         .permission = "network.config",
     },
@@ -522,6 +533,8 @@ static const ts_api_endpoint_t network_endpoints[] = {
         .description = "Configure WiFi AP",
         .category = TS_API_CAT_NETWORK,
         .handler = api_network_wifi_ap_config,
+        .external_access = TS_API_ACCESS_ADMIN,
+        .allowed_methods = TS_API_METHOD_WRITE,
         .requires_auth = true,
         .permission = "network.config",
     },
@@ -530,13 +543,17 @@ static const ts_api_endpoint_t network_endpoints[] = {
         .description = "Get connected AP stations",
         .category = TS_API_CAT_NETWORK,
         .handler = api_network_wifi_ap_stations,
-        .requires_auth = false,
+        .external_access = TS_API_ACCESS_READ,
+        .allowed_methods = TS_API_METHOD_READ,
+        .requires_auth = true,
     },
     {
         .name = "network.eth.status",
         .description = "Get Ethernet status",
         .category = TS_API_CAT_NETWORK,
         .handler = api_network_eth_status,
+        .external_access = TS_API_ACCESS_PUBLIC,
+        .allowed_methods = TS_API_METHOD_READ,
         .requires_auth = false,
     },
     {
@@ -544,6 +561,8 @@ static const ts_api_endpoint_t network_endpoints[] = {
         .description = "Get/set hostname",
         .category = TS_API_CAT_NETWORK,
         .handler = api_network_hostname,
+        .external_access = TS_API_ACCESS_ADMIN,
+        .allowed_methods = TS_API_METHOD_WRITE,
         .requires_auth = true,
         .permission = "network.config",
     },

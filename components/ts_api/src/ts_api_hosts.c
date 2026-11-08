@@ -10,6 +10,7 @@
 #include "ts_known_hosts.h"
 #include "ts_log.h"
 #include <string.h>
+#include <stdlib.h>
 
 #define TAG "api_hosts"
 
@@ -26,7 +27,12 @@ static esp_err_t api_hosts_list(const cJSON *params, ts_api_result_t *result)
     
     TS_LOGI(TAG, "API: hosts.list called");
     
-    ts_known_host_t hosts[32];
+    /* Keep the bounded snapshot off the shared 8 KB HTTP task stack. */
+    ts_known_host_t *hosts = malloc(32 * sizeof(*hosts));
+    if (!hosts) {
+        ts_api_result_error(result, TS_API_ERR_NO_MEM, "Memory allocation failed");
+        return ESP_ERR_NO_MEM;
+    }
     size_t count = 0;
     
     esp_err_t ret = ts_known_hosts_list(hosts, 32, &count);
@@ -35,6 +41,7 @@ static esp_err_t api_hosts_list(const cJSON *params, ts_api_result_t *result)
     
     // 如果模块未初始化，返回空列表而不是错误
     if (ret == ESP_ERR_INVALID_STATE) {
+        free(hosts);
         cJSON *data = cJSON_CreateObject();
         cJSON_AddNumberToObject(data, "count", 0);
         cJSON_AddArrayToObject(data, "hosts");
@@ -43,12 +50,14 @@ static esp_err_t api_hosts_list(const cJSON *params, ts_api_result_t *result)
     }
     
     if (ret != ESP_OK) {
+        free(hosts);
         ts_api_result_error(result, TS_API_ERR_INTERNAL, "Failed to list known hosts");
         return ret;
     }
     
     cJSON *data = cJSON_CreateObject();
     if (!data) {
+        free(hosts);
         ts_api_result_error(result, TS_API_ERR_NO_MEM, "Memory allocation failed");
         return ESP_ERR_NO_MEM;
     }
@@ -66,6 +75,7 @@ static esp_err_t api_hosts_list(const cJSON *params, ts_api_result_t *result)
         cJSON_AddItemToArray(hosts_array, item);
     }
     
+    free(hosts);
     ts_api_result_ok(result, data);
     return ESP_OK;
 }
@@ -231,39 +241,39 @@ esp_err_t ts_api_hosts_register(void)
 {
     static const ts_api_endpoint_t endpoints[] = {
         {
-            .name = "hosts.list",
+            .name = "hosts.list", .external_access=TS_API_ACCESS_READ, .allowed_methods=TS_API_METHOD_READ,
             .description = "List all known SSH hosts",
             .category = TS_API_CAT_NETWORK,
             .handler = api_hosts_list,
-            .requires_auth = false,
+            .requires_auth=true,
         },
         {
-            .name = "hosts.info",
+            .name = "hosts.info", .external_access=TS_API_ACCESS_READ, .allowed_methods=TS_API_METHOD_READ,
             .description = "Get known host info",
             .category = TS_API_CAT_NETWORK,
             .handler = api_hosts_info,
-            .requires_auth = false,
+            .requires_auth=true,
         },
         {
-            .name = "hosts.remove",
+            .name = "hosts.remove", .external_access=TS_API_ACCESS_ADMIN, .allowed_methods=TS_API_METHOD_WRITE,
             .description = "Remove a known host",
             .category = TS_API_CAT_NETWORK,
             .handler = api_hosts_remove,
-            .requires_auth = true,
+            .requires_auth=true,
         },
         {
-            .name = "hosts.update",
+            .name = "hosts.update", .external_access=TS_API_ACCESS_ADMIN, .allowed_methods=TS_API_METHOD_WRITE,
             .description = "Force update a host fingerprint",
             .category = TS_API_CAT_NETWORK,
             .handler = api_hosts_update,
-            .requires_auth = true,
+            .requires_auth=true,
         },
         {
-            .name = "hosts.clear",
+            .name = "hosts.clear", .external_access=TS_API_ACCESS_ADMIN, .allowed_methods=TS_API_METHOD_WRITE,
             .description = "Clear all known hosts",
             .category = TS_API_CAT_NETWORK,
             .handler = api_hosts_clear,
-            .requires_auth = true,
+            .requires_auth=true,
         },
     };
     

@@ -8,6 +8,8 @@
  */
 
 #include "ts_storage.h"
+#include "ts_file_store.h"
+#include "esp_random.h"
 #include "ts_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -23,6 +25,8 @@
 #define TS_STG_MALLOC(size) ({ void *p = heap_caps_malloc((size), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT); p ? p : malloc(size); })
 
 #define TAG "ts_storage"
+
+extern esp_err_t ts_storage_sd_resolve_name(const char *path, char *name, size_t capacity);
 
 /*===========================================================================*/
 /*                          Private Data                                      */
@@ -239,6 +243,60 @@ esp_err_t ts_storage_write_file(const char *path, const void *data, size_t size)
     esp_err_t ret=ts_storage_check_write_path(path,false);
     if(ret==ESP_OK)ret=write_file_unchecked(path, data, size);
     ts_storage_sd_unlock();return ret;
+}
+
+esp_err_t ts_storage_replace_file(const char *path, const void *data, size_t size)
+{
+    if (!data && size) return ESP_ERR_INVALID_ARG;
+    /* SPIFFS has short object names; use its original direct writer instead of
+     * FAT staging suffixes, which can make valid SPIFFS names unusable. */
+    if (path && (strncmp(path, "/spiffs/", 8) == 0 || strncmp(path, "/www/", 5) == 0)) {
+        esp_err_t checked = ts_storage_check_external_write_path(path, false);
+        return checked == ESP_OK ? ts_storage_write_file(path, data, size) : checked;
+    }
+    ts_storage_sd_lock();
+    esp_err_t ret = ts_storage_check_external_write_path(path, false);
+    if (ret != ESP_OK) goto done;
+    /* Preserve the real long filename when a caller used a FAT short alias.
+     * Only the final component is renamed; parent aliases remain equivalent. */
+    char current[2 * TS_STORAGE_MAX_PATH], leaf[TS_STORAGE_MAX_PATH];
+    const char *target = path;
+    ret = !strncmp(path, "/sdcard/", 8) ?
+        ts_storage_sd_resolve_name(path, leaf, sizeof(leaf)) : ESP_ERR_NOT_FOUND;
+    if (ret == ESP_OK) {
+        const char *separator = strrchr(path, '/'), *backslash = strrchr(path, '\\');
+        if (backslash && backslash > separator) separator = backslash;
+        size_t parent = (size_t)(separator + 1 - path);
+        int length = snprintf(current, sizeof(current), "%.*s%s", (int)parent, path, leaf);
+        if (length < 0 || (size_t)length >= sizeof(current)) {
+            ret = ESP_ERR_INVALID_SIZE;
+            goto done;
+        }
+        target = current;
+    } else if (ret != ESP_ERR_NOT_FOUND) goto done;
+    /* Eight ASCII suffix bytes still fit the 255-character FAT component
+     * limit for every target accepted by our 256-byte /sdcard path contract.
+     * The actual newlib/VFS path buffer is larger than this internal path. */
+    char pending[TS_STORAGE_MAX_PATH + 8], previous[TS_STORAGE_MAX_PATH + 8];
+    ret = ESP_ERR_NOT_FINISHED;
+    for (unsigned attempt = 0; attempt < 8; ++attempt) {
+        unsigned long nonce = esp_random() & 0xffffffU;
+        snprintf(pending, sizeof(pending), "%s.n%06lx", path, nonce);
+        snprintf(previous, sizeof(previous), "%s.o%06lx", path, nonce);
+        struct stat st;
+        if (stat(pending, &st) == 0) continue;
+        if (errno != ENOENT) goto done;
+        if (stat(previous, &st) == 0) continue;
+        if (errno != ENOENT) goto done;
+        ts_file_store_paths_t paths = {target, pending, previous};
+        ret = ts_file_store_replace(&paths, data, size, TS_FILE_STORE_FRESH, NULL, NULL);
+        if (ret == ESP_ERR_NOT_FINISHED)
+            TS_LOGE(TAG, "File replacement requires recovery");
+        break;
+    }
+done:
+    ts_storage_sd_unlock();
+    return ret;
 }
 
 esp_err_t ts_storage_write_string(const char *path, const char *str)

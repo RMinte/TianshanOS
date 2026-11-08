@@ -143,29 +143,19 @@ static esp_err_t https_handler_wrapper(httpd_req_t *req)
         .body_len = 0
     };
     
-    // Read body if present - must loop to receive all data
-    if (req->content_len > 0) {
-        ts_req.body = TS_MALLOC_PSRAM(req->content_len + 1);
-        if (ts_req.body) {
-            size_t total_received = 0;
-            while (total_received < req->content_len) {
-                int ret = httpd_req_recv(req, ts_req.body + total_received, 
-                                         req->content_len - total_received);
-                if (ret <= 0) {
-                    if (ret == HTTPD_SOCK_ERR_TIMEOUT) {
-                        // Timeout, continue trying
-                        continue;
-                    }
-                    // Error or connection closed
-                    break;
-                }
-                total_received += ret;
-            }
-            ts_req.body[total_received] = '\0';
-            ts_req.body_len = total_received;
-        }
+    if (!ts_http_authorize_route(&ts_req, route)) return ESP_FAIL;
+
+    if (route->admit && !route->admit(&ts_req, route->user_data)) return ESP_FAIL;
+
+    if (ts_http_admit_body(&ts_req, route) != ESP_OK) return ESP_FAIL;
+    if (ts_http_receive_body(&ts_req) != ESP_OK) return ESP_FAIL;
+
+    /* A large body may outlive the session or a role change. Route-owned
+     * authorization is live again at execution, before any business effect. */
+    if (!ts_http_authorize_route(&ts_req, route)) {
+        free(ts_req.body);
+        return ESP_FAIL;
     }
-    
     esp_err_t result = route->handler(&ts_req, route->user_data);
     
     free(ts_req.body);

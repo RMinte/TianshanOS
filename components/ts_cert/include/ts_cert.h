@@ -150,6 +150,11 @@ void ts_cert_free_snapshot(ts_cert_snapshot_t *snapshot);
 bool ts_cert_prerequisites(const ts_cert_pki_status_t *status, bool require_ca);
 const char *ts_cert_validity_to_str(ts_cert_validity_t validity);
 esp_err_t ts_cert_install_certificate_ex(const char *pem, size_t len, ts_cert_op_error_t *detail);
+/* Auto-enrollment only: local key pair + TLS leaf + owner-installed issuer
+ * chain, before the single existing certificate write. Never installs a CA
+ * from a peer. Offline storage does not authorize TLS clients or config packs. */
+esp_err_t ts_cert_install_issued_certificate_ex(const char *pem, size_t len, ts_cert_op_error_t *detail);
+
 esp_err_t ts_cert_install_ca_chain_ex(const char *pem, size_t len, ts_cert_op_error_t *detail);
 const char *ts_cert_op_error_to_str(ts_cert_op_error_t detail);
 

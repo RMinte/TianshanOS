@@ -290,6 +290,8 @@ static esp_err_t api_service_restart(const cJSON *params, ts_api_result_t *resul
 static const ts_api_endpoint_t s_service_endpoints[] = {
     {
         .name = "service.list",
+        .external_access = TS_API_ACCESS_PUBLIC,
+        .allowed_methods = TS_API_METHOD_READ,
         .description = "List all services",
         .category = TS_API_CAT_SYSTEM,
         .handler = api_service_list,
@@ -297,6 +299,8 @@ static const ts_api_endpoint_t s_service_endpoints[] = {
     },
     {
         .name = "service.status",
+        .external_access = TS_API_ACCESS_PUBLIC,
+        .allowed_methods = TS_API_METHOD_READ,
         .description = "Get service status",
         .category = TS_API_CAT_SYSTEM,
         .handler = api_service_status,
@@ -304,6 +308,8 @@ static const ts_api_endpoint_t s_service_endpoints[] = {
     },
     {
         .name = "service.start",
+        .external_access = TS_API_ACCESS_ADMIN,
+        .allowed_methods = TS_API_METHOD_WRITE,
         .description = "Start a service",
         .category = TS_API_CAT_SYSTEM,
         .handler = api_service_start,
@@ -311,6 +317,8 @@ static const ts_api_endpoint_t s_service_endpoints[] = {
     },
     {
         .name = "service.stop",
+        .external_access = TS_API_ACCESS_ADMIN,
+        .allowed_methods = TS_API_METHOD_WRITE,
         .description = "Stop a service",
         .category = TS_API_CAT_SYSTEM,
         .handler = api_service_stop,
@@ -318,6 +326,8 @@ static const ts_api_endpoint_t s_service_endpoints[] = {
     },
     {
         .name = "service.restart",
+        .external_access = TS_API_ACCESS_ADMIN,
+        .allowed_methods = TS_API_METHOD_WRITE,
         .description = "Restart a service",
         .category = TS_API_CAT_SYSTEM,
         .handler = api_service_restart,

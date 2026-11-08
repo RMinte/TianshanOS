@@ -2,16 +2,14 @@
 """
 TianShanOS 版本号生成脚本
 
-在每次构建时生成包含 git hash 和时间戳的版本字符串。
-由 CMake 在构建阶段调用，确保每次构建都有唯一的版本号。
-
-输出格式: MAJOR.MINOR.PATCH+HASH.TIMESTAMP
-例如: 0.3.1+7fdcca4d.01311234
+生成不包含日期/时间的版本标识：干净检出使用 Git 提交号；
+未提交修改或无 Git 的源码副本使用源码指纹区分内容。
+输出示例：0.6.5+7fdcca4d 或 0.6.5+s1a2b3c4d。
 """
 
 import subprocess
 import sys
-from datetime import datetime
+import hashlib
 from pathlib import Path
 
 
@@ -78,6 +76,28 @@ def read_version_file(version_file: Path) -> tuple:
     return major, minor, patch, prerelease
 
 
+def source_fingerprint(repo_path: Path) -> str:
+    """Hash relative source paths/content, excluding clocks and local outputs."""
+    files = [repo_path / name for name in ('version.txt', 'CMakeLists.txt', 'Kconfig.projbuild',
+             'sdkconfig', 'sdkconfig.defaults', 'partitions.csv', 'dependencies.lock')]
+    for directory in ('components', 'main', 'cmake', 'tools'):
+        for path in (repo_path / directory).rglob('*'):
+            parts = path.relative_to(repo_path / directory).parts
+            if not path.is_file() or any(p.startswith('.') or p in ('build', '__pycache__', 'node_modules') for p in parts):
+                continue
+            if directory != 'tools' or path.suffix in ('.py', '.sh'):
+                files.append(path)
+    digest = hashlib.sha256()
+    for path in sorted(p for p in files if p.is_file()):
+        content = path.read_bytes()
+        if path.name == 'sdkconfig':
+            content = '\n'.join(sorted(line for line in content.decode().splitlines()
+                       if line.startswith('CONFIG_') or line.startswith('# CONFIG_'))).encode()
+        digest.update(path.relative_to(repo_path).as_posix().encode() + b'\0')
+        digest.update(hashlib.sha256(content).digest())
+    return digest.hexdigest()[:8]
+
+
 def generate_version(repo_path: Path) -> str:
     """生成完整版本字符串"""
     version_file = repo_path / 'version.txt'
@@ -88,16 +108,14 @@ def generate_version(repo_path: Path) -> str:
     if prerelease:
         version += f"-{prerelease}"
     
-    # 构建元数据: HASH[d].TIMESTAMP
     git_hash = get_git_hash(repo_path)
-    dirty_flag = 'd' if is_git_dirty(repo_path) else ''
-    timestamp = datetime.now().strftime('%m%d%H%M')
-    
-    if git_hash:
-        build_meta = f"{git_hash}{dirty_flag}.{timestamp}"
+    if git_hash and not is_git_dirty(repo_path):
+        build_meta = git_hash
+    elif git_hash:
+        build_meta = f"{git_hash}d.{source_fingerprint(repo_path)}"
     else:
-        build_meta = timestamp
-    
+        build_meta = 's' + source_fingerprint(repo_path)
+
     return f"{version}+{build_meta}"
 
 

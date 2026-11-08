@@ -17,7 +17,10 @@
 #include "ts_led_font.h"
 #include "ts_led_effect.h"
 #include "ts_led_color_correction.h"
+#include "ts_storage.h"
+#include "ts_security.h"
 #include <string.h>
+#include <math.h>
 
 #define TAG "api_led"
 
@@ -168,7 +171,13 @@ static esp_err_t api_led_brightness(const cJSON *params, ts_api_result_t *result
     }
     
     // If brightness is provided, set it; otherwise return current value
-    if (brightness_param && cJSON_IsNumber(brightness_param)) {
+    if (brightness_param) {
+        if (!cJSON_IsNumber(brightness_param) || !isfinite(brightness_param->valuedouble) ||
+            brightness_param->valuedouble < 0 || brightness_param->valuedouble > 255 ||
+            floor(brightness_param->valuedouble) != brightness_param->valuedouble) {
+            ts_api_result_error(result, TS_API_ERR_INVALID_ARG, "Invalid brightness (integer 0-255)");
+            return ESP_ERR_INVALID_ARG;
+        }
         uint8_t brightness = (uint8_t)cJSON_GetNumberValue(brightness_param);
         esp_err_t ret = ts_led_device_set_brightness(dev, brightness);
         if (ret != ESP_OK) {
@@ -232,7 +241,7 @@ static esp_err_t api_led_clear(const cJSON *params, ts_api_result_t *result)
 }
 
 /**
- * @brief led.set - Set LED(s) color
+ * @brief led.set - Set a validated LED pixel range
  * @param device: device name
  * @param index: LED index or start index
  * @param count: number of LEDs (optional, default 1)
@@ -1526,7 +1535,13 @@ static esp_err_t api_led_cc_export(const cJSON *params, ts_api_result_t *result)
         path = path_param->valuestring;
     }
     
-    esp_err_t ret = ts_led_cc_save_to_sdcard(path);
+    esp_err_t ret = ts_storage_check_external_write_path(path ? path : TS_LED_CC_SDCARD_JSON_PATH, false);
+    if (ret != ESP_OK) {
+        ts_api_result_error(result, ret == ESP_ERR_NOT_ALLOWED ? TS_API_ERR_NO_PERMISSION : TS_API_ERR_INVALID_ARG,
+            ret == ESP_ERR_NOT_ALLOWED ? "automation_configuration_managed" : "storage_path_invalid");
+        return ret;
+    }
+    ret = ts_led_cc_save_to_sdcard(path);
     if (ret != ESP_OK) {
         ts_api_result_error(result, ret == ESP_ERR_NOT_ALLOWED ? TS_API_ERR_NO_PERMISSION : TS_API_ERR_INTERNAL,
             ret == ESP_ERR_NOT_ALLOWED ? "automation_configuration_managed" : "Failed to export configuration");
@@ -1571,6 +1586,56 @@ static esp_err_t api_led_cc_import(const cJSON *params, ts_api_result_t *result)
     return ESP_OK;
 }
 
+/* File consumers use the same private path classification as generic reads.
+ * Check before touching LED state; never infer identity from request JSON. */
+static esp_err_t led_read_for_session(const cJSON *params, uint32_t session_id,
+                                      ts_api_handler_t handler, const char *key,
+                                      const char *fallback, ts_api_result_t *result)
+{
+#ifdef CONFIG_TS_WEBUI_AUTH_REQUIRED
+    ts_session_t session;
+    if (ts_security_validate_session(session_id, &session) != ESP_OK || session.level < TS_PERM_ADMIN) {
+        ts_api_result_error(result, TS_API_ERR_AUTH, "Unauthorized");
+        return ESP_ERR_NOT_ALLOWED;
+    }
+#else
+    (void)session_id;
+#endif
+    const cJSON *item = cJSON_GetObjectItem(params, key);
+    const char *path = cJSON_IsString(item) ? item->valuestring : fallback;
+    if (!path || !path[0]) return handler(params, result);
+    bool needs_admin;
+    esp_err_t ret = ts_storage_external_read_requires_admin(path, &needs_admin);
+    if (ret != ESP_OK) {
+        ts_api_result_error(result, ret == ESP_ERR_INVALID_ARG ? TS_API_ERR_INVALID_ARG : TS_API_ERR_INTERNAL,
+            ret == ESP_ERR_INVALID_ARG ? "storage_path_invalid" : "storage_read_failed");
+        return ret;
+    }
+#ifdef CONFIG_TS_WEBUI_AUTH_REQUIRED
+    if (ts_security_validate_session(session_id, &session) != ESP_OK || session.level < TS_PERM_ADMIN) {
+        ts_api_result_error(result, TS_API_ERR_AUTH, "Unauthorized");
+        return ESP_ERR_NOT_ALLOWED;
+    }
+    if (needs_admin && session.level < TS_PERM_ADMIN) {
+        ts_api_result_error(result, TS_API_ERR_NO_PERMISSION, "Administrator permission required");
+        return ESP_ERR_NOT_ALLOWED;
+    }
+#endif
+    return handler(params, result);
+}
+static esp_err_t led_image_for_session(const cJSON *params, uint32_t session, ts_api_result_t *result)
+{
+    return led_read_for_session(params, session, api_led_image, "path", NULL, result);
+}
+static esp_err_t led_qrcode_for_session(const cJSON *params, uint32_t session, ts_api_result_t *result)
+{
+    return led_read_for_session(params, session, api_led_qrcode, "bg_image", NULL, result);
+}
+static esp_err_t led_cc_import_for_session(const cJSON *params, uint32_t session, ts_api_result_t *result)
+{
+    return led_read_for_session(params, session, api_led_cc_import, "path", TS_LED_CC_SDCARD_JSON_PATH, result);
+}
+
 /*===========================================================================*/
 /*                          Registration                                      */
 /*===========================================================================*/
@@ -1578,6 +1643,8 @@ static esp_err_t api_led_cc_import(const cJSON *params, ts_api_result_t *result)
 static const ts_api_endpoint_t led_endpoints[] = {
     {
         .name = "led.list",
+        .external_access = TS_API_ACCESS_PUBLIC,
+        .allowed_methods = TS_API_METHOD_READ,
         .description = "List LED devices",
         .category = TS_API_CAT_LED,
         .handler = api_led_list,
@@ -1585,181 +1652,230 @@ static const ts_api_endpoint_t led_endpoints[] = {
     },
     {
         .name = "led.brightness",
+        .external_access = TS_API_ACCESS_ADMIN,
+        .allowed_methods = TS_API_METHOD_WRITE,
         .description = "Get/set device brightness",
         .category = TS_API_CAT_LED,
         .handler = api_led_brightness,
-        .requires_auth = false,  // TODO: 测试完成后改为 true
+        .requires_auth = true,  // TODO: 测试完成后改为 true
         .permission = "led.control",
     },
     {
         .name = "led.clear",
+        .external_access = TS_API_ACCESS_ADMIN,
+        .allowed_methods = TS_API_METHOD_WRITE,
         .description = "Clear all LEDs on device",
         .category = TS_API_CAT_LED,
         .handler = api_led_clear,
-        .requires_auth = false,  // TODO: 测试完成后改为 true
+        .requires_auth = true,  // TODO: 测试完成后改为 true
         .permission = "led.control",
     },
     {
         .name = "led.set",
-        .description = "Set LED(s) color",
+        .external_access = TS_API_ACCESS_ADMIN,
+        .allowed_methods = TS_API_METHOD_WRITE,
+        .description = "Legacy individual pixel setting (unsupported)",
         .category = TS_API_CAT_LED,
         .handler = api_led_set,
-        .requires_auth = false,  // TODO: 测试完成后改为 true
+        .requires_auth = true,  // TODO: 测试完成后改为 true
         .permission = "led.control",
     },
     {
         .name = "led.fill",
+        .external_access = TS_API_ACCESS_ADMIN,
+        .allowed_methods = TS_API_METHOD_WRITE,
         .description = "Fill all LEDs with color",
         .category = TS_API_CAT_LED,
         .handler = api_led_fill,
-        .requires_auth = false,  // TODO: 测试完成后改为 true
+        .requires_auth = true,  // TODO: 测试完成后改为 true
         .permission = "led.control",
     },
     {
         .name = "led.effect.list",
+        .external_access = TS_API_ACCESS_READ,
+        .allowed_methods = TS_API_METHOD_READ,
         .description = "List available effects",
         .category = TS_API_CAT_LED,
         .handler = api_led_effect_list,
-        .requires_auth = false,
+        .requires_auth = true,
     },
     {
         .name = "led.effect.start",
+        .external_access = TS_API_ACCESS_ADMIN,
+        .allowed_methods = TS_API_METHOD_WRITE,
         .description = "Start effect on device",
         .category = TS_API_CAT_LED,
         .handler = api_led_effect_start,
-        .requires_auth = false,  // TODO: 测试完成后改为 true
+        .requires_auth = true,  // TODO: 测试完成后改为 true
         .permission = "led.control",
     },
     {
         .name = "led.effect.stop",
+        .external_access = TS_API_ACCESS_ADMIN,
+        .allowed_methods = TS_API_METHOD_WRITE,
         .description = "Stop effect on device",
         .category = TS_API_CAT_LED,
         .handler = api_led_effect_stop,
-        .requires_auth = false,  // TODO: 测试完成后改为 true
+        .requires_auth = true,  // TODO: 测试完成后改为 true
         .permission = "led.control",
     },
     {
         .name = "led.color.parse",
+        .external_access = TS_API_ACCESS_READ,
+        .allowed_methods = TS_API_METHOD_READ,
         .description = "Parse color string to RGB",
         .category = TS_API_CAT_LED,
         .handler = api_led_color_parse,
-        .requires_auth = false,
+        .requires_auth = true,
     },
     {
         .name = "led.color.hsv",
+        .external_access = TS_API_ACCESS_READ,
+        .allowed_methods = TS_API_METHOD_READ,
         .description = "Convert HSV to RGB",
         .category = TS_API_CAT_LED,
         .handler = api_led_color_hsv,
-        .requires_auth = false,
+        .requires_auth = true,
     },
     {
         .name = "led.filter.list",
+        .external_access = TS_API_ACCESS_READ,
+        .allowed_methods = TS_API_METHOD_READ,
         .description = "List available post-processing filters",
         .category = TS_API_CAT_LED,
         .handler = api_led_filter_list,
-        .requires_auth = false,
+        .requires_auth = true,
     },
     {
         .name = "led.filter.start",
+        .external_access = TS_API_ACCESS_ADMIN,
+        .allowed_methods = TS_API_METHOD_WRITE,
         .description = "Apply post-processing filter",
         .category = TS_API_CAT_LED,
         .handler = api_led_filter_start,
-        .requires_auth = false,
+        .requires_auth = true,
         .permission = "led.control",
     },
     {
         .name = "led.filter.stop",
+        .external_access = TS_API_ACCESS_ADMIN,
+        .allowed_methods = TS_API_METHOD_WRITE,
         .description = "Stop post-processing filter",
         .category = TS_API_CAT_LED,
         .handler = api_led_filter_stop,
-        .requires_auth = false,
+        .requires_auth = true,
         .permission = "led.control",
     },
     {
         .name = "led.image",
+        .external_access = TS_API_ACCESS_ADMIN,
+        .allowed_methods = TS_API_METHOD_WRITE,
         .description = "Display image on matrix",
         .category = TS_API_CAT_LED,
         .handler = api_led_image,
-        .requires_auth = false,
+        .session_handler = led_image_for_session,
+        .requires_auth = true,
         .permission = "led.control",
     },
     {
         .name = "led.qrcode",
+        .external_access = TS_API_ACCESS_ADMIN,
+        .allowed_methods = TS_API_METHOD_WRITE,
         .description = "Generate and display QR code",
         .category = TS_API_CAT_LED,
         .handler = api_led_qrcode,
-        .requires_auth = false,
+        .session_handler = led_qrcode_for_session,
+        .requires_auth = true,
         .permission = "led.control",
     },
     {
         .name = "led.text",
+        .external_access = TS_API_ACCESS_ADMIN,
+        .allowed_methods = TS_API_METHOD_WRITE,
         .description = "Display text on matrix",
         .category = TS_API_CAT_LED,
         .handler = api_led_text,
-        .requires_auth = false,
+        .requires_auth = true,
         .permission = "led.control",
     },
     {
         .name = "led.text.stop",
+        .external_access = TS_API_ACCESS_ADMIN,
+        .allowed_methods = TS_API_METHOD_WRITE,
         .description = "Stop text overlay",
         .category = TS_API_CAT_LED,
         .handler = api_led_text_stop,
-        .requires_auth = false,
+        .requires_auth = true,
         .permission = "led.control",
     },
     {
         .name = "led.save",
+        .external_access = TS_API_ACCESS_ADMIN,
+        .allowed_methods = TS_API_METHOD_WRITE,
         .description = "Save current state as boot configuration",
         .category = TS_API_CAT_LED,
         .handler = api_led_save,
-        .requires_auth = false,  // TODO: 测试完成后改为 true
+        .requires_auth = true,  // TODO: 测试完成后改为 true
         .permission = "led.config",
     },
     {
         .name = "led.boot.config",
+        .external_access = TS_API_ACCESS_READ,
+        .allowed_methods = TS_API_METHOD_READ,
         .description = "Get LED boot configuration",
         .category = TS_API_CAT_LED,
         .handler = api_led_boot_config,
-        .requires_auth = false,
+        .requires_auth = true,
     },
     /* Color Correction APIs */
     {
         .name = "led.color_correction.get",
+        .external_access = TS_API_ACCESS_READ,
+        .allowed_methods = TS_API_METHOD_READ,
         .description = "Get color correction configuration",
         .category = TS_API_CAT_LED,
         .handler = api_led_cc_get,
-        .requires_auth = false,
+        .requires_auth = true,
     },
     {
         .name = "led.color_correction.set",
+        .external_access = TS_API_ACCESS_ADMIN,
+        .allowed_methods = TS_API_METHOD_WRITE,
         .description = "Set color correction configuration",
         .category = TS_API_CAT_LED,
         .handler = api_led_cc_set,
-        .requires_auth = false,
+        .requires_auth = true,
         .permission = "led.config",
     },
     {
         .name = "led.color_correction.reset",
+        .external_access = TS_API_ACCESS_ADMIN,
+        .allowed_methods = TS_API_METHOD_WRITE,
         .description = "Reset color correction to defaults",
         .category = TS_API_CAT_LED,
         .handler = api_led_cc_reset,
-        .requires_auth = false,
+        .requires_auth = true,
         .permission = "led.config",
     },
     {
         .name = "led.color_correction.export",
+        .external_access = TS_API_ACCESS_ADMIN,
+        .allowed_methods = TS_API_METHOD_WRITE,
         .description = "Export color correction config to SD card",
         .category = TS_API_CAT_LED,
         .handler = api_led_cc_export,
-        .requires_auth = false,
+        .requires_auth = true,
         .permission = "led.config",
     },
     {
         .name = "led.color_correction.import",
+        .external_access = TS_API_ACCESS_ADMIN,
+        .allowed_methods = TS_API_METHOD_WRITE,
         .description = "Import color correction config from SD card",
         .category = TS_API_CAT_LED,
         .handler = api_led_cc_import,
-        .requires_auth = false,
+        .session_handler = led_cc_import_for_session,
+        .requires_auth = true,
         .permission = "led.config",
     },
 };

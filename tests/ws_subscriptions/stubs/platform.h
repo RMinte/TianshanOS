@@ -59,7 +59,7 @@ typedef struct {void*data;size_t data_size;int id;} ts_event_t;
 #define TS_EVENT_BASE_OTA "ota"
 #define TS_EVENT_SYSTEM_INFO_CHANGED 1
 #define TS_EVENT_DEVICE_STATUS_CHANGED 2
-#define TS_EVENT_OTA_PROGRESS_UPDATE 3
+#include "../../../components/ts_core/ts_event/include/ts_ota_events.h"
 #ifdef TEST_FAIL_EVENTS
 extern int test_event_fail_at, test_event_registers;
 #endif
@@ -95,8 +95,10 @@ static inline int ts_event_unregister_sync(void*h,unsigned t) {(void)h;(void)t;r
 #endif
 typedef void *httpd_handle_t;
 typedef struct {httpd_handle_t handle;void*sess_ctx;void(*free_ctx)(void*);int fd;int method;void*user_ctx;const char*uri;size_t content_len;} httpd_req_t;
-typedef struct {int type;uint8_t*payload;size_t len;} httpd_ws_frame_t;
+typedef struct {bool final,fragmented;int type;uint8_t*payload;size_t len;} httpd_ws_frame_t;
 #define HTTPD_WS_TYPE_TEXT 1
+#define HTTPD_WS_TYPE_PING 9
+#define HTTPD_WS_TYPE_PONG 10
 #define HTTPD_WS_CLIENT_WEBSOCKET 2
 static inline int httpd_req_to_sockfd(httpd_req_t*r) {return r->fd;}
 int httpd_ws_get_fd_info(httpd_handle_t,int);

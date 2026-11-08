@@ -68,17 +68,18 @@ def package(build, out):
         end = address + (build / name).stat().st_size
         if any(address < high and end > low for low, high in protected):
             raise ValueError('刷写镜像覆盖数据区 / Flash image overlaps a preserved data partition')
+    public_name = lambda name: 'TianshanOS.bin' if name == app else name
     out.mkdir(parents=True, exist_ok=False)
     for name in set(images.values()):
-        target = out / name
+        target = out / public_name(name)
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(build / name, target)
     manifest = dict(format=1, build_version=json.loads((build / 'project_description.json').read_text())['project_version'],
                     partition_table=args['partition-table']['file'],
                     partition_table_offset=int(args['partition-table']['offset'], 0),
                     flash_settings=args['write_flash_args'],
-                    images=[dict(offset=address, file=name) for address, name in sorted(images.items())],
-                    files={name: sha256(out / name) for name in sorted(set(images.values()))})
+                    images=[dict(offset=address, file=public_name(name)) for address, name in sorted(images.items())],
+                    files={public_name(name): sha256(out / public_name(name)) for name in sorted(set(images.values()))})
     (out / 'upgrade.json').write_text(json.dumps(manifest, indent=2) + '\n')
     shutil.copyfile(Path(__file__), out / 'upgrade.py')
     (out / 'requirements.txt').write_text('esptool==4.11.0\n')
@@ -119,7 +120,7 @@ def flash(folder, port, baud):
     print('刷写完成。请保留原 SD 卡，等待首次配置迁移 / Flash complete. Keep the original SD card inserted for first-start migration.', flush=True)
 
 
-README = '''# TianShanOS USB／串口升级
+README = '''# TianshanOS USB／串口升级
 
 这是存储方案 v2 的配套包，包含固件、网页、新分区表和引导文件。
 请使用厂商确认可交付的包。开发候选包仍须经厂商确认后，才能用于客户机器。

@@ -9,12 +9,12 @@ python3 - "$build" <<'PY'
 from pathlib import Path
 import sys,re
 for source,names,dest in [
- ('components/ts_net/src/ts_http_server.c',['http_handler_wrapper'],'reviewer_http.inc'),
+ ('components/ts_net/src/ts_http_server.c',['ts_http_authorize_route','ts_http_admit_body','ts_http_receive_body','http_handler_wrapper'],'reviewer_http.inc'),
  ('main/ts_core_init.c',['core_release_components','core_init_rollback','ts_core_start','ts_core_stop','ts_core_deinit'],'reviewer_core.inc'),
  ('components/ts_core/ts_service/src/ts_service.c',['stop_service_internal','ts_service_stop','ts_service_stop_all','ts_service_deinit'],'reviewer_service.inc')]:
  s=Path(source).read_text();parts=[]
  for name in names:
-  m=re.search(r'^(?:static )?esp_err_t '+name+r'\([^;]*?\)\n\{',s,re.M);assert m,name
+  m=re.search(r'^(?:static )?(?:esp_err_t|bool) '+name+r'\([^;]*?\)\n\{',s,re.M);assert m,name
   parts.append(s[m.start():s.index('\n}',m.start())+2])
  Path(sys.argv[1],dest).write_text('\n'.join(parts))
 PY
@@ -26,5 +26,5 @@ cc -std=gnu11 -g -fsanitize=address,undefined -Itests/ws_subscriptions/stubs -I"
 cc -std=gnu11 -g -fsanitize=address,undefined -Wno-deprecated-declarations -Icomponents/ts_core/ts_event/include -Itests/ws_subscriptions/stubs -Icomponents/ts_core/ts_event/src -I"$cjson" -I"$build" tests/ws_subscriptions/test_reviewer_core.c -o "$build/core"
 "$build/core"
 
-cc -std=gnu11 -g -fsanitize=address,undefined -Itests/ws_subscriptions/stubs -I"$cjson" -I"$build" tests/ws_subscriptions/test_reviewer_http.c -o "$build/http"
+cc -std=gnu11 -g -fsanitize=address,undefined -Itests/ws_subscriptions/stubs -Icomponents/ts_net/include -I"$cjson" -I"$build" tests/ws_subscriptions/test_reviewer_http.c -o "$build/http"
 "$build/http"

@@ -8,6 +8,7 @@
 
 #include "ts_api.h"
 #include "ts_keystore.h"
+#include "ts_security.h"
 #include "ts_automation_config.h"
 #include "ts_ssh_service.h"
 #include "ts_log.h"
@@ -39,14 +40,30 @@ static const char *key_type_desc(ts_keystore_key_type_t type)
 /**
  * @brief key.list - List all stored keys
  */
-static esp_err_t api_key_list(const cJSON *params, ts_api_result_t *result)
+static cJSON *key_info_json(const ts_keystore_key_info_t *info, bool list_row)
+{
+    cJSON *data = cJSON_CreateObject();
+    if (!data || !cJSON_AddStringToObject(data, "id", info->id) ||
+        !cJSON_AddStringToObject(data, "type", ts_keystore_type_to_string(info->type)) ||
+        !cJSON_AddStringToObject(data, "type_desc", key_type_desc(info->type)) ||
+        !cJSON_AddStringToObject(data, "comment", info->comment) ||
+        !cJSON_AddStringToObject(data, "alias", info->alias) ||
+        !cJSON_AddNumberToObject(data, "created", info->created_at) ||
+        !cJSON_AddNumberToObject(data, "last_used", info->last_used) ||
+        !cJSON_AddBoolToObject(data, list_row ? "has_pubkey" : "has_public_key", info->has_public_key) ||
+        !cJSON_AddBoolToObject(data, "exportable", info->exportable) ||
+        !cJSON_AddBoolToObject(data, "hidden", info->hidden)) {
+        cJSON_Delete(data);
+        return NULL;
+    }
+    return data;
+}
+
+static esp_err_t api_key_list_impl(const cJSON *params, bool show_hidden, ts_api_result_t *result)
 {
     (void)params;
     
     TS_LOGI(TAG, "API: key.list called");
-    
-    /* 检查是否显示隐藏密钥（TODO: 从认证状态判断） */
-    bool show_hidden = true;  // 暂时默认显示全部，后续接入认证系统
     
     /* 使用 PSRAM 分配避免栈溢出 */
     ts_keystore_key_info_t *keys = heap_caps_malloc(
@@ -65,17 +82,9 @@ static esp_err_t api_key_list(const cJSON *params, ts_api_result_t *result)
     
     TS_LOGI(TAG, "API: ts_keystore_list_keys_ex returned %s, count=%zu", esp_err_to_name(ret), count);
     
-    // 如果模块未初始化，返回空列表而不是错误
-    if (ret == ESP_ERR_INVALID_STATE) {
-        free(keys);
-        cJSON *data = cJSON_CreateObject();
-        cJSON_AddNumberToObject(data, "count", 0);
-        cJSON_AddNumberToObject(data, "max_keys", TS_KEYSTORE_MAX_KEYS);
-        cJSON_AddArrayToObject(data, "keys");
-        ts_api_result_ok(result, data);
-        return ESP_OK;
-    }
-    
+    /* Preserve the empty view before the keystore service starts. */
+    if (ret == ESP_ERR_INVALID_STATE) { ret = ESP_OK; count = 0; }
+
     if (ret != ESP_OK) {
         free(keys);
         ts_api_result_error(result, TS_API_ERR_INTERNAL, "Failed to list keys");
@@ -83,43 +92,22 @@ static esp_err_t api_key_list(const cJSON *params, ts_api_result_t *result)
     }
     
     cJSON *data = cJSON_CreateObject();
-    if (!data) {
-        free(keys);
+    cJSON *keys_array = data ? cJSON_AddArrayToObject(data, "keys") : NULL;
+    bool complete = keys_array && cJSON_AddNumberToObject(data, "count", count) &&
+        cJSON_AddNumberToObject(data, "max_keys", TS_KEYSTORE_MAX_KEYS);
+    for (size_t i = 0; complete && i < count; ++i) {
+        cJSON *item = key_info_json(&keys[i], true);
+        if (!item || !cJSON_AddItemToArray(keys_array, item)) {
+            cJSON_Delete(item);
+            complete = false;
+        }
+    }
+    free(keys);
+    if (!complete) {
+        cJSON_Delete(data);
         ts_api_result_error(result, TS_API_ERR_NO_MEM, "Memory allocation failed");
         return ESP_ERR_NO_MEM;
     }
-    
-    cJSON_AddNumberToObject(data, "count", count);
-    cJSON_AddNumberToObject(data, "max_keys", TS_KEYSTORE_MAX_KEYS);
-    
-    cJSON *keys_array = cJSON_AddArrayToObject(data, "keys");
-    for (size_t i = 0; i < count; i++) {
-        cJSON *item = cJSON_CreateObject();
-        
-        /* 如果是隐藏密钥且未授权，则掩码 ID */
-        if (keys[i].hidden && !show_hidden) {
-            /* 掩码格式：🔒 <alias> 或 🔒 Hidden Key */
-            const char *display_id = (strlen(keys[i].alias) > 0) ? keys[i].alias : "Hidden Key";
-            char masked_id[TS_KEYSTORE_ALIAS_MAX_LEN + 8];
-            snprintf(masked_id, sizeof(masked_id), "🔒 %s", display_id);
-            cJSON_AddStringToObject(item, "id", masked_id);
-        } else {
-            cJSON_AddStringToObject(item, "id", keys[i].id);
-        }
-        
-        cJSON_AddStringToObject(item, "type", ts_keystore_type_to_string(keys[i].type));
-        cJSON_AddStringToObject(item, "type_desc", key_type_desc(keys[i].type));
-        cJSON_AddStringToObject(item, "comment", keys[i].comment);
-        cJSON_AddStringToObject(item, "alias", keys[i].alias);
-        cJSON_AddNumberToObject(item, "created", keys[i].created_at);
-        cJSON_AddNumberToObject(item, "last_used", keys[i].last_used);
-        cJSON_AddBoolToObject(item, "has_pubkey", keys[i].has_public_key);
-        cJSON_AddBoolToObject(item, "exportable", keys[i].exportable);
-        cJSON_AddBoolToObject(item, "hidden", keys[i].hidden);
-        cJSON_AddItemToArray(keys_array, item);
-    }
-    
-    free(keys);
     ts_api_result_ok(result, data);
     return ESP_OK;
 }
@@ -129,7 +117,7 @@ static esp_err_t api_key_list(const cJSON *params, ts_api_result_t *result)
  * 
  * @param params { "id": "key_id" }
  */
-static esp_err_t api_key_info(const cJSON *params, ts_api_result_t *result)
+static esp_err_t api_key_info_impl(const cJSON *params, bool show_hidden, ts_api_result_t *result)
 {
     if (!params) {
         ts_api_result_error(result, TS_API_ERR_INVALID_ARG, "Missing parameters");
@@ -143,7 +131,7 @@ static esp_err_t api_key_info(const cJSON *params, ts_api_result_t *result)
     }
     
     ts_keystore_key_info_t info;
-    esp_err_t ret = ts_keystore_get_key_info(id->valuestring, &info);
+    esp_err_t ret = ts_keystore_read_public_record(id->valuestring, show_hidden, &info, NULL, NULL);
     
     if (ret == ESP_ERR_NOT_FOUND) {
         ts_api_result_error(result, TS_API_ERR_NOT_FOUND, "Key not found");
@@ -153,23 +141,11 @@ static esp_err_t api_key_info(const cJSON *params, ts_api_result_t *result)
         return ret;
     }
     
-    cJSON *data = cJSON_CreateObject();
+    cJSON *data = key_info_json(&info, false);
     if (!data) {
         ts_api_result_error(result, TS_API_ERR_NO_MEM, "Memory allocation failed");
         return ESP_ERR_NO_MEM;
     }
-    
-    cJSON_AddStringToObject(data, "id", info.id);
-    cJSON_AddStringToObject(data, "type", ts_keystore_type_to_string(info.type));
-    cJSON_AddStringToObject(data, "type_desc", key_type_desc(info.type));
-    cJSON_AddStringToObject(data, "comment", info.comment);
-    cJSON_AddStringToObject(data, "alias", info.alias);
-    cJSON_AddNumberToObject(data, "created", info.created_at);
-    cJSON_AddNumberToObject(data, "last_used", info.last_used);
-    cJSON_AddBoolToObject(data, "has_public_key", info.has_public_key);
-    cJSON_AddBoolToObject(data, "exportable", info.exportable);
-    cJSON_AddBoolToObject(data, "hidden", info.hidden);
-    
     ts_api_result_ok(result, data);
     return ESP_OK;
 }
@@ -254,7 +230,7 @@ static esp_err_t api_key_generate(const cJSON *params, ts_api_result_t *result)
     }
     ts_keystore_generate_result_t detail;
     esp_err_t ret = ts_keystore_generate_key_with_result(id->valuestring, type, &opts, &detail);
-    TS_LOGI(TAG, "key.generate request=%s storage id=%s ret=%s stage=%s stored=%d cleanup=%s", request_id, id->valuestring,
+    TS_LOGI(TAG, "key.generate request=%s storage ret=%s stage=%s stored=%d cleanup=%s", request_id,
             esp_err_to_name(ret), detail.failed_stage ? detail.failed_stage : "saved", detail.stored,
             esp_err_to_name(detail.cleanup_error));
     if (ret != ESP_OK) {
@@ -284,7 +260,7 @@ static esp_err_t api_key_generate(const cJSON *params, ts_api_result_t *result)
         !cJSON_AddStringToObject(data, "id", id->valuestring) ||
         !cJSON_AddStringToObject(data, "type", ts_keystore_type_to_string(type))) {
         cJSON_Delete(data);
-        TS_LOGE(TAG, "key.generate request=%s saved id=%s but response allocation failed", request_id, id->valuestring);
+        TS_LOGE(TAG, "key.generate request=%s saved but response allocation failed", request_id);
         ts_api_result_error(result, TS_API_ERR_NO_MEM, "key_response_failed");
         return ESP_ERR_NO_MEM;
     }
@@ -376,7 +352,7 @@ static esp_err_t api_key_delete(const cJSON *params, ts_api_result_t *result)
  * @param params { "id": "key_id" }
  * @return Public key in OpenSSH format
  */
-static esp_err_t api_key_export(const cJSON *params, ts_api_result_t *result)
+static esp_err_t api_key_export_impl(const cJSON *params, bool show_hidden, ts_api_result_t *result)
 {
     if (!params) {
         ts_api_result_error(result, TS_API_ERR_INVALID_ARG, "Missing parameters");
@@ -392,7 +368,8 @@ static esp_err_t api_key_export(const cJSON *params, ts_api_result_t *result)
     /* 加载公钥 */
     char *pubkey = NULL;
     size_t pubkey_len = 0;
-    esp_err_t ret = ts_keystore_load_public_key(id->valuestring, &pubkey, &pubkey_len);
+    ts_keystore_key_info_t info;
+    esp_err_t ret = ts_keystore_read_public_record(id->valuestring, show_hidden, &info, &pubkey, &pubkey_len);
     
     if (ret == ESP_ERR_NOT_FOUND) {
         ts_api_result_error(result, TS_API_ERR_NOT_FOUND, "Key not found");
@@ -402,18 +379,17 @@ static esp_err_t api_key_export(const cJSON *params, ts_api_result_t *result)
         return ret;
     }
     
-    /* 获取密钥信息 */
-    ts_keystore_key_info_t info;
-    ts_keystore_get_key_info(id->valuestring, &info);
-    
     cJSON *data = cJSON_CreateObject();
-    cJSON_AddStringToObject(data, "id", id->valuestring);
-    cJSON_AddStringToObject(data, "type", ts_keystore_type_to_string(info.type));
-    cJSON_AddStringToObject(data, "public_key", pubkey);
-    cJSON_AddStringToObject(data, "comment", info.comment);
-    
+    bool complete = data && cJSON_AddStringToObject(data, "id", info.id) &&
+        cJSON_AddStringToObject(data, "type", ts_keystore_type_to_string(info.type)) &&
+        cJSON_AddStringToObject(data, "public_key", pubkey) &&
+        cJSON_AddStringToObject(data, "comment", info.comment);
     free(pubkey);
-    
+    if (!complete) {
+        cJSON_Delete(data);
+        ts_api_result_error(result, TS_API_ERR_NO_MEM, "Memory allocation failed");
+        return ESP_ERR_NO_MEM;
+    }
     ts_api_result_ok(result, data);
     return ESP_OK;
 }
@@ -437,48 +413,34 @@ static esp_err_t api_key_export_private(const cJSON *params, ts_api_result_t *re
         return ESP_ERR_INVALID_ARG;
     }
     
-    /* 获取密钥信息，检查是否可导出 */
     ts_keystore_key_info_t info;
-    esp_err_t ret = ts_keystore_get_key_info(id->valuestring, &info);
-    if (ret == ESP_ERR_NOT_FOUND) {
-        ts_api_result_error(result, TS_API_ERR_NOT_FOUND, "Key not found");
-        return ESP_ERR_NOT_FOUND;
-    } else if (ret != ESP_OK) {
-        ts_api_result_error(result, TS_API_ERR_INTERNAL, "Failed to get key info");
-        return ret;
-    }
-    
-    /* 安全检查：只有 exportable=true 的密钥才能导出私钥 */
-    if (!info.exportable) {
-        ts_api_result_error(result, TS_API_ERR_NO_PERMISSION, 
-            "Private key is not exportable. Generate key with --exportable flag to allow export.");
-        return ESP_ERR_NOT_ALLOWED;
-    }
-    
-    /* 加载私钥 */
     char *privkey = NULL;
     size_t privkey_len = 0;
-    ret = ts_keystore_load_private_key(id->valuestring, &privkey, &privkey_len);
-    
-    if (ret == ESP_ERR_NOT_FOUND) {
-        ts_api_result_error(result, TS_API_ERR_NOT_FOUND, "Private key not found");
-        return ESP_ERR_NOT_FOUND;
-    } else if (ret != ESP_OK || !privkey) {
-        ts_api_result_error(result, TS_API_ERR_INTERNAL, "Failed to export private key");
+    esp_err_t ret = ts_keystore_read_exportable_private_record(id->valuestring, &info, &privkey, &privkey_len);
+    if (ret == ESP_ERR_NOT_ALLOWED) {
+        ts_api_result_error(result, TS_API_ERR_NO_PERMISSION, "Private key is not exportable");
         return ret;
     }
-    
+    if (ret != ESP_OK || !privkey) {
+        ts_api_result_error(result, ret == ESP_ERR_NOT_FOUND ? TS_API_ERR_NOT_FOUND : TS_API_ERR_INTERNAL,
+            ret == ESP_ERR_NOT_FOUND ? "Key not found" : "Failed to export private key");
+        return ret == ESP_OK ? ESP_FAIL : ret;
+    }
+
     cJSON *data = cJSON_CreateObject();
-    cJSON_AddStringToObject(data, "id", id->valuestring);
-    cJSON_AddStringToObject(data, "type", ts_keystore_type_to_string(info.type));
-    cJSON_AddStringToObject(data, "private_key", privkey);
-    cJSON_AddStringToObject(data, "comment", info.comment);
-    
-    /* 安全警告 */
-    cJSON_AddStringToObject(data, "warning", "Keep this private key secure! Never share it publicly.");
-    
+    bool complete = data && cJSON_AddStringToObject(data, "id", info.id) &&
+        cJSON_AddStringToObject(data, "type", ts_keystore_type_to_string(info.type)) &&
+        cJSON_AddStringToObject(data, "private_key", privkey) &&
+        cJSON_AddStringToObject(data, "comment", info.comment) &&
+        cJSON_AddStringToObject(data, "warning", "Keep this private key secure! Never share it publicly.");
+    volatile char *wipe = privkey;
+    for (size_t i = 0; i < privkey_len; ++i) wipe[i] = 0;
     free(privkey);
-    
+    if (!complete) {
+        cJSON_Delete(data);
+        ts_api_result_error(result, TS_API_ERR_NO_MEM, "Memory allocation failed");
+        return ESP_ERR_NO_MEM;
+    }
     ts_api_result_ok(result, data);
     return ESP_OK;
 }
@@ -487,25 +449,113 @@ static esp_err_t api_key_export_private(const cJSON *params, ts_api_result_t *re
 /*                          Registration                                      */
 /*===========================================================================*/
 
+static esp_err_t key_read_visibility(uint32_t session_id, bool *show_hidden,
+    ts_api_result_t *result)
+{
+#ifdef CONFIG_TS_WEBUI_AUTH_REQUIRED
+    ts_session_t caller;
+    if (ts_security_validate_session(session_id, &caller) != ESP_OK || caller.level < TS_PERM_READ) {
+        ts_api_result_error(result, TS_API_ERR_AUTH, "Unauthorized");
+        return ESP_ERR_NOT_ALLOWED;
+    }
+    *show_hidden = caller.level >= TS_PERM_ADMIN;
+#else
+    (void)session_id; (void)result;
+    *show_hidden = true;
+#endif
+    return ESP_OK;
+}
+
+static esp_err_t api_key_list(const cJSON *params, ts_api_result_t *result)
+{
+    return api_key_list_impl(params, true, result);
+}
+
+typedef esp_err_t (*key_read_handler_t)(const cJSON *, bool, ts_api_result_t *);
+static esp_err_t key_read_for_session(const cJSON *params, uint32_t session_id,
+    bool administrator_only, key_read_handler_t handler, ts_api_result_t *result)
+{
+    bool show_hidden;
+    esp_err_t ret = key_read_visibility(session_id, &show_hidden, result);
+    if (ret != ESP_OK) return ret;
+    if (administrator_only && !show_hidden) {
+        ts_api_result_error(result, TS_API_ERR_NO_PERMISSION, "Administrator permission required");
+        return ESP_ERR_NOT_ALLOWED;
+    }
+    ret = handler(params, show_hidden, result);
+    if (ret != ESP_OK || result->code != TS_API_OK) return ret;
+    bool still_hidden;
+    ret = key_read_visibility(session_id, &still_hidden, result);
+    if (ret == ESP_OK && still_hidden != show_hidden) {
+        ts_api_result_error(result, TS_API_ERR_AUTH, "Key read permission changed");
+        ret = ESP_ERR_NOT_ALLOWED;
+    }
+    return ret;
+}
+
+static esp_err_t private_export_read(const cJSON *params, bool show_hidden, ts_api_result_t *result)
+{
+    (void)show_hidden;
+    return api_key_export_private(params, result);
+}
+
+static esp_err_t api_key_info(const cJSON *params, ts_api_result_t *result)
+{
+    return api_key_info_impl(params, true, result);
+}
+
+static esp_err_t api_key_export(const cJSON *params, ts_api_result_t *result)
+{
+    return api_key_export_impl(params, true, result);
+}
+
+static esp_err_t api_key_list_for_session(const cJSON *params, uint32_t session_id, ts_api_result_t *result)
+{
+    return key_read_for_session(params, session_id, false, api_key_list_impl, result);
+}
+
+static esp_err_t api_key_info_for_session(const cJSON *params, uint32_t session_id, ts_api_result_t *result)
+{
+    return key_read_for_session(params, session_id, false, api_key_info_impl, result);
+}
+
+static esp_err_t api_key_export_for_session(const cJSON *params, uint32_t session_id, ts_api_result_t *result)
+{
+    return key_read_for_session(params, session_id, false, api_key_export_impl, result);
+}
+
+static esp_err_t api_key_export_private_for_session(const cJSON *params, uint32_t session_id, ts_api_result_t *result)
+{
+    return key_read_for_session(params, session_id, true, private_export_read, result);
+}
+
 esp_err_t ts_api_key_register(void)
 {
     static const ts_api_endpoint_t endpoints[] = {
         {
             .name = "key.list",
+            .external_access = TS_API_ACCESS_READ,
+            .allowed_methods = TS_API_METHOD_READ,
             .description = "List all stored keys",
             .category = TS_API_CAT_SYSTEM,
             .handler = api_key_list,
+            .session_handler = api_key_list_for_session,
             .requires_auth = false,
         },
         {
             .name = "key.info",
+            .external_access = TS_API_ACCESS_READ,
+            .allowed_methods = TS_API_METHOD_READ,
             .description = "Get key info",
             .category = TS_API_CAT_SYSTEM,
             .handler = api_key_info,
+            .session_handler = api_key_info_for_session,
             .requires_auth = false,
         },
         {
             .name = "key.generate",
+            .external_access = TS_API_ACCESS_ADMIN,
+            .allowed_methods = TS_API_METHOD_WRITE,
             .description = "Generate a new key",
             .category = TS_API_CAT_SYSTEM,
             .handler = api_key_generate,
@@ -513,6 +563,8 @@ esp_err_t ts_api_key_register(void)
         },
         {
             .name = "key.delete",
+            .external_access = TS_API_ACCESS_ADMIN,
+            .allowed_methods = TS_API_METHOD_WRITE,
             .description = "Delete a key",
             .category = TS_API_CAT_SYSTEM,
             .handler = api_key_delete,
@@ -520,16 +572,22 @@ esp_err_t ts_api_key_register(void)
         },
         {
             .name = "key.export",
+            .external_access = TS_API_ACCESS_READ,
+            .allowed_methods = TS_API_METHOD_READ,
             .description = "Export public key",
             .category = TS_API_CAT_SYSTEM,
             .handler = api_key_export,
+            .session_handler = api_key_export_for_session,
             .requires_auth = false,
         },
         {
             .name = "key.exportPrivate",
+            .external_access = TS_API_ACCESS_ADMIN,
+            .allowed_methods = TS_API_METHOD_WRITE,
             .description = "Export private key (only for exportable keys)",
             .category = TS_API_CAT_SYSTEM,
             .handler = api_key_export_private,
+            .session_handler = api_key_export_private_for_session,
             .requires_auth = true,  /* 导出私钥需要认证 */
         },
     };

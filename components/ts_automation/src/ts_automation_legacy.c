@@ -135,7 +135,7 @@ static esp_err_t file_bytes(const char *path, char **out, size_t *length)
 }
 
 static esp_err_t load_json(const char *path, bool encrypted, ts_auto_config_kind_t kind,
-                            const ts_config_pack_acceptance_t *accepted, cJSON **out,
+                            cJSON **out,
                             ts_auto_config_error_t *error)
 {
     *out = NULL;
@@ -146,14 +146,12 @@ static esp_err_t load_json(const char *path, bool encrypted, ts_auto_config_kind
     if (encrypted) {
         ts_config_pack_t *pack = NULL;
         ts_config_pack_acceptance_t proof = {0};
-        /* Preserve each installed manager's original verification policy.
-         * Guarded rule packages retain their explicit signer acceptance; the
-         * other installed files use the same signature/recipient loader as
-         * their former SD-priority managers. This is not a failed-check retry. */
-        ts_config_pack_result_t got = kind == TS_AUTO_CONFIG_RULE
-            ? ts_config_pack_load_verified_mem(text, length, accepted, &pack, &proof, NULL)
-            : ts_config_pack_load_mem(text, length, &pack);
+        /* All legacy SD files use the same pinned-publisher owner and exact
+         * internal acceptance. The existing selected-rule journal below keeps
+         * its explicit provenance verification; it is not reinterpreted here. */
+        ts_config_pack_result_t got = ts_config_pack_load_rule_mem(text, length, &pack);
         if (got == TS_CONFIG_PACK_OK) {
+            proof = pack->acceptance;
             *out = ts_config_pack_parse_json(pack->content, pack->content_len);
             ts_config_pack_free(pack);
             const cJSON *type = cJSON_GetObjectItemCaseSensitive(*out, "type");
@@ -176,6 +174,7 @@ static esp_err_t load_json(const char *path, bool encrypted, ts_auto_config_kind
         }
     } else *out = ts_config_pack_parse_json(text, length);
     free(text);
+    if (ret != ESP_OK) { cJSON_Delete(*out); *out = NULL; }
     return ret != ESP_OK ? ret : *out ? ESP_OK : ESP_ERR_INVALID_ARG;
 }
 
@@ -185,10 +184,10 @@ static esp_err_t priority_json(const char *base, ts_auto_config_kind_t kind, cJS
     char path[256];
     if (snprintf(path, sizeof(path), "%s.tscfg", base) >= sizeof(path)) return ESP_ERR_INVALID_SIZE;
     struct stat st;
-    if (stat(path, &st) == 0) return load_json(path, true, kind, NULL, out, error);
+    if (stat(path, &st) == 0) return load_json(path, true, kind, out, error);
     if (errno != ENOENT) return ESP_FAIL;
     if (snprintf(path, sizeof(path), "%s.json", base) >= sizeof(path)) return ESP_ERR_INVALID_SIZE;
-    return load_json(path, false, kind, NULL, out, error);
+    return load_json(path, false, kind, out, error);
 }
 
 static const cJSON *unwrap(const cJSON *json, ts_auto_config_kind_t kind)
@@ -270,7 +269,7 @@ static esp_err_t directory(cJSON *array, ts_auto_config_kind_t kind, const char 
         }
         snprintf(path, sizeof(path), LEGACY_CONFIG_DIR "/%s/%s%s", name, id, encrypted ? ".tscfg" : ".json");
         cJSON *json = NULL;
-        ret = load_json(path, encrypted, kind, NULL, &json, error);
+        ret = load_json(path, encrypted, kind, &json, error);
         if (ret == ESP_OK && encrypted && kind == TS_AUTO_CONFIG_RULE) {
             const char *type = string(json, "type");
             if (!type || strcmp(type, "automation_rule")) ret = ESP_ERR_INVALID_ARG;

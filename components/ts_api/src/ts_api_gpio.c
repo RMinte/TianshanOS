@@ -269,20 +269,26 @@ static esp_err_t api_gpio_toggle(const cJSON *params, ts_api_result_t *result)
 static const ts_api_endpoint_t s_gpio_endpoints[] = {
     {
         .name = "gpio.list",
+        .external_access = TS_API_ACCESS_READ,
+        .allowed_methods = TS_API_METHOD_READ,
         .description = "List all controllable GPIO pins",
         .category = TS_API_CAT_HAL,
         .handler = api_gpio_list,
-        .requires_auth = false
+        .requires_auth = true
     },
     {
         .name = "gpio.info",
+        .external_access = TS_API_ACCESS_READ,
+        .allowed_methods = TS_API_METHOD_READ,
         .description = "Get GPIO pin info",
         .category = TS_API_CAT_HAL,
         .handler = api_gpio_info,
-        .requires_auth = false
+        .requires_auth = true
     },
     {
         .name = "gpio.set",
+        .external_access = TS_API_ACCESS_ADMIN,
+        .allowed_methods = TS_API_METHOD_WRITE,
         .description = "Set GPIO level",
         .category = TS_API_CAT_HAL,
         .handler = api_gpio_set,
@@ -290,6 +296,8 @@ static const ts_api_endpoint_t s_gpio_endpoints[] = {
     },
     {
         .name = "gpio.toggle",
+        .external_access = TS_API_ACCESS_ADMIN,
+        .allowed_methods = TS_API_METHOD_WRITE,
         .description = "Toggle GPIO level",
         .category = TS_API_CAT_HAL,
         .handler = api_gpio_toggle,

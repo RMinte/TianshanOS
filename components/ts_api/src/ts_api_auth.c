@@ -61,6 +61,19 @@ static esp_err_t validate_root_token(const cJSON *token_item, ts_api_result_t *r
     return ESP_OK;
 }
 
+/* Prepare the required client re-login contract before changing credentials. */
+static cJSON *password_update_response(bool reauth_required)
+{
+    cJSON *data = cJSON_CreateObject();
+    if (!data || !cJSON_AddBoolToObject(data, "success", true) ||
+        !cJSON_AddBoolToObject(data, "sessions_revoked", true) ||
+        !cJSON_AddBoolToObject(data, "reauth_required", reauth_required)) {
+        cJSON_Delete(data);
+        return NULL;
+    }
+    return data;
+}
+
 /*===========================================================================*/
 /*                          API Handlers                                      */
 /*===========================================================================*/
@@ -102,8 +115,13 @@ static esp_err_t api_auth_login(const cJSON *params, ts_api_result_t *result)
     }
     
     /* 获取权限级别 */
-    ts_perm_level_t level;
-    ts_auth_verify_password(username, password, &level);
+    ts_session_t session;
+    ret = ts_security_validate_session(session_id, &session);
+    if (ret != ESP_OK) {
+        ts_api_result_error(result, TS_API_ERR_AUTH, "Session expired");
+        return ret;
+    }
+    ts_perm_level_t level = session.level;
     
     /* 检查是否需要修改密码 */
     bool password_changed = ts_auth_password_changed(username);
@@ -152,7 +170,7 @@ static esp_err_t api_auth_logout(const cJSON *params, ts_api_result_t *result)
     cJSON_AddBoolToObject(data, "success", ret == ESP_OK);
     
     ts_api_result_ok(result, data);
-    TS_LOGI(TAG, "Session %08lx logged out", (unsigned long)session_id);
+    TS_LOGI(TAG, "Session logged out");
     return ESP_OK;
 }
 
@@ -219,6 +237,13 @@ static esp_err_t api_auth_status(const cJSON *params, ts_api_result_t *result)
  * Params: { "token": "...", "old_password": "...", "new_password": "..." }
  * Returns: { "success": true }
  */
+static const char *password_update_failure(esp_err_t ret, const char *fallback)
+{
+    if (ret == ESP_ERR_NOT_FINISHED) return "credential_write_uncertain";
+    if (ret == ESP_ERR_NOT_ALLOWED) return "auth_firmware_confirmation_required";
+    return fallback;
+}
+
 static esp_err_t api_auth_change_password(const cJSON *params, ts_api_result_t *result)
 {
     const cJSON *token_item = cJSON_GetObjectItem(params, "token");
@@ -261,22 +286,27 @@ static esp_err_t api_auth_change_password(const cJSON *params, ts_api_result_t *
         return ESP_ERR_INVALID_ARG;
     }
     
+    cJSON *data = password_update_response(true);
+    if (!data) {
+        ts_api_result_error(result, TS_API_ERR_NO_MEM, "Out of memory");
+        return ESP_ERR_NO_MEM;
+    }
+
     /* 修改密码 */
     ret = ts_auth_change_password(session.client_id, 
                                    old_pwd_item->valuestring,
                                    new_password);
     
     if (ret != ESP_OK) {
+        cJSON_Delete(data);
         if (ret == ESP_ERR_INVALID_ARG) {
             ts_api_result_error(result, TS_API_ERR_AUTH, "Old password is incorrect");
         } else {
-            ts_api_result_error(result, TS_API_ERR_INTERNAL, "Failed to change password");
+            ts_api_result_error(result, TS_API_ERR_INTERNAL, password_update_failure(ret, "Failed to change password"));
         }
         return ret;
     }
     
-    cJSON *data = cJSON_CreateObject();
-    cJSON_AddBoolToObject(data, "success", true);
     cJSON_AddStringToObject(data, "message", "Password changed successfully");
     
     ts_api_result_ok(result, data);
@@ -312,14 +342,19 @@ static esp_err_t api_auth_admin_set_password(const cJSON *params, ts_api_result_
         return ESP_ERR_INVALID_ARG;
     }
 
+    cJSON *data = password_update_response(false);
+    if (!data) {
+        ts_api_result_error(result, TS_API_ERR_NO_MEM, "Out of memory");
+        return ESP_ERR_NO_MEM;
+    }
+
     ret = ts_auth_set_admin_password(new_password);
     if (ret != ESP_OK) {
-        ts_api_result_error(result, TS_API_ERR_INTERNAL, "Failed to set admin password");
+        cJSON_Delete(data);
+        ts_api_result_error(result, TS_API_ERR_INTERNAL, password_update_failure(ret, "Failed to set admin password"));
         return ret;
     }
 
-    cJSON *data = cJSON_CreateObject();
-    cJSON_AddBoolToObject(data, "success", true);
     cJSON_AddStringToObject(data, "username", "admin");
     cJSON_AddBoolToObject(data, "password_changed", true);
 
@@ -356,14 +391,19 @@ static esp_err_t api_auth_root_set_password(const cJSON *params, ts_api_result_t
         return ESP_ERR_INVALID_ARG;
     }
 
+    cJSON *data = password_update_response(true);
+    if (!data) {
+        ts_api_result_error(result, TS_API_ERR_NO_MEM, "Out of memory");
+        return ESP_ERR_NO_MEM;
+    }
+
     ret = ts_auth_set_root_password(new_password);
     if (ret != ESP_OK) {
-        ts_api_result_error(result, TS_API_ERR_INTERNAL, "Failed to set root password");
+        cJSON_Delete(data);
+        ts_api_result_error(result, TS_API_ERR_INTERNAL, password_update_failure(ret, "Failed to set root password"));
         return ret;
     }
 
-    cJSON *data = cJSON_CreateObject();
-    cJSON_AddBoolToObject(data, "success", true);
     cJSON_AddStringToObject(data, "username", "root");
     cJSON_AddBoolToObject(data, "password_changed", true);
 
@@ -385,14 +425,19 @@ static esp_err_t api_auth_admin_reset_password(const cJSON *params, ts_api_resul
     esp_err_t ret = validate_root_token(token_item, result);
     if (ret != ESP_OK) return ret;
 
+    cJSON *data = password_update_response(false);
+    if (!data) {
+        ts_api_result_error(result, TS_API_ERR_NO_MEM, "Out of memory");
+        return ESP_ERR_NO_MEM;
+    }
+
     ret = ts_auth_reset_password("admin");
     if (ret != ESP_OK) {
-        ts_api_result_error(result, TS_API_ERR_INTERNAL, "Failed to reset admin password");
+        cJSON_Delete(data);
+        ts_api_result_error(result, TS_API_ERR_INTERNAL, password_update_failure(ret, "Failed to reset admin password"));
         return ret;
     }
 
-    cJSON *data = cJSON_CreateObject();
-    cJSON_AddBoolToObject(data, "success", true);
     cJSON_AddStringToObject(data, "username", "admin");
     cJSON_AddBoolToObject(data, "password_changed", false);
 
@@ -411,6 +456,8 @@ static const ts_api_endpoint_t s_auth_endpoints[] = {
         .description = "User login",
         .category = TS_API_CAT_SECURITY,
         .handler = api_auth_login,
+        .external_access = TS_API_ACCESS_PUBLIC,
+        .allowed_methods = TS_API_METHOD_POST,
         .requires_auth = false,  /* 登录本身不需要认证 */
     },
     {
@@ -418,6 +465,8 @@ static const ts_api_endpoint_t s_auth_endpoints[] = {
         .description = "User logout",
         .category = TS_API_CAT_SECURITY,
         .handler = api_auth_logout,
+        .external_access = TS_API_ACCESS_TOKEN,
+        .allowed_methods = TS_API_METHOD_POST,
         .requires_auth = false,  /* 登出使用 token 验证 */
     },
     {
@@ -425,6 +474,8 @@ static const ts_api_endpoint_t s_auth_endpoints[] = {
         .description = "Check auth status",
         .category = TS_API_CAT_SECURITY,
         .handler = api_auth_status,
+        .external_access = TS_API_ACCESS_TOKEN,
+        .allowed_methods = TS_API_METHOD_POST,
         .requires_auth = false,  /* 状态检查使用 token 验证 */
     },
     {
@@ -432,6 +483,8 @@ static const ts_api_endpoint_t s_auth_endpoints[] = {
         .description = "Change password",
         .category = TS_API_CAT_SECURITY,
         .handler = api_auth_change_password,
+        .external_access = TS_API_ACCESS_TOKEN,
+        .allowed_methods = TS_API_METHOD_POST,
         .requires_auth = false,  /* 密码修改使用 token 验证 */
     },
     {
@@ -439,21 +492,27 @@ static const ts_api_endpoint_t s_auth_endpoints[] = {
         .description = "Root sets admin password",
         .category = TS_API_CAT_SECURITY,
         .handler = api_auth_admin_set_password,
-        .requires_auth = false,  /* Handler validates root token */
+        .external_access = TS_API_ACCESS_ROOT,
+        .allowed_methods = TS_API_METHOD_POST,
+        .requires_auth = true,  /* Handler validates root token */
     },
     {
         .name = "auth.root.set_password",
         .description = "Root sets root password",
         .category = TS_API_CAT_SECURITY,
         .handler = api_auth_root_set_password,
-        .requires_auth = false,  /* Handler validates root token */
+        .external_access = TS_API_ACCESS_ROOT,
+        .allowed_methods = TS_API_METHOD_POST,
+        .requires_auth = true,  /* Handler validates root token */
     },
     {
         .name = "auth.admin.reset_password",
         .description = "Root resets admin password to default",
         .category = TS_API_CAT_SECURITY,
         .handler = api_auth_admin_reset_password,
-        .requires_auth = false,  /* Handler validates root token */
+        .external_access = TS_API_ACCESS_ROOT,
+        .allowed_methods = TS_API_METHOD_POST,
+        .requires_auth = true,  /* Handler validates root token */
     },
 };
 

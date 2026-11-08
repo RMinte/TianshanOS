@@ -326,7 +326,7 @@ static int cmd_pki_export_csr(const char *filepath)
     free(csr_buf);
     if (err != ESP_OK) {
         ts_console_printf(err == ESP_ERR_NOT_ALLOWED
-            ? "This file belongs to Automation. Choose another export path.\n"
+            ? "This path is protected. Choose another export path.\n"
             : "Could not save the CSR. Check the path and storage.\n");
         return 1;
     }

@@ -42,6 +42,7 @@ code = r'''
 #include <string.h>
 #include <strings.h>
 #include "ts_api.h"
+#include "ts_security.h"
 #include "freertos/semphr.h"
 #define TS_LOGD(...) ((void)0)
 #define TS_LOGI(...) ((void)0)
@@ -75,7 +76,8 @@ static void test_categories(void) {
         char name[64]; snprintf(name, sizeof(name), "%s.fixture", expected[i]);
         ts_api_endpoint_t endpoint = {
             .name = name, .description = "Registry fixture", .category = i,
-            .handler = fixture_handler, .requires_auth = true, .permission = "admin"
+            .handler = fixture_handler, .requires_auth = true, .permission = "admin",
+            .external_access = TS_API_ACCESS_READ, .allowed_methods = TS_API_METHOD_READ
         };
         assert(ts_api_register(&endpoint) == ESP_OK);
         cJSON *info = ts_api_get_info(name);
@@ -228,7 +230,7 @@ with tempfile.TemporaryDirectory(prefix='ts-registry-tables-') as directory:
     subprocess.run([
         'cc', '-std=gnu11', '-g', '-Wno-deprecated-declarations',
         '-fsanitize=address,undefined', '-fno-sanitize-recover=all',
-        '-Itests/runtime/storage_stubs', '-Icomponents/ts_api/include', '-I' + str(cjson),
+        '-Itests/runtime/storage_stubs', '-Icomponents/ts_api/include', '-Icomponents/ts_security/include', '-I' + str(cjson),
         '-Icomponents/ts_core/ts_config/include', '-Icomponents/ts_hal/include',
         '-I' + str(idf / 'components/soc/esp32s3/include'),
         str(build / 'test.c'), str(cjson / 'cJSON.c'), '-lpthread', '-o', str(build / 'test')

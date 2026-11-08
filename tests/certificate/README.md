@@ -8,7 +8,7 @@ ESP32 hardware configuration. This does not validate hardware TLS or Flash.
 
 Prerequisites: C compiler with ASan/UBSan, CMake, Node, Python with `cryptography`,
 and the existing ESP-IDF checkout. No production credentials are read. Credentials
-are generated into the temporary build directory with fixed 2026 validity dates.
+are generated into temporary build directories with fixed validity dates.
 Private keys are test-only, temporary, and never printed.
 
 On this macOS workspace (Command Line Tools avoids requiring changes to Xcode's
@@ -33,6 +33,12 @@ prebuilt mbedTLS is not sanitizer-instrumented. The application under test is.
 
 - `test_time_retry.c`: pure UTC conversion, calendar limits, serial output boundaries,
   retry schedule and control intent policy.
+- test_https_auth.py / test_https_auth.c: production auth unit and request
+  handler, real mbedTLS PEM parsing and isolated certificate-chain checks. Covers
+  all five role requirements, device/management separation, missing or ambiguous
+  OU and certificate/context failures. HTTP transport lookup is a stub; this
+  does not test an actual TLS handshake. The isolated PKI uses 2020–2099 dates.
+  --source-ref REV runs the same checks against older production code.
 - `test_material.c`: includes the entire production certificate implementation;
   real mbedTLS parses generated PEM and checks keys. Injected heap/parse allocation,
   NVS set/commit/read and notification failures; pthread readers/writers; metadata

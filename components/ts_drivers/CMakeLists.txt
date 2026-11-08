@@ -15,6 +15,7 @@ idf_component_register(
         ts_core
         ts_hal
     PRIV_REQUIRES
+        ts_http_fetch
         driver
         esp_adc
         esp_timer

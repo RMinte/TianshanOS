@@ -15,6 +15,7 @@
 #include "ts_service.h"
 #include "ts_event.h"
 #include "ts_storage.h"
+#include "ts_ota.h"
 #include "ts_console.h"
 #include "ts_cmd_all.h"
 #include "ts_hal.h"
@@ -29,6 +30,7 @@
 #include "ts_keystore.h"
 #include "ts_known_hosts.h"
 #include "ts_cert.h"
+#include "ts_config_pack.h"
 #include "ts_pki_client.h"
 #include "ts_https.h"
 #include "ts_https_api.h"
@@ -159,8 +161,7 @@ static esp_err_t storage_service_start(ts_service_handle_t handle, void *user_da
         ESP_LOGI(TAG, "SD card mounted at /sdcard");
         
         // ====== SD 卡 Recovery 检查 ======
-        // 检查 /sdcard/recovery/ 目录，如果存在且版本不同则自动恢复
-        // 这是最低级别的恢复机制，即使 OTA 完全损坏也能工作
+        // 保持原版 recovery 目录与清单恢复流程。
         ret = ts_ota_check_recovery();
         if (ret == ESP_OK) {
             // 如果执行了恢复，函数不会返回（会重启）
@@ -199,7 +200,19 @@ esp_err_t ts_services_prepare_config(void)
     esp_err_t ret = storage_service_init(NULL, NULL);
     if (ret == ESP_OK) ret = storage_service_start(NULL, NULL);
     if (ret == ESP_OK) ret = ts_config_migrate_system(ts_storage_sd_mounted());
-    if (ret == ESP_OK) ret = ts_config_schemas_init();
+    if (ret == ESP_ERR_NOT_FINISHED) {
+        ESP_LOGW(TAG, "Encrypted legacy configuration unavailable; retaining existing internal settings. Inspect certificate and package validation.");
+        ret = ESP_OK;
+    }
+    /* HAL/LED can read an already accepted encrypted configuration before the
+     * network/security service starts. These owners do not generate new keys. */
+    if (ret == ESP_OK) {
+        esp_err_t material = ts_cert_init();
+        if (material == ESP_OK) material = ts_config_pack_init();
+        if (material != ESP_OK)
+            ESP_LOGW(TAG, "Early encrypted configuration unavailable: %s", esp_err_to_name(material));
+        ret = ts_config_schemas_init();
+    }
     return ret;
 }
 
@@ -596,7 +609,8 @@ static esp_err_t security_service_stop(ts_service_handle_t handle, void *user_da
     (void)handle;
     (void)user_data;
     
-    ts_pki_client_deinit();
+    esp_err_t ret = ts_pki_client_deinit();
+    if (ret != ESP_OK) return ret;
     ts_cert_deinit();
     ts_known_hosts_deinit();
     ts_keystore_deinit();
@@ -716,22 +730,30 @@ static void https_coordinator(void *arg)
                 s_https_state.completed = control;
                 portEXIT_CRITICAL(&s_https_control_lock);
             }
-        } else if (!ts_https_is_running()) {
+        } else {
             ts_cert_pki_status_t status = {0};
             ts_https_config_t config = TS_HTTPS_CONFIG_DEFAULT();
             esp_err_t ret = ts_cert_get_status(&status);
             bool ready = ret == ESP_OK && ts_cert_prerequisites(&status, config.require_client_cert);
             int64_t now = esp_timer_get_time() / 1000;
-            if (ts_https_retry_due(&retry, status.generation, control, true, ready, now)) {
+            ts_https_runtime_t runtime;
+            ts_https_get_runtime(&runtime);
+            bool replace = runtime.running &&
+                    (!ready || runtime.loaded_generation != status.generation);
+            /* The existing owner also retires obsolete connections. A failed stop
+             * retains its buffers and follows the same bounded retry policy. */
+            bool due = ts_https_retry_due(&retry, status.generation, control, true,
+                                          ready || runtime.running, now);
+            if (due && (replace || (!runtime.running && ready))) {
                 const char *stage = "cleanup";
                 ret = https_cleanup();
-                if (ret == ESP_OK) { stage = "init"; ret = ts_https_init(&config); }
-                if (ret == ESP_OK) { stage = "default_endpoints"; ret = ts_https_register_default_api(); }
+                if (ret == ESP_OK && ready) { stage = "init"; ret = ts_https_init(&config); }
+                if (ret == ESP_OK && ready) { stage = "default_endpoints"; ret = ts_https_register_default_api(); }
                 /* Stop intent supersedes this attempt before starting the listener. */
                 portENTER_CRITICAL(&s_https_control_lock);
                 bool current = s_https_state.desired && control == s_https_state.control;
                 portEXIT_CRITICAL(&s_https_control_lock);
-                if (ret == ESP_OK && current) { stage = "start"; ret = ts_https_start(); }
+                if (ret == ESP_OK && current && ready) { stage = "start"; ret = ts_https_start(); }
                 if (ret != ESP_OK || !current) {
                     esp_err_t cleanup = https_cleanup();
                     if (cleanup != ESP_OK) { stage = "cleanup"; ret = cleanup; }
@@ -954,7 +976,7 @@ static esp_err_t webui_service_start(ts_service_handle_t handle, void *user_data
         return ret;
     }
     
-    ESP_LOGI(TAG, "WebUI server started on port 80");
+    ESP_LOGI(TAG, "WebUI HTTP started");
     return ESP_OK;
 }
 

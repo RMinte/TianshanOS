@@ -18,7 +18,9 @@ extern "C" {
 esp_err_t ts_config_partitions_init(void);
 
 /* Before configuration schemas, authentication, networking or drivers start.
- * SD must already have been checked. Completion is recorded before cleanup. */
+ * SD must already have been checked. Completion is recorded before cleanup.
+ * NOT_FINISHED: encrypted SD data awaits trusted publisher/time admission.
+ * Continue boot with the already copied internal settings; retry on reboot. */
 esp_err_t ts_config_migrate_system(bool sd_available);
 
 #ifdef __cplusplus

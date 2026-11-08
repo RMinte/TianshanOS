@@ -172,6 +172,16 @@ typedef struct {esp_netif_dns_type_t dns_type;esp_netif_dns_info_t *dns_info;} e
 /* Real SDK public wrapper enforces the nonzero-address contract before IPC. */
 static unsigned dns_writes[2];
 static int dns_failure_kind = -1;
+/* The SDK DHCPS DNS setter above changes only offered DNS. These are the
+ * separate lwIP resolver entries; callbacks must touch them on TCP/IP. */
+static ip_addr_t host_resolver[2];
+#define ip_addr_set_ip4_u32_val(p,v) ((p).addr=(v))
+#define ip_2_ip4(p) (p)
+#define IP_IS_V4(p) 1
+#define ip4_addr_get_u32(p) ((p)->addr)
+static void dns_setserver(unsigned i,const ip_addr_t *dns){assert(on_tcpip&&i<2);host_resolver[i]=*dns;}
+static const ip_addr_t *dns_getserver(unsigned i){assert(on_tcpip&&i<2);return &host_resolver[i];}
+
 static esp_err_t esp_netif_set_dns_info_api(esp_netif_api_msg_t *msg) {
     esp_netif_dns_param_t *p=msg->data;
     if(p->dns_type==dns_failure_kind)return ESP_ERR_INVALID_STATE;
@@ -199,10 +209,12 @@ static void *exec_tcpip(void *arg) {
     ctx->ret=ctx->fn(ctx->arg);on_tcpip=false;return NULL;
 }
 static void (*after_dispatch)(void);
+static esp_err_t read_eth_host_dns(void *context);
 static esp_err_t esp_netif_tcpip_exec(esp_netif_callback_fn fn,void *arg) {
-    assert(!on_tcpip);++apply_dispatches;struct exec_context ctx={fn,arg,ESP_FAIL};pthread_t worker;
+    /* Status reads share TCP/IP but are not DHCP application attempts. */
+    assert(!on_tcpip);if(fn!=read_eth_host_dns)++apply_dispatches;struct exec_context ctx={fn,arg,ESP_FAIL};pthread_t worker;
     assert(!pthread_create(&worker,NULL,exec_tcpip,&ctx));assert(!pthread_join(worker,NULL));
-    if(after_dispatch){void (*event)(void)=after_dispatch;after_dispatch=NULL;event();}
+    if(fn!=read_eth_host_dns&&after_dispatch){void (*event)(void)=after_dispatch;after_dispatch=NULL;event();}
     return ctx.ret;
 }
 static void interface_up(unsigned index) {
@@ -377,7 +389,7 @@ static void setup(bool erase_nvs) {
     }
     netifs_exist=eth_netif_exists=true;s_link_up=true;initialize_eth_intent();check_start_table=false;console_text[0]=0;
     fail_stage=FAIL_NONE;stop_calls=start_calls=apply_dispatches=0;after_dispatch=NULL;
-    memset(dns_writes,0,sizeof(dns_writes));
+    memset(dns_writes,0,sizeof(dns_writes));memset(host_resolver,0,sizeof(host_resolver));
     dns_failure_kind=-1;
     model_tick=100;status_reads_before_failure=-1;started_notifications=stopped_notifications=0;
     fail_read_key=fail_write_key=NULL;fail_open_read=missing_namespace=fail_commit=false;fail_cleanup_stop=false;
@@ -499,7 +511,7 @@ static void check_transitions_and_queries(void) {
     for(unsigned custom=0;custom<2;custom++) {
         if(!custom)s_state.iface[1].config.pool.dns1[0]=0;
         else strcpy(s_state.iface[1].config.pool.dns1,"8.8.8.8");
-        memset(dns_writes,0,sizeof(dns_writes));assert(ts_net_set_ip_info(TS_NET_IF_ETH,&info)==ESP_OK);
+        memset(dns_writes,0,sizeof(dns_writes));memset(host_resolver,0,sizeof(host_resolver));assert(ts_net_set_ip_info(TS_NET_IF_ETH,&info)==ESP_OK);
         assert(dns_writes[0]==1&&dns_writes[1]==1);
         assert(servers[1].dns_server[0].addr==(custom?inet_addr("8.8.8.8"):info.dns1));
         assert(servers[1].dns_server[1].addr==info.dns2);

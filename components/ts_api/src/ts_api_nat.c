@@ -124,13 +124,17 @@ esp_err_t ts_api_nat_register(void)
     static const ts_api_endpoint_t endpoints[] = {
         {
             .name = "nat.status",
+            .external_access = TS_API_ACCESS_READ,
+            .allowed_methods = TS_API_METHOD_READ,
             .description = "Get NAT gateway status",
             .category = TS_API_CAT_NETWORK,
             .handler = api_nat_status,
-            .requires_auth = false,
+            .requires_auth = true,
         },
         {
             .name = "nat.enable",
+            .external_access = TS_API_ACCESS_ADMIN,
+            .allowed_methods = TS_API_METHOD_WRITE,
             .description = "Enable NAT gateway",
             .category = TS_API_CAT_NETWORK,
             .handler = api_nat_enable,
@@ -138,6 +142,8 @@ esp_err_t ts_api_nat_register(void)
         },
         {
             .name = "nat.disable",
+            .external_access = TS_API_ACCESS_ADMIN,
+            .allowed_methods = TS_API_METHOD_WRITE,
             .description = "Disable NAT gateway",
             .category = TS_API_CAT_NETWORK,
             .handler = api_nat_disable,
@@ -145,6 +151,8 @@ esp_err_t ts_api_nat_register(void)
         },
         {
             .name = "nat.save",
+            .external_access = TS_API_ACCESS_ADMIN,
+            .allowed_methods = TS_API_METHOD_WRITE,
             .description = "Save NAT configuration",
             .category = TS_API_CAT_NETWORK,
             .handler = api_nat_save,

@@ -1,8 +1,9 @@
 #!/bin/bash
 set -euo pipefail
 cd "$(dirname "$0")/../.."
+source tests/runtime/host_env.sh
 export DEVELOPER_DIR="${DEVELOPER_DIR:-/Library/Developer/CommandLineTools}"
-build=/tmp/tianshan-runtime-tests
+build="$TS_TEST_BUILD_ROOT/log"
 mkdir -p "$build"
 python3 - "$build" <<'PY'
 from pathlib import Path

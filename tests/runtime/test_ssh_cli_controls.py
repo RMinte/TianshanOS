@@ -148,6 +148,15 @@ knowntext=source(KNOWN)
 code += knowntext[knowntext.index('#define NVS_NAMESPACE'):knowntext.index('/* ============================================================================\n * 外部声明')]
 for name in ['simple_hash','make_nvs_key','ts_known_hosts_init','ts_known_hosts_deinit','ts_known_hosts_add_manual','ts_known_hosts_list','ts_known_hosts_count','ts_known_hosts_clear']:
     code += function(KNOWN,name)
+# Exercise the original security-page endpoint with the same NVS fixture.
+code += r'''
+static bool fail_hosts_alloc;
+static void *hosts_alloc(size_t size) {return fail_hosts_alloc?NULL:malloc(size);}
+const char *ts_host_key_type_str(ts_host_key_type_t type) {(void)type;return "ed25519";}
+#define malloc hosts_alloc
+'''
+code += function('components/ts_api/src/ts_api_hosts.c','api_hosts_list')
+code += '#undef malloc\n'
 # The storage adapter reads a real immutable document shape. Mutation is the
 # local configuration-store boundary, accepting only the original empty array.
 code += r'''
@@ -199,7 +208,13 @@ static void check_revoke(bool cli) {
     printf("PASS %s actual revoke: single/duplicate empty, mixed retention, absent and open/read/move/chmod/transport failures\n",cli?"CLI":"API");
 }
 static int command(int (*handler)(int,char**),const char *tail) {char buffer[512];snprintf(buffer,sizeof(buffer),"%s",tail);char *argv[32];int argc=0;char *p=strtok(buffer," ");while(p){assert(argc<32);argv[argc++]=p;p=strtok(NULL," ");}console_output[0]=0;return handler(argc,argv);}
-static void check_known(void) {assert(ts_known_hosts_init()==ESP_OK);uint8_t unrelated=9;assert(nvs_set_blob(s_state.nvs,"other_blob",&unrelated,1)==ESP_OK);assert(ts_known_hosts_add_manual("fixture.invalid",22,"synthetic-fingerprint",TS_HOST_KEY_ED25519)==ESP_OK);assert(command(registered_hosts,"hosts --list")==0);ts_known_host_t rows[2];size_t count=0;assert(ts_known_hosts_list(rows,2,&count)==ESP_OK&&count==1&&!strcmp(rows[0].host,"fixture.invalid"));assert(ts_known_hosts_count()==1);assert(command(registered_hosts,"hosts --clear")==1&&ts_known_hosts_count()==1);assert(command(registered_hosts,"hosts --clear --yes")==0&&ts_known_hosts_count()==0);assert(command(registered_hosts,"hosts --clear --yes")==0);assert(ts_known_hosts_deinit()==ESP_OK);puts("PASS actual stored h_ key, list/count and confirmed known-host clear");}
+static void check_known(void) {ts_api_result_t r={0};
+    assert(api_hosts_list(NULL,&r)==ESP_OK&&cJSON_GetArraySize(cJSON_GetObjectItem(r.data,"hosts"))==0);ts_api_result_free(&r);
+    assert(ts_known_hosts_init()==ESP_OK);uint8_t unrelated=9;assert(nvs_set_blob(s_state.nvs,"other_blob",&unrelated,1)==ESP_OK);assert(ts_known_hosts_add_manual("fixture.invalid",22,"synthetic-fingerprint",TS_HOST_KEY_ED25519)==ESP_OK);assert(command(registered_hosts,"hosts --list")==0);ts_known_host_t rows[2];size_t count=0;assert(ts_known_hosts_list(rows,2,&count)==ESP_OK&&count==1&&!strcmp(rows[0].host,"fixture.invalid"));assert(ts_known_hosts_count()==1);
+    assert(api_hosts_list(NULL,&r)==ESP_OK);cJSON *rows_json=cJSON_GetObjectItem(r.data,"hosts");
+    assert(cJSON_GetArraySize(rows_json)==1&&!strcmp(cJSON_GetObjectItem(cJSON_GetArrayItem(rows_json,0),"host")->valuestring,"fixture.invalid"));ts_api_result_free(&r);
+    fail_hosts_alloc=true;assert(api_hosts_list(NULL,&r)==ESP_ERR_NO_MEM&&r.code==TS_API_ERR_NO_MEM);ts_api_result_free(&r);fail_hosts_alloc=false;
+    assert(api_hosts_list(NULL,&r)==ESP_OK);ts_api_result_free(&r);assert(command(registered_hosts,"hosts --clear")==1&&ts_known_hosts_count()==1);assert(command(registered_hosts,"hosts --clear --yes")==0&&ts_known_hosts_count()==0);assert(command(registered_hosts,"hosts --clear --yes")==0);assert(ts_known_hosts_deinit()==ESP_OK);puts("PASS actual known-host UI API: uninitialized/listed rows/allocation failure/retry; stored h_ key and confirmed CLI clear");}
 static void check_deployed(void) {remote_reset("ssh-ed25519 OTHER retained\n");strcpy(deployed_rows[0].id,"fixture-host");deployed_view.document.hosts=deployed_rows;deployed_view.document.host_count=1;assert(command(registered_hosts,"hosts --deployed")==0);assert(command(registered_hosts,"hosts --deployed --clear")==1&&!collection_replaces&&ts_ssh_hosts_config_count()==1);assert(command(registered_hosts,"hosts --deployed --clear --yes")==0&&collection_replaces==1&&ts_ssh_hosts_config_count()==0);assert(command(registered_hosts,"hosts --deployed")==0);assert(command(registered_hosts,"hosts --deployed --clear --yes")==0&&collection_replaces==1&&!view_readers);char *remote=read_file("remote/.ssh/authorized_keys");assert(!strcmp(remote,"ssh-ed25519 OTHER retained\n")&&!remote_calls);free(remote);puts("PASS actual frozen view count, original clear confirmation and empty collection");}
 static void check_auth(void) {
     const char *modes[]={"--exec normal","--test"};

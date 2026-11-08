@@ -25,6 +25,7 @@
 #include "nvs.h"
 #include "lwip/ip4_addr.h"
 #include "lwip/ip_addr.h"
+#include "lwip/dns.h"
 #include "ts_dhcps_bindings.h"
 #include "dhcpserver/dhcpserver.h"  /* For dhcps_lease_t */
 #include "freertos/FreeRTOS.h"
@@ -391,6 +392,15 @@ static esp_err_t configure_stopped_netif(ts_dhcp_if_t iface, esp_netif_t *netif,
         dns.ip.u_addr.ip4.addr = addresses[i];
         ret = esp_netif_set_dns_info(netif, i ? ESP_NETIF_DNS_BACKUP : ESP_NETIF_DNS_MAIN, &dns);
         if (ret != ESP_OK) return ret;
+    }
+    /* Already on TCP/IP. Host DNS is independent of the DHCP pool's offers;
+     * changing/reloading a pool alone must leave the resolver untouched. */
+    if (host_dns) {
+        for (unsigned i = 0; i < 2; ++i) {
+            ip_addr_t address;
+            ip_addr_set_ip4_u32_val(address, host_dns[i]);
+            dns_setserver(i, &address);
+        }
     }
     return ESP_OK;
 }

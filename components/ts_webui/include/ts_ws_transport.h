@@ -44,11 +44,15 @@ bool ts_ws_peer_get(httpd_handle_t server, int fd, ts_ws_peer_t *peer);
 bool ts_ws_peer_equal(ts_ws_peer_t a, ts_ws_peer_t b);
 esp_err_t ts_ws_peer_bind_session(ts_ws_peer_t peer, uint32_t session_id);
 bool ts_ws_peer_authorized(ts_ws_peer_t peer, ts_perm_level_t required);
+bool ts_ws_peer_authorized_for_session(ts_ws_peer_t peer, ts_perm_level_t required, uint32_t session_id);
+unsigned ts_ws_peer_snapshot_for_session(ts_ws_peer_t *peers, unsigned capacity, ts_perm_level_t required, uint32_t session_id);
 unsigned ts_ws_peer_snapshot_for_level(ts_ws_peer_t *peers, unsigned capacity, ts_perm_level_t required);
 unsigned ts_ws_transport_capacity(void);
 ts_ws_message_t *ts_ws_message_json(const char *topic, const cJSON *data, int64_t timestamp);
 ts_ws_message_t *ts_ws_message_text(const char *text, size_t len);
 void ts_ws_message_require(ts_ws_message_t *message, ts_perm_level_t required);
+/* Immutable after publication; even session_id=0 is a restrictive requirement. */
+void ts_ws_message_require_session(ts_ws_message_t *message, uint32_t session_id);
 void ts_ws_message_release(ts_ws_message_t *message);
 /* ESP_OK means local acceptance. Each accepted target settles once via done,
  * including later queue failure, stale/canceled target and socket failure.

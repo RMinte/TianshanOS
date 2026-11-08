@@ -266,13 +266,24 @@ static void check_eth_lifecycle(void){
     hardware_reset();assert(ts_net_manager_init()==ESP_OK&&ts_dhcp_server_init()==ESP_OK);
     assert(ts_net_manager_start(TS_NET_IF_ETH)==ESP_OK);deliver_events();run_delayed_task();
     ts_net_ip_info_t cold_dns={0};assert(ts_net_get_ip_info(TS_NET_IF_ETH,&cold_dns)==ESP_OK);
-    uint32_t expected=inet_addr(custom?"8.8.8.8":"9.9.9.9");
+    uint32_t expected=inet_addr("9.9.9.9");
+    assert(host_resolver[0].addr==expected);
     assert(cold_dns.dns1==expected&&dns_writes[0]==(custom?2:1));
     cJSON *visible=cJSON_CreateObject();add_ip_info_to_json(visible,&cold_dns);
-    assert(!strcmp(cJSON_GetObjectItem(visible,"dns1")->valuestring,custom?"8.8.8.8":"9.9.9.9"));cJSON_Delete(visible);
+    assert(!strcmp(cJSON_GetObjectItem(visible,"dns1")->valuestring,"9.9.9.9"));cJSON_Delete(visible);
     assert(option_value(&servers[1],DHCP_OPTION_DNS_SERVER,true)==inet_addr(custom?"8.8.8.8":"192.168.50.1"));
     assert(ts_dhcp_server_load_config()==ESP_OK);
     assert(ts_net_get_ip_info(TS_NET_IF_ETH,&cold_dns)==ESP_OK&&cold_dns.dns1==expected);
+    ts_net_if_config_t staged;assert(ts_net_manager_get_config(TS_NET_IF_ETH,&staged)==ESP_OK);
+    strcpy(staged.static_ip.dns1,"223.5.5.5");assert(ts_net_manager_set_config(TS_NET_IF_ETH,&staged)==ESP_OK);
+    assert(host_resolver[0].addr==expected); /* manager staging is not application */
+    assert(ts_net_manager_restart(TS_NET_IF_ETH)==ESP_OK);deliver_events();run_delayed_task();
+    assert(ts_net_get_ip_info(TS_NET_IF_ETH,&cold_dns)==ESP_OK&&cold_dns.dns1==inet_addr("223.5.5.5"));
+    assert(host_resolver[0].addr==inet_addr("223.5.5.5"));
+    ts_net_if_status_t observed;assert(ts_net_manager_get_if_status(TS_NET_IF_ETH,&observed)==ESP_OK);
+    assert(!strcmp(observed.ip_info.dns1,"223.5.5.5"));
+    assert(option_value(&servers[1],DHCP_OPTION_DNS_SERVER,true)==inet_addr(custom?"8.8.8.8":"192.168.50.1"));
+    assert(ts_dhcp_server_load_config()==ESP_OK&&host_resolver[0].addr==inet_addr("223.5.5.5"));
     }
     record("P2_cold_boot_same_host_DNS_readback_pool_override_empty_offer_and_reload");
     for(unsigned kind=0;kind<2;kind++){

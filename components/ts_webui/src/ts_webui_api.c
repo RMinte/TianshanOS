@@ -17,6 +17,9 @@
 #include "freertos/task.h"
 #include "esp_http_server.h"
 #include "esp_system.h"
+#include "esp_ota_ops.h"
+#include "esp_app_format.h"
+#include <stdatomic.h>
 #include "esp_timer.h"
 #include <string.h>
 #include <stdint.h>
@@ -42,12 +45,15 @@ static bool is_binary_upload_complete(ts_http_request_t *req)
     return req && req->req && req->body_len == (size_t)req->req->content_len;
 }
 
+
+
 static void delayed_reboot_task(void *arg)
 {
     uint32_t delay_ms = (uint32_t)(uintptr_t)arg;
     vTaskDelay(pdMS_TO_TICKS(delay_ms));
     esp_restart();
 }
+
 
 static void schedule_reboot_after_response(uint32_t delay_ms)
 {
@@ -64,21 +70,9 @@ static void schedule_reboot_after_response(uint32_t delay_ms)
     }
 }
 
-static void clear_recovery_manifest(const char *reason)
-{
-    if (unlink(TS_OTA_RECOVERY_MANIFEST_PATH) == 0) {
-        TS_LOGI(TAG, "Removed recovery manifest: %s", reason);
-    }
-}
 
-static void clean_recovery_after_browser_ota_failure(const char *reason)
-{
-    TS_LOGW(TAG, "Cleaning recovery cache after browser OTA failure: %s", reason);
-    esp_err_t ret = ts_ota_clean_recovery();
-    if (ret != ESP_OK) {
-        TS_LOGW(TAG, "Recovery cleanup failed: %s", esp_err_to_name(ret));
-    }
-}
+
+
 
 static bool is_browser_ota_busy(void)
 {
@@ -140,43 +134,87 @@ static esp_err_t send_key_generate_result(ts_http_request_t *req, ts_api_result_
     return ret;
 }
 
+/* One URI/policy owner for pre-body admission and execution-time recheck.
+ * TOKEN endpoints retain their existing bounded-parser/body-token contract;
+ * body fields never supply the C session identity for protected operations. */
+/* The role/session comes from the validated header, not receipt query fields. */
+
+static bool api_request_access(ts_http_request_t *req, char api_name[64], uint32_t *session_id)
+{
+    const size_t prefix_len = strlen(API_PREFIX);
+    if (!req->uri || strncmp(req->uri, API_PREFIX "/", prefix_len + 1)) {
+        ts_http_send_error(req, 404, "API not found");
+        return false;
+    }
+    const char *endpoint = req->uri + prefix_len + 1;
+    size_t length = strcspn(endpoint, "?");
+    if (!length || length >= 64) {
+        ts_http_send_error(req, 404, "API not found");
+        return false;
+    }
+    memcpy(api_name, endpoint, length);
+    api_name[length] = '\0';
+    for (char *p = api_name; *p; ++p) if (*p == '/') *p = '.';
+    *session_id = 0;
+    /* Only verified request headers supply the C session identity. */
+    check_auth(req, session_id, TS_PERM_NONE);
+    ts_api_access_t access;
+    esp_err_t policy_ret = ts_api_get_access(api_name, &access);
+    if (policy_ret != ESP_OK) {
+        ts_http_send_error(req, policy_ret == ESP_ERR_NOT_FOUND ? 404 : 500, "API policy unavailable");
+        return false;
+    }
+#ifdef CONFIG_TS_WEBUI_AUTH_REQUIRED
+    if (access.requires_auth) {
+        esp_err_t auth_ret = check_auth(req, session_id, (ts_perm_level_t)access.minimum_level);
+        if (auth_ret != ESP_OK) {
+            ts_http_send_error(req, auth_ret == ESP_ERR_NOT_ALLOWED ? 403 : 401,
+                auth_ret == ESP_ERR_NOT_ALLOWED && access.minimum_level == TS_PERM_ROOT ? "Administrator permission required" : "Unauthorized");
+            return false;
+        }
+    }
+#endif
+    uint8_t method = req->method == TS_HTTP_GET ? TS_API_METHOD_GET :
+        req->method == TS_HTTP_POST ? TS_API_METHOD_POST : req->method == TS_HTTP_PUT ? TS_API_METHOD_PUT :
+        req->method == TS_HTTP_DELETE ? TS_API_METHOD_DELETE : 0;
+    if (!method || !(access.allowed_methods & method)) {
+        ts_http_send_error(req, 405, "Method not allowed");
+        return false;
+    }
+
+    return true;
+}
+
+static bool api_admit(ts_http_request_t *req, void *user_data)
+{
+    (void)user_data;
+    char api_name[64];
+    uint32_t session_id;
+    if (!api_request_access(req, api_name, &session_id)) return false;
+    if (!strncmp(api_name,"auth.",5)) {
+        if (req->req->content_len>16U*1024U) {
+            ts_http_send_error(req,413,"Authentication request too large");
+            return false;
+        }
+        ts_httpd_set_body_receive_budget(10000);
+    }
+    return true;
+}
+
 static esp_err_t api_handler(ts_http_request_t *req, void *user_data)
 {
     (void)user_data;
-    
+
 #ifdef CONFIG_TS_WEBUI_CORS_ENABLE
     ts_http_set_cors(req, "*");
 #endif
-    
-    // Extract endpoint from URI
-    const char *uri = req->uri;
-    const char *endpoint = uri + strlen(API_PREFIX) + 1;
-    
-    // Convert slashes to dots for API lookup
+
     char api_name[64];
-    strncpy(api_name, endpoint, sizeof(api_name) - 1);
-    api_name[sizeof(api_name) - 1] = '\0';
-    
-    // Remove query string if present
-    char *query = strchr(api_name, '?');
-    if (query) {
-        *query = '\0';
-    }
-    
-    // Convert slashes to dots
-    for (char *p = api_name; *p; p++) {
-        if (*p == '/') *p = '.';
-    }
-    
-    // API 请求日志使用 DEBUG 级别，避免干扰调试
+    uint32_t session_id;
+    if (!api_request_access(req, api_name, &session_id)) return ESP_FAIL;
     if (strncmp(api_name, "log.", 4) != 0) {
-        TS_LOGD(TAG, "API request: method=%d uri=%s -> api_name=%s", 
-                req->method, uri, api_name);
+        TS_LOGD(TAG, "API request: method=%d", req->method);
     }
-    
-    uint32_t session_id = 0;
-    /* Only verified request headers supply the C session identity. */
-    check_auth(req, &session_id, TS_PERM_NONE);
 
     bool key_generation = strcmp(api_name, "key.generate") == 0;
     bool rule_import = strcmp(api_name,"automation.rules.import")==0;
@@ -194,34 +232,50 @@ static esp_err_t api_handler(ts_http_request_t *req, void *user_data)
         return send_ret;
     }
     
-    // Parse URL query string parameters (for GET requests)
+    if (!request) return ts_http_send_error(req, 500, "Request allocation failed");
     size_t query_len = httpd_req_get_url_query_len(req->req);
     if (query_len > 0) {
+        if (query_len == SIZE_MAX) {
+            cJSON_Delete(request);
+            return ts_http_send_error(req, 400, "Invalid query length");
+        }
         char *query_buf = TS_API_MALLOC(query_len + 1);
-        if (query_buf) {
-            if (httpd_req_get_url_query_str(req->req, query_buf, query_len + 1) == ESP_OK) {
-                ts_api_parse_query(request, query_buf);
-            }
-            free(query_buf);
+        if (!query_buf) {
+            cJSON_Delete(request);
+            return ts_http_send_error(req, 500, "Query allocation failed");
+        }
+        ts_api_params_status_t parsed = TS_API_PARAMS_INVALID;
+        if (httpd_req_get_url_query_str(req->req, query_buf, query_len + 1) == ESP_OK)
+            parsed = ts_api_params_add_query(request, query_buf);
+        free(query_buf);
+        if (parsed != TS_API_PARAMS_OK) {
+            cJSON_Delete(request);
+            return ts_http_send_error(req, parsed == TS_API_PARAMS_NO_MEM ? 500 : 400, "Invalid or unavailable query");
         }
     }
-    
-    // Add body data if present (POST/PUT requests - overrides query params)
-    if (req->body && req->body_len > 0) {
-        cJSON *body = rule_import ? ts_config_pack_parse_import_request(req->body,req->body_len) : cJSON_Parse(req->body);
-        if(rule_import&&!cJSON_IsObject(body)){
-            cJSON_Delete(body);cJSON_Delete(request);
-            return ts_http_send_error(req,400,"invalid_pack");
+
+    if (req->body_len > 0) {
+        cJSON *body = rule_import ? ts_config_pack_parse_import_request(req->body, req->body_len)
+                                 : ts_api_params_parse_object(req->body, req->body_len);
+        if (!body || !cJSON_IsObject(body) || !ts_api_params_unique(body, 0)) {
+            cJSON_Delete(body); cJSON_Delete(request);
+            return ts_http_send_error(req, 400, rule_import ? "invalid_pack" : "Invalid JSON parameters");
         }
-        if (body) {
-            cJSON *item;
-            cJSON_ArrayForEach(item, body) {
-                cJSON_AddItemToObject(request, item->string, cJSON_Duplicate(item, true));
+        cJSON *item;
+        cJSON_ArrayForEach(item, body) {
+            if (cJSON_GetObjectItem(request, item->string)) {
+                cJSON_Delete(body); cJSON_Delete(request);
+                return ts_http_send_error(req, 400, "Conflicting query and body parameters");
             }
-            cJSON_Delete(body);
+            cJSON *copy = cJSON_Duplicate(item, true);
+            if (!copy || !cJSON_AddItemToObject(request, item->string, copy)) {
+                cJSON_Delete(copy); cJSON_Delete(body); cJSON_Delete(request);
+                return ts_http_send_error(req, 500, "Parameter allocation failed");
+            }
         }
+        cJSON_Delete(body);
     }
-    
+
     if (key_generation) {
         const cJSON *rid = cJSON_GetObjectItem(request, "request_id");
         if (cJSON_IsString(rid) && strlen(rid->valuestring) < sizeof(key_request_id)) {
@@ -244,10 +298,17 @@ static esp_err_t api_handler(ts_http_request_t *req, void *user_data)
         return ts_http_send_error(req, 401, "Unauthorized");
     }
 
+    if (ret == ESP_ERR_NOT_ALLOWED && result.code == TS_API_ERR_NO_PERMISSION &&
+        result.message && !strcmp(result.message, "Root permission required")) {
+        cJSON_Delete(request);
+        ts_api_result_free(&result);
+        return ts_http_send_error(req, 403, "Root permission required");
+    }
+
     // API 结果日志使用 DEBUG 级别
     if (strncmp(api_name, "log.", 4) != 0) {
-        TS_LOGD(TAG, "API call result: api=%s ret=%d code=%d msg=%s", 
-                api_name, ret, result.code, result.message ? result.message : "null");
+        TS_LOGD(TAG, "API call result: api=%s ret=%d code=%d",
+                api_name, ret, result.code);
     }
     
     if (key_generation) {
@@ -259,28 +320,26 @@ static esp_err_t api_handler(ts_http_request_t *req, void *user_data)
     cJSON_Delete(request);
     if (key_generation) return send_key_generate_result(req, &result, key_request_id, key_started);
 
+    /* A reply allocation failure after a write cannot prove that no effect occurred. */
+    const bool response_may_have_effect = req->method != TS_HTTP_GET;
     if (ret == ESP_OK || result.code == TS_API_OK) {
-        // Build response JSON
         cJSON *response = cJSON_CreateObject();
-        cJSON_AddNumberToObject(response, "code", result.code);
-        if (result.message) {
-            cJSON_AddStringToObject(response, "message", result.message);
+        bool built = response && cJSON_AddNumberToObject(response, "code", result.code);
+        if (built && result.message) built = cJSON_AddStringToObject(response, "message", result.message) != NULL;
+        if (built && result.data) {
+            built = cJSON_AddItemToObject(response, "data", result.data);
+            if (built) result.data = NULL; /* Transfer this result's sole ownership. */
         }
-        if (result.data) {
-            cJSON_AddItemToObject(response, "data", cJSON_Duplicate(result.data, true));
-        }
-        
-        char *json = cJSON_PrintUnformatted(response);
+        char *json = built ? cJSON_PrintUnformatted(response) : NULL;
         cJSON_Delete(response);
-        
-        // Free result resources
         ts_api_result_free(&result);
-        
         if (json) {
             esp_err_t send_ret = ts_http_send_json(req, 200, json);
             free(json);
             return send_ret;
         }
+        if (response_may_have_effect)
+            return ts_http_send_json(req, 409, "{\"code\":7,\"error\":\"result_unknown\"}");
         return ts_http_send_error(req, 500, "JSON serialization failed");
     } else if (ret == ESP_ERR_NOT_FOUND && result.code == TS_API_ERR_NOT_FOUND && 
                result.message && strcmp(result.message, "API not found") == 0) {
@@ -291,18 +350,13 @@ static esp_err_t api_handler(ts_http_request_t *req, void *user_data)
         // Return the actual error from the API handler with HTTP 200
         // API errors (like "no data") are business logic errors, not HTTP errors
         cJSON *response = cJSON_CreateObject();
-        /* code and error are the failure itself: if either cannot be written, send HTTP 500 rather
-         * than a document the client would misread. */
         bool built = response &&
                      cJSON_AddNumberToObject(response, "code", result.code) &&
                      cJSON_AddStringToObject(response, "error", result.message ? result.message : "Internal error");
-        /* A failing handler may attach details the client must act on, e.g. the host-key
-         * fingerprint ssh.exec reports with code 1001/1002 so the UI can ask the user to
-         * confirm it. Dropping them leaves a bare error and no way to continue. Handlers
-         * that fail without details leave data NULL, so their responses do not change. */
+        /* Details may carry the confirmation the UI needs, so send them whole. */
         if (built && result.data) {
-            cJSON *data = cJSON_Duplicate(result.data, true);
-            if (data && !cJSON_AddItemToObject(response, "data", data)) cJSON_Delete(data);
+            built = cJSON_AddItemToObject(response, "data", result.data);
+            if (built) result.data = NULL;
         }
 
         char *json = built ? cJSON_PrintUnformatted(response) : NULL;
@@ -316,6 +370,8 @@ static esp_err_t api_handler(ts_http_request_t *req, void *user_data)
             free(json);
             return send_ret;
         }
+        if (response_may_have_effect)
+            return ts_http_send_json(req, 409, "{\"code\":7,\"error\":\"result_unknown\"}");
         return ts_http_send_error(req, 500, "Internal error");
     }
 }
@@ -332,7 +388,7 @@ static esp_err_t login_handler(ts_http_request_t *req, void *user_data)
         return ts_http_send_error(req, 400, "Missing body");
     }
     
-    cJSON *body = cJSON_Parse(req->body);
+    cJSON *body = ts_api_params_parse_object(req->body, req->body_len);
     if (!body) {
         return ts_http_send_error(req, 400, "Invalid JSON");
     }
@@ -355,16 +411,19 @@ static esp_err_t login_handler(ts_http_request_t *req, void *user_data)
     esp_err_t ret = ts_auth_login(username->valuestring, password->valuestring, &session_id, token, sizeof(token));
     cJSON_Delete(body);
     
+    if (ret == ESP_ERR_INVALID_STATE) {
+        return ts_http_send_error(req, 401, "Account locked due to too many failed attempts");
+    }
     if (ret != ESP_OK) {
         return ts_http_send_error(req, 401, "Invalid credentials");
     }
     
     /* 获取用户权限等级 */
-    ts_perm_level_t level = TS_PERM_ADMIN;  /* 默认 */
     ts_session_t session;
-    if (ts_security_validate_session(session_id, &session) == ESP_OK) {
-        level = session.level;
+    if (ts_security_validate_session(session_id, &session) != ESP_OK) {
+        return ts_http_send_error(req, 401, "Session expired");
     }
+    ts_perm_level_t level = session.level;
     
     /* 将权限级别转换为字符串 */
     const char *level_str = (level == TS_PERM_ROOT) ? "root" : "admin";
@@ -445,6 +504,9 @@ static esp_err_t file_download_handler(ts_http_request_t *req, void *user_data)
     ts_http_set_cors(req, "*");
 #endif
 
+    uint32_t session_id = 0;
+    if (check_auth(req, &session_id, TS_PERM_READ) != ESP_OK) return ts_http_send_error(req, 401, "Unauthorized");
+
     // 获取文件路径参数
     char path[256] = {0};
     esp_err_t ret = ts_http_get_query_param(req, "path", path, sizeof(path));
@@ -455,16 +517,14 @@ static esp_err_t file_download_handler(ts_http_request_t *req, void *user_data)
     // ts_http_get_query_param already decodes the query value once.
     TS_LOGD(TAG, "Download request: %s", path);
     
-    // 安全检查：只允许访问 /sdcard 和 /spiffs
-    if (strncmp(path, "/sdcard", 7) != 0 && strncmp(path, "/spiffs", 7) != 0) {
-        return ts_http_send_error(req, 403, "Access denied: invalid path");
-    }
-    uint32_t session_id = 0;
-    if (ts_storage_check_write_path(path, false) != ESP_OK &&
-        check_auth(req, &session_id, TS_PERM_ROOT) != ESP_OK) {
-        return ts_http_send_error(req, 401, "Unauthorized");
-    }
-    
+    bool needs_admin;
+    ret = ts_storage_external_read_requires_admin(path, &needs_admin);
+    if (ret != ESP_OK) return ts_http_send_error(req, ret == ESP_ERR_INVALID_ARG ? 400 : 500,
+        ret == ESP_ERR_INVALID_ARG ? "storage_path_invalid" : "storage_read_failed");
+    ret = check_auth(req, &session_id, needs_admin ? TS_PERM_ADMIN : TS_PERM_READ);
+    if (ret != ESP_OK) return ts_http_send_error(req, ret == ESP_ERR_NOT_ALLOWED ? 403 : 401,
+        ret == ESP_ERR_NOT_ALLOWED ? "Administrator permission required" : "Unauthorized");
+
     // 检查文件是否存在
     if (!ts_storage_exists(path)) {
         return ts_http_send_error(req, 404, "File not found");
@@ -476,7 +536,7 @@ static esp_err_t file_download_handler(ts_http_request_t *req, void *user_data)
     }
     
     // 发送文件
-    return ts_http_send_file(req, path);
+    return ts_http_send_private_file(req, path);
 }
 
 /**
@@ -506,7 +566,7 @@ static esp_err_t file_upload_handler(ts_http_request_t *req, void *user_data)
     if (strncmp(path, "/sdcard/", 8) != 0) {
         return ts_http_send_error(req, 403, "Upload only allowed to /sdcard");
     }
-    ret = ts_storage_check_write_path(path, false);
+    ret = ts_storage_check_external_write_path(path, false);
     if (ret == ESP_ERR_NOT_ALLOWED) return ts_http_send_error(req, 409, "automation_configuration_managed");
     if (ret != ESP_OK) return ts_http_send_error(req, 400, "storage_path_invalid");
     
@@ -528,11 +588,12 @@ static esp_err_t file_upload_handler(ts_http_request_t *req, void *user_data)
     }
     
     // 写入文件
-    ret = ts_storage_write_file(path, req->body, req->body_len);
+    ret = ts_storage_replace_file(path, req->body, req->body_len);
     if (ret != ESP_OK) {
         if (ret == ESP_ERR_NOT_ALLOWED) return ts_http_send_error(req, 409, "automation_configuration_managed");
         TS_LOGE(TAG, "Failed to write file %s: %s", path, esp_err_to_name(ret));
-        return ts_http_send_error(req, 500, "Failed to write file");
+        return ts_http_send_error(req, ret == ESP_ERR_NOT_FINISHED ? 409 : 500,
+            ret == ESP_ERR_NOT_FINISHED ? "file_replace_uncertain" : "Failed to write file");
     }
     
     TS_LOGD(TAG, "File uploaded: %s (%zu bytes)", path, req->body_len);
@@ -609,176 +670,101 @@ static esp_err_t file_upload_handler(ts_http_request_t *req, void *user_data)
  * This allows browsers to upload firmware directly to ESP32 devices
  * that cannot access external networks.
  * 
- * 使用统一 recovery 目录模式：保存到 /sdcard/recovery/ 然后刷入
+ * Original firmware format and SD recovery cache; validate before changing the previous cache.
  */
-static esp_err_t ota_firmware_upload_handler(ts_http_request_t *req, void *user_data)
+/* Keep the original raw APP/WWW and /sdcard/recovery contract. Invalid or
+ * failed uploads never delete the last recovery set. No publisher registration
+ * is required; APP completeness is finally checked by the SDK installer. */
+static esp_err_t ota_upload_reply(ts_http_request_t *req, bool firmware)
 {
-    (void)user_data;
-    
-#ifdef CONFIG_TS_WEBUI_CORS_ENABLE
-    ts_http_set_cors(req, "*");
-#endif
-
-    if (!is_binary_upload_complete(req)) {
-        TS_LOGW(TAG, "Incomplete firmware upload: got %zu of %zu bytes",
-                req->body_len, req->req ? (size_t)req->req->content_len : 0);
-        return ts_http_send_error(req, 400, "Incomplete upload");
-    }
-
-    // 检查请求体
-    if (!req->body || req->body_len == 0) {
-        return ts_http_send_error(req, 400, "Empty firmware content");
-    }
-
-    if (is_browser_ota_busy()) {
-        return ts_http_send_error(req, 409, "OTA already in progress");
-    }
-    
-    // 获取 auto_reboot 参数
-    char auto_reboot_str[8] = "true";
-    ts_http_get_query_param(req, "auto_reboot", auto_reboot_str, sizeof(auto_reboot_str));
-    bool auto_reboot = (strcmp(auto_reboot_str, "false") != 0);
-    
-    TS_LOGI(TAG, "OTA firmware upload: %zu bytes, auto_reboot=%d", req->body_len, auto_reboot);
-    
-    // 新固件上传开始时先移除旧 manifest 和旧 WebUI，避免失败路径留下旧恢复指令。
-    clear_recovery_manifest("firmware upload");
-    if (unlink(TS_OTA_RECOVERY_WWW_PATH) == 0) {
-        TS_LOGI(TAG, "Removed stale recovery www.bin");
-    }
-
-    // 先保存到 recovery 目录，保持恢复素材；刷写成功后再写 disabled manifest。
-    esp_err_t ret = ts_ota_save_upload(req->body, req->body_len, true, false);
-    if (ret != ESP_OK) {
-        TS_LOGE(TAG, "ts_ota_save_upload failed: %s", esp_err_to_name(ret));
-        clean_recovery_after_browser_ota_failure("firmware save failed");
-        return ts_http_send_error(req, 500, "Firmware save failed");
-    }
-
-    ret = ts_ota_flash_file_sync(TS_OTA_RECOVERY_FIRMWARE_PATH, true, NULL, NULL);
-    if (ret != ESP_OK) {
-        TS_LOGE(TAG, "ts_ota_flash_file_sync failed: %s", esp_err_to_name(ret));
-        clean_recovery_after_browser_ota_failure("firmware flash failed");
-        if (ret == ESP_ERR_INVALID_STATE) {
-            return ts_http_send_error(req, 409, "OTA already in progress");
-        }
-        if (ret == ESP_ERR_INVALID_SIZE || ret == ESP_ERR_INVALID_ARG) {
+    if (!is_binary_upload_complete(req) || !req->body || !req->body_len)
+        return ts_http_send_error(req, 400, "Incomplete or empty OTA upload");
+    uint32_t caller = 0;
+    if (check_auth(req, &caller, TS_PERM_ADMIN) != ESP_OK)
+        return ts_http_send_error(req, 403, "Administrator login required");
+    const esp_partition_t *partition = firmware ? esp_ota_get_next_update_partition(NULL) :
+        esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_SPIFFS, "www");
+    if (!partition) return ts_http_send_error(req, 500, "OTA partition unavailable");
+    if (req->body_len > partition->size)
+        return ts_http_send_error(req, 400, "OTA image exceeds partition capacity");
+    if (firmware) {
+        const size_t offset = sizeof(esp_image_header_t) + sizeof(esp_image_segment_header_t);
+        esp_app_desc_t app;
+        if (req->body_len < offset + sizeof(app))
             return ts_http_send_error(req, 400, "Invalid firmware image");
-        }
-        return ts_http_send_error(req, 500, "Firmware flash failed");
+        memcpy(&app, (const uint8_t *)req->body + offset, sizeof(app));
+        if (((const uint8_t *)req->body)[0] != ESP_IMAGE_HEADER_MAGIC ||
+            app.magic_word != ESP_APP_DESC_MAGIC_WORD)
+            return ts_http_send_error(req, 400, "Invalid firmware image");
     }
-
-    ret = ts_ota_write_recovery_manifest_from_files(false, false, false);
+    if (is_browser_ota_busy()) return ts_http_send_error(req, 409, "OTA already in progress");
+    static atomic_flag upload_busy = ATOMIC_FLAG_INIT;
+    if (atomic_flag_test_and_set(&upload_busy)) return ts_http_send_error(req, 409, "OTA upload busy");
+    char auto_reboot_text[8] = "true";
+    ts_http_get_query_param(req, "auto_reboot", auto_reboot_text, sizeof(auto_reboot_text));
+    bool auto_reboot = firmware && strcmp(auto_reboot_text, "false") != 0;
+    cJSON *reply = cJSON_CreateObject();
+    bool ready = reply && cJSON_AddStringToObject(reply, "status", "success") &&
+        cJSON_AddNumberToObject(reply, "size", req->body_len) &&
+        cJSON_AddStringToObject(reply, "message", firmware ? "Firmware uploaded and flashed, pending reboot" : "WWW partition updated");
+    if (ready && firmware) ready = cJSON_AddBoolToObject(reply, "reboot_pending", true) &&
+        cJSON_AddBoolToObject(reply, "auto_reboot_requested", auto_reboot);
+    char *json = ready ? cJSON_PrintUnformatted(reply) : NULL;
+    cJSON_Delete(reply);
+    if (!json) {
+        atomic_flag_clear(&upload_busy);
+        return ts_http_send_error(req, 500, "Out of memory");
+    }
+    const char *pending = firmware ? "/sdcard/recovery/.firmware-upload.bin" : "/sdcard/recovery/.www-upload.bin";
+    const char *destination = firmware ? TS_OTA_RECOVERY_FIRMWARE_PATH : TS_OTA_RECOVERY_WWW_PATH;
+    esp_err_t ret = ts_storage_mkdir_p("/sdcard/recovery");
+    if (ret == ESP_OK) ret = ts_storage_write_file(pending, req->body, req->body_len);
+    if (ret == ESP_OK) ret = firmware ? ts_ota_flash_file_sync(pending, true, NULL, NULL) :
+        ts_ota_www_flash_file_sync(pending, NULL, NULL);
     if (ret != ESP_OK) {
-        TS_LOGE(TAG, "failed to write disabled app-only recovery manifest: %s", esp_err_to_name(ret));
-        clean_recovery_after_browser_ota_failure("firmware manifest update failed");
-        return ts_http_send_error(req, 500, "Recovery manifest update failed");
+        unlink(pending);
+        free(json);
+        atomic_flag_clear(&upload_busy);
+        return ts_http_send_error(req, ret == ESP_ERR_INVALID_STATE ? 409 :
+            (ret == ESP_ERR_INVALID_ARG || ret == ESP_ERR_INVALID_SIZE || ret == ESP_ERR_OTA_VALIDATE_FAILED) ? 400 : 500,
+            "OTA upload did not complete; previous recovery files retained");
     }
-
-    TS_LOGI(TAG, "OTA firmware upload successful");
-    
-    // 返回成功响应
-    cJSON *response = cJSON_CreateObject();
-    cJSON_AddStringToObject(response, "status", "success");
-    cJSON_AddNumberToObject(response, "size", req->body_len);
-    cJSON_AddBoolToObject(response, "reboot_pending", true);
-    cJSON_AddBoolToObject(response, "auto_reboot_requested", auto_reboot);
-    cJSON_AddStringToObject(response, "message", "Firmware uploaded and flashed, pending reboot");
-    
-    char *json = cJSON_PrintUnformatted(response);
-    cJSON_Delete(response);
-    
+    /* Flash succeeded. Commit the ordinary recovery file, then its disabled
+     * manifest. A cache failure must not be reported as complete success. */
+    ret = ts_storage_replace_file(destination, req->body, req->body_len);
+    unlink(pending);
+    if (ret != ESP_OK ||
+        (firmware || ts_storage_exists(TS_OTA_RECOVERY_FIRMWARE_PATH) ?
+         ts_ota_write_recovery_manifest_from_files(!firmware, false, false) : ESP_OK) != ESP_OK) {
+        free(json);
+        atomic_flag_clear(&upload_busy);
+        return ts_http_send_json(req, 409,
+            "{\"status\":\"partial\",\"error\":\"recovery_cache_failed\",\"flash_written\":true}");
+    }
     ret = ts_http_send_json(req, 200, json);
     free(json);
-    if (ret == ESP_OK && auto_reboot) {
-        schedule_reboot_after_response(OTA_UPLOAD_REBOOT_DELAY_MS);
-    }
+    atomic_flag_clear(&upload_busy);
+    if (ret == ESP_OK && auto_reboot) schedule_reboot_after_response(OTA_UPLOAD_REBOOT_DELAY_MS);
     return ret;
 }
 
+static esp_err_t ota_firmware_upload_handler(ts_http_request_t *req, void *user_data)
+{
+    (void)user_data;
+    return ota_upload_reply(req, true);
+}
 /**
  * @brief Handle WWW partition upload request
  * POST /api/v1/ota/www
  * Body: www.bin content
  * 
- * 使用统一 recovery 目录模式：保存到 /sdcard/recovery/www.bin 然后刷入
+ * Original www partition and raw image format.
  */
 static esp_err_t ota_www_upload_handler(ts_http_request_t *req, void *user_data)
 {
     (void)user_data;
-    
-#ifdef CONFIG_TS_WEBUI_CORS_ENABLE
-    ts_http_set_cors(req, "*");
-#endif
-
-    if (!is_binary_upload_complete(req)) {
-        TS_LOGW(TAG, "Incomplete WWW upload: got %zu of %zu bytes",
-                req->body_len, req->req ? (size_t)req->req->content_len : 0);
-        return ts_http_send_error(req, 400, "Incomplete upload");
-    }
-
-    // 检查请求体
-    if (!req->body || req->body_len == 0) {
-        return ts_http_send_error(req, 400, "Empty www content");
-    }
-
-    if (is_browser_ota_busy()) {
-        return ts_http_send_error(req, 409, "OTA already in progress");
-    }
-    
-    TS_LOGI(TAG, "WWW partition upload: %zu bytes", req->body_len);
-    
-    // WebUI 上传会重写 disabled manifest；先清掉旧 manifest 避免失败路径沿用旧恢复指令。
-    clear_recovery_manifest("www upload");
-
-    // 先保存到 recovery 目录，保持完整恢复包；再同步刷入 www 分区。
-    esp_err_t ret = ts_ota_save_upload(req->body, req->body_len, false, false);
-    if (ret != ESP_OK) {
-        TS_LOGE(TAG, "ts_ota_save_upload failed: %s", esp_err_to_name(ret));
-        clean_recovery_after_browser_ota_failure("www save failed");
-        return ts_http_send_error(req, 500, "WWW partition save failed");
-    }
-
-    ret = ts_ota_www_flash_file_sync(TS_OTA_RECOVERY_WWW_PATH, NULL, NULL);
-    if (ret != ESP_OK) {
-        TS_LOGE(TAG, "ts_ota_www_flash_file_sync failed: %s", esp_err_to_name(ret));
-        clean_recovery_after_browser_ota_failure("www flash failed");
-        if (ret == ESP_ERR_INVALID_STATE) {
-            return ts_http_send_error(req, 409, "WWW OTA already in progress");
-        }
-        if (ret == ESP_ERR_INVALID_SIZE) {
-            return ts_http_send_error(req, 400, "Invalid WWW image size");
-        }
-        return ts_http_send_error(req, 500, "WWW partition flash failed");
-    }
-
-    if (ts_storage_exists(TS_OTA_RECOVERY_FIRMWARE_PATH)) {
-        ret = ts_ota_write_recovery_manifest_from_files(true, false, false);
-        if (ret != ESP_OK) {
-            TS_LOGW(TAG, "Full recovery manifest update failed: %s", esp_err_to_name(ret));
-            clean_recovery_after_browser_ota_failure("www manifest update failed");
-        }
-    } else {
-        TS_LOGW(TAG, "Recovery firmware missing after WebUI upload");
-        clean_recovery_after_browser_ota_failure("recovery firmware missing after www upload");
-    }
-    
-    TS_LOGI(TAG, "WWW partition upload successful");
-    
-    // 返回成功响应
-    cJSON *response = cJSON_CreateObject();
-    cJSON_AddStringToObject(response, "status", "success");
-    cJSON_AddNumberToObject(response, "size", req->body_len);
-    cJSON_AddStringToObject(response, "message", "WWW partition updated");
-    
-    char *json = cJSON_PrintUnformatted(response);
-    cJSON_Delete(response);
-    
-    ret = ts_http_send_json(req, 200, json);
-    free(json);
-    return ret;
+    return ota_upload_reply(req, false);
 }
-
 esp_err_t ts_webui_api_init(void)
 {
     TS_LOGI(TAG, "Initializing API routes");
@@ -788,6 +774,8 @@ esp_err_t ts_webui_api_init(void)
         .uri = API_PREFIX "/auth/login",
         .method = TS_HTTP_POST,
         .handler = login_handler,
+        .max_body_bytes = 16U*1024U,
+        .body_timeout_ms = 10000,
         .requires_auth = false,
         .user_data = NULL
     };
@@ -807,7 +795,8 @@ esp_err_t ts_webui_api_init(void)
         .uri = API_PREFIX "/file/download",
         .method = TS_HTTP_GET,
         .handler = file_download_handler,
-        .requires_auth = false,
+        .requires_auth = true,
+        .required_level = TS_PERM_READ,
         .user_data = NULL
     };
     ts_http_server_register_route(&file_download);
@@ -817,7 +806,10 @@ esp_err_t ts_webui_api_init(void)
         .uri = API_PREFIX "/file/upload",
         .method = TS_HTTP_POST,
         .handler = file_upload_handler,
+        .max_body_bytes = 16U*1024U*1024U,
+        .body_timeout_ms = 300000,
         .requires_auth = true,
+        .required_level = TS_PERM_ADMIN,
         .user_data = NULL
     };
     ts_http_server_register_route(&file_upload);
@@ -827,7 +819,10 @@ esp_err_t ts_webui_api_init(void)
         .uri = API_PREFIX "/ota/firmware",
         .method = TS_HTTP_POST,
         .handler = ota_firmware_upload_handler,
+        .max_body_bytes = 16U*1024U*1024U,
+        .body_timeout_ms = 300000,
         .requires_auth = true,
+        .required_level = TS_PERM_ADMIN,
         .user_data = NULL
     };
     ts_http_server_register_route(&ota_firmware);
@@ -837,12 +832,21 @@ esp_err_t ts_webui_api_init(void)
         .uri = API_PREFIX "/ota/www",
         .method = TS_HTTP_POST,
         .handler = ota_www_upload_handler,
+        .max_body_bytes = 16U*1024U*1024U,
+        .body_timeout_ms = 300000,
         .requires_auth = true,
+        .required_level = TS_PERM_ADMIN,
         .user_data = NULL
     };
     ts_http_server_register_route(&ota_www);
     
     // Generic API handler for all other routes
+    size_t generic_body_limit=1024U*1024U;
+#ifdef CONFIG_TS_CONFIG_PACK_MAX_SIZE
+    /* Preserve the existing escaped import envelope of the configured pack size. */
+    size_t pack_envelope=(size_t)CONFIG_TS_CONFIG_PACK_MAX_SIZE*6U+1024U;
+    if (pack_envelope>generic_body_limit) generic_body_limit=pack_envelope;
+#endif
     ts_http_method_t methods[] = {TS_HTTP_GET, TS_HTTP_POST, TS_HTTP_PUT, TS_HTTP_DELETE};
     const char *method_names[] = {"GET", "POST", "PUT", "DELETE"};
     for (int i = 0; i < 4; i++) {
@@ -850,6 +854,9 @@ esp_err_t ts_webui_api_init(void)
             .uri = API_PREFIX "/*",
             .method = methods[i],
             .handler = api_handler,
+            .admit = api_admit,
+            .max_body_bytes = generic_body_limit,
+            .body_timeout_ms = 30000,
             .requires_auth = false,
             .user_data = NULL
         };

@@ -5,7 +5,7 @@ from pathlib import Path
 import re
 import subprocess
 
-UPSTREAM = 'RMinte-AI/TianshanOS'
+UPSTREAM = 'RMinte/TianshanOS'
 TAG = re.compile(r'v\d+\.\d+\.\d+(?:-[A-Za-z0-9.]+)?')
 
 

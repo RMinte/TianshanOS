@@ -2,7 +2,7 @@
 const {test, before, after} = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('node:path'), fs = require('node:fs');
-const {chromium} = require('../prompts/node_modules/playwright');
+const {chromium} = require('playwright');
 const L = require('../macos27-r2/lib.cjs');
 const out = path.join(L.REPO, 'output/playwright/ui-correction');
 let browser, fixture;

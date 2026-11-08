@@ -11,9 +11,12 @@ python3 - "$build" <<'PYCODE'
 from pathlib import Path
 import sys
 s=Path('components/ts_api/src/ts_api_ssh.c').read_text();parts=[]
-for name in ['api_ssh_exec_stream','api_ssh_exec_status']:
+for name in ['api_ssh_exec_stream_impl','api_ssh_exec_stream','api_ssh_exec_stream_for_session','api_ssh_exec_status_impl','api_ssh_exec_status','api_ssh_exec_status_for_session','api_ssh_cancel_impl','api_ssh_cancel','api_ssh_cancel_for_session']:
  a=s.index('static esp_err_t '+name+'(');b=s.index('\n}',a)+2;parts.append(s[a:b])
 Path(sys.argv[1],'exec_api.inc').write_text('\n'.join(parts))
 PYCODE
 cc -std=gnu11 -g -Wno-deprecated-declarations -Wno-macro-redefined -fsanitize=address,undefined -I"$build" -Itests/ws_subscriptions/stubs -Icomponents/ts_webui/include -Icomponents/ts_webui/src -Icomponents/ts_security/include -Icomponents/ts_automation/include -Icomponents/ts_drivers/include -Icomponents/ts_console/include -Icomponents/ts_net/include -I"$cjson" tests/ws_subscriptions/test_exec_api.c "$cjson/cJSON.c" -lm -o "$build/test"
 "$build/test"
+
+cc -std=gnu11 -g -Wno-deprecated-declarations -Wno-macro-redefined -fsanitize=address,undefined -fno-sanitize-recover=all -Itests/ws_subscriptions/stubs -Icomponents/ts_webui/include -Icomponents/ts_webui/src -Icomponents/ts_security/include -Icomponents/ts_automation/include -Icomponents/ts_drivers/include -Icomponents/ts_console/include -Icomponents/ts_net/include -I"$cjson" tests/ws_subscriptions/test_exec_ownership.c "$cjson/cJSON.c" -lm -o "$build/ownership"
+"$build/ownership"

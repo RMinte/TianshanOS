@@ -8,6 +8,7 @@ sources, not copied) with synthetic SSH/known-hosts back ends, checks the exact 
 them in tests/fixtures/ssh-fingerprint/.  The browser suite replays those bytes into the real Web UI, so firmware and
 UI cannot drift apart unnoticed.  Regenerate with UPDATE_FIXTURES=1 after an intentional wire-format change.
 """
+from host_paths import build_dir
 from pathlib import Path
 import json
 import os
@@ -15,7 +16,7 @@ import re
 import subprocess
 import sys
 
-build = Path('/tmp/tianshan-ssh-host-tests')
+build = build_dir('ssh-fingerprint')
 build.mkdir(exist_ok=True)
 wire_dir = build / 'wire'
 wire_dir.mkdir(exist_ok=True)
@@ -120,9 +121,11 @@ end = web_source.index('\n}\n\nstatic esp_err_t login_handler', start)
 code += r'''
 static char *http_body;
 static int http_error_status;
+static int http_json_status;
+static bool response_may_have_effect;
 static char http_error_text[96];
 static esp_err_t ts_http_send_json(void *req,int status,const char *json) {
-    assert(status==200);free(http_body);http_body=strdup(json);return ESP_OK;
+    assert(status==200||status==409);http_json_status=status;free(http_body);http_body=strdup(json);return ESP_OK;
 }
 static esp_err_t ts_http_send_error(void *req,int status,const char *msg) {
     http_error_status=status;snprintf(http_error_text,sizeof http_error_text,"%s",msg);return ESP_FAIL;
@@ -329,7 +332,29 @@ static void failure_branch_under_allocation_failure(void) {
         }
         if(alloc_calls<k) break;                       /* the injected failure was never reached: sweep complete */
     }
-    assert(with_details>=1 && without_details>=1 && internal_error>=1);
+    assert(with_details>=1 && without_details==0 && internal_error>=1);
+}
+static void success_write_allocation_failure(void) {
+    cJSON_Hooks counting={counting_malloc,free};
+    int complete=0,unknown=0;
+    response_may_have_effect=true;
+    for(int k=1;k<=64;k++) {
+        ts_api_result_t r={0};
+        cJSON *data=cJSON_Parse("{\"operation_id\":123,\"boot_id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"result_key\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"}");assert(data);
+        ts_api_result_ok(&r,data);free(http_body);http_body=NULL;http_error_status=0;
+        alloc_calls=0;alloc_fail_at=k;cJSON_InitHooks(&counting);
+        assert(send_result(ESP_OK,r)==ESP_OK);cJSON_InitHooks(NULL);
+        cJSON *wire=cJSON_Parse(http_body);assert(wire&&!http_error_status);
+        if(http_json_status==409) {
+            assert(cJSON_GetObjectItem(wire,"code")->valueint==7&&!strcmp(str(wire,"error"),"result_unknown"));++unknown;
+        } else {
+            assert(http_json_status==200&&cJSON_GetObjectItem(wire,"code")->valueint==0);
+            cJSON *d=cJSON_GetObjectItem(wire,"data");assert(d&&cJSON_GetObjectItem(d,"operation_id")->valueint==123);
+            assert(!strcmp(str(d,"boot_id"),"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")&&!strcmp(str(d,"result_key"),"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"));++complete;
+        }
+        cJSON_Delete(wire);if(alloc_calls<k)break;
+    }
+    response_may_have_effect=false;assert(complete&&unknown);
 }
 int main(void) {
     new_host();
@@ -340,6 +365,7 @@ int main(void) {
     ssh_test_endpoint();
     failures_without_details_keep_their_exact_shape();
     failure_branch_under_allocation_failure();
+    success_write_allocation_failure();
     free(http_body);
     puts("PASS production ssh.exec/ssh.test + HTTP response chain: fingerprint reaches the client for new/changed hosts; nothing trusted, authenticated or executed before an exact confirmation; wrong or missing confirmation rejected; plain failures keep {code,error}; allocation failure at every point gives the complete response or HTTP 500");
 }

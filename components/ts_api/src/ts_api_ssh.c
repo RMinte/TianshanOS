@@ -117,7 +117,7 @@ static esp_err_t configure_ssh_from_params(const cJSON *params, ts_ssh_config_t 
         esp_err_t ret =
             ts_keystore_load_private_key(keyid->valuestring, &request_key->data, &request_key->len);
         if (ret != ESP_OK) {
-            TS_LOGE(TAG, "Failed to load key '%s': %s", keyid->valuestring, esp_err_to_name(ret));
+            TS_LOGE(TAG, "Failed to load SSH key: %s", esp_err_to_name(ret));
             return ret;
         }
         config->auth_method = TS_SSH_AUTH_PUBLICKEY;
@@ -439,7 +439,7 @@ static esp_err_t api_ssh_exec(const cJSON *params, ts_api_result_t *result)
  * - collect_output: Whether to collect output (default true)
  * - max_output_size: Maximum output to collect (default 65536)
  */
-static esp_err_t api_ssh_exec_stream(const cJSON *params, ts_api_result_t *result)
+static esp_err_t api_ssh_exec_stream_impl(const cJSON *params, uint32_t caller_session_id, ts_api_result_t *result)
 {
     if (!params) {
         ts_api_result_error(result, TS_API_ERR_INVALID_ARG, "Missing parameters");
@@ -520,7 +520,7 @@ static esp_err_t api_ssh_exec_stream(const cJSON *params, ts_api_result_t *resul
     ts_webui_ssh_receipt_t receipt={0};
     {
         /* Use one admission path, including the private recovery receipt. */
-        ts_webui_ssh_options_t options = {.receipt=&receipt};
+        ts_webui_ssh_options_t options = {.receipt=&receipt,.owner_session_id=caller_session_id};
         options.expect_pattern = (expect_pattern && cJSON_IsString(expect_pattern)) ? 
                                   expect_pattern->valuestring : NULL;
         options.fail_pattern = (fail_pattern && cJSON_IsString(fail_pattern)) ? 
@@ -540,9 +540,7 @@ static esp_err_t api_ssh_exec_stream(const cJSON *params, ts_api_result_t *resul
         options.stop_on_match = (stop_on_match && cJSON_IsBool(stop_on_match)) ? 
                                  cJSON_IsTrue(stop_on_match) : false;
         
-        TS_LOGW(TAG, "api_ssh_exec_stream: var_name param=%p, is_string=%d, value='%s'",
-                 (void*)var_name, var_name ? cJSON_IsString(var_name) : 0,
-                 options.var_name ? options.var_name : "(null)");
+        TS_LOGD(TAG, "SSH stream options accepted");
         
         ret = ts_webui_ssh_exec_start_ex(
             host->valuestring, ssh_port,
@@ -570,31 +568,46 @@ static esp_err_t api_ssh_exec_stream(const cJSON *params, ts_api_result_t *resul
     
     return ESP_OK;
 }
+static esp_err_t api_ssh_exec_stream(const cJSON *p,ts_api_result_t *r){
+    return api_ssh_exec_stream_impl(p,0,r);
+}
+static esp_err_t api_ssh_exec_stream_for_session(const cJSON *p,uint32_t sid,ts_api_result_t *r){
+    return api_ssh_exec_stream_impl(p,sid,r);
+}
+
 
 /* Exact boot identity and the private initiation receipt, in addition to the
  * same authentication gate as ssh.exec_stream. IDs alone reveal no results. */
-static esp_err_t api_ssh_exec_status(const cJSON *params,ts_api_result_t *result) {
+static esp_err_t api_ssh_exec_status_impl(const cJSON *params,const uint32_t *caller_session_id,ts_api_result_t *result) {
     const cJSON *id=cJSON_GetObjectItem(params,"session_id");
     const cJSON *boot=cJSON_GetObjectItem(params,"boot_id"),*key=cJSON_GetObjectItem(params,"result_key");
     char *json=NULL;esp_err_t lookup=ESP_ERR_NOT_FOUND;
     if(cJSON_IsNumber(id) && id->valuedouble>=1 && id->valuedouble<=UINT32_MAX &&
        id->valuedouble==(double)(uint32_t)id->valuedouble && cJSON_IsString(boot) && cJSON_IsString(key))
-        json=ts_webui_ssh_exec_status((uint32_t)id->valuedouble,boot->valuestring,key->valuestring,&lookup);
+        json=caller_session_id ? ts_webui_ssh_exec_status_for_session((uint32_t)id->valuedouble,boot->valuestring,key->valuestring,*caller_session_id,&lookup) :
+            ts_webui_ssh_exec_status((uint32_t)id->valuedouble,boot->valuestring,key->valuestring,&lookup);
     if(!json){ts_api_result_error(result,lookup==ESP_ERR_NO_MEM?TS_API_ERR_INTERNAL:TS_API_ERR_NOT_FOUND,
         lookup==ESP_ERR_NO_MEM?"ssh_result_unknown":"ssh_result_unavailable");return lookup;}
     cJSON *data=cJSON_Parse(json);free(json);
     if(!data){ts_api_result_error(result,TS_API_ERR_INTERNAL,"ssh_result_unknown");return ESP_FAIL;}
     ts_api_result_ok(result,data);return ESP_OK;
 }
+static esp_err_t api_ssh_exec_status(const cJSON *p,ts_api_result_t *r){
+    return api_ssh_exec_status_impl(p,NULL,r);
+}
+static esp_err_t api_ssh_exec_status_for_session(const cJSON *p,uint32_t sid,ts_api_result_t *r){
+    return api_ssh_exec_status_impl(p,&sid,r);
+}
+
 
 /**
  * @brief ssh.cancel - Cancel running SSH exec session
  * 
- * Params: { "session_id": 12345 }
+ * Params: { "session_id": 12345, "boot_id": "<initiation boot>", "result_key": "<private initiation receipt>" }
  * 
  * Response: { "cancelled": true }
  */
-static esp_err_t api_ssh_cancel(const cJSON *params, ts_api_result_t *result)
+static esp_err_t api_ssh_cancel_impl(const cJSON *params,const uint32_t *caller_session_id,ts_api_result_t *result)
 {
     const cJSON *sid = cJSON_GetObjectItem(params, "session_id");
     
@@ -604,7 +617,20 @@ static esp_err_t api_ssh_cancel(const cJSON *params, ts_api_result_t *result)
         ts_api_result_error(result, TS_API_ERR_NOT_FOUND, "ssh_no_session");
         return ESP_ERR_NOT_FOUND;
     }
-    esp_err_t ret = ts_webui_ssh_exec_cancel((uint32_t)sid->valuedouble);
+    const cJSON *boot = cJSON_GetObjectItem(params, "boot_id");
+    const cJSON *key = cJSON_GetObjectItem(params, "result_key");
+    bool has_receipt = cJSON_IsString(boot) && cJSON_IsString(key);
+    esp_err_t ret = ESP_ERR_INVALID_STATE;
+    /* The original UI sends only the job ID. Its validated initiating login
+     * already identifies the owner; supplied receipt fields must still match. */
+    if (caller_session_id && ((!boot && !key) || has_receipt)) {
+        ret = ts_webui_ssh_exec_cancel_for_session((uint32_t)sid->valuedouble,
+            has_receipt ? boot->valuestring : NULL,
+            has_receipt ? key->valuestring : NULL, *caller_session_id);
+    } else if (!caller_session_id && has_receipt) {
+        ret = ts_webui_ssh_exec_cancel_with_receipt((uint32_t)sid->valuedouble,
+            boot->valuestring, key->valuestring);
+    }
     if (ret != ESP_OK) {
         ts_api_result_error(result, ret == ESP_ERR_INVALID_STATE ? TS_API_ERR_NOT_FOUND : TS_API_ERR_INTERNAL,
                             ret == ESP_ERR_INVALID_STATE ? "ssh_no_session" : "ssh_cancel_failed");
@@ -617,6 +643,13 @@ static esp_err_t api_ssh_cancel(const cJSON *params, ts_api_result_t *result)
     
     return ESP_OK;
 }
+static esp_err_t api_ssh_cancel(const cJSON *p,ts_api_result_t *r){
+    return api_ssh_cancel_impl(p,NULL,r);
+}
+static esp_err_t api_ssh_cancel_for_session(const cJSON *p,uint32_t sid,ts_api_result_t *r){
+    return api_ssh_cancel_impl(p,&sid,r);
+}
+
 
 /**
  * @brief ssh.test - Test SSH connection
@@ -1760,15 +1793,27 @@ static esp_err_t api_ssh_service_start(const cJSON *params, ts_api_result_t *res
 }
 
 static const ts_api_endpoint_t ssh_endpoints[] = {
-    {.name="ssh.exec_status",.description="Read owned current or latest SSH result",
-     .category=TS_API_CAT_SECURITY,.handler=api_ssh_exec_status,.requires_auth=true},
+    {
+        .name = "ssh.exec_status",
+        .description = "Read owned current or latest SSH result",
+        .category = TS_API_CAT_SECURITY,
+        .handler = api_ssh_exec_status,
+        .session_handler = api_ssh_exec_status_for_session,
+        .external_access = TS_API_ACCESS_ROOT,
+        .allowed_methods = TS_API_METHOD_READ,
+        .requires_auth = true,
+    },
     {.name = "ssh.services.start", .description = "Start a stored managed service",
-     .category = TS_API_CAT_SECURITY, .handler = api_ssh_service_start, .requires_auth = true},
+     .category = TS_API_CAT_SECURITY, .handler = api_ssh_service_start,
+     .external_access = TS_API_ACCESS_ADMIN, .allowed_methods = TS_API_METHOD_WRITE,
+     .requires_auth = true},
     {
         .name = "ssh.exec",
         .description = "Execute remote command via SSH",
         .category = TS_API_CAT_SECURITY,
         .handler = api_ssh_exec,
+        .external_access = TS_API_ACCESS_ROOT,
+        .allowed_methods = TS_API_METHOD_WRITE,
         .requires_auth = true,
     },
     {
@@ -1776,6 +1821,9 @@ static const ts_api_endpoint_t ssh_endpoints[] = {
         .description = "Execute remote command with streaming output via WebSocket",
         .category = TS_API_CAT_SECURITY,
         .handler = api_ssh_exec_stream,
+        .session_handler = api_ssh_exec_stream_for_session,
+        .external_access = TS_API_ACCESS_ROOT,
+        .allowed_methods = TS_API_METHOD_WRITE,
         .requires_auth = true,
     },
     {
@@ -1783,6 +1831,9 @@ static const ts_api_endpoint_t ssh_endpoints[] = {
         .description = "Cancel running SSH exec session",
         .category = TS_API_CAT_SECURITY,
         .handler = api_ssh_cancel,
+        .session_handler = api_ssh_cancel_for_session,
+        .external_access = TS_API_ACCESS_ROOT,
+        .allowed_methods = TS_API_METHOD_WRITE,
         .requires_auth = true,
     },
     {
@@ -1790,6 +1841,8 @@ static const ts_api_endpoint_t ssh_endpoints[] = {
         .description = "Test SSH connection",
         .category = TS_API_CAT_SECURITY,
         .handler = api_ssh_test,
+        .external_access = TS_API_ACCESS_ADMIN,
+        .allowed_methods = TS_API_METHOD_WRITE,
         .requires_auth = true,
     },
     {
@@ -1797,6 +1850,8 @@ static const ts_api_endpoint_t ssh_endpoints[] = {
         .description = "Deploy public key to remote server",
         .category = TS_API_CAT_SECURITY,
         .handler = api_ssh_copyid,
+        .external_access = TS_API_ACCESS_ADMIN,
+        .allowed_methods = TS_API_METHOD_WRITE,
         .requires_auth = true,
     },
     {
@@ -1804,6 +1859,8 @@ static const ts_api_endpoint_t ssh_endpoints[] = {
         .description = "Revoke (remove) deployed public key from remote server",
         .category = TS_API_CAT_SECURITY,
         .handler = api_ssh_revoke,
+        .external_access = TS_API_ACCESS_ADMIN,
+        .allowed_methods = TS_API_METHOD_WRITE,
         .requires_auth = true,
     },
     {
@@ -1811,6 +1868,8 @@ static const ts_api_endpoint_t ssh_endpoints[] = {
         .description = "Generate SSH key pair",
         .category = TS_API_CAT_SECURITY,
         .handler = api_ssh_keygen,
+        .external_access = TS_API_ACCESS_ADMIN,
+        .allowed_methods = TS_API_METHOD_WRITE,
         .requires_auth = true,
     },
     /* SSH Host Config APIs */
@@ -1819,13 +1878,17 @@ static const ts_api_endpoint_t ssh_endpoints[] = {
         .description = "List all SSH host configurations",
         .category = TS_API_CAT_SECURITY,
         .handler = api_ssh_hosts_list,
-        .requires_auth = false,
+        .external_access = TS_API_ACCESS_READ,
+        .allowed_methods = TS_API_METHOD_READ,
+        .requires_auth = true,
     },
     {
         .name = "ssh.hosts.add",
         .description = "Add SSH host configuration",
         .category = TS_API_CAT_SECURITY,
         .handler = api_ssh_hosts_add,
+        .external_access = TS_API_ACCESS_ADMIN,
+        .allowed_methods = TS_API_METHOD_WRITE,
         .requires_auth = true,
     },
     {
@@ -1833,6 +1896,8 @@ static const ts_api_endpoint_t ssh_endpoints[] = {
         .description = "Update an existing SSH hosts configuration",
         .category = TS_API_CAT_SECURITY,
         .handler = api_ssh_hosts_update,
+        .external_access = TS_API_ACCESS_ADMIN,
+        .allowed_methods = TS_API_METHOD_WRITE,
         .requires_auth = true,
     },
     {
@@ -1840,6 +1905,8 @@ static const ts_api_endpoint_t ssh_endpoints[] = {
         .description = "Remove SSH host configuration",
         .category = TS_API_CAT_SECURITY,
         .handler = api_ssh_hosts_remove,
+        .external_access = TS_API_ACCESS_ADMIN,
+        .allowed_methods = TS_API_METHOD_WRITE,
         .requires_auth = true,
     },
     {
@@ -1847,13 +1914,17 @@ static const ts_api_endpoint_t ssh_endpoints[] = {
         .description = "Get SSH host configuration by ID",
         .category = TS_API_CAT_SECURITY,
         .handler = api_ssh_hosts_get,
-        .requires_auth = false,
+        .external_access = TS_API_ACCESS_READ,
+        .allowed_methods = TS_API_METHOD_READ,
+        .requires_auth = true,
     },
     {
         .name = "ssh.hosts.export",
         .description = "Export SSH host configuration as .tscfg",
         .category = TS_API_CAT_SECURITY,
         .handler = api_ssh_hosts_export,
+        .external_access = TS_API_ACCESS_ADMIN,
+        .allowed_methods = TS_API_METHOD_WRITE,
         .requires_auth = true,
     },
     {
@@ -1861,6 +1932,8 @@ static const ts_api_endpoint_t ssh_endpoints[] = {
         .description = "Import SSH host configuration from .tscfg",
         .category = TS_API_CAT_SECURITY,
         .handler = api_ssh_hosts_import,
+        .external_access = TS_API_ACCESS_ADMIN,
+        .allowed_methods = TS_API_METHOD_WRITE,
         .requires_auth = true,
     },
     /* SSH Command Config APIs */
@@ -1869,13 +1942,17 @@ static const ts_api_endpoint_t ssh_endpoints[] = {
         .description = "List all SSH command configurations",
         .category = TS_API_CAT_SECURITY,
         .handler = api_ssh_commands_list,
-        .requires_auth = false,
+        .external_access = TS_API_ACCESS_READ,
+        .allowed_methods = TS_API_METHOD_READ,
+        .requires_auth = true,
     },
     {
         .name = "ssh.commands.add",
         .description = "Add or update SSH command configuration",
         .category = TS_API_CAT_SECURITY,
         .handler = api_ssh_commands_add,
+        .external_access = TS_API_ACCESS_ROOT,
+        .allowed_methods = TS_API_METHOD_WRITE,
         .requires_auth = true,
     },
     {
@@ -1883,6 +1960,8 @@ static const ts_api_endpoint_t ssh_endpoints[] = {
         .description = "Update an existing SSH commands configuration",
         .category = TS_API_CAT_SECURITY,
         .handler = api_ssh_commands_update,
+        .external_access = TS_API_ACCESS_ROOT,
+        .allowed_methods = TS_API_METHOD_WRITE,
         .requires_auth = true,
     },
     {
@@ -1890,6 +1969,8 @@ static const ts_api_endpoint_t ssh_endpoints[] = {
         .description = "Remove SSH command configuration",
         .category = TS_API_CAT_SECURITY,
         .handler = api_ssh_commands_remove,
+        .external_access = TS_API_ACCESS_ROOT,
+        .allowed_methods = TS_API_METHOD_WRITE,
         .requires_auth = true,
     },
     {
@@ -1897,13 +1978,17 @@ static const ts_api_endpoint_t ssh_endpoints[] = {
         .description = "Get SSH command configuration by ID",
         .category = TS_API_CAT_SECURITY,
         .handler = api_ssh_commands_get,
-        .requires_auth = false,
+        .external_access = TS_API_ACCESS_READ,
+        .allowed_methods = TS_API_METHOD_READ,
+        .requires_auth = true,
     },
     {
         .name = "ssh.commands.export",
         .description = "Export SSH command configuration as .tscfg",
         .category = TS_API_CAT_SECURITY,
         .handler = api_ssh_commands_export,
+        .external_access = TS_API_ACCESS_ROOT,
+        .allowed_methods = TS_API_METHOD_WRITE,
         .requires_auth = true,
     },
     {
@@ -1911,6 +1996,8 @@ static const ts_api_endpoint_t ssh_endpoints[] = {
         .description = "Import SSH command configuration from .tscfg",
         .category = TS_API_CAT_SECURITY,
         .handler = api_ssh_commands_import,
+        .external_access = TS_API_ACCESS_ROOT,
+        .allowed_methods = TS_API_METHOD_WRITE,
         .requires_auth = true,
     },
 };

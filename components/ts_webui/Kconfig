@@ -38,9 +38,4 @@ menu "TianShanOS WebUI Configuration"
         default y
         depends on TS_WEBUI_ENABLE
 
-    config TS_WEBUI_STATIC_PATH
-        string "Static Files Path"
-        default "/www"
-        depends on TS_WEBUI_ENABLE
-
 endmenu

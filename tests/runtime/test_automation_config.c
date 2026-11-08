@@ -68,33 +68,28 @@ esp_err_t nvs_set_u8(nvs_handle_t handle,const char *name,uint8_t value)
 { assert(handle==1&&!strcmp(name,"auto_v"));pending_auto_v=value;auto_v_dirty=true;return ESP_OK; }
 esp_err_t nvs_erase_all(nvs_handle_t handle){(void)handle;assert(false);return ESP_FAIL;}
 typedef void *esp_websocket_client_handle_t;
-typedef void *esp_http_client_handle_t;
-enum {HTTP_METHOD_GET,HTTP_METHOD_POST};
-typedef struct {const char *url;int method,timeout_ms,buffer_size;bool skip_cert_common_name_check;esp_err_t (*crt_bundle_attach)(void *);} esp_http_client_config_t;
-static int http_method,http_calls,local_api_calls,http_offset;
-static bool http_bundle,http_skip_name;
+#include "ts_http_fetch.h"
+#include "ts_http_url.h"
+static int http_method,http_calls,local_api_calls;
+static bool http_default_ca,http_headers_only;
 static char http_url[256];
 static const char *http_payload="{\"temperature\":21}";
 static char http_authorization[128];
 static esp_err_t esp_crt_bundle_attach(void *p){(void)p;return ESP_OK;}
-static esp_http_client_handle_t esp_http_client_init(const esp_http_client_config_t *cfg)
-{http_method=cfg->method;++http_calls;http_offset=0;http_authorization[0]=0;
- http_bundle=cfg->crt_bundle_attach==esp_crt_bundle_attach;http_skip_name=cfg->skip_cert_common_name_check;
- snprintf(http_url,sizeof(http_url),"%s",cfg->url);return (void*)1;}
-static esp_err_t esp_http_client_set_header(esp_http_client_handle_t c,const char *name,const char *value)
-{(void)c;assert(!strcmp(name,"Authorization"));snprintf(http_authorization,sizeof(http_authorization),"%s",value);return ESP_OK;}
-static esp_err_t esp_http_client_open(esp_http_client_handle_t c,int n){(void)c;(void)n;return ESP_OK;}
-static int esp_http_client_fetch_headers(esp_http_client_handle_t c){(void)c;return 0;}
-static int esp_http_client_get_status_code(esp_http_client_handle_t c){(void)c;return 200;}
-static int esp_http_client_read(esp_http_client_handle_t c,char *out,int size)
-{(void)c;const char *data=http_payload;int length=(int)strlen(data);if(http_offset)return 0;assert(size>=length);memcpy(out,data,length);http_offset=length;return length;}
-static esp_err_t esp_http_client_close(esp_http_client_handle_t c){(void)c;return ESP_OK;}
-static esp_err_t esp_http_client_cleanup(esp_http_client_handle_t c){(void)c;return ESP_OK;}
+esp_err_t ts_http_fetch(const ts_http_fetch_config_t *request,ts_http_fetch_result_t *reply)
+{
+    memset(reply,0,sizeof(*reply));http_method=request->method;++http_calls;
+    http_default_ca=request->cert_pem==NULL;http_headers_only=request->headers_only;
+    snprintf(http_url,sizeof(http_url),"%s",request->url);
+    snprintf(http_authorization,sizeof(http_authorization),"%s",request->authorization?request->authorization:"");
+    reply->status=200;reply->body=strdup(http_payload);reply->length=strlen(http_payload);reply->content_length=reply->length;
+    return reply->body?ESP_OK:ESP_ERR_NO_MEM;
+}
 esp_err_t ts_api_call(const char *name,const cJSON *params,ts_api_result_t *result)
 {(void)params;assert(!strcmp(name,"example.status"));++local_api_calls;result->code=0;result->data=cJSON_Parse("{\"temperature\":21}");return ESP_OK;}
 typedef const char *esp_event_base_t;
 typedef struct {char *data_ptr;int data_len,payload_len,payload_offset;bool fin;uint8_t op_code;} esp_websocket_event_data_t;
-typedef struct {const char *uri;int buffer_size,reconnect_timeout_ms,network_timeout_ms,ping_interval_sec;bool enable_close_reconnect;esp_err_t (*crt_bundle_attach)(void *);} esp_websocket_client_config_t;
+typedef struct {const char *uri;int buffer_size,reconnect_timeout_ms,network_timeout_ms,ping_interval_sec;bool enable_close_reconnect,disable_auto_reconnect;esp_err_t (*crt_bundle_attach)(void *);} esp_websocket_client_config_t;
 enum {WEBSOCKET_EVENT_CONNECTED=1,WEBSOCKET_EVENT_DISCONNECTED,WEBSOCKET_EVENT_DATA,WEBSOCKET_EVENT_ERROR,WEBSOCKET_EVENT_CLOSED};
 #define SIO_MSG_BUF_SIZE 8192
 #define SIO_PROBE_MSG "2probe"
@@ -118,6 +113,7 @@ static unsigned stream_tasks_created;
 static void sio_connection_task(void *arg) {(void)arg;assert(false);}
 static BaseType_t xTaskCreateWithCaps(void (*task)(void *),const char *name,unsigned stack,void *arg,unsigned priority,TaskHandle_t *out,unsigned caps)
 {assert(task==sio_connection_task&&name&&stack==6144&&arg&&priority==5&&caps);*out=(void *)1;++stream_tasks_created;return pdPASS;}
+static void *heap_caps_realloc(void *p,size_t n,unsigned caps) {(void)caps;return realloc(p,n);}
 #include "source_transport.inc"
 void ts_source_config_activate(void) { /* Task creation and real networking are outside this fixture. */ }
 
@@ -413,13 +409,13 @@ static void rule_config_cases(void)
 static void source_cases(void)
 {
     char transport_url[256];
-    ts_source_sio_websocket_url("https://example.invalid:443", "sid", transport_url, sizeof(transport_url));
+    ts_source_sio_url("https://example.invalid:443", "sid", transport_url, sizeof(transport_url));
     assert(!strcmp(transport_url,"wss://example.invalid:443/socket.io/?EIO=4&transport=websocket&sid=sid"));
-    ts_source_sio_websocket_url("http://example.invalid:80", "sid", transport_url, sizeof(transport_url));
+    ts_source_sio_url("http://example.invalid:80", "sid", transport_url, sizeof(transport_url));
     assert(!strcmp(transport_url,"ws://example.invalid:80/socket.io/?EIO=4&transport=websocket&sid=sid"));
     char sid[64]={0};http_payload="0{\"sid\":\"fixture\"}";
     assert(sio_http_handshake("https://example.invalid:443",sid,sizeof(sid))==ESP_OK&&!strcmp(sid,"fixture"));
-    assert(!strncmp(http_url,"https://",8)&&http_bundle&&!http_skip_name);
+    assert(!strncmp(http_url,"https://",8)&&http_default_ca&&!http_headers_only);
     http_payload="{\"temperature\":21}";
     /* Real runtime handshake: standard server sends no WS noop acknowledgement. */
     ts_auto_source_t protocol={.enabled=true,.type=TS_AUTO_SRC_SOCKETIO,.mapping_count=1};
@@ -505,9 +501,9 @@ static void source_cases(void)
     assert(stream&&stream->source_instance==ws.instance&&stream->type==TS_AUTO_SRC_WEBSOCKET&&stream->pending_mutex);
     assert(stream_connect(ws.id,TS_AUTO_SRC_WEBSOCKET)==ESP_OK&&stream_tasks_created==before_stream+1);
     esp_websocket_client_config_t stream_config=test_stream_client_config(stream,3210,ws.websocket.uri);
-    assert(stream_config.enable_close_reconnect&&stream_config.reconnect_timeout_ms==3210&&stream_config.crt_bundle_attach==esp_crt_bundle_attach);
+    assert(stream_config.enable_close_reconnect&&!stream_config.disable_auto_reconnect&&stream_config.reconnect_timeout_ms==3210&&stream_config.crt_bundle_attach==esp_crt_bundle_attach);
     stream->type=TS_AUTO_SRC_SOCKETIO;stream_config=test_stream_client_config(stream,3210,ws.websocket.uri);
-    assert(!stream_config.enable_close_reconnect&&stream_config.reconnect_timeout_ms==10000);stream->type=TS_AUTO_SRC_WEBSOCKET;
+    assert(!stream_config.enable_close_reconnect&&stream_config.disable_auto_reconnect&&stream_config.reconnect_timeout_ms==10000);stream->type=TS_AUTO_SRC_WEBSOCKET;
     sio_websocket_event_handler(stream,NULL,WEBSOCKET_EVENT_CONNECTED,NULL);
     assert(ts_source_get_copy(ws.id,&ws)==ESP_OK&&ws.connected);
     char message[]="{\"data\":{\"temperature\":23}}";int length=(int)strlen(message);
@@ -537,7 +533,7 @@ static void source_cases(void)
     sio_websocket_event_handler(stream,NULL,WEBSOCKET_EVENT_DATA,&control);ws_test_handler(&test,NULL,WEBSOCKET_EVENT_DATA,&control);
     part=(esp_websocket_event_data_t){.data_ptr=framed+8,.data_len=framed_length-8,.payload_len=framed_length-8,.fin=true,.op_code=0};
     sio_websocket_event_handler(stream,NULL,WEBSOCKET_EVENT_DATA,&part);ws_test_handler(&test,NULL,WEBSOCKET_EVENT_DATA,&part);
-    assert(test.received&&!strcmp(test.message,framed));free(test.message);test_process_pending(stream);
+    assert(test.received&&!strcmp(test.sample.data,framed));free(test.sample.data);test_process_pending(stream);
     assert(ts_variable_get("plain_ws.temperature",&mapped)==ESP_OK&&mapped.int_val==25);
     /* A separate empty FIN completes the buffered message in both paths. */
     char empty_fin_message[]="{\"data\":{\"temperature\":26}}";
@@ -553,7 +549,7 @@ static void source_cases(void)
     sio_websocket_event_handler(stream,NULL,WEBSOCKET_EVENT_DATA,&part);
     assert(stream->pending_json&&!strcmp(stream->pending_json,empty_fin_message));
     ws_test_handler(&test,NULL,WEBSOCKET_EVENT_DATA,&part);
-    assert(test.received&&!strcmp(test.message,empty_fin_message));free(test.message);test_process_pending(stream);
+    assert(test.received&&!strcmp(test.sample.data,empty_fin_message));free(test.sample.data);test_process_pending(stream);
     assert(ts_variable_get("plain_ws.temperature",&mapped)==ESP_OK&&mapped.int_val==26);
     char next_message[]="{\"data\":{\"temperature\":27}}";
     part=(esp_websocket_event_data_t){.data_ptr=next_message,.data_len=(int)strlen(next_message),.payload_len=(int)strlen(next_message),.fin=true,.op_code=1};

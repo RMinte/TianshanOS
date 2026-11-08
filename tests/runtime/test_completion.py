@@ -1,3 +1,4 @@
+from host_paths import build_dir
 import sys
 """Compile production completion lifetime and synchronous admission; mock only queue/RTOS I/O."""
 from pathlib import Path
@@ -7,7 +8,7 @@ def function(name):
  m=re.search(r'^(?:static )?[^\n;]+\b'+name+r'\([^;]+?\)\s*\{',source,re.M)
  assert m,name
  return source[m.start():source.index('\n}',m.start())+2]
-build=Path('/tmp/tianshan-runtime-tests');build.mkdir(exist_ok=True)
+build=build_dir('completion');build.mkdir(exist_ok=True)
 code=r'''
 #include <assert.h>
 #include <stdlib.h>

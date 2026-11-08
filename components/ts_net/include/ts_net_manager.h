@@ -291,6 +291,8 @@ esp_err_t ts_net_manager_set_hostname(const char *hostname);
  * @return 主机名字符串
  */
 const char *ts_net_manager_get_hostname(void);
+/* Copy the published authority (configured name before first start). Pending
+ * hostname edits do not invalidate the currently published management origin. */
 
 /* ============================================================================
  * 配置持久化

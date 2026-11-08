@@ -12,6 +12,10 @@
  */
 
 #include <stdatomic.h>
+#include <limits.h>
+#include <math.h>
+#include "ts_http_url.h"
+#include "esp_timer.h"
 #include <string.h>
 #include <stdlib.h>
 #include "freertos/FreeRTOS.h"
@@ -19,8 +23,7 @@
 #include "freertos/semphr.h"
 #include "esp_log.h"
 #include "esp_mac.h"
-#include "esp_http_client.h"
-#include "esp_crt_bundle.h"
+#include "ts_http_fetch.h"
 #include "esp_heap_caps.h"
 #include "cJSON.h"
 
@@ -39,27 +42,76 @@ static struct {
     ts_pki_client_config_t config;
     char device_id[TS_CERT_DEVICE_ID_MAX_LEN];
     int request_id;  // CSR 提交后返回的请求 ID
-    TaskHandle_t enroll_task;
+    _Atomic(TaskHandle_t) enroll_task;
     _Atomic bool enroll_running;
-    SemaphoreHandle_t mutex;
     _Atomic bool stop_requested;
     ts_pki_enroll_callback_t callback;
     void *callback_data;
 } s_client = {0};
 
+/* One operation owner, retained across deinit so late callers cannot take a
+ * freed mutex. Recursive only for the existing blocking enrollment composition.
+ * Contending control/HTTP requests return busy rather than waiting behind I/O. */
+static StaticSemaphore_t s_operation_storage;
+static SemaphoreHandle_t s_operation;
+static portMUX_TYPE s_operation_init_lock = portMUX_INITIALIZER_UNLOCKED;
+static atomic_bool s_deinitializing;
+static int64_t s_request_deadline; /* Held by the operation owner; zero for individual requests. */
+static bool operation_take(void)
+{
+    portENTER_CRITICAL(&s_operation_init_lock);
+    if (!s_operation) s_operation = xSemaphoreCreateRecursiveMutexStatic(&s_operation_storage);
+    portEXIT_CRITICAL(&s_operation_init_lock);
+    return xSemaphoreTakeRecursive(s_operation, 0) == pdTRUE;
+}
+static bool operation_enter(void)
+{
+    if (!operation_take()) return false;
+    if (s_deinitializing) { xSemaphoreGiveRecursive(s_operation); return false; }
+    return true;
+}
+static bool enrollment_owner(void)
+{
+    return !s_client.enroll_running || xTaskGetCurrentTaskHandle() == s_client.enroll_task;
+}
+static bool request_current(void *task)
+{
+    return !s_deinitializing && (!s_request_deadline || esp_timer_get_time() < s_request_deadline) && !(s_client.enroll_running &&
+        task == s_client.enroll_task && s_client.stop_requested);
+}
+
+/* Only a host, never a URL/path/header; accept DNS and IPv4/IPv6 without
+ * inventing a separate authority parser or changing the configured target. */
+static bool valid_server(const char *host, uint16_t port)
+{
+    if (!host || !port || !host[0] || strnlen(host, sizeof(s_client.config.server_host)) >= sizeof(s_client.config.server_host)) return false;
+    char url[96];
+    bool brackets = strchr(host, ':') && host[0] != '[';
+    int n = snprintf(url, sizeof(url), brackets ? "http://[%s]:%u/" : "http://%s:%u/", host, (unsigned)port);
+    struct http_parser_url parsed;
+    return n > 0 && (size_t)n < sizeof(url) && ts_http_url_parse(url, &parsed) &&
+        !(parsed.field_set & ((1U << UF_USERINFO) | (1U << UF_QUERY) | (1U << UF_FRAGMENT))) &&
+        parsed.field_data[UF_PATH].len == 1;
+}
+static void server_url(char *out, size_t size, const char *path)
+{
+    const char *host = s_client.config.server_host;
+    bool brackets = strchr(host, ':') && host[0] != '[';
+    snprintf(out, size, brackets ? "http%s://[%s]:%u%s" : "http%s://%s:%u%s",
+        s_client.config.use_https ? "s" : "", host, (unsigned)s_client.config.server_port, path);
+}
+
 /** HTTP response buffer */
 #define HTTP_RESP_BUF_SIZE 8192
-static char *s_http_resp_buf = NULL;
-static size_t s_http_resp_len = 0;
 
 /*===========================================================================*/
 /*                       Forward Declarations                                 */
 /*===========================================================================*/
 
-static esp_err_t http_event_handler(esp_http_client_event_t *evt);
 static esp_err_t do_http_request(const char *url, esp_http_client_method_t method,
-                                  const char *post_data, int *http_code);
+                                  const char *post_data, int *http_code, cJSON **response);
 static void auto_enroll_task(void *arg);
+static void enroll_wait(uint32_t ms);
 static esp_err_t get_device_id(void);
 
 /*===========================================================================*/
@@ -87,35 +139,15 @@ esp_err_t ts_pki_client_init(void)
     return ts_pki_client_init_with_config(&config);
 }
 
-esp_err_t ts_pki_client_init_with_config(const ts_pki_client_config_t *config)
+static esp_err_t ts_pki_client_init_with_config_locked(const ts_pki_client_config_t *config)
 {
     if (s_client.initialized) {
         ESP_LOGW(TAG, "Already initialized");
         return ESP_OK;
     }
     
-    if (!config) {
-        return ESP_ERR_INVALID_ARG;
-    }
-    
-    // 分配 HTTP 响应缓冲区
-    s_http_resp_buf = heap_caps_malloc(HTTP_RESP_BUF_SIZE, MALLOC_CAP_SPIRAM);
-    if (!s_http_resp_buf) {
-        s_http_resp_buf = malloc(HTTP_RESP_BUF_SIZE);
-        if (!s_http_resp_buf) {
-            ESP_LOGE(TAG, "Failed to allocate HTTP buffer");
-            return ESP_ERR_NO_MEM;
-        }
-    }
-    
-    // 创建互斥锁
-    s_client.mutex = xSemaphoreCreateMutex();
-    if (!s_client.mutex) {
-        free(s_http_resp_buf);
-        s_http_resp_buf = NULL;
-        return ESP_ERR_NO_MEM;
-    }
-    
+    if (!config || !valid_server(config->server_host, config->server_port) || !config->poll_interval_sec) return ESP_ERR_INVALID_ARG;
+
     // 复制配置
     memcpy(&s_client.config, config, sizeof(ts_pki_client_config_t));
     s_client.initialized = true;
@@ -139,59 +171,59 @@ esp_err_t ts_pki_client_init_with_config(const ts_pki_client_config_t *config)
     return ESP_OK;
 }
 
-void ts_pki_client_deinit(void)
+esp_err_t ts_pki_client_deinit(void)
 {
-    if (!s_client.initialized) return;
-    
-    // 停止后台任务
+    s_deinitializing = true;
     ts_pki_client_stop_auto_enroll();
-    
-    if (s_client.enroll_running) { ESP_LOGW(TAG, "Enrollment still exiting; retaining resources"); return; }
-
-    // 释放资源
-    if (s_client.mutex) {
-        vSemaphoreDelete(s_client.mutex);
-        s_client.mutex = NULL;
+    if (!operation_take()) return ESP_ERR_INVALID_STATE;
+    if (s_client.enroll_running) {
+        xSemaphoreGiveRecursive(s_operation);
+        return ESP_ERR_INVALID_STATE;
     }
-    
-    if (s_http_resp_buf) {
-        free(s_http_resp_buf);
-        s_http_resp_buf = NULL;
-    }
-    
-    memset(&s_client, 0, sizeof(s_client));
+    s_client.initialized = false;
+    memset(&s_client.config, 0, sizeof(s_client.config));
+    memset(s_client.device_id, 0, sizeof(s_client.device_id));
+    s_client.request_id = 0;
+    s_client.enroll_task = NULL;
+    s_client.callback = NULL;
+    s_client.callback_data = NULL;
+    s_client.stop_requested = false;
+    s_deinitializing = false;
+    xSemaphoreGiveRecursive(s_operation);
     ESP_LOGI(TAG, "PKI client deinitialized");
+    return ESP_OK;
 }
 
 /*===========================================================================*/
 /*                          Server Configuration                              */
 /*===========================================================================*/
 
-esp_err_t ts_pki_client_set_server(const char *host, uint16_t port)
+static esp_err_t ts_pki_client_set_server_locked(const char *host, uint16_t port)
 {
     if (!s_client.initialized || !host) {
         return ESP_ERR_INVALID_STATE;
     }
     
-    xSemaphoreTake(s_client.mutex, portMAX_DELAY);
-    strncpy(s_client.config.server_host, host, sizeof(s_client.config.server_host) - 1);
-    s_client.config.server_port = port;
-    xSemaphoreGive(s_client.mutex);
-    
+    if (!valid_server(host, port)) return ESP_ERR_INVALID_ARG;
+    if (s_client.enroll_running) return ESP_ERR_INVALID_STATE;
+    if (strcmp(s_client.config.server_host, host) || s_client.config.server_port != port) {
+        snprintf(s_client.config.server_host, sizeof(s_client.config.server_host), "%s", host);
+        s_client.config.server_port = port;
+        s_client.request_id = 0; /* Request IDs are scoped to their issuing server. */
+    }
+
     ESP_LOGI(TAG, "PKI server set to %s:%d", host, port);
     return ESP_OK;
 }
 
-esp_err_t ts_pki_client_get_server(char *host, uint16_t *port)
+static esp_err_t ts_pki_client_get_server_locked(char *host, uint16_t *port)
 {
     if (!s_client.initialized || !host || !port) {
         return ESP_ERR_INVALID_STATE;
     }
     
-    xSemaphoreTake(s_client.mutex, portMAX_DELAY);
     strcpy(host, s_client.config.server_host);
     *port = s_client.config.server_port;
-    xSemaphoreGive(s_client.mutex);
     
     return ESP_OK;
 }
@@ -200,7 +232,7 @@ esp_err_t ts_pki_client_get_server(char *host, uint16_t *port)
 /*                      Manual Enrollment Operations                          */
 /*===========================================================================*/
 
-esp_err_t ts_pki_client_submit_csr(void)
+static esp_err_t ts_pki_client_submit_csr_locked(void)
 {
     if (!s_client.initialized) {
         return ESP_ERR_INVALID_STATE;
@@ -248,16 +280,20 @@ esp_err_t ts_pki_client_submit_csr(void)
     
     // 构建 JSON 请求体
     cJSON *root = cJSON_CreateObject();
-    cJSON_AddStringToObject(root, "device_id", s_client.device_id);
-    cJSON_AddStringToObject(root, "csr_pem", csr_pem);
-    cJSON_AddStringToObject(root, "device_type", "ESP32-S3");
-    cJSON_AddStringToObject(root, "device_ip", "10.10.99.97");  // 设备静态 IP
-    cJSON_AddStringToObject(root, "description", "TianShanOS Rack Manager");
-    // 建议的 SAN IP，管理员可在审批时修改
-    cJSON *san_ips = cJSON_CreateArray();
-    cJSON_AddItemToArray(san_ips, cJSON_CreateString("10.10.99.97"));
-    cJSON_AddItemToObject(root, "suggested_san_ips", san_ips);
-    
+    bool complete = root && cJSON_AddStringToObject(root, "device_id", s_client.device_id) &&
+        cJSON_AddStringToObject(root, "csr_pem", csr_pem) &&
+        cJSON_AddStringToObject(root, "device_type", "ESP32-S3") &&
+        cJSON_AddStringToObject(root, "device_ip", "10.10.99.97") &&
+        cJSON_AddStringToObject(root, "description", "TianShanOS Rack Manager");
+    cJSON *san_ips = complete ? cJSON_AddArrayToObject(root, "suggested_san_ips") : NULL;
+    cJSON *ip = san_ips ? cJSON_CreateString("10.10.99.97") : NULL;
+    if (!ip || !cJSON_AddItemToArray(san_ips, ip)) {
+        cJSON_Delete(ip);
+        cJSON_Delete(root);
+        free(csr_pem);
+        return ESP_ERR_NO_MEM;
+    }
+
     char *json_str = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
     free(csr_pem);
@@ -268,13 +304,12 @@ esp_err_t ts_pki_client_submit_csr(void)
     
     // 发送 HTTP 请求到 /api/csr/submit
     char url[256];
-    snprintf(url, sizeof(url), "http%s://%s:%d/api/csr/submit",
-             s_client.config.use_https ? "s" : "",
-             s_client.config.server_host,
-             s_client.config.server_port);
+    server_url(url, sizeof(url), "/api/csr/submit");
     
     int http_code = 0;
-    ret = do_http_request(url, HTTP_METHOD_POST, json_str, &http_code);
+    cJSON *resp = NULL;
+    s_client.request_id = 0;
+    ret = do_http_request(url, HTTP_METHOD_POST, json_str, &http_code, &resp);
     free(json_str);
     
     if (ret != ESP_OK) {
@@ -284,10 +319,14 @@ esp_err_t ts_pki_client_submit_csr(void)
     
     if (http_code == 200 || http_code == 201) {
         // 解析响应获取 request_id
-        cJSON *resp = cJSON_Parse(s_http_resp_buf);
         if (resp) {
             cJSON *req_id = cJSON_GetObjectItem(resp, "request_id");
-            if (req_id && cJSON_IsNumber(req_id)) {
+            if (!cJSON_IsNumber(req_id) || !isfinite(req_id->valuedouble) || req_id->valuedouble < 1 ||
+                req_id->valuedouble > INT_MAX || req_id->valuedouble != (int)req_id->valuedouble) {
+                cJSON_Delete(resp);
+                return ESP_ERR_INVALID_RESPONSE;
+            }
+            if (req_id) {
                 s_client.request_id = req_id->valueint;
                 ESP_LOGI(TAG, "CSR submitted successfully, request_id=%d", s_client.request_id);
             }
@@ -298,18 +337,7 @@ esp_err_t ts_pki_client_submit_csr(void)
                 strcmp(status->valuestring, "approved") == 0 &&
                 cert && cJSON_IsString(cert)) {
                 ESP_LOGI(TAG, "Certificate auto-issued!");
-                cJSON *ca_chain = cJSON_GetObjectItem(resp, "ca_chain");
-                // 安装证书 (mbedtls 需要包含 null 终止符)
-                ret = ts_cert_install_certificate(cert->valuestring, strlen(cert->valuestring) + 1);
-                // 安装 CA 链
-                if (ret == ESP_OK && ca_chain && cJSON_IsString(ca_chain)) {
-                    ret = ts_cert_install_ca_chain(ca_chain->valuestring, strlen(ca_chain->valuestring) + 1);
-                }
-                if (ret == ESP_OK) {
-                    ts_cert_pki_status_t installed;
-                    ret = ts_cert_get_status(&installed);
-                    if (ret == ESP_OK && (!installed.has_ca_chain || !installed.ca_valid)) ret = ESP_ERR_INVALID_STATE;
-                }
+                ret = ts_cert_install_issued_certificate_ex(cert->valuestring, strlen(cert->valuestring) + 1, NULL);
                 if (ret != ESP_OK) { cJSON_Delete(resp); return ret; }
             }
             cJSON_Delete(resp);
@@ -317,14 +345,14 @@ esp_err_t ts_pki_client_submit_csr(void)
         return ESP_OK;
     } else if (http_code == 409) {
         ESP_LOGW(TAG, "CSR already exists for this device");
-        return ESP_OK;  // 已存在也算成功
+        return ESP_ERR_INVALID_STATE; /* Conflict without a bound request ID is not success. */
     } else {
         ESP_LOGE(TAG, "Server returned error: %d", http_code);
         return ESP_FAIL;
     }
 }
 
-esp_err_t ts_pki_client_check_status(ts_pki_enroll_status_t *status)
+static esp_err_t ts_pki_client_check_status_locked(ts_pki_enroll_status_t *status)
 {
     if (!s_client.initialized || !status) {
         return ESP_ERR_INVALID_STATE;
@@ -336,14 +364,13 @@ esp_err_t ts_pki_client_check_status(ts_pki_enroll_status_t *status)
     }
     
     char url[256];
-    snprintf(url, sizeof(url), "http%s://%s:%d/api/csr/status/%d",
-             s_client.config.use_https ? "s" : "",
-             s_client.config.server_host,
-             s_client.config.server_port,
-             s_client.request_id);
+    char path[64];
+    snprintf(path, sizeof(path), "/api/csr/status/%d", s_client.request_id);
+    server_url(url, sizeof(url), path);
     
     int http_code = 0;
-    esp_err_t ret = do_http_request(url, HTTP_METHOD_GET, NULL, &http_code);
+    cJSON *root = NULL;
+    esp_err_t ret = do_http_request(url, HTTP_METHOD_GET, NULL, &http_code, &root);
     
     if (ret != ESP_OK) {
         *status = TS_PKI_ENROLL_ERROR;
@@ -356,12 +383,12 @@ esp_err_t ts_pki_client_check_status(ts_pki_enroll_status_t *status)
     }
     
     if (http_code != 200) {
+        cJSON_Delete(root);
         *status = TS_PKI_ENROLL_ERROR;
         return ESP_OK;
     }
     
     // 解析 JSON 响应
-    cJSON *root = cJSON_Parse(s_http_resp_buf);
     if (!root) {
         *status = TS_PKI_ENROLL_ERROR;
         return ESP_OK;
@@ -387,7 +414,7 @@ esp_err_t ts_pki_client_check_status(ts_pki_enroll_status_t *status)
     return ESP_OK;
 }
 
-esp_err_t ts_pki_client_install_certificate(void)
+static esp_err_t ts_pki_client_install_certificate_locked(void)
 {
     if (!s_client.initialized) {
         return ESP_ERR_INVALID_STATE;
@@ -402,22 +429,21 @@ esp_err_t ts_pki_client_install_certificate(void)
     
     // 从 /api/csr/status/{request_id} 获取证书
     char url[256];
-    snprintf(url, sizeof(url), "http%s://%s:%d/api/csr/status/%d",
-             s_client.config.use_https ? "s" : "",
-             s_client.config.server_host,
-             s_client.config.server_port,
-             s_client.request_id);
+    char path[64];
+    snprintf(path, sizeof(path), "/api/csr/status/%d", s_client.request_id);
+    server_url(url, sizeof(url), path);
     
     int http_code = 0;
-    esp_err_t ret = do_http_request(url, HTTP_METHOD_GET, NULL, &http_code);
+    cJSON *root = NULL;
+    esp_err_t ret = do_http_request(url, HTTP_METHOD_GET, NULL, &http_code, &root);
     
     if (ret != ESP_OK || http_code != 200) {
+        cJSON_Delete(root);
         ESP_LOGE(TAG, "Failed to get certificate: http_code=%d", http_code);
         return ESP_FAIL;
     }
     
     // 解析 JSON 响应
-    cJSON *root = cJSON_Parse(s_http_resp_buf);
     if (!root) {
         ESP_LOGE(TAG, "Failed to parse certificate response");
         return ESP_FAIL;
@@ -438,30 +464,10 @@ esp_err_t ts_pki_client_install_certificate(void)
         return ESP_FAIL;
     }
     
-    // 获取 CA 链（如果有）
-    cJSON *ca_chain = cJSON_GetObjectItem(root, "ca_chain");
-    const char *ca_chain_str = (ca_chain && cJSON_IsString(ca_chain)) ? ca_chain->valuestring : NULL;
-    
-    // 安装证书 (mbedtls 需要包含 null 终止符)
-    ret = ts_cert_install_certificate(cert_pem->valuestring, strlen(cert_pem->valuestring) + 1);
-    
-    if (ret != ESP_OK) {
-        cJSON_Delete(root);
-        ESP_LOGE(TAG, "Failed to install certificate: %s", esp_err_to_name(ret));
-        return ret;
-    }
-    
-    // 安装 CA 链
-    if (ca_chain_str) {
-        ret = ts_cert_install_ca_chain(ca_chain_str, strlen(ca_chain_str) + 1);
-        if (ret != ESP_OK) { cJSON_Delete(root); return ret; }
-    } else {
-        ts_cert_pki_status_t installed;
-        ret = ts_cert_get_status(&installed);
-        if (ret != ESP_OK || (!installed.has_ca_chain || !installed.ca_valid)) {
-            cJSON_Delete(root); return ESP_ERR_INVALID_STATE;
-        }
-    }
+    /* The response is untrusted transport data. Its ca_chain is not a trust
+     * decision; the material owner verifies against Root's existing bundle. */
+    ret = ts_cert_install_issued_certificate_ex(cert_pem->valuestring, strlen(cert_pem->valuestring) + 1, NULL);
+    if (ret != ESP_OK) { cJSON_Delete(root); return ret; }
 
     cJSON_Delete(root);
     
@@ -470,7 +476,7 @@ esp_err_t ts_pki_client_install_certificate(void)
     return ESP_OK;
 }
 
-esp_err_t ts_pki_client_enroll_blocking(uint32_t timeout_sec)
+static esp_err_t ts_pki_client_enroll_blocking_locked(uint32_t timeout_sec)
 {
     if (!s_client.initialized) {
         return ESP_ERR_INVALID_STATE;
@@ -482,17 +488,22 @@ esp_err_t ts_pki_client_enroll_blocking(uint32_t timeout_sec)
         return ret;
     }
     
-    // 计算超时
-    uint32_t max_attempts = timeout_sec ? 
-        (timeout_sec / s_client.config.poll_interval_sec) :
-        s_client.config.max_poll_attempts;
-    
+    uint32_t max_attempts = timeout_sec ? 0 : s_client.config.max_poll_attempts;
+
     // 轮询等待批准
     uint32_t attempts = 0;
     ts_pki_enroll_status_t status;
     
-    while (attempts < max_attempts) {
-        vTaskDelay(pdMS_TO_TICKS(s_client.config.poll_interval_sec * 1000));
+    while (!max_attempts || attempts < max_attempts) {
+        uint32_t wait_ms = (uint32_t)s_client.config.poll_interval_sec * 1000;
+        if (s_request_deadline) {
+            int64_t remaining = (s_request_deadline - esp_timer_get_time()) / 1000;
+            if (remaining <= 0) return ESP_ERR_TIMEOUT;
+            if (remaining < wait_ms) wait_ms = (uint32_t)remaining;
+        }
+        enroll_wait(wait_ms);
+        if (s_deinitializing) return ESP_ERR_INVALID_STATE;
+        if (!request_current(xTaskGetCurrentTaskHandle())) return ESP_ERR_TIMEOUT;
         
         ret = ts_pki_client_check_status(&status);
         if (ret != ESP_OK) {
@@ -530,34 +541,38 @@ esp_err_t ts_pki_client_enroll_blocking(uint32_t timeout_sec)
 /*                      Background Enrollment Service                         */
 /*===========================================================================*/
 
-esp_err_t ts_pki_client_start_auto_enroll(ts_pki_enroll_callback_t callback,
+static esp_err_t ts_pki_client_start_auto_enroll_locked(ts_pki_enroll_callback_t callback,
                                            void *user_data)
 {
     if (!s_client.initialized) {
         return ESP_ERR_INVALID_STATE;
     }
     
-    bool expected = false;
-    if (!atomic_compare_exchange_strong(&s_client.enroll_running, &expected, true)) {
-        ESP_LOGW(TAG, "Auto-enroll already running");
-        return ESP_OK;
+    portENTER_CRITICAL(&s_operation_init_lock);
+    bool already_running = s_client.enroll_running;
+    if (!already_running) {
+        s_client.stop_requested = false;
+        s_client.enroll_task = NULL;
+        s_client.enroll_running = true;
     }
-    
+    portEXIT_CRITICAL(&s_operation_init_lock);
+    if (already_running) return ESP_OK;
     s_client.callback = callback;
     s_client.callback_data = user_data;
-    s_client.stop_requested = false;
-    
+
     /* MUST use DRAM stack - PKI operations access NVS (SPI Flash).
      * SPI Flash operations disable cache, and PSRAM access requires cache.
      */
+    TaskHandle_t task = NULL;
     BaseType_t ret = xTaskCreate(auto_enroll_task, "pki_enroll", 8192,
-                                  NULL, 5, &s_client.enroll_task);
+                                  NULL, 5, &task);
     if (ret != pdPASS) {
         s_client.enroll_running = false;
         ESP_LOGE(TAG, "Failed to create enroll task");
         return ESP_ERR_NO_MEM;
     }
     
+    s_client.enroll_task = task;
     ESP_LOGI(TAG, "Auto-enrollment started");
     return ESP_OK;
 }
@@ -567,6 +582,7 @@ void ts_pki_client_stop_auto_enroll(void)
     if (!s_client.enroll_running) return;
     
     s_client.stop_requested = true;
+    if (s_client.enroll_task == xTaskGetCurrentTaskHandle()) return;
     
     // 等待任务退出
     for (int i = 0; i < 50; i++) {
@@ -603,18 +619,15 @@ const char *ts_pki_enroll_status_to_str(ts_pki_enroll_status_t status)
     }
 }
 
-bool ts_pki_client_is_server_reachable(void)
+static bool ts_pki_client_is_server_reachable_locked(void)
 {
     if (!s_client.initialized) return false;
     
     char url[128];
-    snprintf(url, sizeof(url), "http%s://%s:%d/api/health",
-             s_client.config.use_https ? "s" : "",
-             s_client.config.server_host,
-             s_client.config.server_port);
+    server_url(url, sizeof(url), "/api/health");
     
     int http_code = 0;
-    esp_err_t ret = do_http_request(url, HTTP_METHOD_GET, NULL, &http_code);
+    esp_err_t ret = do_http_request(url, HTTP_METHOD_GET, NULL, &http_code, NULL);
     
     return (ret == ESP_OK && http_code == 200);
 }
@@ -644,75 +657,46 @@ static esp_err_t get_device_id(void)
     return ESP_OK;
 }
 
-static esp_err_t http_event_handler(esp_http_client_event_t *evt)
-{
-    switch (evt->event_id) {
-        case HTTP_EVENT_ON_DATA:
-            if (!esp_http_client_is_chunked_response(evt->client)) {
-                if (s_http_resp_len + evt->data_len < HTTP_RESP_BUF_SIZE - 1) {
-                    memcpy(s_http_resp_buf + s_http_resp_len, evt->data, evt->data_len);
-                    s_http_resp_len += evt->data_len;
-                    s_http_resp_buf[s_http_resp_len] = '\0';
-                }
-            }
-            break;
-        default:
-            break;
-    }
-    return ESP_OK;
-}
-
 static esp_err_t do_http_request(const char *url, esp_http_client_method_t method,
-                                  const char *post_data, int *http_code)
+                                  const char *post_data, int *http_code, cJSON **response)
 {
-    esp_http_client_config_t config = {
-        .url = url,
-        .method = method,
-        .event_handler = http_event_handler,
-        .timeout_ms = TS_PKI_HTTP_TIMEOUT_MS,
-        .buffer_size = 2048,
-        .buffer_size_tx = 2048,
+    if (!http_code) return ESP_ERR_INVALID_ARG;
+    *http_code = 0;
+    if (response) *response = NULL;
+    unsigned timeout_ms = TS_PKI_HTTP_TIMEOUT_MS;
+    if (s_request_deadline) {
+        int64_t remaining = (s_request_deadline - esp_timer_get_time()) / 1000;
+        if (remaining <= 0) return ESP_ERR_TIMEOUT;
+        if (remaining < timeout_ms) timeout_ms = (unsigned)remaining;
+    }
+    ts_http_fetch_config_t request = {
+        .url = url, .method = method, .body = post_data,
+        .content_type = post_data ? "application/json" : NULL,
+        .timeout_ms = timeout_ms, .maximum_body = HTTP_RESP_BUF_SIZE - 1,
+        .current = request_current, .context = xTaskGetCurrentTaskHandle(),
     };
-    
-    // 如果使用 HTTPS，配置证书验证
-    if (s_client.config.use_https) {
-        config.crt_bundle_attach = esp_crt_bundle_attach;
-    }
-    
-    esp_http_client_handle_t client = esp_http_client_init(&config);
-    if (!client) {
-        return ESP_ERR_NO_MEM;
-    }
-    
-    // 设置 Content-Type
-    if (post_data) {
-        esp_http_client_set_header(client, "Content-Type", "application/json");
-        esp_http_client_set_post_field(client, post_data, strlen(post_data));
-    }
-    
-    // 清空响应缓冲区
-    s_http_resp_len = 0;
-    s_http_resp_buf[0] = '\0';
-    
-    // 执行请求
-    esp_err_t ret = esp_http_client_perform(client);
-    
+    ts_http_fetch_result_t reply = {0};
+    esp_err_t ret = ts_http_fetch(&request, &reply);
+    if (ret == ESP_OK && !request_current(request.context)) ret = ESP_ERR_INVALID_STATE;
     if (ret == ESP_OK) {
-        *http_code = esp_http_client_get_status_code(client);
-        ESP_LOGD(TAG, "HTTP %s %s => %d", 
-                 method == HTTP_METHOD_POST ? "POST" : "GET",
-                 url, *http_code);
-    } else {
-        ESP_LOGE(TAG, "HTTP request failed: %s", esp_err_to_name(ret));
-    }
-    
-    esp_http_client_cleanup(client);
+        *http_code = reply.status;
+        if (response && (reply.status == 200 || reply.status == 201)) {
+            const char *end = NULL;
+            cJSON *json = reply.body ? cJSON_ParseWithLengthOpts(reply.body, reply.length + 1, &end, true) : NULL;
+            if (!cJSON_IsObject(json) || end != reply.body + reply.length) {
+                cJSON_Delete(json);
+                ret = ESP_ERR_INVALID_RESPONSE;
+            } else *response = json;
+        }
+        ESP_LOGD(TAG, "PKI HTTP status=%d", *http_code);
+    } else ESP_LOGE(TAG, "HTTP request failed: %s", esp_err_to_name(ret));
+    free(reply.body);
     return ret;
 }
 
 static void enroll_wait(uint32_t ms)
 {
-    while (ms && !s_client.stop_requested) {
+    while (ms && request_current(xTaskGetCurrentTaskHandle())) {
         uint32_t step = ms < 100 ? ms : 100;
         vTaskDelay(pdMS_TO_TICKS(step)); ms -= step;
     }
@@ -725,7 +709,7 @@ static void auto_enroll_task(void *arg)
     // 等待网络就绪
     enroll_wait(5000);
     
-    if (s_client.stop_requested) goto done;
+    if (!request_current(xTaskGetCurrentTaskHandle())) goto done;
 
     // 检查是否已有有效证书
     ts_cert_pki_status_t cert_status;
@@ -745,7 +729,7 @@ static void auto_enroll_task(void *arg)
     
     // 等待 PKI 服务器可达
     int retry = 0;
-    while (!s_client.stop_requested && retry < 30) {
+    while (request_current(xTaskGetCurrentTaskHandle()) && retry < 30) {
         if (ts_pki_client_is_server_reachable()) {
             ESP_LOGI(TAG, "PKI server is reachable");
             break;
@@ -755,7 +739,7 @@ static void auto_enroll_task(void *arg)
         retry++;
     }
     
-    if (s_client.stop_requested) {
+    if (!request_current(xTaskGetCurrentTaskHandle())) {
         s_client.enroll_running = false;
         vTaskDelete(NULL);
         return;
@@ -782,7 +766,7 @@ static void auto_enroll_task(void *arg)
     uint32_t attempts = 0;
     ts_pki_enroll_status_t status;
     
-    while (!s_client.stop_requested) {
+    while (request_current(xTaskGetCurrentTaskHandle())) {
         if (s_client.config.max_poll_attempts > 0 && 
             attempts >= s_client.config.max_poll_attempts) {
             ESP_LOGE(TAG, "Max poll attempts reached");
@@ -795,7 +779,7 @@ static void auto_enroll_task(void *arg)
         
         enroll_wait(s_client.config.poll_interval_sec * 1000);
         
-        if (s_client.stop_requested) break;
+        if (!request_current(xTaskGetCurrentTaskHandle())) break;
         ret = ts_pki_client_check_status(&status);
         if (ret != ESP_OK) {
             ESP_LOGW(TAG, "Failed to check status, retrying...");
@@ -854,4 +838,84 @@ done:
     ESP_LOGI(TAG, "Auto-enrollment task finished");
     s_client.enroll_running = false;
     vTaskDelete(NULL);
+}
+
+/* Public entry points; busy never starts a second request or changes its target. */
+esp_err_t ts_pki_client_init_with_config(const ts_pki_client_config_t *config)
+{
+    if (!operation_enter()) return ESP_ERR_INVALID_STATE;
+    esp_err_t result = ts_pki_client_init_with_config_locked(config);
+    xSemaphoreGiveRecursive(s_operation);
+    return result;
+}
+
+esp_err_t ts_pki_client_set_server(const char *host, uint16_t port)
+{
+    if (!operation_enter()) return ESP_ERR_INVALID_STATE;
+    esp_err_t result = ts_pki_client_set_server_locked(host, port);
+    xSemaphoreGiveRecursive(s_operation);
+    return result;
+}
+
+esp_err_t ts_pki_client_get_server(char *host, uint16_t *port)
+{
+    if (!operation_enter()) return ESP_ERR_INVALID_STATE;
+    esp_err_t result = ts_pki_client_get_server_locked(host, port);
+    xSemaphoreGiveRecursive(s_operation);
+    return result;
+}
+
+esp_err_t ts_pki_client_submit_csr(void)
+{
+    if (!operation_enter()) return ESP_ERR_INVALID_STATE;
+    if (!enrollment_owner()) { xSemaphoreGiveRecursive(s_operation); return ESP_ERR_INVALID_STATE; }
+    esp_err_t result = ts_pki_client_submit_csr_locked();
+    xSemaphoreGiveRecursive(s_operation);
+    return result;
+}
+
+esp_err_t ts_pki_client_check_status(ts_pki_enroll_status_t *status)
+{
+    if (status) *status = TS_PKI_ENROLL_ERROR;
+    if (!operation_enter()) return ESP_ERR_INVALID_STATE;
+    esp_err_t result = ts_pki_client_check_status_locked(status);
+    xSemaphoreGiveRecursive(s_operation);
+    return result;
+}
+
+esp_err_t ts_pki_client_install_certificate(void)
+{
+    if (!operation_enter()) return ESP_ERR_INVALID_STATE;
+    if (!enrollment_owner()) { xSemaphoreGiveRecursive(s_operation); return ESP_ERR_INVALID_STATE; }
+    esp_err_t result = ts_pki_client_install_certificate_locked();
+    xSemaphoreGiveRecursive(s_operation);
+    return result;
+}
+
+esp_err_t ts_pki_client_enroll_blocking(uint32_t timeout_sec)
+{
+    if (!operation_enter()) return ESP_ERR_INVALID_STATE;
+    if (!enrollment_owner()) { xSemaphoreGiveRecursive(s_operation); return ESP_ERR_INVALID_STATE; }
+    s_request_deadline = timeout_sec ? esp_timer_get_time() + (int64_t)timeout_sec * 1000000 : 0;
+    esp_err_t result = ts_pki_client_enroll_blocking_locked(timeout_sec);
+    s_request_deadline = 0;
+    xSemaphoreGiveRecursive(s_operation);
+    return result;
+}
+
+esp_err_t ts_pki_client_start_auto_enroll(ts_pki_enroll_callback_t callback,
+                                           void *user_data)
+{
+    if (!operation_enter()) return ESP_ERR_INVALID_STATE;
+    esp_err_t result = ts_pki_client_start_auto_enroll_locked(callback, user_data);
+    xSemaphoreGiveRecursive(s_operation);
+    return result;
+}
+
+bool ts_pki_client_is_server_reachable(void)
+{
+    if (!operation_enter()) return false;
+    bool result = ts_pki_client_is_server_reachable_locked();
+    xSemaphoreGiveRecursive(s_operation);
+    return result;
 }

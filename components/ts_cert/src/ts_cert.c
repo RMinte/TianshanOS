@@ -198,6 +198,7 @@ static esp_err_t nvs_write_string(const char *key, const char *str)
     return err;
 }
 
+
 static void set_status(const ts_cert_info_t *current)
 {
     ts_cert_info_t info = *current;
@@ -643,14 +644,40 @@ static void save_ca_copy(const char *pem)
     if (written != len || closed != 0) ESP_LOGW(TAG, "CA saved in NVS; SD copy write failed");
 }
 
-static esp_err_t install_material(const char *pem, size_t len, bool ca, ts_cert_op_error_t *detail)
+/* CA installation accepts an owner-selected trust bundle, not a leaf
+ * certificate. Validate every member, including on reload. A CA without KU
+ * retains X.509's unrestricted-usage meaning; present KU must allow signing.
+ * Selection of a new trust anchor does not require the previous CA's signature. */
+static bool ca_bundle_constraints_valid(const mbedtls_x509_crt *bundle)
+{
+    if (!bundle || !bundle->raw.len) return false;
+    for (const mbedtls_x509_crt *crt = bundle; crt; crt = crt->next) {
+        if (!crt->raw.len || mbedtls_x509_crt_get_ca_istrue(crt) != 1 ||
+            mbedtls_x509_crt_check_key_usage(crt, MBEDTLS_X509_KU_KEY_CERT_SIGN) != 0)
+            return false;
+    }
+    return true;
+}
+
+/* Automatic enrollment authenticates the signed device identity against the
+ * owner's existing issuer bundle. A peer response never supplies trust roots.
+ * With no usable UTC, time flags may be deferred only for storing this identity;
+ * remote-client authentication and config-package admission keep their own gates. */
+static int issued_validity(void *context, mbedtls_x509_crt *crt, int depth, uint32_t *flags)
+{
+    (void)crt; (void)depth;
+    if (*(bool *)context) *flags &= ~(MBEDTLS_X509_BADCERT_FUTURE | MBEDTLS_X509_BADCERT_EXPIRED);
+    return 0;
+}
+
+static esp_err_t install_material(const char *pem, size_t len, bool ca, bool issued, ts_cert_op_error_t *detail)
 {
     ts_cert_op_error_t why = TS_CERT_OP_OK;
     esp_err_t err = ESP_ERR_INVALID_ARG;
     char *replacement = NULL;
-    mbedtls_x509_crt crt;
+    mbedtls_x509_crt crt, trust;
     mbedtls_pk_context pk;
-    mbedtls_x509_crt_init(&crt); mbedtls_pk_init(&pk);
+    mbedtls_x509_crt_init(&crt); mbedtls_x509_crt_init(&trust); mbedtls_pk_init(&pk);
     if (!s_initialized) { why = TS_CERT_OP_NOT_INITIALIZED; err = ESP_ERR_INVALID_STATE; goto done; }
     if (!pem || len <= 1) { why = TS_CERT_OP_INVALID_INPUT; goto done; }
     size_t cap = ca ? TS_CERT_CA_CHAIN_MAX_LEN : TS_CERT_PEM_MAX_LEN;
@@ -664,6 +691,7 @@ static esp_err_t install_material(const char *pem, size_t len, bool ca, ts_cert_
         why = TS_CERT_OP_PRIVATE_KEY_MISSING; err = ESP_ERR_INVALID_STATE; goto done;
     }
     if (s_storage_error) { why = TS_CERT_OP_STORAGE_FAILED; err = ESP_FAIL; goto done; }
+    if (issued && (!s_ca_chain_pem || !s_ca_valid)) { why = TS_CERT_OP_INVALID_INPUT; err = ESP_ERR_INVALID_STATE; goto done; }
     char *old = ca ? s_ca_chain_pem : s_certificate_pem;
     replacement = copy_pem(pem, len);
     if (!replacement) { why = TS_CERT_OP_NO_MEMORY; err = ESP_ERR_NO_MEM; goto done; }
@@ -672,6 +700,10 @@ static esp_err_t install_material(const char *pem, size_t len, bool ca, ts_cert_
         ESP_LOGW(TAG, "PEM parse: %d", ret);
         why = allocation_error(ret) ? TS_CERT_OP_NO_MEMORY : TS_CERT_OP_PEM_PARSE_FAILED;
         err = why == TS_CERT_OP_NO_MEMORY ? ESP_ERR_NO_MEM : ESP_ERR_INVALID_ARG;
+        goto done;
+    }
+    if (ca && !ca_bundle_constraints_valid(&crt)) {
+        why = TS_CERT_OP_INVALID_INPUT;
         goto done;
     }
     if (!ca) {
@@ -689,6 +721,26 @@ static esp_err_t install_material(const char *pem, size_t len, bool ca, ts_cert_
             why = allocation_error(ret) ? TS_CERT_OP_NO_MEMORY : TS_CERT_OP_KEY_MISMATCH;
             err = why == TS_CERT_OP_NO_MEMORY ? ESP_ERR_NO_MEM : ESP_ERR_INVALID_STATE;
             goto done;
+        }
+    }
+    if (issued) {
+        if (mbedtls_x509_crt_get_ca_istrue(&crt) != 0 ||
+            mbedtls_x509_crt_check_key_usage(&crt, MBEDTLS_X509_KU_DIGITAL_SIGNATURE) ||
+            (mbedtls_x509_crt_check_extended_key_usage(&crt, MBEDTLS_OID_CLIENT_AUTH, MBEDTLS_OID_SIZE(MBEDTLS_OID_CLIENT_AUTH)) &&
+             mbedtls_x509_crt_check_extended_key_usage(&crt, MBEDTLS_OID_SERVER_AUTH, MBEDTLS_OID_SIZE(MBEDTLS_OID_SERVER_AUTH)))) {
+            why = TS_CERT_OP_INVALID_INPUT; err = ESP_ERR_INVALID_ARG; goto done;
+        }
+        ret = mbedtls_x509_crt_parse(&trust, (const unsigned char *)s_ca_chain_pem, strlen(s_ca_chain_pem) + 1);
+        if (ret != 0) {
+            why = allocation_error(ret) ? TS_CERT_OP_NO_MEMORY : TS_CERT_OP_PEM_PARSE_FAILED;
+            err = why == TS_CERT_OP_NO_MEMORY ? ESP_ERR_NO_MEM : ESP_ERR_INVALID_ARG; goto done;
+        }
+        uint32_t flags = 0;
+        bool offline = !ts_cert_time_ready((int64_t)time(NULL), TS_TIME_MIN_VALID_YEAR);
+        ret = mbedtls_x509_crt_verify(&crt, &trust, NULL, NULL, &flags, issued_validity, &offline);
+        if (ret != 0 || flags) {
+            why = allocation_error(ret) ? TS_CERT_OP_NO_MEMORY : TS_CERT_OP_INVALID_INPUT;
+            err = why == TS_CERT_OP_NO_MEMORY ? ESP_ERR_NO_MEM : ESP_ERR_INVALID_ARG; goto done;
         }
     }
     /* Reuse the candidate parser for metadata: no second parse or allocation after persistence. */
@@ -720,15 +772,15 @@ static esp_err_t install_material(const char *pem, size_t len, bool ca, ts_cert_
     err = ESP_OK;
  done:
     free(replacement);
-    mbedtls_pk_free(&pk); mbedtls_x509_crt_free(&crt);
+    mbedtls_pk_free(&pk); mbedtls_x509_crt_free(&crt); mbedtls_x509_crt_free(&trust);
     if (detail) *detail = why;
     return err;
 }
 
 static esp_err_t ts_cert_install_certificate_ex_locked(const char *pem, size_t len, ts_cert_op_error_t *detail)
-{ return install_material(pem, len, false, detail); }
+{ return install_material(pem, len, false, false, detail); }
 static esp_err_t ts_cert_install_ca_chain_ex_locked(const char *pem, size_t len, ts_cert_op_error_t *detail)
-{ return install_material(pem, len, true, detail); }
+{ return install_material(pem, len, true, false, detail); }
 static esp_err_t ts_cert_install_certificate_locked(const char *pem, size_t len)
 { return ts_cert_install_certificate_ex_locked(pem, len, NULL); }
 static esp_err_t ts_cert_install_ca_chain_locked(const char *pem, size_t len)
@@ -1053,7 +1105,8 @@ static void refresh_metadata(void)
         }
     }
     if (s_ca_chain_pem)
-        s_ca_valid = mbedtls_x509_crt_parse(&ca, (const unsigned char *)s_ca_chain_pem, strlen(s_ca_chain_pem)+1) == 0;
+        s_ca_valid = mbedtls_x509_crt_parse(&ca, (const unsigned char *)s_ca_chain_pem, strlen(s_ca_chain_pem)+1) == 0 &&
+                     ca_bundle_constraints_valid(&ca);
     mbedtls_pk_free(&key); mbedtls_x509_crt_free(&crt); mbedtls_x509_crt_free(&ca);
     s_metadata_generation = s_generation;
 }
@@ -1087,14 +1140,8 @@ void ts_cert_free_snapshot(ts_cert_snapshot_t *s)
     memset(s, 0, sizeof(*s));
 }
 
-static esp_err_t ts_cert_get_snapshot_locked(bool require_ca, ts_cert_snapshot_t *snapshot)
+static esp_err_t copy_snapshot_locked(bool require_ca, ts_cert_snapshot_t *snapshot)
 {
-    if (!snapshot) return ESP_ERR_INVALID_ARG;
-    memset(snapshot, 0, sizeof(*snapshot));
-    ts_cert_pki_status_t status;
-    esp_err_t err = ts_cert_get_status_locked(&status);
-    if (err != ESP_OK) return err;
-    if (!ts_cert_prerequisites(&status, require_ca)) return ESP_ERR_INVALID_STATE;
     snapshot->key = copy_pem(s_private_key_pem, strlen(s_private_key_pem)+1);
     snapshot->certificate = copy_pem(s_certificate_pem, strlen(s_certificate_pem)+1);
     if (s_ca_chain_pem && s_ca_valid) snapshot->ca = copy_pem(s_ca_chain_pem, strlen(s_ca_chain_pem)+1);
@@ -1104,6 +1151,17 @@ static esp_err_t ts_cert_get_snapshot_locked(bool require_ca, ts_cert_snapshot_t
     snapshot->generation = s_generation;
     memcpy(snapshot->certificate_sha256, s_fingerprint, sizeof(s_fingerprint));
     return ESP_OK;
+}
+
+static esp_err_t ts_cert_get_snapshot_locked(bool require_ca, ts_cert_snapshot_t *snapshot)
+{
+    if (!snapshot) return ESP_ERR_INVALID_ARG;
+    memset(snapshot, 0, sizeof(*snapshot));
+    ts_cert_pki_status_t status;
+    esp_err_t err = ts_cert_get_status_locked(&status);
+    if (err != ESP_OK) return err;
+    if (!ts_cert_prerequisites(&status, require_ca)) return ESP_ERR_INVALID_STATE;
+    return copy_snapshot_locked(require_ca, snapshot);
 }
 
 /* All public cache/RNG operations take the same lock; events are posted after release.
@@ -1188,6 +1246,15 @@ esp_err_t ts_cert_install_certificate_ex(const char *pem, size_t len, ts_cert_op
     material_lock();
     uint32_t previous = s_generation;
     esp_err_t result = ts_cert_install_certificate_ex_locked(pem, len, detail);
+    material_unlock(previous, 1);
+    return result;
+}
+
+esp_err_t ts_cert_install_issued_certificate_ex(const char *pem, size_t len, ts_cert_op_error_t *detail)
+{
+    material_lock();
+    uint32_t previous = s_generation;
+    esp_err_t result = install_material(pem, len, false, true, detail);
     material_unlock(previous, 1);
     return result;
 }
@@ -1319,18 +1386,13 @@ esp_err_t ts_cert_get_pack_snapshot(ts_cert_snapshot_t *snapshot)
     if (ret == ESP_OK && (status.storage_error || !status.key_valid || !status.key_matches ||
         !status.has_certificate || !status.ca_valid)) ret = ESP_ERR_INVALID_STATE;
     if (ret == ESP_OK) {
-        snapshot->key = copy_pem(s_private_key_pem, strlen(s_private_key_pem) + 1);
-        snapshot->certificate = copy_pem(s_certificate_pem, strlen(s_certificate_pem) + 1);
-        snapshot->ca = copy_pem(s_ca_chain_pem, strlen(s_ca_chain_pem) + 1);
-        snapshot->generation = s_generation;
-        memcpy(snapshot->certificate_sha256, s_fingerprint, sizeof(s_fingerprint));
-        if (!snapshot->key || !snapshot->certificate || !snapshot->ca) {
-            ts_cert_free_snapshot(snapshot); ret = ESP_ERR_NO_MEM;
-        }
+        ret = copy_snapshot_locked(true, snapshot);
     }
     xSemaphoreGive(s_mutex);
     return ret;
 }
+
+
 /* Short configuration admission lease: acquire after certificate/crypto work.
  * Never call TLS/material parsing while holding it. */
 bool ts_cert_material_begin(uint32_t expected_generation)

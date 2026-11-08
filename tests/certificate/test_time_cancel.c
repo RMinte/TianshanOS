@@ -16,7 +16,8 @@ static int set_clock(const struct timeval *tv,const struct timezone *tz) {(void)
 int ts_event_post(const char *base,int id,const void *data,size_t length,unsigned wait) {
     (void)base;(void)id;(void)wait;assert(length==sizeof(delivered));delivered=*(const ts_time_sync_info_t *)data;++notifications;return event_error;
 }
-static struct {_Atomic bool enroll_running,stop_requested;} s_client;
+static struct {_Atomic bool enroll_running,stop_requested;void *enroll_task;} s_client;
+static void *xTaskGetCurrentTaskHandle(void) {return (void *)1;}
 static unsigned delays;
 static bool finish_on_delay;
 static void vTaskDelay(unsigned t) {(void)t;++delays;if(finish_on_delay)s_client.enroll_running=false;}
@@ -34,6 +35,7 @@ int main(void) {
     for(unsigned i=0;i<3;++i){const char *tz[]={"UTC","CST-8","PST8PDT"};setenv("TZ",tz[i],1);tzset();clock_value=1735689599;assert(ts_time_sync_needs_sync());clock_value=1735689600;assert(!ts_time_sync_needs_sync());}
     s_client.enroll_running=true;ts_pki_client_stop_auto_enroll();assert(s_client.stop_requested&&s_client.enroll_running&&delays==50);
     finish_on_delay=true;ts_pki_client_stop_auto_enroll();assert(!s_client.enroll_running);
+    s_client.enroll_task=(void *)1;s_client.enroll_running=true;unsigned before=delays;ts_pki_client_stop_auto_enroll();assert(delays==before);
     puts("PASS actual time notifications/UTC readiness and cooperative enrollment stop (syscalls/tasks mocked)");
     return 0;
 }

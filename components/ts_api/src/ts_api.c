@@ -19,6 +19,10 @@
 #include <stdlib.h>
 
 #define TAG "ts_api"
+_Static_assert(TS_API_ACCESS_READ - TS_API_ACCESS_PUBLIC == TS_PERM_READ &&
+               TS_API_ACCESS_WRITE - TS_API_ACCESS_PUBLIC == TS_PERM_WRITE &&
+               TS_API_ACCESS_ADMIN - TS_API_ACCESS_PUBLIC == TS_PERM_ADMIN &&
+               TS_API_ACCESS_ROOT - TS_API_ACCESS_PUBLIC == TS_PERM_ROOT, "API/security role mapping changed");
 
 /*===========================================================================*/
 /*                          Name Tables                                       */
@@ -69,8 +73,11 @@ typedef struct {
     char *description;
     ts_api_category_t category;
     ts_api_handler_t handler;
+    ts_api_session_handler_t session_handler;
     bool requires_auth;
     char *permission;
+    ts_api_external_access_t external_access;
+    uint8_t allowed_methods;
     bool used;
 } api_entry_t;
 
@@ -191,6 +198,19 @@ esp_err_t ts_api_register(const ts_api_endpoint_t *endpoint)
         return ESP_ERR_INVALID_ARG;
     }
     
+    if (endpoint->external_access > TS_API_ACCESS_TOKEN ||
+        (endpoint->allowed_methods & ~TS_API_METHOD_ALL) ||
+        (endpoint->external_access == TS_API_ACCESS_INTERNAL ? endpoint->allowed_methods != 0 : !endpoint->allowed_methods))
+        return ESP_ERR_INVALID_ARG;
+    /* Reject a contradictory management declaration at registration; never
+     * rewrite an admitted operation's role from a name or permission string. */
+    if (endpoint->external_access != TS_API_ACCESS_INTERNAL && endpoint->permission &&
+        !strcmp(endpoint->permission, "cert.manage") &&
+        ((endpoint->external_access != TS_API_ACCESS_ADMIN &&
+          endpoint->external_access != TS_API_ACCESS_ROOT) ||
+         (endpoint->allowed_methods & ~TS_API_METHOD_WRITE)))
+        return ESP_ERR_INVALID_ARG;
+
     xSemaphoreTake(s_api.mutex, portMAX_DELAY);
     
     /* Check for duplicate */
@@ -215,8 +235,19 @@ esp_err_t ts_api_register(const ts_api_endpoint_t *endpoint)
     entry->description = endpoint->description ? TS_STRDUP_PSRAM(endpoint->description) : NULL;
     entry->category = endpoint->category;
     entry->handler = endpoint->handler;
+    entry->session_handler = endpoint->session_handler;
     entry->requires_auth = endpoint->requires_auth;
+    entry->external_access = endpoint->external_access;
+    entry->allowed_methods = endpoint->allowed_methods;
     entry->permission = endpoint->permission ? TS_STRDUP_PSRAM(endpoint->permission) : NULL;
+    if ((endpoint->description && !entry->description) ||
+        (endpoint->permission && !entry->permission)) {
+        free(entry->description);
+        free(entry->permission);
+        memset(entry, 0, sizeof(*entry));
+        xSemaphoreGive(s_api.mutex);
+        return ESP_ERR_NO_MEM;
+    }
     entry->used = true;
     
     s_api.endpoint_count++;
@@ -331,7 +362,8 @@ void ts_api_parse_query(cJSON *params, char *query)
 }
 
 
-esp_err_t ts_api_call(const char *name, const cJSON *params, ts_api_result_t *result)
+static esp_err_t api_call_dispatch(const char *name, const cJSON *params, uint32_t caller_session_id,
+                                   bool external, ts_api_result_t *result)
 {
     if (!s_api.initialized) {
         if (result) {
@@ -358,12 +390,13 @@ esp_err_t ts_api_call(const char *name, const cJSON *params, ts_api_result_t *re
     
     /* Copy handler to call outside mutex */
     ts_api_handler_t handler = entry->handler;
+    ts_api_session_handler_t session_handler = entry->session_handler;
     
     xSemaphoreGive(s_api.mutex);
     
     /* Call handler */
     TS_LOGD(TAG, "Calling API: %s", name);
-    esp_err_t ret = handler(params, result);
+    esp_err_t ret = external && session_handler ? session_handler(params, caller_session_id, result) : handler(params, result);
     
     if (ret != ESP_OK && result->code == TS_API_OK) {
         ts_api_result_error(result, TS_API_ERR_INTERNAL, "Handler error");
@@ -372,56 +405,218 @@ esp_err_t ts_api_call(const char *name, const cJSON *params, ts_api_result_t *re
     return ret;
 }
 
+esp_err_t ts_api_call(const char *name, const cJSON *params, ts_api_result_t *result)
+{
+    return api_call_dispatch(name, params, 0, false, result);
+}
+
+static void classify_external_access(ts_api_external_access_t mode, uint8_t methods,
+                                     ts_api_access_t *access)
+{
+    access->external_access = mode;
+    access->allowed_methods = mode == TS_API_ACCESS_INTERNAL ? 0 : methods;
+    access->requires_auth = mode >= TS_API_ACCESS_READ && mode <= TS_API_ACCESS_ROOT;
+    access->minimum_level = access->requires_auth ? (uint8_t)(mode - TS_API_ACCESS_PUBLIC) : TS_PERM_NONE;
+}
+
+esp_err_t ts_api_get_access(const char *name, ts_api_access_t *access)
+{
+    if (!name || !access) return ESP_ERR_INVALID_ARG;
+    if (!s_api.initialized) return ESP_ERR_INVALID_STATE;
+    xSemaphoreTake(s_api.mutex, portMAX_DELAY);
+    api_entry_t *entry = find_endpoint(name);
+    if (entry) classify_external_access(entry->external_access, entry->allowed_methods, access);
+    esp_err_t ret = entry ? ESP_OK : ESP_ERR_NOT_FOUND;
+    xSemaphoreGive(s_api.mutex);
+    return ret;
+}
+
+/* Authorization and dispatch share one registry snapshot. */
+static esp_err_t copy_external_call(const char *name, ts_api_access_t *access,
+                                   ts_api_handler_t *handler,
+                                   ts_api_session_handler_t *session_handler)
+{
+    if (!s_api.initialized) return ESP_ERR_INVALID_STATE;
+    xSemaphoreTake(s_api.mutex, portMAX_DELAY);
+    api_entry_t *entry = find_endpoint(name);
+    if (entry) {
+        classify_external_access(entry->external_access, entry->allowed_methods, access);
+        *handler = entry->handler;
+        *session_handler = entry->session_handler;
+    }
+    esp_err_t ret = entry ? ESP_OK : ESP_ERR_NOT_FOUND;
+    xSemaphoreGive(s_api.mutex);
+    return ret;
+}
+
+/* External private results have an explicit metadata contract. New saved
+ * fields are private until a field is deliberately added to this projection. */
+static bool project_result_fields(cJSON *object, const char *fields, const cJSON *preserved)
+{
+    if (!cJSON_IsObject(object)) return false;
+    cJSON *item = object->child;
+    while (item) {
+        cJSON *next = item->next;
+        if (item == preserved) { item = next; continue; }
+        bool allowed = false;
+        for (const char *p = fields; *p;) {
+            const char *end = strchr(p, '|');
+            size_t length = end ? (size_t)(end - p) : strlen(p);
+            if (item->string && strlen(item->string) == length && !memcmp(item->string, p, length))
+                allowed = true;
+            if (!end) break;
+            p = end + 1;
+        }
+        if (allowed && !strcmp(item->string, "automatic_start")) {
+            allowed = project_result_fields(item, "state|reason|retry_after_ms|", NULL);
+        } else if (allowed && !strcmp(item->string, "ssh_commands")) {
+            allowed = cJSON_IsArray(item);
+            for (cJSON *command = item->child; command;) {
+                cJSON *following = command->next;
+                if (!cJSON_IsString(command)) cJSON_Delete(cJSON_DetachItemViaPointer(item, command));
+                command = following;
+            }
+        } else allowed = allowed && (cJSON_IsString(item) || cJSON_IsNumber(item) || cJSON_IsBool(item) || cJSON_IsNull(item));
+        if (!allowed) cJSON_Delete(cJSON_DetachItemViaPointer(object, item));
+        item = next;
+    }
+    return true;
+}
+
+/* A NULL result probes the same policy, including effect/acknowledgement semantics. */
+static esp_err_t private_result_projection(const char *name, ts_api_result_t *result, bool root, bool *effect_result)
+{
+    static const struct { const char *name, *collection, *fields; bool effect; } views[] = {
+#define VIEW_FIELDS "id|name|label|type|enabled|active_version|"
+        {"ssh.hosts.list", "hosts", VIEW_FIELDS "host|port|created|created_time|last_used|", false},
+        {"ssh.hosts.get", NULL, VIEW_FIELDS "host|port|created|created_time|last_used|", false},
+        {"ssh.commands.list", "commands", VIEW_FIELDS "host_id|icon|nohup|orphan|runtime_instance|lastExec|created|created_time|serviceMode|service_mode|varName|var_name|", false},
+        {"ssh.commands.get", NULL, VIEW_FIELDS "host_id|icon|nohup|orphan|runtime_instance|lastExec|created|created_time|serviceMode|service_mode|varName|var_name|", false},
+        {"automation.sources.list", "sources", VIEW_FIELDS "connected|last_update_ms|poll_interval_ms|reconnect_ms|mapping_count|update_mode|invalid|", false},
+        {"automation.rules.list", "rules", VIEW_FIELDS "revision|runtime_active|manual_trigger|conditions_count|actions_count|trigger_count|last_trigger_ms|automatic_start|ssh_commands|", false},
+        {"automation.rules.get", NULL, VIEW_FIELDS "revision|runtime_active|manual_trigger|conditions_count|actions_count|trigger_count|last_trigger_ms|", false},
+        {"automation.actions.list", "templates", VIEW_FIELDS "async|use_count|last_used_at|created_at|", false},
+        {"automation.actions.get", NULL, VIEW_FIELDS "async|use_count|last_used_at|created_at|", false},
+        /* These two handlers already project their allowed public fields. */
+        {"config.get", NULL, NULL, false},
+        {"config.module.show", NULL, NULL, false},
+        {"ota.server.get", NULL, "configured|", false},
+        {"ota.progress", NULL, NULL, false},
+        {"ota.www.progress", NULL, NULL, false},
+        {"automation.actions.execute", NULL, "async|status|duration_ms|", true},
+#undef VIEW_FIELDS
+    };
+    for (unsigned i = 0; i < sizeof(views) / sizeof(views[0]); ++i) {
+        if (strcmp(name, views[i].name)) continue;
+        if (effect_result) *effect_result = views[i].effect;
+        if (!result || !result->data || root || !views[i].fields) return ESP_OK;
+        if (views[i].effect) {
+            /* The effect already happened. Redaction must not allocate, fail,
+             * or turn its real acknowledgement into a retryable write error. */
+            if (!project_result_fields(result->data, views[i].fields, NULL)) {
+                cJSON_Delete(result->data);
+                result->data = NULL;
+            }
+            return ESP_OK;
+        }
+        cJSON *rows = views[i].collection ? cJSON_GetObjectItemCaseSensitive(result->data, views[i].collection) : NULL;
+        bool valid = views[i].collection ? cJSON_IsArray(rows) : cJSON_IsObject(result->data);
+        if (views[i].collection && valid) {
+            valid = project_result_fields(result->data,
+                "count|total|active_version|load_error|paused|loaded|recovery_required|invalid_items|restart_required|", rows);
+            cJSON *row;
+            cJSON_ArrayForEach(row, rows) {
+                if (!project_result_fields(row, views[i].fields, NULL) || !cJSON_AddBoolToObject(row, "restricted", true)) {
+                    valid = false;
+                    break;
+                }
+            }
+        } else if (valid) valid = project_result_fields(result->data, views[i].fields, NULL);
+        if (!valid || !cJSON_AddBoolToObject(result->data, "restricted", true)) {
+            ts_api_result_error(result, TS_API_ERR_INTERNAL, "Configuration metadata unavailable");
+            return ESP_FAIL;
+        }
+        return ESP_OK;
+    }
+    return ESP_ERR_NOT_FOUND;
+}
+
 esp_err_t ts_api_call_for_session(const char *name, const cJSON *params,
                                   uint32_t session_id, ts_api_result_t *result)
 {
     if (!name || !result) return ESP_ERR_INVALID_ARG;
     ts_api_result_init(result);
-    cJSON *info = ts_api_get_info(name);
-    if (!info) {
-        ts_api_result_error(result, TS_API_ERR_NOT_FOUND, "API not found");
-        return ESP_ERR_NOT_FOUND;
+    ts_api_access_t access;
+    ts_api_handler_t handler = NULL;
+    ts_api_session_handler_t session_handler = NULL;
+    esp_err_t policy_ret = copy_external_call(name, &access, &handler, &session_handler);
+    if (policy_ret != ESP_OK) {
+        ts_api_result_error(result, policy_ret == ESP_ERR_NOT_FOUND ? TS_API_ERR_NOT_FOUND : TS_API_ERR_INTERNAL,
+                            policy_ret == ESP_ERR_NOT_FOUND ? "API not found" : "API policy unavailable");
+        return policy_ret;
     }
-    const cJSON *auth = cJSON_GetObjectItemCaseSensitive(info, "requires_auth");
-    if (!cJSON_IsBool(auth)) {
-        cJSON_Delete(info);
-        ts_api_result_error(result, TS_API_ERR_INTERNAL, "API policy unavailable");
-        return ESP_FAIL;
+    if (access.external_access == TS_API_ACCESS_INTERNAL) {
+        ts_api_result_error(result, TS_API_ERR_NOT_SUPPORTED, "API not exposed externally");
+        return ESP_ERR_NOT_SUPPORTED;
     }
-    bool needs_auth = cJSON_IsTrue(auth);
-    cJSON_Delete(info);
     bool source_secrets = true;
 #ifdef CONFIG_TS_WEBUI_AUTH_REQUIRED
     ts_session_t session;
     ts_perm_level_t level = TS_PERM_NONE;
     if (session_id && ts_security_validate_session(session_id, &session) == ESP_OK)
         level = session.level;
-    source_secrets = level >= TS_PERM_ROOT;
-    bool root_only = needs_auth && !strncmp(name, "automation.", 11) &&
-        strcmp(name, "automation.actions.execute") &&
-        strcmp(name, "automation.rules.trigger") &&
-        strcmp(name, "automation.services.list") &&
-        strcmp(name, "automation.services.status") &&
-        strcmp(name, "automation.services.stop");
-    ts_perm_level_t required = root_only ? TS_PERM_ROOT :
-        !strcmp(name, "ui.widgets.set") ? TS_PERM_ADMIN : TS_PERM_READ;
-    const cJSON *path = !strcmp(name, "storage.read") ? cJSON_GetObjectItem(params, "path") : NULL;
-    if ((needs_auth && level < required) ||
-        (cJSON_IsString(path) && ts_storage_check_write_path(path->valuestring, false) != ESP_OK && !source_secrets)) {
+    /* Preserve the pre-existing sources credential projection. Other restored
+     * configuration/security pages retain their original Admin data contract. */
+    ts_perm_level_t private_level = !strcmp(name, "automation.sources.list") ? TS_PERM_ROOT : TS_PERM_ADMIN;
+    source_secrets = level >= private_level;
+    /* The generic store can contain arbitrary credentials. Only the language
+     * preference is a public WebUI bootstrap value; raw reads require a logged-in administrator. */
+    const cJSON *config_key = !strcmp(name, "config.get") ? cJSON_GetObjectItem(params, "key") : NULL;
+    bool private_config = !strcmp(name, "config.get") &&
+        !(cJSON_IsString(config_key) && !strcmp(config_key->valuestring, "system.language"));
+    if ((access.requires_auth && level < access.minimum_level) ||
+        (private_config && !source_secrets)) {
         ts_api_result_error(result, TS_API_ERR_AUTH, "Unauthorized");
         return ESP_ERR_NOT_ALLOWED;
     }
 #else
-    (void)needs_auth;
+    (void)access;
     (void)session_id;
 #endif
-    esp_err_t ret = ts_api_call(name, params, result);
-    if (!strcmp(name, "automation.sources.list") && !source_secrets && result->data) {
-        cJSON *source;
-        cJSON_ArrayForEach(source, cJSON_GetObjectItemCaseSensitive(result->data, "sources")) {
-            cJSON_DeleteItemFromObjectCaseSensitive(source, "rest_auth");
-            cJSON_DeleteItemFromObjectCaseSensitive(source, "auth_header");
+    /* Invoke the handler copied with this policy, never a second name lookup
+     * that could select a concurrently replaced operation. */
+    esp_err_t ret = session_handler ? session_handler(params, session_id, result) : handler(params, result);
+    if (ret != ESP_OK && result->code == TS_API_OK)
+        ts_api_result_error(result, TS_API_ERR_INTERNAL, "Handler error");
+    if (!strcmp(name, "config.module.show") && !source_secrets && result->data) {
+        /* Both single-module and "all" responses are emitted by this API.
+         * Omit secrets instead of returning a mask that a client might save. */
+        cJSON *configs[] = {
+            cJSON_GetObjectItemCaseSensitive(result->data, "config"),
+            cJSON_GetObjectItemCaseSensitive(result->data, "wifi")
+        };
+        for (unsigned i = 0; i < sizeof(configs) / sizeof(configs[0]); ++i) {
+            cJSON_DeleteItemFromObjectCaseSensitive(configs[i], "ap.password");
+            cJSON_DeleteItemFromObjectCaseSensitive(configs[i], "sta.password");
         }
+    }
+    bool effect_result = false;
+    if (private_result_projection(name, NULL, true, &effect_result) == ESP_OK) {
+#ifdef CONFIG_TS_WEBUI_AUTH_REQUIRED
+        ts_session_t current;
+        bool live = ts_security_validate_session(session_id, &current) == ESP_OK;
+        if (effect_result) {
+            /* Keep the actual write outcome, but never its private output if
+             * the initiating administrator is no longer authorized at delivery. */
+            source_secrets = source_secrets && live && current.level >= private_level;
+        } else if ((access.requires_auth && (!live || current.level < access.minimum_level)) ||
+                   (source_secrets && (!live || current.level < private_level))) {
+            ts_api_result_error(result, TS_API_ERR_AUTH, "Unauthorized");
+            return ESP_ERR_NOT_ALLOWED;
+        }
+#endif
+        esp_err_t projected = private_result_projection(name, result, source_secrets, NULL);
+        if (projected != ESP_OK) return projected;
     }
     return ret;
 }
@@ -500,9 +695,16 @@ cJSON *ts_api_get_info(const char *name)
         }
         cJSON_AddStringToObject(info, "category", 
             ts_api_category_name(entry->category));
-        cJSON_AddBoolToObject(info, "requires_auth", entry->requires_auth);
-        if (entry->permission) {
-            cJSON_AddStringToObject(info, "permission", entry->permission);
+        ts_api_access_t access;
+        classify_external_access(entry->external_access, entry->allowed_methods, &access);
+        /* Partial metadata must never weaken the dispatch policy. */
+        if (!cJSON_AddBoolToObject(info, "requires_auth", access.requires_auth) ||
+            !cJSON_AddNumberToObject(info, "minimum_level", access.minimum_level) ||
+            !cJSON_AddNumberToObject(info, "external_access", access.external_access) ||
+            !cJSON_AddNumberToObject(info, "allowed_methods", access.allowed_methods) ||
+            (entry->permission && !cJSON_AddStringToObject(info, "permission", entry->permission))) {
+            cJSON_Delete(info);
+            info = NULL;
         }
     }
     

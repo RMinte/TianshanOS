@@ -18,15 +18,16 @@ def function(path,name):
 rtos=RTOS.replace('#define TS_EVENT_BASE_SERVICE 1',r'''
 #define TS_EVENT_BASE_SERVICE 1
 #define TS_EVENT_BASE_OTA 9
-static atomic_int ota_events[9];static void (*ota_event_hook)(int);
+static atomic_int ota_events[0x060a];static void (*ota_event_hook)(int);
 ''').replace('if(event==TS_EVENT_SERVICE_STOPPED)++stopped_events;',
-'''if(base==TS_EVENT_BASE_OTA){assert(event>=0&&event<9);++ota_events[event];if(ota_event_hook)ota_event_hook(event);}else if(event==TS_EVENT_SERVICE_STOPPED)++stopped_events;''')
+'''if(base==TS_EVENT_BASE_OTA){assert(event>=0&&event<0x060a);++ota_events[event];if(ota_event_hook)ota_event_hook(event);}else if(event==TS_EVENT_SERVICE_STOPPED)++stopped_events;''')
 code=rtos+r'''
 #include <ctype.h>
 #include <sys/stat.h>
 #include "esp_app_format.h"
 #include "esp_app_desc.h"
 #include "ts_ota.h"
+#include "esp_partition.h"
 #include "ts_api.h"
 #define TAG "local-ota"
 #define OTA_MALLOC heap_alloc
@@ -90,12 +91,12 @@ static void make_firmware(void) {
 }
 static void reset_fixture(void) {
     assert(!s_ota_running&&!s_ota_task_handle&&!s_ota_url);s_state=TS_OTA_STATE_IDLE;s_error=TS_OTA_ERR_NONE;s_total_size=s_received_size=0;strcpy(s_status_msg,"idle");s_upload_handle=0;s_upload_in_progress=false;https_running=false;https_aborts=flash_aborts=restarts=boot_choices=begin_calls=end_calls=0;written_size=0;pause_stage=PAUSE_NONE;pause_once=false;finish_before_create_returns=false;
-    for(int i=0;i<9;i++)ota_events[i]=0;
+    for(int i=0;i<0x060a;i++)ota_events[i]=0;
 }
 static void refused_without_mutation(void) {
-    ts_ota_progress_t before,after;assert(ts_ota_get_progress(&before)==ESP_OK);char message[64];strcpy(message,before.status_msg);int events[9];for(int i=0;i<9;i++)events[i]=ota_events[i];
+    ts_ota_progress_t before,after;assert(ts_ota_get_progress(&before)==ESP_OK);char message[64];strcpy(message,before.status_msg);int events[0x060a];for(int i=0;i<0x060a;i++)events[i]=ota_events[i];
     ts_api_result_t r={0};assert(api_ota_abort(NULL,&r)==ESP_ERR_NOT_SUPPORTED&&r.code!=TS_API_OK&&!cJSON_HasObjectItem(r.data,"aborted"));ts_api_result_free(&r);assert(ts_ota_get_progress(&after)==ESP_OK);
-    assert(after.state==before.state&&after.error==before.error&&after.total_size==before.total_size&&after.received_size==before.received_size&&!strcmp(after.status_msg,message));for(int i=0;i<9;i++)assert(ota_events[i]==events[i]);assert(!flash_aborts&&!https_aborts);
+    assert(after.state==before.state&&after.error==before.error&&after.total_size==before.total_size&&after.received_size==before.received_size&&!strcmp(after.status_msg,message));for(int i=0;i<0x060a;i++)assert(ota_events[i]==events[i]);assert(!flash_aborts&&!https_aborts);
 }
 static void start_from_api(void) {cJSON *params=cJSON_Parse("{\"file\":\"normal.bin\",\"no_reboot\":true}");ts_api_result_t r={0};assert(api_ota_start_file(params,&r)==ESP_OK&&r.code==TS_API_OK&&cJSON_IsTrue(cJSON_GetObjectItem(r.data,"started")));cJSON_Delete(params);ts_api_result_free(&r);}
 static void complete_worker(void) {join_tasks();assert(!s_ota_running&&!s_ota_task_handle&&!s_ota_url&&s_ota_config.url==NULL);assert(s_state==TS_OTA_STATE_PENDING_REBOOT&&s_error==TS_OTA_ERR_NONE);assert(begin_calls==1&&end_calls==1&&boot_choices==1&&!flash_aborts&&written_size==sizeof(firmware)&&!memcmp(written_bytes,firmware,sizeof(firmware)));assert(!ota_events[TS_EVENT_OTA_ABORTED]);}
@@ -117,7 +118,7 @@ int main(void) {
     puts("PASS actual SD task/API abort: queued/read/write/verify/boot/completed refuse unchanged; local bytes/boot result, no_reboot, create failure/fast exit, original idle/error/HTTPS/upload paths");
 }
 '''
-headers={'ts_ota.h':Path('components/ts_ota/include/ts_ota.h').read_text(),
+headers={'ts_ota_events.h':Path('components/ts_core/ts_event/include/ts_ota_events.h').read_text(),'ts_ota.h':Path('components/ts_ota/include/ts_ota.h').read_text(),
  'esp_partition.h':'#pragma once\n#include <stdint.h>\ntypedef struct {char label[17];uint32_t address,size;} esp_partition_t;\n',
  'esp_app_format.h':(IDF/'components/bootloader_support/include/esp_app_format.h').read_text(),
  'esp_app_desc.h':(IDF/'components/esp_app_format/include/esp_app_desc.h').read_text(),

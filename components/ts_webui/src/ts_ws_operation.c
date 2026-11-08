@@ -12,6 +12,7 @@ struct ts_ws_operation {
     ts_ws_op_kind_t kind;
     bool initializing, builder;
     bool business_accepted;
+    uint32_t owner_session_id;
     ts_ws_business_phase_t business;
     ts_ws_stop_reason_t first_stop;
     unsigned stop_reasons;
@@ -27,9 +28,6 @@ static portMUX_TYPE s_op_lock = portMUX_INITIALIZER_UNLOCKED;
 static ts_ws_operation_t s_ops[TS_WS_OP_KINDS];
 static uint64_t s_op_sequence, s_op_delivery;
 static bool s_op_accepting, s_op_tick;
-static ts_perm_level_t output_level(ts_ws_operation_t *op) {
-    return op->kind == TS_WS_OP_EXEC ? TS_PERM_READ : TS_PERM_ROOT;
-}
 #define OP_LOCK() portENTER_CRITICAL(&s_op_lock)
 #define OP_UNLOCK() portEXIT_CRITICAL(&s_op_lock)
 
@@ -51,11 +49,19 @@ ts_ws_operation_t *ts_ws_op_create(ts_ws_op_kind_t kind, ts_ws_peer_t peer, esp_
     OP_UNLOCK();
     esp_err_t ret=kind!=TS_WS_OP_EXEC ? ts_ws_reserve(&peer,1,true,4096,&op->terminal) :
         ts_ws_result_reserve(TS_WS_LEGACY_BYTES,&op->terminal);
-    if (ret == ESP_OK) ts_ws_message_require(op->terminal.message, output_level(op));
+    if (ret == ESP_OK) {
+        ts_ws_message_require(op->terminal.message, TS_PERM_ROOT);
+        if(kind==TS_WS_OP_EXEC)ts_ws_message_require_session(op->terminal.message,0);
+    }
     OP_LOCK(); op->initializing=false; OP_UNLOCK();
     if(error)*error=ret;
     if(ret!=ESP_OK) { ts_ws_op_discard(op); ts_ws_op_executor_done(op); return NULL; }
     return op;
+}
+void ts_ws_op_set_exec_owner(ts_ws_operation_t *op, uint32_t session_id) {
+    OP_LOCK();assert(op->kind==TS_WS_OP_EXEC && op->ledger.phase==OP_STARTING);
+    op->owner_session_id=session_id;OP_UNLOCK();
+    ts_ws_message_require_session(op->terminal.message,session_id);
 }
 void ts_ws_op_bind(ts_ws_operation_t *op,void *data,void (*destroy)(void *)) {
     OP_LOCK(); assert(op->ledger.phase==OP_STARTING && !op->data);op->data=data;op->destroy=destroy;OP_UNLOCK();
@@ -99,7 +105,7 @@ static bool close_locked(ts_ws_operation_t *op) {
 }
 static void close_snapshot(ts_ws_operation_t *op) {
     if(op->kind!=TS_WS_OP_EXEC){op->terminal_peers[0]=op->peer;op->terminal_count=ts_ws_peer_authorized(op->peer,TS_PERM_ROOT)?1:0;}
-    else op->terminal_count=ts_ws_peer_snapshot_for_level(op->terminal_peers,TS_WS_CONNECTIONS,TS_PERM_READ);
+    else op->terminal_count=ts_ws_peer_snapshot_for_session(op->terminal_peers,TS_WS_CONNECTIONS,TS_PERM_ROOT,op->owner_session_id);
 }
 bool ts_ws_op_close_begin(ts_ws_operation_t *op) {
     OP_LOCK();bool winner=close_locked(op);OP_UNLOCK();
@@ -148,14 +154,15 @@ bool ts_ws_op_output_begin(ts_ws_operation_t *op,ts_ws_output_ticket_t *t) {
     if(ok){op->ledger.preparing++;t->sequence=++op->ledger.tickets;op->ledger.refs++;t->op=op;}OP_UNLOCK();
     if(!ok)return false;
     if(op->kind!=TS_WS_OP_EXEC){t->peers[0]=op->peer;t->count=ts_ws_peer_authorized(op->peer,TS_PERM_ROOT)?1:0;}
-    else t->count=ts_ws_peer_snapshot_for_level(t->peers,TS_WS_CONNECTIONS,TS_PERM_READ);
+    else t->count=ts_ws_peer_snapshot_for_session(t->peers,TS_WS_CONNECTIONS,TS_PERM_ROOT,op->owner_session_id);
     TS_WS_TEST_POINT("B02");return true;
 }
 static bool publish_output(ts_ws_output_ticket_t *t,const char *json,bool retryable) {
     if(!t->op)return false;
     ts_ws_operation_t *op=t->op;ts_ws_message_t *m=NULL;
     if(t->count && json)m=ts_ws_message_text(json,strlen(json));
-    ts_ws_message_require(m, output_level(op));
+    ts_ws_message_require(m, TS_PERM_ROOT);
+    if(op->kind==TS_WS_OP_EXEC)ts_ws_message_require_session(m,op->owner_session_id);
     uint64_t tokens[TS_WS_CONNECTIONS]={0};bool winner=false,registered=false;
     TS_WS_TEST_POINT("B03");
     OP_LOCK();

@@ -282,20 +282,26 @@ void ts_api_log_register(void)
     static const ts_api_endpoint_t endpoints[] = {
         {
             .name = "log.list",
+            .external_access = TS_API_ACCESS_ADMIN,
+            .allowed_methods = TS_API_METHOD_READ,
             .category = TS_API_CAT_SYSTEM,
             .handler = api_log_list,
             .description = "Get log entries with filtering",
-            .requires_auth = false,
+            .requires_auth = true,
         },
         {
             .name = "log.stats",
+            .external_access = TS_API_ACCESS_ADMIN,
+            .allowed_methods = TS_API_METHOD_READ,
             .category = TS_API_CAT_SYSTEM,
             .handler = api_log_stats,
             .description = "Get log system statistics",
-            .requires_auth = false,
+            .requires_auth = true,
         },
         {
             .name = "log.clear",
+            .external_access = TS_API_ACCESS_ADMIN,
+            .allowed_methods = TS_API_METHOD_WRITE,
             .category = TS_API_CAT_SYSTEM,
             .handler = api_log_clear,
             .description = "Clear log buffer",
@@ -303,6 +309,8 @@ void ts_api_log_register(void)
         },
         {
             .name = "log.setLevel",
+            .external_access = TS_API_ACCESS_ADMIN,
+            .allowed_methods = TS_API_METHOD_WRITE,
             .category = TS_API_CAT_SYSTEM,
             .handler = api_log_set_level,
             .description = "Set log level",
@@ -310,6 +318,8 @@ void ts_api_log_register(void)
         },
         {
             .name = "log.capture",
+            .external_access = TS_API_ACCESS_ADMIN,
+            .allowed_methods = TS_API_METHOD_WRITE,
             .category = TS_API_CAT_SYSTEM,
             .handler = api_log_capture,
             .description = "Enable/disable ESP_LOG capture",

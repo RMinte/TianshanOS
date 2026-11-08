@@ -1,43 +1,17 @@
 """Real production pack create/verify/decrypt with SDK Mbed TLS 3.6.5 and disposable PKI."""
+from host_paths import build_dir, sdk_library_dir
 from pathlib import Path
-import fcntl, os, subprocess, shutil, hashlib, sys, tempfile, time, re
+import os, subprocess, shutil, hashlib, sys, time, re
 root = Path(__file__).resolve().parents[2]
-# Every run owns its scratch tree, so concurrent runs (another worktree, another
-# agent) never share generated sources, PKI, config.h or the linked executable.
-build = Path(tempfile.mkdtemp(prefix='tianshan-rule-pack-'))
+build = build_dir('rule-pack')
+build.mkdir(exist_ok=True)
 idf = Path(os.environ.get('IDF_PATH', '/Users/massif/esp/v5.5.2/esp-idf'))
 mbed = idf/'components/mbedtls/mbedtls'
-cmake = shutil.which('cmake') or '/Users/massif/.espressif/tools/cmake/3.30.2/CMake.app/Contents/bin/cmake'
+native = sdk_library_dir(idf)
 env = {**os.environ, 'DEVELOPER_DIR': '/Library/Developer/CommandLineTools'}
 def run(args, **kw):
     kw.setdefault('env',env)
     return subprocess.run([str(a) for a in args], check=True, **kw)
-
-def mbedtls_version():
-    header = mbed/'include/mbedtls/build_info.h'
-    if not header.exists():
-        raise RuntimeError(f'Mbed TLS build_info.h not found under {mbed}')
-    for line in header.read_text().splitlines():
-        if line.startswith('#define MBEDTLS_VERSION_STRING '):
-            return line.split('"')[1]
-    raise RuntimeError(f'MBEDTLS_VERSION_STRING not found in {header}')
-
-MBEDTLS_ARGS = ['-DENABLE_PROGRAMS=OFF', '-DENABLE_TESTING=OFF']
-# The cache directory is keyed by SDK path, Mbed TLS version and build arguments.
-# A different identity therefore gets its own directory instead of deleting
-# another run's cache, and a completed build is never removed. Concurrent first
-# builds of the same identity are serialised by a lock on that directory.
-identity = hashlib.sha256('|'.join([str(idf), mbedtls_version(), *MBEDTLS_ARGS]).encode()).hexdigest()[:16]
-native = Path('/tmp/tianshan-pack-mbedtls-' + identity)
-complete = native/'build-complete'
-with Path(str(native) + '.lock').open('w') as lock:
-    fcntl.flock(lock, fcntl.LOCK_EX)
-    if not complete.exists():
-        if native.exists():
-            shutil.rmtree(native)
-        run([cmake, '-S', mbed, '-B', native, *MBEDTLS_ARGS])
-        run([cmake, '--build', native, '-j', '4'])
-        complete.write_text(mbedtls_version())
 openssl = shutil.which('openssl')
 assert openssl
 pki = build/'pki'
@@ -83,25 +57,40 @@ int fixture_mkdir(const char *, mode_t);
 ''')
 pack_source=build/'current_pack.c'
 pack_source.write_text('#include "paths.h"\n'+(root/'components/ts_config_pack/src/ts_config_pack.c').read_text())
-api=(root/'components/ts_api/src/ts_api_config_pack.c').read_text()
-m=re.search(r'^static esp_err_t api_config_pack_export_cert\([^;]*?\)\s*\{',api,re.M)
-assert m
-(build/'export_api.inc').write_text(api[m.start():api.index('\n}',m.end())+2]+'\n')
+# Only extract the actual API bodies: storage/PKI remain the shared fixture.
+api_parts = []
+for source_path, names in [('components/ts_api/src/ts_api.c', ['ts_api_result_free','ts_api_result_ok','ts_api_result_error']),
+                           ('components/ts_api/src/ts_api_config_pack.c', ['api_config_pack_verify','api_config_pack_import','api_config_pack_export_cert']),
+                           ('components/ts_core/ts_config/src/ts_config_migrate.c', ['read_system_file']),
+                           ('components/ts_automation/src/ts_rule_pack.c', ['ts_rule_pack_error','ts_rule_pack_definition_digest','ts_rule_pack_provenance']),
+                           ('components/ts_automation/src/ts_automation_legacy.c', ['file_bytes','load_json','priority_json'])]:
+    text = (root/source_path).read_text()
+    for name in names:
+        match = re.search(r'^(?:static )?[^\n;]+\b'+name+r'\([^;]+?\)\s*\{', text, re.M)
+        assert match, name
+        api_parts.append(text[match.start():text.index('\n}',match.end())+2])
+(build/'pack_api.inc').write_text('\n'.join(api_parts))
 sources = [root/'tests/runtime/rule_pack/test_crypto.c', pack_source,
            root/'components/ts_config_pack/src/ts_config_pack_trust.c',root/'components/ts_security/src/ts_crypto.c',
-           idf/'components/json/cJSON/cJSON.c']
+           idf/'components/json/cJSON/cJSON.c', root/'components/ts_automation/src/ts_rule_codec.c',
+           root/'components/ts_automation/src/ts_action_codec.c',root/'components/ts_automation/src/ts_action_filter.c']
+if '--file-trust-case' in sys.argv:
+    sources[0] = root/'tests/runtime/rule_pack/test_file_trust.c'
+if '--pack-source' in sys.argv:
+    sources[1] = Path(sys.argv[sys.argv.index('--pack-source')+1]).resolve()
 if '--baseline' in sys.argv:
     old = build/'baseline_pack.c'
     old.write_bytes(subprocess.check_output(['git','show','bdc0354b:components/ts_config_pack/src/ts_config_pack.c'],cwd=root))
     sources[1] = old
     sources.remove(root/'components/ts_config_pack/src/ts_config_pack_trust.c')
 cmd = ['cc','-std=c11','-D_DEFAULT_SOURCE','-g','-fsanitize=address,undefined','-Wno-deprecated-declarations',
-       '-include',build/'config.h','-I'+str(build),'-I'+str(root/'components/ts_api/include'),'-I'+str(root/'tests/runtime/rule_pack/stubs'),
-       '-I'+str(root/'components/ts_storage/include'),'-I'+str(root/'components/ts_config_pack/include'),'-I'+str(root/'components/ts_config_pack/src'),
-       '-I'+str(root/'components/ts_cert/include'),'-I'+str(root/'components/ts_security/include'),
+       '-include',build/'config.h','-I'+str(root/'tests/runtime/rule_pack/stubs'),
+       '-I'+str(build),'-I'+str(root/'components/ts_automation/include'),'-I'+str(root/'components/ts_api/include'),'-I'+str(root/'components/ts_storage/include'),'-I'+str(root/'components/ts_config_pack/include'),'-I'+str(root/'components/ts_config_pack/src'),
+       '-I'+str(root/'components/ts_net/include'),'-I'+str(root/'components/ts_cert/include'),'-I'+str(root/'components/ts_security/include'),
        '-I'+str(mbed/'include'),'-I'+str(idf/'components/json/cJSON')]
 if '--baseline' in sys.argv: cmd += ['-DPACK_BASELINE']
 if '--unconfigured' in sys.argv: cmd += ['-DPACK_UNCONFIGURED']
+if '--ordinary-tls' in sys.argv: cmd += ['-DPACK_ORDINARY_TLS']
 export_payloads=Path(sys.argv[sys.argv.index('--export-payloads')+1]).resolve() if '--export-payloads' in sys.argv else None
 if export_payloads:
     assert export_payloads.is_file()
@@ -111,7 +100,7 @@ if integration:
     case=next((arg.split('=',1)[1] for arg in sys.argv if arg.startswith('--case=')),None)
     if case not in (None,'view'): raise ValueError('The delayed-rule-store cases were retired; use the configuration owner suite.')
     run(['bash',root/'tests/runtime/run_config_storage.sh'],cwd=root)
-executable=build/('export-payloads' if export_payloads else 'crypto-baseline' if '--baseline' in sys.argv else 'unconfigured' if '--unconfigured' in sys.argv else 'engine' if '--engine' in sys.argv else 'store' if '--store' in sys.argv else 'crypto')
+executable=build/('export-payloads' if export_payloads else 'crypto-baseline' if '--baseline' in sys.argv else 'unconfigured' if '--unconfigured' in sys.argv else 'engine' if '--engine' in sys.argv else 'store' if '--store' in sys.argv else 'file-trust' if '--file-trust-case' in sys.argv else 'crypto')
 cmd += sources+[native/'library/libmbedx509.a',native/'library/libmbedcrypto.a','-lpthread','-lm','-o',executable]
 run(cmd,cwd=root)
 case=None if integration else next((a.split('=',1)[1] for a in sys.argv if a.startswith('--case=')),None)

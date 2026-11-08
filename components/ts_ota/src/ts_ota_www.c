@@ -80,7 +80,7 @@ static void www_ota_update_progress(ts_ota_state_t state, size_t received, size_
         } else {
             s_www_progress.progress_percent = 0;
         }
-        s_www_progress.status_msg = msg;
+        snprintf(s_www_progress.status_msg, sizeof(s_www_progress.status_msg), "%s", msg ? msg : "");
         xSemaphoreGive(s_www_progress_mutex);
     }
     
@@ -91,8 +91,8 @@ static void www_ota_update_progress(ts_ota_state_t state, size_t received, size_
             .received_size = received,
             .total_size = total,
             .progress_percent = (total > 0) ? (received * 100 / total) : 0,
-            .status_msg = msg
         };
+        snprintf(progress.status_msg, sizeof(progress.status_msg), "%s", msg ? msg : "");
         s_www_config.progress_cb(&progress, s_www_config.user_data);
     }
 }

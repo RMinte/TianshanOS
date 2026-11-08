@@ -61,13 +61,13 @@ footer.foot{padding:19px 0 18px}
 .lang-notice{position:fixed;top:100px;left:24px;right:24px;z-index:1100;display:flex;align-items:center;gap:12px;padding:16px;border-radius:var(--r-menu);font-size:14px}
 .modal{position:fixed;inset:0;z-index:200;display:flex;align-items:center;justify-content:center;background:rgba(20,30,45,.20)}
 @media (max-width:1200px){
-.header{top:12px;left:12px;right:12px;height:auto;padding:12px 14px;border-radius:28px;grid-template-columns:minmax(0,1fr) auto;gap:10px 12px}
+.header{position:sticky;top:12px;left:auto;right:auto;margin:12px 12px 0;height:auto;padding:12px 14px;border-radius:28px;grid-template-columns:minmax(0,1fr) auto;gap:10px 12px}
 .brand{margin-left:0}
 .nav{grid-row:2;grid-column:1/-1;width:100%;overflow-x:auto;scrollbar-width:none}
 .nav::-webkit-scrollbar{display:none}
 .nav a{flex:none;white-space:nowrap}
 .user-menu{gap:10px}
-.main{margin:124px 12px 0;border-radius:28px}
+.main{margin:12px 12px 0;border-radius:28px}
 }
 @media (max-width:600px){
 #ws-status{font-size:0;gap:0}
@@ -76,7 +76,7 @@ footer.foot{padding:19px 0 18px}
 .brand .wm{min-width:0;flex:0 1 auto;width:125.25px;height:20px;margin-top:0}
 .brand>svg:not(.wm){flex:none}
 .user-menu{gap:6px}
-.main{margin-top:118px;padding:10px;border-radius:22px}
+.main{padding:10px;border-radius:22px}
 }
 /*END*/
 
@@ -408,6 +408,14 @@ input[type=radio]:checked{border:5px solid var(--accent-text)}
 .stat-st.warn i{background:var(--warn-dot)}
 
 /* ===== 页面：指令 ===== */
+.command-empty{min-height:316px;padding:36px 24px 44px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center}
+.command-empty-icon{display:grid;place-items:center;width:48px;height:48px;margin-bottom:18px;color:var(--ink-2)}
+.command-empty-icon>.i{width:44px;height:44px}
+.command-empty-title{margin:0;font-size:16px;line-height:24px;font-weight:600;color:var(--ink)}
+.command-empty-description{max-width:360px;margin:8px 0 0;font-size:13px;line-height:21px;color:var(--ink-3)}
+.command-empty-action{margin-top:24px}
+.command-empty-action>.i{width:15px;height:15px}
+@media(max-width:600px){.command-empty{min-height:284px;padding:30px 14px 38px}.command-empty-description{max-width:260px}}
 .host-selector{display:flex;gap:12px;flex-wrap:wrap}
 .host-selector>.empty{flex:1 1 100%}
 .host-card{cursor:default}

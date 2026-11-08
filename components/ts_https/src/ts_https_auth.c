@@ -12,6 +12,7 @@
 #include "mbedtls/x509_crt.h"
 #include "mbedtls/ssl.h"
 #include <string.h>
+#include <strings.h>
 
 static const char *TAG = "ts_https_auth";
 
@@ -45,14 +46,24 @@ ts_https_role_t ts_https_str_to_role(const char *str)
 
 bool ts_https_role_has_permission(ts_https_role_t user_role, ts_https_role_t required_role)
 {
-    // Admin > Operator > Viewer > Anonymous
-    // Device is special - only equals Device
-    if (required_role == TS_HTTPS_ROLE_DEVICE) {
-        return user_role == TS_HTTPS_ROLE_DEVICE;
+    /* Device is an identity for device endpoints, not a management rank. */
+    switch (required_role) {
+        case TS_HTTPS_ROLE_ANONYMOUS:
+            return user_role == TS_HTTPS_ROLE_ANONYMOUS ||
+                   user_role == TS_HTTPS_ROLE_VIEWER || user_role == TS_HTTPS_ROLE_OPERATOR ||
+                   user_role == TS_HTTPS_ROLE_ADMIN || user_role == TS_HTTPS_ROLE_DEVICE;
+        case TS_HTTPS_ROLE_VIEWER:
+            return user_role == TS_HTTPS_ROLE_VIEWER || user_role == TS_HTTPS_ROLE_OPERATOR ||
+                   user_role == TS_HTTPS_ROLE_ADMIN || user_role == TS_HTTPS_ROLE_DEVICE;
+        case TS_HTTPS_ROLE_OPERATOR:
+            return user_role == TS_HTTPS_ROLE_OPERATOR || user_role == TS_HTTPS_ROLE_ADMIN;
+        case TS_HTTPS_ROLE_ADMIN:
+            return user_role == TS_HTTPS_ROLE_ADMIN;
+        case TS_HTTPS_ROLE_DEVICE:
+            return user_role == TS_HTTPS_ROLE_DEVICE;
+        default:
+            return false;
     }
-    
-    // For other roles, higher numeric value = more permission
-    return (int)user_role >= (int)required_role;
 }
 
 /*===========================================================================*/
@@ -99,12 +110,12 @@ static esp_err_t extract_rdn(const mbedtls_x509_name *name,
  */
 esp_err_t ts_https_auth_from_cert(const mbedtls_x509_crt *cert, ts_https_auth_t *auth)
 {
-    if (!cert || !auth) {
+    if (!auth) {
         return ESP_ERR_INVALID_ARG;
     }
     
     memset(auth, 0, sizeof(*auth));
-    auth->authenticated = true;
+    if (!cert) return ESP_ERR_INVALID_ARG;
     
     // Extract Common Name (CN) → username
     // OID for CN: 2.5.4.3
@@ -124,16 +135,20 @@ esp_err_t ts_https_auth_from_cert(const mbedtls_x509_crt *cert, ts_https_auth_t 
     // OID for OU: 2.5.4.11
     static const char oid_ou[] = { 0x55, 0x04, 0x0B };
     char ou_value[32] = {0};
-    if (extract_rdn(&cert->subject, oid_ou, sizeof(oid_ou),
-                    ou_value, sizeof(ou_value)) == ESP_OK) {
-        auth->role = ts_https_str_to_role(ou_value);
-        ESP_LOGI(TAG, "Client role from OU: %s → %s", 
-                 ou_value, ts_https_role_to_str(auth->role));
-    } else {
-        // No OU field - default to viewer
-        auth->role = TS_HTTPS_ROLE_VIEWER;
-        ESP_LOGW(TAG, "No OU field in certificate, defaulting to viewer");
+    bool found_role = false;
+    for (const mbedtls_x509_name *n = &cert->subject; n; n = n->next) {
+        if (n->oid.len != sizeof(oid_ou) || memcmp(n->oid.p, oid_ou, sizeof(oid_ou))) continue;
+        /* A role is exactly one complete OU value, never a truncated C string. */
+        if (found_role || !n->val.len || n->val.len >= sizeof(ou_value) ||
+            memchr(n->val.p, '\0', n->val.len)) {
+            memset(auth, 0, sizeof(*auth));
+            return ESP_ERR_INVALID_ARG;
+        }
+        memcpy(ou_value, n->val.p, n->val.len);
+        found_role = true;
     }
+    auth->role = ts_https_str_to_role(ou_value); /* Missing/unknown OU stays anonymous. */
+    auth->authenticated = true;
     
     int64_t expiry;
     time_t now = time(NULL);
@@ -161,11 +176,12 @@ esp_err_t ts_https_auth_from_cert(const mbedtls_x509_crt *cert, ts_https_auth_t 
  */
 esp_err_t ts_https_get_client_auth(void *ssl_ctx, ts_https_auth_t *auth)
 {
-    if (!ssl_ctx || !auth) {
+    if (!auth) {
         return ESP_ERR_INVALID_ARG;
     }
     
     memset(auth, 0, sizeof(*auth));
+    if (!ssl_ctx) return ESP_ERR_INVALID_ARG;
     
     mbedtls_ssl_context *ssl = (mbedtls_ssl_context *)ssl_ctx;
     

@@ -32,9 +32,9 @@ def network_sources(output, manager, driver, network, console):
     end = manager.index('static ts_net_manager_state_t s_state = {0};')
     defines = '\n'.join(line for line in manager.splitlines() if line.startswith('#define NVS_'))
     (output / 'manager_types.inc').write_text(manager_identifiers(defines + '\n' + manager[begin:end]))
-    (output / 'manager_core.inc').write_text('static esp_err_t stop_eth(void);\n' + manager_identifiers('\n\n'.join(sorted(
+    (output / 'manager_core.inc').write_text('static pthread_mutex_t s_hostname_lock=PTHREAD_MUTEX_INITIALIZER;\n#define portENTER_CRITICAL(m) pthread_mutex_lock(m)\n#define portEXIT_CRITICAL(m) pthread_mutex_unlock(m)\nstatic char s_authority_hostname[TS_NET_HOSTNAME_MAX_LEN],s_active_hostname[TS_NET_HOSTNAME_MAX_LEN];\nstatic esp_err_t stop_eth(void);\n' + manager_identifiers('\n\n'.join(sorted(
         (function(manager, n) for n in manager_names if re.search(r'^(?:static )?[\w *]+\b' + n + r'\([^;]*?\)\s*\{', manager, re.M)), key=manager.index))))
-    (output / 'eth_creation.inc').write_text(function(driver, 'create_eth_netif_with_dhcps'))
+    (output / 'eth_creation.inc').write_text((function(driver, 'set_eth_host_dns')+'\n' if 'static esp_err_t set_eth_host_dns(' in driver else '')+function(driver, 'create_eth_netif_with_dhcps'))
     init = function(driver, 'ts_eth_init')
     calls = list(re.finditer(r'^    [^\n]*create_eth_netif_with_dhcps\(', init, re.M))
     assert len(calls) == 1, 'ETH init must have one netif creation call'
@@ -45,7 +45,7 @@ def network_sources(output, manager, driver, network, console):
     (output / 'eth_init_creation.inc').write_text(init[begin:end] + '\n'.join(re.findall(r'^    s_driver_stop_complete = [^;]+;', init, re.M)))
     (output / 'eth_events.inc').write_text('\n\n'.join(function(driver, n) for n in
         ['dhcp_start_task', 'eth_event_handler', 'ts_eth_start', 'ts_eth_stop']))
-    (output / 'network_setter.inc').write_text('\n'.join(function(network, n) for n in ['get_netif', 'ts_net_get_ip_info', 'ts_net_set_ip_info', 'ts_net_get_status']))
+    (output / 'network_setter.inc').write_text((function(network,'read_eth_host_dns')+'\n' if 'static esp_err_t read_eth_host_dns(' in network else '')+'\n'.join(function(network, n) for n in ['get_netif', 'ts_net_get_ip_info', 'ts_net_set_ip_info', 'ts_net_get_status']))
     (output / 'network_cli.inc').write_text('\n'.join(function(console,n) for n in ['do_net_set','do_net_ip','do_net_start','do_net_stop','do_net_restart']))
 
 

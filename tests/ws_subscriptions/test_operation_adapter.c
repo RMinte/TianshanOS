@@ -9,10 +9,25 @@
 #undef TS_LOGI
 #undef TS_LOGW
 #undef TS_LOGE
+#ifdef TEST_CAPTURE_DIAGNOSTICS
+#include <stdarg.h>
+static char diagnostic_trace[65536];
+static size_t diagnostic_used;
+static void capture_diagnostic(const char *tag,const char *format,...){
+ (void)tag;if(diagnostic_used>=sizeof(diagnostic_trace)-1)return;
+ va_list args;va_start(args,format);int n=vsnprintf(diagnostic_trace+diagnostic_used,sizeof(diagnostic_trace)-diagnostic_used,format,args);va_end(args);
+ if(n>0)diagnostic_used+=(size_t)n<sizeof(diagnostic_trace)-diagnostic_used?(size_t)n:sizeof(diagnostic_trace)-diagnostic_used-1;
+}
+#define TS_LOGD(...) capture_diagnostic(__VA_ARGS__)
+#define TS_LOGI(...) capture_diagnostic(__VA_ARGS__)
+#define TS_LOGW(...) capture_diagnostic(__VA_ARGS__)
+#define TS_LOGE(...) capture_diagnostic(__VA_ARGS__)
+#else
 #define TS_LOGD(...) ((void)0)
 #define TS_LOGI(...) ((void)0)
 #define TS_LOGW(...) ((void)0)
 #define TS_LOGE(...) ((void)0)
+#endif
 #include "ts_console.h"
 #include "ts_ssh_client.h"
 #include "ts_ssh_shell.h"
@@ -36,7 +51,15 @@ static int httpd_register_uri_handler(httpd_handle_t h,const httpd_uri_t *u){(vo
 static int httpd_ws_send_frame(httpd_req_t *r,httpd_ws_frame_t *f){return httpd_ws_send_frame_async(r->handle,r->fd,f);}
 static esp_err_t httpd_sess_trigger_close(httpd_handle_t h,int fd){(void)h;if(reqs[fd].sess_ctx)close_peer(fd);return ESP_OK;}
 static const char *incoming;
-static int httpd_ws_recv_frame(httpd_req_t *r,httpd_ws_frame_t *f,size_t n){(void)r;if(!incoming)return ESP_FAIL;f->type=1;f->len=strlen(incoming);if(n)memcpy(f->payload,incoming,f->len);return 0;}
+static bool incoming_override,incoming_final=true,incoming_read_fail;
+static int incoming_type=1;static size_t incoming_length;
+static unsigned input_headers,input_payloads;
+static int httpd_ws_recv_frame(httpd_req_t *r,httpd_ws_frame_t *f,size_t n){
+ (void)r;if(!incoming&&!incoming_override)return ESP_FAIL;
+ if(n)input_payloads++;else input_headers++;
+ f->type=incoming_type;f->final=incoming_final;f->len=incoming_override?incoming_length:strlen(incoming);
+ if(n){if(incoming_read_fail)return ESP_FAIL;assert(f->len<=n);if(f->len)memcpy(f->payload,incoming,f->len);}return 0;
+}
 static size_t rejected_allocation_size;
 static void *adapter_malloc(size_t n){return rejected_allocation_size==n?NULL:tracked_malloc(n);}
 static void *host_heap_malloc(size_t n,unsigned caps){(void)caps;return adapter_malloc(n);}
@@ -168,7 +191,12 @@ void ts_console_request_interrupt(void){}
 esp_err_t ts_log_add_callback(ts_log_callback_t cb,ts_log_level_t l,void *arg,ts_log_callback_handle_t *out){(void)cb;(void)l;(void)arg;*out=(void*)1;return 0;}
 static int remove_log_result;
 esp_err_t ts_log_remove_callback(ts_log_callback_handle_t h){(void)h;return remove_log_result;}
-size_t ts_log_buffer_search(ts_log_entry_t *e,size_t n,ts_log_level_t min,ts_log_level_t max,const char *tag,const char *keyword){(void)e;(void)n;(void)min;(void)max;(void)tag;(void)keyword;return 0;}
+static unsigned log_history_reads;
+static void (*log_history_hook)(void);
+size_t ts_log_buffer_search(ts_log_entry_t *e,size_t n,ts_log_level_t min,ts_log_level_t max,const char *tag,const char *keyword){
+ (void)min;(void)max;(void)tag;(void)keyword;log_history_reads++;if(log_history_hook)log_history_hook();if(!n)return 0;
+ memset(e,0,sizeof(*e));e->level=TS_LOG_INFO;strcpy(e->message,"SYNTHETIC PRIVATE LOG");strcpy(e->tag,"fixture");strcpy(e->task_name,"fixture");return 1;
+}
 httpd_handle_t ts_http_server_get_handle(void){return (void*)11;}
 void ts_http_server_set_stop_hooks(esp_err_t(*stop)(httpd_handle_t),void(*stopped)(httpd_handle_t)){(void)stop;(void)stopped;}
 static int adapter_create_caps(void(*fn)(void*),const char*n,unsigned stack,void*arg,unsigned p,TaskHandle_t*out,unsigned caps){
@@ -188,7 +216,12 @@ static void adapter_delete_caps(TaskHandle_t task){
 }
 static void drive_all(void){for(unsigned i=0;i<12;i++){test_now+=100000;ts_ws_op_poll();pump();timer_pump();}assert(!timer_queued);}
 static void drive_matching_output(void){for(unsigned i=0;i<12;i++){ts_ws_op_poll();pump();timer_pump();}assert(!timer_queued);}
-static void setup(void){variable_instance=1;variable_initialized=true;command_current=true;start();memset(s_clients,0,sizeof(s_clients));s_server=(void*)11;s_ws_stopping=false;ts_ws_op_enable();transport_server.closed=peer_closed;for(int fd=1;fd<=2;fd++){reqs[fd]=(httpd_req_t){.handle=(void*)11,.fd=fd};current=(void*)3;assert(add_client(&reqs[fd],WS_CLIENT_TYPE_EVENT)==ESP_OK);}current=(void*)1;}
+static void setup(void){variable_instance=1;variable_initialized=true;command_current=true;start();memset(s_clients,0,sizeof(s_clients));s_server=(void*)11;s_ws_stopping=false;ts_ws_op_enable();transport_server.closed=peer_closed;for(int fd=1;fd<=2;fd++){reqs[fd]=(httpd_req_t){.handle=(void*)11,.fd=fd};current=(void*)3;assert(add_client(&reqs[fd],WS_CLIENT_TYPE_EVENT)==ESP_OK);}current=(void*)1;
+#ifndef CONFIG_TS_WEBUI_AUTH_REQUIRED
+    /* Observable synthetic executions belong to identity 7, not every peer. */
+    for(int fd=1;fd<=2;fd++)assert(ts_ws_peer_bind_session(*(ts_ws_peer_t*)reqs[fd].sess_ctx,7)==ESP_OK);
+#endif
+}
 static void finish_all(void){drive_all();assert(!ts_ws_op_busy());exec_cache_clear();stop();assert(!live_allocations);}
 static void connect_shell(void){cJSON *j=cJSON_Parse("{\"host\":\"fake\",\"user\":\"fake\"}");current=(void*)3;handle_ssh_connect(&reqs[1],j);current=(void*)1;cJSON_Delete(j);}
 static unsigned terminal_frames,output_frames,connected_frames,disconnecting_frames;static bool output_after_terminal;
@@ -231,6 +264,11 @@ static void stop_progress_shell(void){
  }
  progress();
 }
+/* Explicit private observation fixture; trusted internal owner=0 is tested separately. */
+static esp_err_t observed_exec_start(const char *host,uint16_t port,const char *user,const char *key,const char *password,const char *command,uint32_t *id){
+    ts_webui_ssh_options_t options={.owner_session_id=7};
+    return ts_webui_ssh_exec_start_ex(host,port,user,key,password,command,&options,id);
+}
 static void operation_cross_tests(void){
     uint32_t id;ts_ws_op_stats_t ledger;
     setup();connect_shell();unsigned dc=disconnecting_frames;incoming="{\"type\":\"ssh_disconnect\"}";reqs[1].method=1;current=(void*)3;assert(ws_handler(&reqs[1])==ESP_OK);current=(void*)1;incoming=NULL;shell_task.fn(shell_task.arg);finish_all();assert(disconnecting_frames==dc+1);
@@ -245,7 +283,7 @@ static void operation_cross_tests(void){
     puts("PASS G1 same observable assertion: old rejection callback cannot corrupt replacement Shell (whole production unit)");
 
     setup();terminal_frames=output_frames=0;output_after_terminal=false;
-    assert(ts_webui_ssh_exec_start("fake",22,"u",NULL,"p","cmd",&id)==0);
+    assert(observed_exec_start("fake",22,"u",NULL,"p","cmd",&id)==0);
     ssh_exec_task_params_t *params=exec_task.arg;ts_ws_peer_t peer=*(ts_ws_peer_t*)reqs[1].sess_ctx;
     m=ts_ws_message_text("block",5);assert(ts_ws_transport_submit(peer,m,0,0,NULL,NULL)==0);ts_ws_message_release(m);
     ssh_exec_output_callback("A",1,false,params);barrier_name="B02";barrier_action=g2_preparing_output;
@@ -253,7 +291,7 @@ static void operation_cross_tests(void){
     exec_task.fn(exec_task.arg);finish_all();
     puts("PASS G2 revised result contract: observation failure while output prepares leaves execution OPEN; final result waits for actual completion");
 
-    setup();terminal_frames=0;ts_webui_ssh_options_t opts={.timeout_ms=1000,.collect_output=true,.extract_pattern="value=(.*)",.var_name="fake"};
+    setup();terminal_frames=0;ts_webui_ssh_options_t opts={.owner_session_id=7,.timeout_ms=1000,.collect_output=true,.extract_pattern="value=(.*)",.var_name="fake"};
     assert(ts_webui_ssh_exec_start_ex("fake",22,"u",NULL,"p","cmd",&opts,&id)==0);
     timer_queue_fail=true;exec_task.fn(exec_task.arg);drive_all();assert(ts_ws_op_busy());
     params=exec_task.arg;assert(params->timer_phase==2 && !params->session);
@@ -287,10 +325,10 @@ static void operation_cross_tests(void){
     puts("PASS original timeout and stop-on-match business abort semantics retained");
 
     setup();before=aborts;remote_hook=cancel_original_exec;
-    assert(ts_webui_ssh_exec_start("fake",22,"u",NULL,"p","cmd",&id)==0);
+    assert(observed_exec_start("fake",22,"u",NULL,"p","cmd",&id)==0);
     exec_task.fn(exec_task.arg);remote_hook=NULL;assert(aborts==before+1);finish_all();
     setup();terminal_frames=0;
-    assert(ts_webui_ssh_exec_start("fake",22,"u",NULL,"p","cmd",&id)==0);
+    assert(observed_exec_start("fake",22,"u",NULL,"p","cmd",&id)==0);
     params=exec_task.arg;barrier_name="B07";barrier_action=close_snapshot_joiner;
     if(ts_ws_op_close_begin(params->op))ts_ws_op_close_finish(params->op,"{\"type\":\"ssh_exec_done\"}");
     drive_all();assert(!barrier_action && frames[3]==0 && terminal_frames==2);
@@ -298,12 +336,12 @@ static void operation_cross_tests(void){
     puts("PASS original cancel ID contract, user disconnecting status and frozen terminal recipient snapshot");
 
     setup();close_peer(1);close_peer(2);
-    assert(ts_webui_ssh_exec_start("fake",22,"u",NULL,"p","cmd",&id)==0);
+    assert(observed_exec_start("fake",22,"u",NULL,"p","cmd",&id)==0);
     params=exec_task.arg;before=allocations;ssh_exec_output_callback("none",4,false,params);assert(allocations==before);
     exec_task.fn(exec_task.arg);finish_all();
     puts("PASS no recipients: no observation JSON/payload allocation; business executes and tickets retire");
 
-    setup();task_create_fail=true;assert(ts_webui_ssh_exec_start("fake",22,"u",NULL,"p","cmd",&id)==ESP_FAIL);task_create_fail=false;finish_all();
+    setup();task_create_fail=true;assert(observed_exec_start("fake",22,"u",NULL,"p","cmd",&id)==ESP_FAIL);task_create_fail=false;finish_all();
     for(unsigned i=0;i<16;i++) {
         setup();fail_allocation=allocations+i+1;
         esp_err_t ret=ts_webui_ssh_exec_start_ex("fake",22,"u",NULL,"p","cmd",&opts,&id);fail_allocation=0;
@@ -311,7 +349,7 @@ static void operation_cross_tests(void){
     }
     puts("PASS task-create and allocation failure sweep: all actual contexts, credentials, output buffers and reservations reclaimed");
     for(unsigned i=0;i<48;i++) {
-        setup();assert(ts_webui_ssh_exec_start("fake",22,"u",NULL,"p","cmd",&id)==0);
+        setup();assert(observed_exec_start("fake",22,"u",NULL,"p","cmd",&id)==0);
         sent_hook=validate_exec_frame;params=exec_task.arg;fail_allocation=allocations+i+1;
         ssh_exec_output_callback("encoding",8,false,params);fail_allocation=0;
         exec_task.fn(exec_task.arg);finish_all();
@@ -336,7 +374,7 @@ static void replace_command_during_exec(void){command_current=false;}
 static void replace_variable_during_exec(void){++variable_instance;}
 static void foreground_identity_tests(void)
 {
- ts_webui_ssh_options_t options={.collect_output=true,.extract_pattern="value=(.*)",.var_name="shared",.command_id="command-a",.command_instance=17};
+ ts_webui_ssh_options_t options={.owner_session_id=7,.collect_output=true,.extract_pattern="value=(.*)",.var_name="shared",.command_id="command-a",.command_instance=17};
  uint32_t id;
  for(unsigned scenario=0;scenario<4;++scenario){
   setup();remote_hook=scenario==1?replace_command_during_exec:scenario==2?replace_variable_during_exec:NULL;
@@ -365,7 +403,7 @@ static void full_command_tests(void){
   memset(command,'x',length);memcpy(command,"bash -c '\n#",11);command[length-2]='\n';command[length-1]='\'';command[length]=0;
   memcpy(expected,command,length+1);expected_command=expected;
   setup();uint32_t id;unsigned submitted=commands_submitted;
-  assert(ts_webui_ssh_exec_start("fake",22,"u",NULL,"p",command,&id)==ESP_OK);
+  assert(observed_exec_start("fake",22,"u",NULL,"p",command,&id)==ESP_OK);
   /* The HTTP request can be freed before the task is scheduled. */
   memset(command,'!',length);free(command);
   exec_task.fn(exec_task.arg);assert(commands_submitted==submitted+1);finish_all();
@@ -373,7 +411,7 @@ static void full_command_tests(void){
  }
  setup();char command[1501];memset(command,'x',1500);command[1500]=0;
  uint32_t id=0;unsigned submitted=commands_submitted;rejected_allocation_size=sizeof(command);
- assert(ts_webui_ssh_exec_start("fake",22,"u",NULL,"p",command,&id)==ESP_ERR_NO_MEM);
+ assert(observed_exec_start("fake",22,"u",NULL,"p",command,&id)==ESP_ERR_NO_MEM);
  rejected_allocation_size=0;assert(!id && commands_submitted==submitted);finish_all();
  puts("PASS full async commands: 511/512/757/1500 bytes preserved after request release; allocation failure submits nothing and reclaims ownership");
 }
@@ -405,7 +443,7 @@ static void matching_regressions(void){
  for(unsigned n=0;n<10;n++){unsigned scenario=scenarios[n];
   setup();terminal_frames=0;matching_status[0]=matching_value[0]=0;matching_callbacks=0;sent_hook=observe_matching;
   noise[65533]='x';const char *parts[6]={noise,NULL};
-  ts_webui_ssh_options_t options={.collect_output=true,.extract_pattern="value=(.*);",.stop_on_match=scenario==4||scenario==6};
+  ts_webui_ssh_options_t options={.owner_session_id=7,.collect_output=true,.extract_pattern="value=(.*);",.stop_on_match=scenario==4||scenario==6};
   if(scenario==0){options.expect_pattern="READY";parts[1]="READY";}
   if(scenario==1){options.fail_pattern="ERROR";parts[1]="ERROR";}
   if(scenario==2)parts[1]="value=42;";
@@ -438,10 +476,10 @@ int main(void){
  ssh_send_output(ctx,"out",3);ssh_cleanup();shell_task.fn(shell_task.arg);finish_all();assert(!output_after_terminal);
  for(int f=0;f<5;f++){setup();terminal_frames=0;unsigned before=connected_frames;task_create_fail=f==0;close_during_create=f==1;remote_failure=f>=2?f-1:0;shell_task.fn=NULL;connect_shell();if(shell_task.fn)shell_task.fn(shell_task.arg);finish_all();assert(connected_frames==before);task_create_fail=close_during_create=false;remote_failure=0;}
  setup();terminal_frames=0;output_after_terminal=false;uint32_t id;
- ts_webui_ssh_options_t opts={.collect_output=true,.timeout_ms=1000,.extract_pattern="value=(.*)",.var_name="fake"};
+ ts_webui_ssh_options_t opts={.owner_session_id=7,.collect_output=true,.timeout_ms=1000,.extract_pattern="value=(.*)",.var_name="fake"};
  assert(ts_webui_ssh_exec_start_ex("fake",22,"user",NULL,"password","cmd",&opts,&id)==0);
  exec_task.fn(exec_task.arg);drive_all();assert(terminal_frames==2 && !output_after_terminal && variable_writes);finish_all();
- setup();inline_exec=true;assert(ts_webui_ssh_exec_start("fake",22,"user",NULL,"password","cmd",&id)==0);inline_exec=false;finish_all();
+ setup();inline_exec=true;assert(observed_exec_start("fake",22,"user",NULL,"password","cmd",&id)==0);inline_exec=false;finish_all();
  for(unsigned i=0;i<10;i++){
   setup();connect_shell();unsigned before=caps_deletes;
   ssh_cleanup();shell_task.fn(shell_task.arg);

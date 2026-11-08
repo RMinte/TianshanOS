@@ -1,12 +1,13 @@
 #!/bin/bash
 set -euo pipefail
 cd "$(dirname "$0")/../.."
+source tests/runtime/host_env.sh
 : "${IDF_PATH:=/Users/massif/esp/v5.5.2/esp-idf}"
-: "${STORAGE_PATH_TEST_BUILD:=/tmp/tianshan-storage-path-tests}"
+: "${STORAGE_PATH_TEST_BUILD:=$TS_TEST_BUILD_ROOT/storage-paths}"
 mkdir -p "$STORAGE_PATH_TEST_BUILD"
 python3 - "$STORAGE_PATH_TEST_BUILD/storage_upload.inc" <<'PYTHON'
 from pathlib import Path
-import sys
+import os,sys
 parts=[]
 for file,name,signature in (
     ('components/ts_net/src/ts_http_server.c','url_decode_inplace','static void '),
@@ -14,7 +15,7 @@ for file,name,signature in (
     ('components/ts_webui/src/ts_webui_api.c','file_download_handler','static esp_err_t '),
     ('components/ts_webui/src/ts_webui_api.c','file_upload_handler','static esp_err_t '),
 ):
-    source=Path(file).read_text()
+    source=Path(os.environ.get('STORAGE_UPLOAD_SOURCE',file) if name=='file_upload_handler' else file).read_text()
     start=source.index(signature+name+'(')
     parts.append(source[start:source.index('\n}',start)+2])
 Path(sys.argv[1]).write_text('\n'.join(parts))

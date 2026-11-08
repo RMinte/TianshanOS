@@ -14,6 +14,7 @@
  */
 
 #include "ts_eth.h"
+#include "lwip/dns.h"
 #include "ts_net.h"
 #include "ts_dhcp_server.h"
 #include "ts_pin_manager.h"
@@ -149,6 +150,18 @@ static void ip_event_handler(void *arg, esp_event_base_t event_base,
     }
 }
 
+/* DHCPS netif DNS entries belong to DHCP offers, not the host resolver. */
+static esp_err_t set_eth_host_dns(void *context)
+{
+    const uint32_t *servers = context;
+    for (unsigned i = 0; i < 2; ++i) {
+        ip_addr_t address;
+        ip_addr_set_ip4_u32_val(address, servers[i]);
+        dns_setserver(i, &address);
+    }
+    return ESP_OK;
+}
+
 /**
  * @brief 创建支持 DHCP 服务器的以太网 netif
  * 
@@ -202,6 +215,12 @@ static esp_err_t create_eth_netif_with_dhcps(const ts_eth_config_t *config, esp_
         }
     }
     
+    esp_err_t ret = esp_netif_tcpip_exec(set_eth_host_dns, (void *)config->dns);
+    if (ret != ESP_OK) {
+        esp_netif_destroy(netif);
+        return ret;
+    }
+
     TS_LOGI(TAG, "Created Ethernet netif with DHCP server mode");
     
     *out = netif;

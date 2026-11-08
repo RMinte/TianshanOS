@@ -179,6 +179,7 @@ esp_err_t ts_https_start(void)
     // Configure HTTPS server
     httpd_ssl_config_t config = HTTPD_SSL_CONFIG_DEFAULT();
     
+    config.httpd.ctrl_port = 32769; /* Independent from business and redirect listeners. */
     config.httpd.server_port = 0;  // HTTPS uses its own port
     config.port_secure = s_config.port;
     config.httpd.max_open_sockets = s_config.max_clients;
@@ -411,65 +412,6 @@ static const mbedtls_x509_crt *get_client_cert(httpd_req_t *req)
     return peer_cert;
 }
 
-/**
- * @brief 从 X.509 证书 DN 中提取指定 OID 的值
- */
-static int extract_dn_field(const mbedtls_x509_name *dn, const char *oid, char *buf, size_t buf_len)
-{
-    const mbedtls_x509_name *name = dn;
-    while (name != NULL) {
-        // 检查 OID 是否匹配
-        if (name->oid.len == strlen(oid) && memcmp(name->oid.p, oid, name->oid.len) == 0) {
-            size_t copy_len = (name->val.len < buf_len - 1) ? name->val.len : buf_len - 1;
-            memcpy(buf, name->val.p, copy_len);
-            buf[copy_len] = '\0';
-            return 0;
-        }
-        name = name->next;
-    }
-    return -1;
-}
-
-// X.509 OID 常量
-#define OID_CN  "\x55\x04\x03"  // 2.5.4.3 - Common Name
-#define OID_O   "\x55\x04\x0a"  // 2.5.4.10 - Organization
-#define OID_OU  "\x55\x04\x0b"  // 2.5.4.11 - Organizational Unit
-
-/**
- * @brief 从证书 Subject 中提取认证信息
- */
-static void extract_auth_from_cert(const mbedtls_x509_crt *cert, ts_https_auth_t *auth)
-{
-    char buf[64];
-    
-    // 提取 CN (Common Name) -> username
-    if (extract_dn_field(&cert->subject, OID_CN, buf, sizeof(buf)) == 0) {
-        strncpy(auth->username, buf, sizeof(auth->username) - 1);
-        auth->username[sizeof(auth->username) - 1] = '\0';
-    }
-    
-    // 提取 O (Organization) -> organization
-    if (extract_dn_field(&cert->subject, OID_O, buf, sizeof(buf)) == 0) {
-        strncpy(auth->organization, buf, sizeof(auth->organization) - 1);
-        auth->organization[sizeof(auth->organization) - 1] = '\0';
-    }
-    
-    // 提取 OU (Organizational Unit) -> role
-    if (extract_dn_field(&cert->subject, OID_OU, buf, sizeof(buf)) == 0) {
-        auth->role = ts_https_str_to_role(buf);
-        ESP_LOGI(TAG, "Client cert OU='%s' -> role=%s", buf, ts_https_role_to_str(auth->role));
-    }
-    
-    int64_t expiry;
-    time_t now = time(NULL);
-    auth->cert_days_remaining = 0;
-    if (now != (time_t)-1 && ts_cert_time_utc(cert->valid_to.year, cert->valid_to.mon,
-            cert->valid_to.day, cert->valid_to.hour, cert->valid_to.min, cert->valid_to.sec, &expiry))
-        auth->cert_days_remaining = ts_cert_time_days(expiry - (int64_t)now);
-
-    auth->authenticated = true;
-}
-
 static esp_err_t generic_handler(httpd_req_t *req)
 {
     ts_https_endpoint_t *endpoint = (ts_https_endpoint_t *)req->user_ctx;
@@ -490,23 +432,36 @@ static esp_err_t generic_handler(httpd_req_t *req)
         }
     };
     
-    // Try to get client authentication from certificate
+    /* A retained TLS context authenticates against its loaded CA. Recheck the
+     * material lease before granting permissions, so material loss, rotation or
+     * an unavailable credential store cannot keep authorizing old sessions.
+     * Explicit public health remains anonymous until admission is restored. */
+    bool client_auth_current = false;
     if (s_config.require_client_cert) {
+        ts_cert_pki_status_t current;
+        client_auth_current = ts_cert_get_status(&current) == ESP_OK &&
+            ts_cert_prerequisites(&current, true) && current.generation == s_material.generation;
+        if (!client_auth_current && endpoint->min_role != TS_HTTPS_ROLE_ANONYMOUS)
+            return ts_https_send_error(&https_req, 503, "Client authentication materials changed or are not ready");
+    }
+
+    // Try to get client authentication from certificate
+    if (client_auth_current) {
         const mbedtls_x509_crt *client_cert = get_client_cert(req);
         if (client_cert) {
-            // 从证书中提取认证信息
-            extract_auth_from_cert(client_cert, &https_req.auth);
-            ESP_LOGI(TAG, "mTLS auth: user='%s', org='%s', role=%s",
-                     https_req.auth.username, 
-                     https_req.auth.organization,
-                     ts_https_role_to_str(https_req.auth.role));
+            /* Use the same complete OU policy as the SSL-context auth path. */
+            esp_err_t auth_result = ts_https_auth_from_cert(client_cert, &https_req.auth);
+            if (auth_result != ESP_OK) {
+                ESP_LOGW(TAG, "Client certificate identity is invalid");
+            } else {
+                ESP_LOGI(TAG, "mTLS auth: user='%s', org='%s', role=%s",
+                         https_req.auth.username,
+                         https_req.auth.organization,
+                         ts_https_role_to_str(https_req.auth.role));
+            }
         } else {
-            // 客户端证书不可用，但 TLS 握手成功，说明证书已被验证
-            // 这种情况不应该发生，记录警告并使用默认值
-            ESP_LOGW(TAG, "mTLS required but client cert not accessible, using fallback");
-            https_req.auth.authenticated = true;
-            https_req.auth.role = TS_HTTPS_ROLE_VIEWER;  // 降级到最低权限
-            strncpy(https_req.auth.username, "unknown-mTLS-user", sizeof(https_req.auth.username) - 1);
+            /* Configuration is not evidence of a caller's authenticated identity. */
+            ESP_LOGW(TAG, "mTLS required but client certificate is not accessible");
         }
     }
     
@@ -535,6 +490,8 @@ esp_err_t ts_https_send_json(ts_https_req_t *req, int status, const char *json_s
         return ESP_ERR_INVALID_ARG;
     }
     
+    esp_err_t ret = httpd_resp_set_hdr(req->req, "Cache-Control", "no-store");
+    if (ret != ESP_OK) return ret;
     httpd_resp_set_type(req->req, "application/json");
     
     // Set status code

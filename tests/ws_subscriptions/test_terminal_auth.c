@@ -50,6 +50,20 @@ static void close_exec(ts_ws_operation_t *op) {
 static void identity_and_delivery(void)
 {
     setup();sent_hook=count_private;
+    admin_level=TS_PERM_NONE;
+    send_message(1,"{\"type\":\"auth\",\"token\":\"admin-token\"}");
+    assert(strstr(payloads[1],"auth_error")&&!ts_ws_peer_authorized(peer(1),TS_PERM_READ));
+    /* Even a trusted producer binding a still-valid enrollment session cannot
+     * deliver queued private data at READ, Admin or Root levels. */
+    assert(ts_ws_peer_bind_session(peer(1),8)==ESP_OK);
+    httpd_ws_frame_t restricted={.type=HTTPD_WS_TYPE_TEXT,.payload=(uint8_t*)"{\"type\":\"output\",\"data\":\"private\"}",.len=0};
+    restricted.len=strlen((char *)restricted.payload);
+    unsigned initial_private=private_frames;
+    assert(ts_ws_transport_send_private(peer(1),&restricted,TS_PERM_READ)==ESP_ERR_NOT_ALLOWED);
+    assert(ts_ws_transport_send_private(peer(1),&restricted,TS_PERM_ADMIN)==ESP_ERR_NOT_ALLOWED);
+    assert(ts_ws_transport_send_private(peer(1),&restricted,TS_PERM_ROOT)==ESP_ERR_NOT_ALLOWED);
+    finish_all();assert(private_frames==initial_private);admin_level=TS_PERM_ADMIN;
+    setup();sent_hook=count_private;
     send_message(1,"{\"type\":\"auth\",\"token\":null}");
     assert(strstr(payloads[1],"auth_error")&&!ts_ws_peer_authorized(peer(1),TS_PERM_READ));
     send_message(1,"{\"type\":\"auth\",\"token\":\"admin-token\",\"level\":4}");
@@ -58,14 +72,14 @@ static void identity_and_delivery(void)
     send_message(1,"{\"type\":\"auth\",\"token\":\"root-token\"}");assert(strstr(payloads[1],"auth_error"));
     send_message(2,"{\"type\":\"auth\",\"token\":\"root-token\"}");
     esp_err_t error;ts_ws_operation_t *op=ts_ws_op_create(TS_WS_OP_EXEC,(ts_ws_peer_t){0},&error);
-    assert(op&&ts_ws_op_open(op));ts_ws_output_ticket_t ticket;
-    assert(ts_ws_op_output_begin(op,&ticket)&&ticket.count==2);
+    assert(op);ts_ws_op_set_exec_owner(op,7);assert(ts_ws_op_open(op));ts_ws_output_ticket_t ticket;
+    assert(ts_ws_op_output_begin(op,&ticket)&&ticket.count==1);
     unsigned before=private_frames,errors=auth_errors;
     ts_ws_transport_stats_t tx_before,tx_after;ts_ws_transport_get_stats(&tx_before);
     ts_ws_op_output_finish(&ticket,"{\"type\":\"ssh_exec_output\",\"data\":\"private\"}");
     session_live=false;pump();
     ts_ws_op_stats_t stats;ts_ws_op_stats(TS_WS_OP_EXEC,&stats);
-    assert(!stats.failed&&!stats.unsettled&&private_frames==before&&auth_errors==errors+2);
+    assert(!stats.failed&&!stats.unsettled&&private_frames==before&&auth_errors==errors+1);
     ts_ws_transport_get_stats(&tx_after);assert(tx_after.attempts==tx_before.attempts&&tx_after.success==tx_before.success);
     current=(void*)3;assert(!ts_ws_peer_authorized(peer(1),TS_PERM_READ));current=(void*)1;
     assert(auth_errors==errors+2); /* only one expiry notice per previous binding */
@@ -85,9 +99,9 @@ static void identity_and_delivery(void)
     assert(ts_ws_peer_bind_session(fresh,7)==ESP_OK);finish_all();
     setup();send_message(1,"{\"type\":\"auth\",\"token\":\"admin-token\"}");
     send_message(2,"{\"type\":\"auth\",\"token\":\"root-token\"}");
-    op=ts_ws_op_create(TS_WS_OP_EXEC,(ts_ws_peer_t){0},&error);assert(op&&ts_ws_op_open(op));
-    assert(ts_ws_op_output_begin(op,&ticket)&&ticket.count==2);
-    send_fail_fd=1;ts_ws_op_output_finish(&ticket,"{\"type\":\"ssh_exec_output\"}");pump();send_fail_fd=-1;
+    op=ts_ws_op_create(TS_WS_OP_EXEC,(ts_ws_peer_t){0},&error);assert(op);ts_ws_op_set_exec_owner(op,7);assert(ts_ws_op_open(op));
+    assert(ts_ws_op_output_begin(op,&ticket)&&ticket.count==1);
+    send_fail_fd=2;ts_ws_op_output_finish(&ticket,"{\"type\":\"ssh_exec_output\"}");pump();send_fail_fd=-1;
     ts_ws_op_stats(TS_WS_OP_EXEC,&stats);assert(stats.failed);
     close_exec(op);
     puts("PASS WS token binding/roles, idempotence, one-binding history, queued revocation, public reuse and complete-peer fd reuse");
@@ -100,7 +114,7 @@ static void heartbeat_expiry(void)
     unsigned errors=auth_errors;
     admin_level=TS_PERM_READ;send_message(2,"{\"type\":\"ping\"}");
     assert(auth_errors==errors&&strstr(payloads[2],"pong")&&ts_ws_peer_authorized(peer(2),TS_PERM_READ));admin_level=TS_PERM_ADMIN;
-    esp_err_t error;ts_ws_operation_t *op=ts_ws_op_create(TS_WS_OP_EXEC,(ts_ws_peer_t){0},&error);assert(op&&ts_ws_op_open(op));
+    esp_err_t error;ts_ws_operation_t *op=ts_ws_op_create(TS_WS_OP_EXEC,(ts_ws_peer_t){0},&error);assert(op);ts_ws_op_set_exec_owner(op,7);assert(ts_ws_op_open(op));
     session_live=false;unsigned before=frames[1];ts_ws_output_ticket_t ticket;
     assert(ts_ws_op_output_begin(op,&ticket)&&ticket.count==0);ts_ws_op_output_finish(&ticket,NULL);
     assert(frames[1]==before&&auth_errors==errors); /* no empty private message */
@@ -155,22 +169,54 @@ static void zero_observers(void)
             send_message(2,"{\"type\":\"auth\",\"token\":\"root-token\"}");
         }
         if(observers)admin_level=TS_PERM_READ;
-        ts_webui_ssh_options_t options={.collect_output=true,.extract_pattern="value=(.*)",.var_name="fake"};
+        ts_webui_ssh_options_t options={.owner_session_id=7,.collect_output=true,.extract_pattern="value=(.*)",.var_name="fake"};
         unsigned writes=variable_writes,submitted=commands_submitted,before=private_frames,old_aborts=aborts;
         unsigned anon=private_by_fd[3],admin=private_by_fd[1],root=private_by_fd[2];uint32_t id;stored_extract[0]=0;
         assert(ts_webui_ssh_exec_start_ex("fake",22,"u",NULL,"p","cmd",&options,&id)==ESP_OK);
         exec_task.fn(exec_task.arg);finish_all();
         assert(variable_writes>writes&&commands_submitted==submitted+1&&aborts==old_aborts&&!strcmp(stored_extract,"42"));
         assert(private_by_fd[3]==anon);
-        if(observers)assert(private_by_fd[1]>admin&&private_by_fd[2]>root);
+        if(observers)assert(private_by_fd[1]==admin&&private_by_fd[2]>root);
         else assert(private_frames==before);
         admin_level=TS_PERM_ADMIN;
     }
-    puts("PASS anonymous receives no private frames; normal READ/Admin+Root exec and zero observers both match/store 42 and finish without abort");
+    puts("PASS anonymous receives no private frames; same-session Root-only exec and zero observers both match/store 42 and finish without abort");
 }
 
+static unsigned log_frames_by_fd[32],history_frames_by_fd[32];
+static void observe_logs(httpd_ws_frame_t *frame){
+ cJSON *msg=cJSON_ParseWithLength((char*)frame->payload,frame->len);const char *type=cJSON_GetStringValue(cJSON_GetObjectItem(msg,"type"));
+ if(type&&!strcmp(type,"log"))log_frames_by_fd[sent_fd]++;
+ if(type&&!strcmp(type,"log_history"))history_frames_by_fd[sent_fd]++;
+ cJSON_Delete(msg);
+}
+static void logs_authorization(void){
+ setup();session_live=true;admin_level=TS_PERM_ADMIN;sent_hook=observe_logs;open_peer(3);
+ const char *messages[]={"{\"type\":\"log_subscribe\",\"token\":\"root-token\",\"role\":\"root\"}","{\"type\":\"log_set_level\",\"minLevel\":5}","{\"type\":\"log_get_history\",\"limit\":5}"};
+ unsigned before=log_history_reads;
+ for(unsigned i=0;i<3;i++){send_message(1,messages[i]);assert(strstr(payloads[1],"auth_error"));}
+ assert(log_history_reads==before&&s_clients[0].type!=WS_CLIENT_TYPE_LOG);
+ admin_level=TS_PERM_READ;send_message(1,"{\"type\":\"auth\",\"token\":\"admin-token\"}");
+ for(unsigned level=TS_PERM_READ;level<=TS_PERM_WRITE;level++){
+  admin_level=(ts_perm_level_t)level;for(unsigned i=0;i<3;i++){send_message(1,messages[i]);assert(strstr(payloads[1],"auth_error"));}
+ }
+ assert(log_history_reads==before&&s_clients[0].type!=WS_CLIENT_TYPE_LOG);
+ admin_level=TS_PERM_ADMIN;send_message(1,"{\"type\":\"log_subscribe\",\"minLevel\":5}");assert(strstr(payloads[1],"log_subscribed"));
+ send_message(1,messages[2]);assert(log_history_reads==before+1&&strstr(payloads[1],"SYNTHETIC PRIVATE LOG"));
+ send_message(2,"{\"type\":\"auth\",\"token\":\"root-token\"}");send_message(2,"{\"type\":\"log_subscribe\",\"minLevel\":5}");send_message(2,messages[2]);assert(strstr(payloads[2],"SYNTHETIC PRIVATE LOG"));
+ /* A future producer cannot bypass role checks by setting an anonymous log filter. */
+ ts_ws_peer_log_level(peer(3),5);httpd_ws_frame_t log={.type=1,.payload=(uint8_t*)"{\"type\":\"log\",\"message\":\"fixture\"}",.len=strlen("{\"type\":\"log\",\"message\":\"fixture\"}")};
+ unsigned admin=log_frames_by_fd[1],root=log_frames_by_fd[2],anon=log_frames_by_fd[3];assert(ts_ws_transport_log(&log,3)==ESP_OK);pump();assert(log_frames_by_fd[1]==admin+1&&log_frames_by_fd[2]==root+1&&log_frames_by_fd[3]==anon);
+ admin=log_frames_by_fd[1];root=log_frames_by_fd[2];assert(ts_ws_transport_log(&log,3)==ESP_OK);admin_level=TS_PERM_READ;pump();assert(log_frames_by_fd[1]==admin&&log_frames_by_fd[2]==root+1);
+ admin_level=TS_PERM_ADMIN;admin=log_frames_by_fd[1];root=log_frames_by_fd[2];assert(ts_ws_transport_log(&log,3)==ESP_OK);session_live=false;pump();assert(log_frames_by_fd[1]==admin&&log_frames_by_fd[2]==root);
+ session_live=true;finish_all();
+ setup();sent_hook=observe_logs;send_message(1,"{\"type\":\"auth\",\"token\":\"admin-token\"}");unsigned history=history_frames_by_fd[1];log_history_hook=revoke;
+ send_message(1,messages[2]);assert(history_frames_by_fd[1]==history);log_history_hook=NULL;session_live=true;finish_all();
+ puts("PASS enrollment NONE cannot bind private WS or receive READ/Admin/Root private frames");
+ puts("PASS logs: anonymous/READ/WRITE cannot subscribe/filter/read history; Admin/Root keep log UI; queued role downgrade/revocation and expiry during history construction never deliver private logs");
+}
 int main(void)
 {
     cJSON_Hooks hooks={tracked_malloc,tracked_free};cJSON_InitHooks(&hooks);
-    identity_and_delivery();heartbeat_expiry();terminal_and_shell();zero_observers();
+    identity_and_delivery();heartbeat_expiry();terminal_and_shell();zero_observers();logs_authorization();
 }

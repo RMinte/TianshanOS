@@ -36,7 +36,11 @@ int main(int argc,char**argv){
  }
  if(!strcmp(argv[1],"exec") || !strcmp(argv[1],"continuous")){
   bool partial=!strcmp(argv[1],"exec");if(partial)open_peer(2);uint32_t id;
-  assert(ts_webui_ssh_exec_start("fake",22,"u",NULL,"p","cmd",&id)==0);ssh_exec_task_params_t *params=exec_task.arg;
+  /* Output tests opt into the initiating identity; internal ownerless Exec
+   * deliberately has no browser observers after the privacy fix. */
+  if(partial)assert(ts_ws_peer_bind_session(*(ts_ws_peer_t*)reqs[2].sess_ctx,7)==ESP_OK);
+  ts_webui_ssh_options_t options={.owner_session_id=7,.collect_output=true};
+  assert(ts_webui_ssh_exec_start_ex("fake",22,"u",NULL,"p","cmd",&options,&id)==0);ssh_exec_task_params_t *params=exec_task.arg;
   if(!partial)queue_fail=true;
   ssh_exec_output_callback("part",4,false,params);
   /* Exec output is staged by the callback and published by worker maintenance. */

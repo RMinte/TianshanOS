@@ -1531,14 +1531,14 @@ static int do_led_draw_text(const char *device_name, const char *text,
     char raw_text[256] = {0};
     const char *cmdline = ts_console_get_raw_cmdline();
     if (cmdline && extract_text_from_cmdline(cmdline, raw_text, sizeof(raw_text))) {
-        TS_LOGI(TAG, "Extracted text from raw cmdline: %s", raw_text);
+        TS_LOGI(TAG, "Extracted text from raw cmdline (%zu bytes)", strlen(raw_text));
         text = raw_text;  // 使用从原始命令行提取的文本
         
         // 同时尝试从原始命令行提取其他参数（因为 argtable3 可能解析失败）
         static char raw_font[32], raw_color[32], raw_align[16];
         if (!font_name && extract_param_from_cmdline(cmdline, "--font", raw_font, sizeof(raw_font))) {
             font_name = raw_font;
-            TS_LOGI(TAG, "Extracted font from raw cmdline: %s", font_name);
+            TS_LOGI(TAG, "Extracted font option from raw cmdline");
         }
         if (!color_str && extract_param_from_cmdline(cmdline, "--color", raw_color, sizeof(raw_color))) {
             color_str = raw_color;
@@ -1546,16 +1546,6 @@ static int do_led_draw_text(const char *device_name, const char *text,
         if (!align_str && extract_param_from_cmdline(cmdline, "--align", raw_align, sizeof(raw_align))) {
             align_str = raw_align;
         }
-    }
-    
-    // 调试：显示 text 的原始字节
-    if (text) {
-        char hex_buf[256] = {0};
-        int pos = 0;
-        for (size_t i = 0; i < strlen(text) && pos < 250; i++) {
-            pos += snprintf(hex_buf + pos, sizeof(hex_buf) - pos, "%02X ", (uint8_t)text[i]);
-        }
-        TS_LOGI(TAG, "text bytes: %s", hex_buf);
     }
     
     // 文本内容：优先使用文件，其次使用 --text 参数
@@ -1577,7 +1567,7 @@ static int do_led_draw_text(const char *device_name, const char *text,
             text_buf[--n] = '\0';
         }
         display_text = text_buf;
-        TS_LOGI(TAG, "Read text from file: %s (%zu bytes)", text_file, n);
+        TS_LOGI(TAG, "Read text from file (%zu bytes)", n);
     }
     
     if (!display_text || strlen(display_text) == 0) {
@@ -1639,8 +1629,8 @@ static int do_led_draw_text(const char *device_name, const char *text,
         }
         
         strncpy(s_current_font_name, font_name, sizeof(s_current_font_name) - 1);
-        TS_LOGI(TAG, "Font loaded: %s (%ux%u, %lu glyphs)", 
-                font_path, s_current_font->header.width,
+        TS_LOGI(TAG, "Font loaded (%ux%u, %lu glyphs)",
+                s_current_font->header.width,
                 s_current_font->header.height, (unsigned long)s_current_font->header.glyph_count);
     }
     
@@ -2106,18 +2096,9 @@ static int cmd_led(int argc, char **argv)
     bool is_draw_text_from_cmdline = false;
     const char *cmdline = ts_console_get_raw_cmdline();
     
-    // 调试：打印原始命令行
-    TS_LOGI(TAG, "nerrors=%d, cmdline=%s", nerrors, cmdline ? cmdline : "(null)");
-    if (cmdline) {
-        // 打印原始字节
-        char hex_buf[128] = {0};
-        int pos = 0;
-        for (size_t i = 0; i < strlen(cmdline) && i < 40 && pos < 120; i++) {
-            pos += snprintf(hex_buf + pos, sizeof(hex_buf) - pos, "%02X ", (uint8_t)cmdline[i]);
-        }
-        TS_LOGI(TAG, "cmdline bytes: %s", hex_buf);
-    }
-    
+    // Shared diagnostics retain parser state, never command contents.
+    TS_LOGI(TAG, "LED argument parse errors=%d, raw command present=%d", nerrors, cmdline != NULL);
+
     if (nerrors != 0 && cmdline) {
         // 直接从原始命令行检查是否包含 --draw-text
         if (strstr(cmdline, "--draw-text")) {
@@ -2132,7 +2113,7 @@ static int cmd_led(int argc, char **argv)
                     char test_buf[64];
                     if (extract_text_from_cmdline(cmdline, test_buf, sizeof(test_buf))) {
                         can_recover_from_raw_cmdline = true;
-                        TS_LOGI(TAG, "Recovering from UTF-8 parse error, extracted: %s", test_buf);
+                        TS_LOGI(TAG, "Recovering from UTF-8 parse error (%zu text bytes)", strlen(test_buf));
                         break;
                     } else {
                         TS_LOGW(TAG, "extract_text_from_cmdline failed");

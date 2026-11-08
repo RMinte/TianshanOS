@@ -21,6 +21,8 @@
 extern "C" {
 #endif
 
+uint32_t ts_time_sync_security_generation(void);
+
 /**
  * @brief Time sync status
  */

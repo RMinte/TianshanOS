@@ -12,6 +12,7 @@
 static inline void pack_failure(ts_api_result_t *result, ts_config_pack_result_t pack_result)
 {
     ts_api_result_code_t code = pack_result == TS_CONFIG_PACK_ERR_NO_MEM ? TS_API_ERR_NO_MEM
+        : pack_result == TS_CONFIG_PACK_ERR_UNSUPPORTED ? TS_API_ERR_NOT_SUPPORTED
         : pack_result == TS_CONFIG_PACK_ERR_PERMISSION ? TS_API_ERR_NO_PERMISSION
         : (pack_result == TS_CONFIG_PACK_ERR_IO || pack_result == TS_CONFIG_PACK_ERR_NOT_INIT) ? TS_API_ERR_INTERNAL
         : TS_API_ERR_INVALID_ARG;

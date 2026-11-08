@@ -29,5 +29,30 @@ int main(void){
  opts.receipt=&second;assert(ts_webui_ssh_exec_start_ex("fake",22,"u",NULL,"p","cmd",&opts,&b)==ESP_OK);
  char *result=ts_webui_ssh_exec_status(a,first.boot_id,first.result_key,NULL);assert(result&&strstr(result,"ssh_exec_done"));tracked_free(result);
  exec_task.fn(exec_task.arg);drive_all();assert(!ts_webui_ssh_exec_status(a,first.boot_id,first.result_key,NULL));finish_all();
+ /* A leaked receipt cannot delegate an externally owned operation to another login. */
+ for(unsigned mode=0;mode<3;mode++){
+  bool cancel=mode!=0;
+  setup();cJSON *request=cJSON_Parse("{\"host\":\"fake\",\"user\":\"u\",\"password\":\"p\",\"command\":\"cmd\",\"owner_session_id\":8,\"caller_session_id\":8,\"session_id\":8,\"role\":\"root\"}");ts_api_result_t start_reply={0};
+  assert(api_ssh_exec_stream_for_session(request,7,&start_reply)==ESP_OK);cJSON_Delete(request);
+  ssh_exec_task_params_t *params=exec_task.arg;assert(params->record->owner_session_id==7);assert(!cJSON_GetObjectItem(start_reply.data,"owner_session_id"));
+  cJSON *control=cJSON_Duplicate(start_reply.data,true);assert(control);
+  if(mode==2){cJSON_DeleteItemFromObject(control,"boot_id");cJSON_DeleteItemFromObject(control,"result_key");}
+  for(unsigned other=0;other<10;other++)if(other!=7){
+   ts_api_result_t denied={0};assert(api_ssh_exec_status_for_session(start_reply.data,other,&denied)!=ESP_OK&&denied.code==TS_API_ERR_NOT_FOUND);
+   denied=(ts_api_result_t){0};assert(api_ssh_cancel_for_session(control,other,&denied)!=ESP_OK&&denied.code==TS_API_ERR_NOT_FOUND);assert(!ts_ws_op_cancelled(params->op));
+  }
+  ts_api_result_t owner_reply={0};assert(api_ssh_exec_status_for_session(start_reply.data,7,&owner_reply)==ESP_OK);cJSON_Delete(owner_reply.data);
+  if(mode==2){
+   ts_api_result_t denied={0};assert(api_ssh_cancel(control,&denied)!=ESP_OK);
+   cJSON *partial=cJSON_Duplicate(control,true);cJSON_AddStringToObject(partial,"boot_id","bad");
+   denied=(ts_api_result_t){0};assert(api_ssh_cancel_for_session(partial,7,&denied)!=ESP_OK);cJSON_Delete(partial);assert(!ts_ws_op_cancelled(params->op));
+  }
+  if(cancel){owner_reply=(ts_api_result_t){0};assert(api_ssh_cancel_for_session(control,7,&owner_reply)==ESP_OK);cJSON_Delete(owner_reply.data);}
+  cJSON_Delete(control);
+  unsigned submitted=commands_submitted;exec_task.fn(exec_task.arg);drive_all();assert(commands_submitted==submitted+!cancel);
+  ts_api_result_t denied={0};assert(api_ssh_exec_status_for_session(start_reply.data,8,&denied)!=ESP_OK&&denied.code==TS_API_ERR_NOT_FOUND);
+  owner_reply=(ts_api_result_t){0};assert(api_ssh_exec_status_for_session(start_reply.data,7,&owner_reply)==ESP_OK);cJSON_Delete(owner_reply.data);cJSON_Delete(start_reply.data);finish_all();
+ }
+ puts("PASS real private EXEC callbacks: original UI ID-only cancel works for its initiating login; other sessions including zero cannot query/cancel with or without the receipt; unbound/partial controls rejected; owner completion/cancel and final result remain usable");
  puts("PASS real initiation/status API: allocation sweep prepares receipt before submit, exact owned lookup, current plus latest only, completion evicts older result");
 }

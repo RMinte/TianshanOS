@@ -1,15 +1,11 @@
 #include "ts_config_pack_trust.h"
 #include "ts_crypto.h"
 #include "ts_core.h"
+#include "ts_time_sync.h"
 #include "mbedtls/x509_crt.h"
 #include "mbedtls/oid.h"
 #include <string.h>
 #include <time.h>
-
-#ifndef CONFIG_TS_CONFIG_PACK_SIGNING_ROOT_SHA256
-#define CONFIG_TS_CONFIG_PACK_SIGNING_ROOT_SHA256 ""
-#endif
-#define ACCEPT_POLICY 1
 
 static bool cert_hash(const mbedtls_x509_crt *crt, char out[65]) {
     unsigned char digest[32];
@@ -36,6 +32,7 @@ static int accepted_time(void *context, mbedtls_x509_crt *crt, int depth, uint32
 }
 ts_config_pack_result_t ts_config_pack_signer_trust(const char *signer,
     const ts_cert_snapshot_t *snapshot, const char *package_hash, const char *recipient,
+    bool require_code_signing, bool existing_file,
     const ts_config_pack_acceptance_t *accepted, ts_config_pack_acceptance_t *out) {
     if (strlen(CONFIG_TS_CONFIG_PACK_SIGNING_ROOT_SHA256) != 64)
         return TS_CONFIG_PACK_ERR_TRUST_NOT_CONFIGURED;
@@ -67,17 +64,22 @@ ts_config_pack_result_t ts_config_pack_signer_trust(const char *signer,
         if (!cert_hash(c, hash)) goto done;
         if (strcmp(hash, root_hash) && mbedtls_x509_crt_parse_der(&certs->leaf, c->raw.p, c->raw.len)) goto done;
     }
-    bool reload = accepted && accepted->policy == ACCEPT_POLICY && accepted->accepted_at > 0 &&
+    bool reload = accepted && accepted->policy == TS_CONFIG_PACK_ACCEPT_POLICY && accepted->accepted_at > 0 &&
         !strcmp(accepted->package_sha256, package_hash) && !strcmp(accepted->recipient, recipient) &&
         !strcmp(accepted->signer_sha256, signer_hash) && !strcmp(accepted->root_sha256, root_hash);
     if (accepted && !reload) goto done;
     ts_cert_pki_status_t status = {0};
-    if (!reload && (ts_cert_get_status(&status) != ESP_OK || !status.time_ready)) {
+    if (ts_cert_get_status(&status) != ESP_OK) goto done;
+    /* Existing ordinary data must load before network/NTP starts. The chain,
+     * Developer role, signature, recipient and GCM checks still apply. Display
+     * timestamps never grant trust or manufacture fresh acceptance. */
+    bool defer_time = reload || (existing_file && !require_code_signing && !status.time_ready);
+    if (!reload && !status.time_ready && !defer_time) {
         result = TS_CONFIG_PACK_ERR_TIME_UNVERIFIED; goto done;
     }
     uint32_t flags = 0;
     if (mbedtls_x509_crt_verify(&certs->leaf, &certs->root, NULL, NULL, &flags,
-                              accepted_time, &reload) != 0 || flags) goto done;
+                              accepted_time, &defer_time) != 0 || flags) goto done;
     result = TS_CONFIG_PACK_ERR_SIGNER_ROLE;
     if(!mbedtls_pk_can_do(&certs->leaf.pk,MBEDTLS_PK_ECDSA) ||
        mbedtls_pk_ec(certs->leaf.pk)->MBEDTLS_PRIVATE(grp).id!=MBEDTLS_ECP_DP_SECP256R1)goto done;
@@ -85,7 +87,7 @@ ts_config_pack_result_t ts_config_pack_signer_trust(const char *signer,
         mbedtls_x509_crt_check_key_usage(&certs->leaf, MBEDTLS_X509_KU_DIGITAL_SIGNATURE)) goto done;
     /* No invented mandatory EKU. If a signer carries EKU restrictions, it must
      * permit code signing or any usage; a TLS-only certificate is not a signing credential. */
-    if (certs->leaf.MBEDTLS_PRIVATE(ext_types) & MBEDTLS_X509_EXT_EXTENDED_KEY_USAGE) {
+    if (require_code_signing && (certs->leaf.MBEDTLS_PRIVATE(ext_types) & MBEDTLS_X509_EXT_EXTENDED_KEY_USAGE)) {
         bool allowed = false;
         for (const mbedtls_x509_sequence *s = &certs->leaf.ext_key_usage; s; s = s->next)
             allowed |= (s->buf.len == MBEDTLS_OID_SIZE(MBEDTLS_OID_CODE_SIGNING) &&
@@ -95,8 +97,8 @@ ts_config_pack_result_t ts_config_pack_signer_trust(const char *signer,
         if (!allowed) goto done;
     }
     if (out) {
-        memset(out, 0, sizeof(*out)); out->policy = ACCEPT_POLICY;
-        out->accepted_at = reload ? accepted->accepted_at : (int64_t)time(NULL);
+        memset(out, 0, sizeof(*out)); out->policy = TS_CONFIG_PACK_ACCEPT_POLICY;
+        out->accepted_at = reload ? accepted->accepted_at : status.time_ready ? (int64_t)time(NULL) : 0;
         strcpy(out->package_sha256, package_hash); strcpy(out->recipient, recipient);
         strcpy(out->signer_sha256, signer_hash); strcpy(out->root_sha256, root_hash);
     }

@@ -116,12 +116,14 @@ static esp_err_t visit_system_entries(bool remove)
 
 /* Encrypted legacy files keep precedence. A selected but unreadable pack must
  * not silently import a different plaintext configuration or finish migration. */
-static esp_err_t read_system_file(const char *path, char **raw, size_t *length)
+static esp_err_t read_system_file(const char *path, char **raw, size_t *length, bool *encrypted_source)
 {
+    *encrypted_source = false;
     char encrypted[80];
     snprintf(encrypted, sizeof(encrypted), "%.*s.tscfg", (int)strlen(path) - 5, path);
     struct stat st;
     if (stat(encrypted, &st) == 0) {
+        *encrypted_source = true;
         esp_err_t ret = ts_cert_init();
         if (ret == ESP_OK) ret = ts_config_pack_init();
         if (ret != ESP_OK) return ret;
@@ -129,7 +131,9 @@ static esp_err_t read_system_file(const char *path, char **raw, size_t *length)
         ts_config_pack_result_t packed = ts_config_pack_load(encrypted, &pack);
         if (packed != TS_CONFIG_PACK_OK || !pack || !pack->content) {
             ts_config_pack_free(pack);
-            return ESP_FAIL;
+            ESP_LOGW(TAG, "Encrypted system config deferred (%s): %s", encrypted,
+                     ts_config_pack_strerror(packed));
+            return ESP_ERR_NOT_FINISHED;
         }
         *raw = pack->content;
         *length = pack->content_len;
@@ -175,34 +179,42 @@ static esp_err_t import_system_files(void)
         nvs_close(old);
     }
     if (ret != ESP_OK && ret != ESP_ERR_NVS_NOT_FOUND) return ret;
-    for (size_t i = 0; i < sizeof(modules) / sizeof(modules[0]); ++i) {
+    enum { MODULE_COUNT = sizeof(modules) / sizeof(modules[0]) };
+    char *contents[MODULE_COUNT] = {0};
+    size_t lengths[MODULE_COUNT] = {0};
+    /* Verify every selected source before writing any SD-derived system value.
+     * This avoids partially applying earlier files when a later signer fails. */
+    for (size_t i = 0; i < MODULE_COUNT; ++i) {
         if (i < 9 && (pending & (1U << i))) continue;
         char path[80];
         snprintf(path, sizeof(path), "/sdcard/config/%s.json", modules[i].file);
-        char *raw = NULL;
-        size_t length = 0;
-        ret = read_system_file(path, &raw, &length);
-        if (ret == ESP_ERR_NOT_FOUND) continue;
-        if (ret != ESP_OK) return ret;
-        cJSON *json = cJSON_ParseWithLengthOpts(raw, length + 1, NULL, true);
+        bool encrypted = false;
+        ret = read_system_file(path, &contents[i], &lengths[i], &encrypted);
+        if (ret == ESP_ERR_NOT_FOUND) { ret = ESP_OK; continue; }
+        if (ret != ESP_OK) goto done;
+        cJSON *json = cJSON_ParseWithLengthOpts(contents[i], lengths[i] + 1, NULL, true);
         bool valid = cJSON_IsObject(json);
         cJSON_Delete(json);
         if (!valid) {
-            ESP_LOGW(TAG, "Ignoring invalid legacy system file: %s", path);
-            free(raw);
-            continue;
+            ESP_LOGW(TAG, "Invalid legacy system file: %s", path);
+            free(contents[i]); contents[i] = NULL;
+            if (encrypted) { ret = ESP_ERR_NOT_FINISHED; goto done; }
         }
+    }
+    for (size_t i = 0; i < MODULE_COUNT; ++i) {
+        if (!contents[i]) continue;
         nvs_handle_t to;
         ret = nvs_open(modules[i].ns, NVS_READWRITE, &to);
         if (ret == ESP_OK) {
-            ret = nvs_set_blob(to, modules[i].key, raw, length);
+            ret = nvs_set_blob(to, modules[i].key, contents[i], lengths[i]);
             if (ret == ESP_OK) ret = nvs_commit(to);
             nvs_close(to);
         }
-        free(raw);
-        if (ret != ESP_OK) return ret;
+        if (ret != ESP_OK) break;
     }
-    return ESP_OK;
+done:
+    for (size_t i = 0; i < MODULE_COUNT; ++i) free(contents[i]);
+    return ret;
 }
 
 esp_err_t ts_config_migrate_system(bool sd_available)
@@ -213,8 +225,19 @@ esp_err_t ts_config_migrate_system(bool sd_available)
     uint8_t version = 0;
     ret = nvs_get_u8(state, "system_v", &version);
     if (ret == ESP_ERR_NVS_NOT_FOUND) ret = ESP_OK;
+    if (ret == ESP_OK && version > 1) ret = ESP_ERR_NOT_SUPPORTED;
     if (ret == ESP_OK && version != 1) {
-        ret = visit_system_entries(false);
+        uint8_t base = 0;
+        ret = nvs_get_u8(state, "system_base_v", &base);
+        if (ret == ESP_ERR_NVS_NOT_FOUND) ret = ESP_OK;
+        if (ret == ESP_OK && base > 1) ret = ESP_ERR_NOT_SUPPORTED;
+        if (ret == ESP_OK && base != 1) {
+            ret = visit_system_entries(false);
+            if (ret == ESP_OK) ret = nvs_set_u8(state, "system_base_v", 1);
+            if (ret == ESP_OK) ret = nvs_commit(state);
+        }
+        /* A clock/trust-deferred SD import must never replay old credentials
+         * over Root changes made through the reachable Web UI in the meantime. */
         if (ret == ESP_OK && sd_available) ret = import_system_files();
         if (ret == ESP_OK) ret = nvs_set_u8(state, "system_v", 1);
         if (ret == ESP_OK) ret = nvs_commit(state);

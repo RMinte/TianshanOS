@@ -189,7 +189,7 @@ esp_err_t ts_ota_get_progress(ts_ota_progress_t *progress)
         progress->progress_percent = 0;
     }
     
-    progress->status_msg = s_status_msg;
+    memcpy(progress->status_msg, s_status_msg, sizeof(progress->status_msg));
     
     xSemaphoreGive(s_ota_mutex);
 
@@ -379,6 +379,11 @@ esp_err_t ts_ota_upload_begin(size_t total_size)
     ESP_LOGI(TAG, "OTA upload starting, target partition: %s (size: %lu KB)",
              s_upload_partition->label, s_upload_partition->size / 1024);
 
+    if (!total_size || total_size > s_upload_partition->size) {
+        xSemaphoreGive(s_ota_mutex);
+        return ESP_ERR_INVALID_SIZE;
+    }
+
     // Begin OTA
     ret = esp_ota_begin(s_upload_partition, OTA_WITH_SEQUENTIAL_WRITES, &s_upload_handle);
     if (ret != ESP_OK) {
@@ -417,6 +422,11 @@ esp_err_t ts_ota_upload_write(const void *data, size_t len)
         return ESP_ERR_INVALID_STATE;
     }
 
+    if (len > s_total_size - s_received_size) {
+        xSemaphoreGive(s_ota_mutex);
+        return ESP_ERR_INVALID_SIZE;
+    }
+
     ret = esp_ota_write(s_upload_handle, data, len);
     if (ret != ESP_OK) {
         xSemaphoreGive(s_ota_mutex);
@@ -453,6 +463,11 @@ esp_err_t ts_ota_upload_end(bool auto_reboot)
     if (!s_upload_in_progress || !s_upload_handle) {
         xSemaphoreGive(s_ota_mutex);
         return ESP_ERR_INVALID_STATE;
+    }
+
+    if (s_received_size != s_total_size) {
+        xSemaphoreGive(s_ota_mutex);
+        return ESP_ERR_INVALID_SIZE;
     }
 
     // End OTA

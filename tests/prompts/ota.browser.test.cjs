@@ -467,3 +467,46 @@ for (const language of ['zh-CN', 'en-US']) {
         });
     });
 }
+
+for (const language of ['zh-CN', 'en-US']) {
+    test(`${language}: expired reboot session confirms minimal running identity without another login`, async () => {
+        await otaPage(language, 'manual-reboot-session', async ({page, state}) => {
+            state.running.version = '0.6.2+target';
+            let rebooted = false, protected401 = false, probes = 0;
+            await page.route('**/api/v1/system/reboot', async route => {
+                rebooted = true; state.running = {...state.running, label: 'ota_1'};
+                await route.fulfill({json: {code: 0, data: {status: 'rebooting'}}});
+            });
+            await page.route('**/api/v1/ota/progress', async route => {
+                if (!rebooted) return route.fallback();
+                protected401 = true;
+                await route.fulfill({status: 401, json: {error: 'Unauthorized'}});
+            });
+            await page.route('**/api/v1/ota/partitions', async route => {
+                if (!rebooted) return route.fallback();
+                probes++;
+                if (probes === 1) return route.abort('connectionrefused');
+                // Same version in the old slot must not be accepted.
+                const running = {label: probes === 2 ? 'ota_0' : state.running.label, version: state.running.version, project: 'TianShanOS'};
+                await route.fulfill({json: {code: 0, data: {running}}});
+            });
+            await manualInput(page, 'SD card', false);
+            await page.evaluate(() => otaFromFile()); state.app = 'pending_reboot';
+            await page.evaluate(() => refreshOtaProgress());
+            await page.evaluate(async () => {try {await api.call('ota.progress', null, 'GET');} catch(error) {window.expiredStatus=error.httpStatus;}});
+            assert(protected401); assert.equal(await page.evaluate(() => window.expiredStatus),401);
+            await page.waitForFunction(() => otaUpgrade?.phase === 'done');
+            assert(probes >= 3);
+            assert.equal(await page.locator('#login-modal').isVisible(), false);
+            assert.equal(await page.locator('#ota-state-text').textContent(), await page.evaluate(() => t('ui.allUpgradeComplete')));
+        });
+    });
+    test(`${language}: minimal partition response is not sent to full card rendering`, async () => {
+        await otaPage(language, 'manual-public-view', async ({page, state}) => {
+            const errors=[];page.on('pageerror', error=>errors.push(error.message));
+            await page.route('**/api/v1/ota/partitions', route => route.fulfill({json:{code:0,data:{running:{label:'ota_0',version:state.running.version,project:'TianShanOS'}}}}));
+            await page.evaluate(() => {document.getElementById('ota-partitions').innerHTML='';return loadOtaData();});
+            assert.equal(await page.locator('#ota-partitions .partition-card').count(),0);assert.deepEqual(errors,[]);
+        });
+    });
+}
