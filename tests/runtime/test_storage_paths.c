@@ -426,6 +426,12 @@ int main(void)
     assert(!test_mkdir("/sdcard/config/automation",0755));assert(!test_mkdir("/autocfg",0755));
     original_file("/sdcard/config/automation/state.json","current");
     original_file("/sdcard/config/ordinary.json","ordinary");
+    assert(!test_mkdir("/sdcard/ssh",0755));
+    original_file("/sdcard/ssh/sentinel.txt","public test sentinel");
+    bool ssh_private=false;
+    assert(ts_storage_external_read_requires_admin("/sdcard/ssh/sentinel.txt",&ssh_private)==ESP_OK&&ssh_private);
+    has_text("/sdcard/ssh/sentinel.txt","public test sentinel");
+    puts("PASS protected SSH sentinel: internal production reader retains original bytes");
     original_file("/autocfg/state.json","emergency");
 
     original_code_volume();
@@ -507,6 +513,7 @@ int main(void)
     recursive_names();
 
     /* Cleanup through the raw test VFS, since the configuration owner is private. */
+    assert(!test_unlink("/sdcard/ssh/sentinel.txt"));assert(!test_rmdir("/sdcard/ssh"));
     assert(!test_unlink("/sdcard/config/ordinary.json"));assert(!test_unlink("/sdcard/config/automation/state.json"));
     assert(!test_rmdir("/sdcard/config/automation"));assert(!test_rmdir("/sdcard/config"));
     assert(!test_rmdir("/sdcard"));assert(!test_unlink("/autocfg/state.json"));

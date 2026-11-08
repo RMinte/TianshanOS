@@ -51,6 +51,8 @@ static FRESULT f_stat(const char *path,FILINFO *info){
  if(!strcmp(name,"missing"))return FR_NO_FILE;
  if(!strcmp(name,"CONFID~1")||!strcmp(name,"confıg"))name="config";
  if(!strcmp(name,"PKIPRI~1"))name="pki";
+ /* Synthetic resolver return tests the shared alias branch, not an on-card SFN claim. */
+ if(!strcmp(name,"SSH_ALIAS"))name="ssh";
  snprintf(info->fname,sizeof(info->fname),"%s",name);return FR_OK;
 }
 """
@@ -94,8 +96,8 @@ int main(void){
  {"storage.status",0,3,TS_API_ACCESS_PUBLIC},{"storage.mount",3,14,TS_API_ACCESS_ADMIN},{"storage.unmount",3,14,TS_API_ACCESS_ADMIN},{"storage.list",1,3,TS_API_ACCESS_READ},{"storage.delete",3,14,TS_API_ACCESS_ADMIN},{"storage.mkdir",3,14,TS_API_ACCESS_ADMIN},{"storage.rename",3,14,TS_API_ACCESS_ADMIN},{"storage.info",1,3,TS_API_ACCESS_READ},{"storage.read",1,3,TS_API_ACCESS_READ}};
  cJSON *names_all=ts_api_list(TS_API_CAT_MAX);check(cJSON_GetArraySize(names_all)==9,"actual nine storage registrations are complete");cJSON_Delete(names_all);
  for(unsigned i=0;i<9;i++){ts_api_access_t access={0};check(ts_api_get_access(policies[i].name,&access)==ESP_OK,"all storage policies query");check(access.minimum_level==policies[i].level&&access.allowed_methods==policies[i].methods&&access.external_access==policies[i].mode&&access.requires_auth==(policies[i].level>0),"nine independent role/method contracts");}
- const char *private_paths[]={"/sdcard/config/network.json","/sdcard/CONFIG/ssh_hosts/a","/sdcard/foo/../config/wifi.json","/sdcard/config. /wifi.json","/sdcard/config\\wifi.json","/sdcard/confıg/wifi.json","/sdcard/CONFID~1/wifi.json","/sdcard/pki/ca-chain.crt","/sdcard/PKIPRI~1/ca-chain.crt","/spiffs/keys","/www/js/app.js","/autocfg/state.json"};
- const char *data_paths[]={"/sdcard","/sdcard/images/pic.png","/sdcard/自定义/file.txt","/sdcard/logs/sys.log","/sdcard/missing/file.txt","/sdcard/config/../images/pic.png","/sdcard/literal%2Fconfig/file"};
+ const char *private_paths[]={"/sdcard/ssh","/sdcard/SSH","/sdcard/ssh/sub/sentinel.txt","/sdcard/foo/../ssh/sentinel.txt","/sdcard/ssh. /sentinel.txt","/sdcard/ssh\\sentinel.txt","/sdcard/SSH_ALIAS/sentinel.txt","/sdcard/config/network.json","/sdcard/CONFIG/ssh_hosts/a","/sdcard/foo/../config/wifi.json","/sdcard/config. /wifi.json","/sdcard/config\\wifi.json","/sdcard/confıg/wifi.json","/sdcard/CONFID~1/wifi.json","/sdcard/pki/ca-chain.crt","/sdcard/PKIPRI~1/ca-chain.crt","/spiffs/keys","/www/js/app.js","/autocfg/state.json"};
+ const char *data_paths[]={"/sdcard/ssh-other/sentinel.txt","/sdcard/ssh/../images/pic.png","/sdcard","/sdcard/images/pic.png","/sdcard/自定义/file.txt","/sdcard/logs/sys.log","/sdcard/missing/file.txt","/sdcard/config/../images/pic.png","/sdcard/literal%2Fconfig/file"};
  const char *invalid_paths[]={"/sdcard-other/a","/spiffs-other/a","/unknown/a","relative","/","/sdcard/config\t/a"};
  const char *names[]={"storage.list","storage.info","storage.read"};unsigned identities[]={0,1,2,3,4,5,99};
  for(unsigned who=0;who<7;who++){

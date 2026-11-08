@@ -130,10 +130,10 @@ esp_err_t ts_storage_external_read_requires_admin(const char *path, bool *requir
     char *end = strchr(normalized + 8, '/');
     if (end) *end = 0;
     const char *name = normalized + 8;
-    if (!strcasecmp(name, "config") || !strcasecmp(name, "pki")) return ESP_OK;
+    if (!strcasecmp(name, "config") || !strcasecmp(name, "pki") || !strcasecmp(name, "ssh")) return ESP_OK;
     char resolved[TS_STORAGE_MAX_PATH];
     ret = ts_storage_sd_resolve_name(normalized, resolved, sizeof(resolved));
     if (ret != ESP_OK && ret != ESP_ERR_NOT_FOUND) return ret;
-    *requires_admin = ret == ESP_OK && (!strcasecmp(resolved, "config") || !strcasecmp(resolved, "pki"));
+    *requires_admin = ret == ESP_OK && (!strcasecmp(resolved, "config") || !strcasecmp(resolved, "pki") || !strcasecmp(resolved, "ssh"));
     return ESP_OK;
 }
