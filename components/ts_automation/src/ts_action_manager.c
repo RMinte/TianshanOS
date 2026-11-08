@@ -1395,7 +1395,7 @@ static esp_err_t execute_webhook(const ts_auto_action_t *action)
     ts_http_fetch_config_t request = {.url = action->webhook.url, .method = method,
         .content_type = method == HTTP_METHOD_POST || method == HTTP_METHOD_PUT ? "application/json" : NULL,
         .body = action->webhook.body_template[0] ? action->webhook.body_template : NULL,
-        .timeout_ms = 5000, .maximum_body = 8192, .headers_only = true};
+        .timeout_ms = 5000, .maximum_body = 8192, .headers_only = true, .follow_redirects = true};
     ts_http_fetch_result_t reply = {0};
     esp_err_t ret = ts_http_fetch(&request, &reply);
     if (ret == ESP_OK && (reply.status < 200 || reply.status >= 300)) ret = ESP_FAIL;

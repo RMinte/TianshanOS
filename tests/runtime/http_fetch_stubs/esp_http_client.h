@@ -3,6 +3,7 @@
 #include <stdint.h>
 #include "esp_err.h"
 #define ESP_ERR_HTTP_EAGAIN 0x7001
+#define ESP_ERR_HTTP_MAX_REDIRECT 0x7002
 typedef struct fixture_client *esp_http_client_handle_t;
 typedef enum {HTTP_METHOD_GET,HTTP_METHOD_POST,HTTP_METHOD_PUT,HTTP_METHOD_DELETE} esp_http_client_method_t;
 enum {HTTP_EVENT_ON_CONNECTED,HTTP_EVENT_DISCONNECTED,HTTP_EVENT_ERROR,HTTP_EVENT_HEADERS_SENT,HTTP_EVENT_ON_HEADER,

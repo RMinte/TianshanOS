@@ -104,7 +104,7 @@ typedef struct {
     uint32_t last_used;                         /**< Last used timestamp */
     bool has_public_key;                        /**< Whether public key is stored */
     bool exportable;                            /**< Whether private key can be exported */
-    bool hidden;                                /**< Whether key ID is hidden from non-Root external readers */
+    bool hidden;                                /**< Whether key ID is hidden from external readers below Admin */
 } ts_keystore_key_info_t;
 
 /**
@@ -114,7 +114,7 @@ typedef struct {
     bool exportable;                /**< Allow private key export (default: false) */
     const char *comment;            /**< Key comment (optional) */
     const char *alias;              /**< Display alias (optional, recommended for hidden keys) */
-    bool hidden;                    /**< Hide key ID from non-Root external readers (default: false) */
+    bool hidden;                    /**< Hide key ID from external readers below Admin (default: false) */
 } ts_keystore_gen_opts_t;
 
 /** Per-call generation outcome. Storage success is independent of HTTP delivery. */

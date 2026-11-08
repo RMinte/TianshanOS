@@ -69,6 +69,7 @@ esp_err_t ts_cert_install_issued_certificate_ex(const char *pem,size_t n,ts_cert
 bool ts_cert_prerequisites(const ts_cert_pki_status_t *s,bool ca){(void)s;(void)ca;return false;}
 esp_err_t ts_http_fetch(const ts_http_fetch_config_t *req,ts_http_fetch_result_t *out){
     captured_timeout=req->timeout_ms;snprintf(requested_url,sizeof(requested_url),"%s",req->url);requests++;check(req->timeout_ms>0&&req->timeout_ms<=TS_PKI_HTTP_TIMEOUT_MS&&req->maximum_body==8191,"existing PKI 30s total/8KiB reply limit passes to shared owner");
+    check(req->follow_redirects,"legacy PKI perform consumer explicitly follows redirects");
     check(req->method==HTTP_METHOD_GET||req->method==HTTP_METHOD_POST,"PKI methods retained");
     if(req->method==HTTP_METHOD_POST){check(req->content_type&&!strcmp(req->content_type,"application/json")&&req->body,"CSR JSON content type/body retained");int saved_budget=atomic_exchange(&json_budget,-1);cJSON *csr=cJSON_Parse(req->body);check(csr&&cJSON_IsString(cJSON_GetObjectItem(csr,"csr_pem"))&&cJSON_IsString(cJSON_GetObjectItem(csr,"device_id"))&&cJSON_IsString(cJSON_GetObjectItem(csr,"description"))&&cJSON_IsArray(cJSON_GetObjectItem(csr,"suggested_san_ips")),"every transmitted CSR body retains all required fields");cJSON_Delete(csr);json_budget=saved_budget;}
     if(fixture_error!=ESP_OK)return fixture_error;

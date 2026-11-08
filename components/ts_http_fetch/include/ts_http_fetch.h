@@ -22,6 +22,8 @@ typedef struct {
     size_t maximum_body;
     /* Webhooks need only a complete HTTP status/header acknowledgment. */
     bool headers_only;
+    /* Only legacy perform consumers opt in; ordinary fetch returns the first hop. */
+    bool follow_redirects;
     bool (*current)(void *);
     void *context;
 } ts_http_fetch_config_t;
@@ -37,6 +39,6 @@ typedef struct {
 } ts_http_fetch_result_t;
 /* Worker entry; callers enforce permission/configuration authority.
  * Nonblocking SDK polls; no new task or global job.
- * DNS, connect, headers and body share one deadline. Redirects are never followed.
+ * DNS, connect, headers and body share one deadline. Opt-in redirects retain this same owner and deadline.
  * On success the caller owns body; failure clears it. Release with free(). */
 esp_err_t ts_http_fetch(const ts_http_fetch_config_t *request, ts_http_fetch_result_t *result);

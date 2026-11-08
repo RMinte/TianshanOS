@@ -672,7 +672,7 @@ static esp_err_t do_http_request(const char *url, esp_http_client_method_t metho
     ts_http_fetch_config_t request = {
         .url = url, .method = method, .body = post_data,
         .content_type = post_data ? "application/json" : NULL,
-        .timeout_ms = timeout_ms, .maximum_body = HTTP_RESP_BUF_SIZE - 1,
+        .timeout_ms = timeout_ms, .maximum_body = HTTP_RESP_BUF_SIZE - 1, .follow_redirects = true,
         .current = request_current, .context = xTaskGetCurrentTaskHandle(),
     };
     ts_http_fetch_result_t reply = {0};
