@@ -2,7 +2,7 @@
 """Real management registrations/registry/dispatcher; synthetic business boundary."""
 from pathlib import Path
 from zipfile import ZipFile
-import argparse,os,sys,re,subprocess,tempfile,importlib.util
+import argparse,os,sys,re,subprocess,tempfile
 ROOT=Path(__file__).resolve().parents[2];os.chdir(ROOT)
 p=argparse.ArgumentParser();p.add_argument('--source-package');args=p.parse_args()
 def source(path):
@@ -16,7 +16,6 @@ a=text.index('api=source(');b=text.index('\nwith tempfile.TemporaryDirectory');a
 try:exec(compile(text[:a],str(f),'exec'),ns)
 finally:sys.argv=argv
 ns['source']=source;exec(compile(text[a:b],str(f),'exec'),ns);code=ns['code'];code=code[:code.index('int main(void)')]
-sp=importlib.util.spec_from_file_location('h',ROOT/'audit/api-security-20261103/tools/extract_inventory.py');h=importlib.util.module_from_spec(sp);sp.loader.exec_module(h)
 # Trigger one trusted registry replacement immediately after the policy/handler
 # snapshot unlock. Old code performs a second lookup and invokes the new Root
 # handler under the earlier public policy; new code invokes its copied handler.

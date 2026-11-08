@@ -8,8 +8,9 @@ Raw legacy flags are checked only where the old probes checked them; normalized
 auth metadata and independent role/method admission are checked for every API.
 """
 from pathlib import Path
+from c_source import masked, endbrace
 from zipfile import ZipFile
-import argparse,json,os,sys,re,subprocess,tempfile,importlib.util
+import argparse,json,os,sys,re,subprocess,tempfile
 ROOT=Path(__file__).resolve().parents[2];os.chdir(ROOT)
 p=argparse.ArgumentParser();p.add_argument('--source-package');p.add_argument('--write-method-contract', action='store_true');args=p.parse_args()
 def source(path):
@@ -25,7 +26,6 @@ finally:sys.argv=argv
 ns['source']=source;exec(compile(text[a:b],str(f),'exec'),ns);code=ns['code'];code=code[:code.index('static esp_err_t mutation(')]
 capacity=int(re.search(r'^CONFIG_TS_API_MAX_ENDPOINTS=(\d+)$', source('sdkconfig'), re.M)[1])
 code=f'#define CONFIG_TS_API_MAX_ENDPOINTS {capacity}\n'+code
-sp=importlib.util.spec_from_file_location('h',ROOT/'audit/api-security-20261103/tools/extract_inventory.py');h=importlib.util.module_from_spec(sp);sp.loader.exec_module(h)
 code+='#define ESP_LOGI(...) ((void)0)\n#define ESP_LOGW(...) ((void)0)\n#define ESP_LOGE(...) ((void)0)\nstatic esp_err_t ts_config_pack_init(void){return ESP_OK;}\nstatic esp_err_t ts_ota_init(void){return ESP_OK;}\nstatic void load_ota_server_config(void){}\n'
 code+='static esp_err_t lpmu_ensure_mutex(void){return ESP_OK;}\nesp_err_t ts_auth_init(void){return ESP_OK;}\n'
 # Expected values are fixed test data, never derived from ts_api_get_access().
@@ -51,12 +51,12 @@ static esp_err_t checked_multiple(const ts_api_endpoint_t *endpoints,size_t coun
 }
 """
 for module in ['auth', 'automation', 'cert', 'config', 'config_pack', 'device', 'dhcp', 'fan', 'gpio', 'hosts', 'key', 'led', 'lpmu_access', 'log', 'monitor', 'nat', 'network', 'ota', 'power', 'service', 'sftp', 'ssh', 'storage', 'system', 'temp', 'time', 'ui', 'wifi']:
-    source_text=source('components/ts_api/src/ts_api_'+module+'.c');mask=h.masked(source_text)
+    source_text=source('components/ts_api/src/ts_api_'+module+'.c');mask=masked(source_text)
     m=re.search(r'^(?:esp_err_t|void) ts_api_'+module+r'_register\(void\)\s*\{',source_text,re.M);assert m,module
     parts=[]
     for table in re.finditer(r'static\s+const\s+ts_api_endpoint_t\s+\w+\[\]\s*=\s*\{',source_text[:m.start()]):
-        parts.append(source_text[table.start():h.endbrace(mask,source_text.index('{',table.start()))+1])
-    parts.append(source_text[m.start():h.endbrace(mask,source_text.index('{',m.start()))]);part='\n'.join(parts)
+        parts.append(source_text[table.start():endbrace(mask,source_text.index('{',table.start()))+1])
+    parts.append(source_text[m.start():endbrace(mask,source_text.index('{',m.start()))]);part='\n'.join(parts)
     for table in re.findall(r'static\s+const\s+ts_api_endpoint_t\s+(\w+)\[\]', '\n'.join(parts[:-1])):
         part=re.sub(r'\b'+table+r'\b','fixture_'+module+'_'+table,part)
     sessions=set(re.findall(r'\.session_handler\s*=\s*(\w+)',part))

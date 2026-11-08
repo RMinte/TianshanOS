@@ -59,6 +59,12 @@ jobs:
       - run: npm ci --prefix tests/prompts
       - run: npm test --prefix tests/prompts
       - run: python3 tests/release/test_web_minify.py
+      - name: Fetch matching ESP-IDF sources for browser Origin regression
+        run: |
+          export IDF_PATH="$RUNNER_TEMP/web-idf"
+          echo "IDF_PATH=$IDF_PATH" >> "$GITHUB_ENV"
+          git clone --depth 1 --branch "$IDF_VERSION" --filter=blob:none --sparse https://github.com/espressif/esp-idf.git "$IDF_PATH"
+          git -C "$IDF_PATH" sparse-checkout set components/esp_http_server
       - name: Install Chrome for actual-page regressions
         working-directory: tests/prompts
         run: npx playwright install --with-deps chrome

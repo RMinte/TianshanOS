@@ -1,3 +1,4 @@
+#define _DEFAULT_SOURCE
 #include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>

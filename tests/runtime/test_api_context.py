@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Actual registry and SSH descriptors prove verified C context dispatch, including concurrency."""
 from pathlib import Path
+from c_source import masked, endbrace
 from zipfile import ZipFile
-import argparse,os,sys,re,subprocess,tempfile,importlib.util
+import argparse,os,sys,re,subprocess,tempfile
 ROOT=Path(__file__).resolve().parents[2];os.chdir(ROOT)
 p=argparse.ArgumentParser();p.add_argument('--source-package');args=p.parse_args()
 def source(path):
@@ -28,9 +29,8 @@ static esp_err_t context_handler(const cJSON *p,uint32_t sid,ts_api_result_t *r)
  atomic_fetch_add(&context_calls,1);ts_api_result_ok(r,NULL);return ESP_OK;
 }
 """
-sp=importlib.util.spec_from_file_location('h',ROOT/'audit/api-security-20261103/tools/extract_inventory.py');h=importlib.util.module_from_spec(sp);sp.loader.exec_module(h)
 s=source('components/ts_api/src/ts_api_ssh.c');m=re.search(r'static const ts_api_endpoint_t ssh_endpoints\[\]\s*=\s*\{',s);assert m
-part=s[m.start():h.endbrace(h.masked(s),s.index('{',m.start()))+1]
+part=s[m.start():endbrace(masked(s),s.index('{',m.start()))+1]
 for handler in set(re.findall(r'\.handler\s*=\s*(\w+)',part)):code+='#define '+handler+' legacy_handler\n'
 for handler in set(re.findall(r'\.session_handler\s*=\s*(\w+)',part)):code+='#define '+handler+' context_handler\n'
 code+=part+'\n'

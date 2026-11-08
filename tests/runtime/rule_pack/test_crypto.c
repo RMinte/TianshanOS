@@ -153,6 +153,7 @@ static void ordinary_identity_cases(const char *dir,const char *certificate_name
  free(device_key);device_key=strdup(b_key);
  free(device_cert);device_cert=NULL;assert(ts_config_pack_get_cert_fingerprint(fp,sizeof(fp))!=ESP_OK);
  ts_api_result_t response={0};assert(api_config_pack_export_cert(NULL,&response)!=ESP_OK&&!response.data);
+ ts_api_result_free(&response);
  ordinary_consumers(b_bytes,b_len,TS_CONFIG_PACK_ERR_CERT_CHAIN,content);
  device_cert=strdup(b_cert);
  certificate_read_error=ESP_ERR_NO_MEM;assert(ts_config_pack_get_cert_fingerprint(fp,sizeof(fp))==ESP_ERR_NO_MEM);
