@@ -193,10 +193,11 @@ static esp_err_t api_config_pack_verify(const cJSON *params, ts_api_result_t *re
 }
 
 /**
- * @brief config.pack.import - Validate a .tscfg file in place
+ * @brief config.pack.import - Admit an encrypted pack from text or uploaded path
  * 
  * Parameters:
- * - path: Path to already uploaded .tscfg file
+ * - content: Raw .tscfg JSON from the existing paste/file-picker flow
+ * - path: Alternative already uploaded file; validated in place
  * 
  * Validates the file without copying. Use this after file upload via
  * storage API to get metadata and validation status.
@@ -210,64 +211,71 @@ static esp_err_t api_config_pack_import(const cJSON *params, ts_api_result_t *re
         ts_api_result_error(result, TS_API_ERR_INVALID_ARG, "Missing parameters");
         return ESP_ERR_INVALID_ARG;
     }
-    
-    const cJSON *path = cJSON_GetObjectItem(params, "path");
-    if (!path || !cJSON_IsString(path)) {
-        ts_api_result_error(result, TS_API_ERR_INVALID_ARG, "Missing 'path' parameter");
+
+    const cJSON *content = cJSON_GetObjectItemCaseSensitive(params, "content");
+    const cJSON *path = cJSON_GetObjectItemCaseSensitive(params, "path");
+    if ((!cJSON_IsString(content) || !content->valuestring[0]) &&
+        (!cJSON_IsString(path) || !path->valuestring[0])) {
+        ts_api_result_error(result, TS_API_ERR_INVALID_ARG, "Missing 'content' or 'path' parameter");
         return ESP_ERR_INVALID_ARG;
     }
-    
-    /* 验证配置包（不复制） */
+    /* The existing paste/file picker and in-place path flows share the same
+     * full recipient/publisher/decrypt admission. No generic apply is implied. */
     ts_config_pack_metadata_t metadata = {0};
-    ts_config_pack_result_t pack_result = ts_config_pack_validate_file(
-        path->valuestring,
-        &metadata
-    );
-    
+    char saved_path[128] = {0};
+    ts_config_pack_result_t pack_result = cJSON_IsString(content) ?
+        ts_config_pack_import(content->valuestring, strlen(content->valuestring),
+                              &metadata, saved_path, sizeof(saved_path)) :
+        ts_config_pack_validate_file(path->valuestring, &metadata);
+    if (pack_result != TS_CONFIG_PACK_OK) {
+        ts_api_result_error(result, TS_API_ERR_INVALID_ARG, ts_config_pack_reason(pack_result));
+        return ESP_FAIL;
+    }
+    const char *validated_path = cJSON_IsString(content) ? saved_path : path->valuestring;
+
     /* 构建响应 */
     cJSON *data = cJSON_CreateObject();
     if (!data) {
         ts_api_result_error(result, TS_API_ERR_NO_MEM, "Memory allocation failed");
         return ESP_ERR_NO_MEM;
     }
-    
+
     cJSON_AddBoolToObject(data, "valid", pack_result == TS_CONFIG_PACK_OK);
     cJSON_AddNumberToObject(data, "result_code", pack_result);
     cJSON_AddStringToObject(data, "result_message", ts_config_pack_strerror(pack_result));
     cJSON_AddStringToObject(data, "reason", ts_config_pack_reason(pack_result));
-    cJSON_AddStringToObject(data, "path", path->valuestring);
-    
-    if (pack_result == TS_CONFIG_PACK_OK) {
-        /* 元数据 */
-        cJSON_AddStringToObject(data, "name", metadata.name);
-        cJSON_AddStringToObject(data, "description", metadata.description);
-        cJSON_AddStringToObject(data, "source_file", metadata.source_file);
-        cJSON_AddStringToObject(data, "target_device", metadata.target_device);
-        cJSON_AddNumberToObject(data, "created_at", (double)metadata.created_at);
-        
-        /* 签名信息 */
-        cJSON *sig = cJSON_CreateObject();
-        cJSON_AddBoolToObject(sig, "valid", metadata.sig_info.valid);
-        cJSON_AddBoolToObject(sig, "is_official", metadata.sig_info.is_official);
-        cJSON_AddStringToObject(sig, "signer_cn", metadata.sig_info.signer_cn);
-        cJSON_AddStringToObject(sig, "signer_ou", metadata.sig_info.signer_ou);
-        cJSON_AddNumberToObject(sig, "signed_at", (double)metadata.sig_info.signed_at);
-        cJSON_AddItemToObject(data, "signature", sig);
-        
-        TS_LOGI(TAG, "Config pack validated: %s (%s)", metadata.name, path->valuestring);
-    }
-    
+    cJSON_AddStringToObject(data, "path", validated_path);
+    cJSON_AddStringToObject(data, "saved_path", validated_path);
+
+    /* 元数据 */
+    cJSON_AddStringToObject(data, "name", metadata.name);
+    cJSON_AddStringToObject(data, "description", metadata.description);
+    cJSON_AddStringToObject(data, "source_file", metadata.source_file);
+    cJSON_AddStringToObject(data, "target_device", metadata.target_device);
+    cJSON_AddNumberToObject(data, "created_at", (double)metadata.created_at);
+
+    /* 签名信息 */
+    cJSON *sig = cJSON_CreateObject();
+    cJSON_AddBoolToObject(sig, "valid", metadata.sig_info.valid);
+    cJSON_AddBoolToObject(sig, "is_official", metadata.sig_info.is_official);
+    cJSON_AddStringToObject(sig, "signer_cn", metadata.sig_info.signer_cn);
+    cJSON_AddStringToObject(sig, "signer_ou", metadata.sig_info.signer_ou);
+    cJSON_AddNumberToObject(sig, "signed_at", (double)metadata.sig_info.signed_at);
+    cJSON_AddItemToObject(data, "signature", sig);
+
+    TS_LOGI(TAG, "Config pack validated: %s (%s)", metadata.name, validated_path);
+
     ts_api_result_ok(result, data);
     return ESP_OK;
 }
 
 /**
- * @brief config.pack.apply - Apply configuration from a validated .tscfg file
+ * @brief config.pack.apply - Unsupported legacy generic application
  * 
  * Parameters:
  * - path: Path to .tscfg file
  * 
- * Decrypts and applies the configuration to the system.
+ * Generic application is unsupported; use the relevant configuration owner import.
  */
 static esp_err_t api_config_pack_apply(const cJSON *params, ts_api_result_t *result)
 {
@@ -289,6 +297,11 @@ static esp_err_t api_config_pack_apply(const cJSON *params, ts_api_result_t *res
         &applied_modules
     );
     
+    if (pack_result == TS_CONFIG_PACK_ERR_UNSUPPORTED) {
+        pack_failure(result, pack_result);
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+
     /* 构建响应 */
     cJSON *data = cJSON_CreateObject();
     if (!data) {
@@ -367,16 +380,15 @@ static esp_err_t api_config_pack_export(const cJSON *params, ts_api_result_t *re
     
     if (cJSON_IsString(content)) {
         json_content = strdup(content->valuestring);
-        json_len = strlen(json_content);
     } else {
         json_content = cJSON_PrintUnformatted(content);
-        json_len = strlen(json_content);
     }
     
     if (!json_content) {
         ts_api_result_error(result, TS_API_ERR_NO_MEM, "Memory allocation failed");
         return ESP_ERR_NO_MEM;
     }
+    json_len = strlen(json_content);
     
     /* 准备导出选项 */
     ts_config_pack_export_opts_t opts = {
@@ -427,7 +439,7 @@ static esp_err_t api_config_pack_export(const cJSON *params, ts_api_result_t *re
     if (save_path && cJSON_IsString(save_path) && strlen(save_path->valuestring) > 0) {
         const char *path = save_path->valuestring;
         
-        esp_err_t ret = ts_storage_check_write_path(path, false);
+        esp_err_t ret = ts_storage_check_external_write_path(path, false);
         char dir_path[TS_STORAGE_MAX_PATH];
         if (ret == ESP_OK) {
             snprintf(dir_path, sizeof(dir_path), "%s", path);
@@ -611,6 +623,8 @@ esp_err_t ts_api_config_pack_register(void)
     static const ts_api_endpoint_t pack_apis[] = {
         {
             .name = "config.pack.info",
+            .external_access = TS_API_ACCESS_READ,
+            .allowed_methods = TS_API_METHOD_READ,
             .description = "Get config pack system information",
             .category = TS_API_CAT_CONFIG,
             .handler = api_config_pack_info,
@@ -619,6 +633,8 @@ esp_err_t ts_api_config_pack_register(void)
         },
         {
             .name = "config.pack.export_cert",
+            .external_access = TS_API_ACCESS_READ,
+            .allowed_methods = TS_API_METHOD_READ,
             .description = "Export device certificate for encryption",
             .category = TS_API_CAT_CONFIG,
             .handler = api_config_pack_export_cert,
@@ -627,6 +643,8 @@ esp_err_t ts_api_config_pack_register(void)
         },
         {
             .name = "config.pack.verify",
+            .external_access = TS_API_ACCESS_ADMIN,
+            .allowed_methods = TS_API_METHOD_WRITE,
             .description = "Verify a .tscfg package signature",
             .category = TS_API_CAT_CONFIG,
             .handler = api_config_pack_verify,
@@ -635,6 +653,8 @@ esp_err_t ts_api_config_pack_register(void)
         },
         {
             .name = "config.pack.import",
+            .external_access = TS_API_ACCESS_ADMIN,
+            .allowed_methods = TS_API_METHOD_WRITE,
             .description = "Validate an uploaded .tscfg file in place",
             .category = TS_API_CAT_CONFIG,
             .handler = api_config_pack_import,
@@ -643,7 +663,9 @@ esp_err_t ts_api_config_pack_register(void)
         },
         {
             .name = "config.pack.apply",
-            .description = "Apply configuration from a validated .tscfg file",
+            .external_access = TS_API_ACCESS_ADMIN,
+            .allowed_methods = TS_API_METHOD_WRITE,
+            .description = "Legacy generic configuration application (unsupported)",
             .category = TS_API_CAT_CONFIG,
             .handler = api_config_pack_apply,
             .requires_auth = true,
@@ -651,6 +673,8 @@ esp_err_t ts_api_config_pack_register(void)
         },
         {
             .name = "config.pack.export",
+            .external_access = TS_API_ACCESS_ADMIN,
+            .allowed_methods = TS_API_METHOD_WRITE,
             .description = "Export configuration as encrypted .tscfg",
             .category = TS_API_CAT_CONFIG,
             .handler = api_config_pack_export,
@@ -659,6 +683,8 @@ esp_err_t ts_api_config_pack_register(void)
         },
         {
             .name = "config.pack.list",
+            .external_access = TS_API_ACCESS_READ,
+            .allowed_methods = TS_API_METHOD_READ,
             .description = "List .tscfg files in directory",
             .category = TS_API_CAT_CONFIG,
             .handler = api_config_pack_list,
@@ -667,6 +693,8 @@ esp_err_t ts_api_config_pack_register(void)
         },
         {
             .name = "config.pack.content",
+            .external_access = TS_API_ACCESS_ADMIN,
+            .allowed_methods = TS_API_METHOD_WRITE,
             .description = "Decrypt and get content of imported config pack",
             .category = TS_API_CAT_CONFIG,
             .handler = api_config_pack_content,

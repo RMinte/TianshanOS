@@ -216,8 +216,9 @@ def gzip_directory(web_dir: str) -> None:
             gz_path = filepath + '.gz'
             
             with open(filepath, 'rb') as f_in:
-                with gzip_module.open(gz_path, 'wb', compresslevel=9) as f_out:
-                    f_out.write(f_in.read())
+                with open(gz_path, 'wb') as raw_out:
+                    with gzip_module.GzipFile(filename='', mode='wb', fileobj=raw_out, compresslevel=9, mtime=0) as f_out:
+                        f_out.write(f_in.read())
             
             gz_size = os.path.getsize(gz_path)
             total_original += original_size

@@ -914,6 +914,7 @@ if (typeof i18n !== 'undefined') i18n.registerLanguage('zh-CN', {
         importCommand: '导入指令',
         // New keys for i18n
         createFirstCommand: '创建第一个指令',
+        selectHostHint: '点击上方主机卡片，查看对应的指令。',
         selectHostFirst: '请先选择一个主机',
         noCommandsForHost: '该主机暂无指令',
         hostNotExistCannotExec: '主机不存在，无法执行',
@@ -4224,6 +4225,12 @@ if (typeof i18n !== 'undefined') i18n.registerLanguage('zh-CN', {
         // 句子里怎么称呼一类对象（{kind}）
         kinds: { source: '数据源', rule: '规则', action: '动作模板', sshHost: 'SSH 主机', sshCommand: 'SSH 指令' },
         reasons: {
+            file_replace_uncertain: {"why":"尚未确认文件替换的最终结果","hint":"请先核对原文件及保留副本，不要清理临时文件；确认当前状态后再决定是否重新上传。"},
+            credential_write_uncertain: {"why":"密码更新结果尚未确认","hint":"目标账户的会话已撤销，请重新登录；新密码可能已经生效。不要自动反复提交改密。"},
+            ws_invalid_frame: {"why":"测试消息的分帧不完整或无效","hint":"请检查远端 WebSocket 服务后重试。"},
+            ws_message_too_large: {"why":"测试消息超过 65536 字节","hint":"请缩小测试消息或减少数据源返回的内容。"},
+            ws_send_failed: {"why":"消息是否送达尚未确认","hint":"请检查连接和远端状态后再重试。"},
+            pack_apply_unsupported: {"why":"此设备不支持通用配置包的一键应用","hint":"请在对应配置页面导入受支持的配置包；现有设置未更改。"},
             access_password_required: {"why": "应用计算机管理员密码必须是非空的单行文字", "hint": "请检查密码输入。"},
             access_state_unavailable: {"why": "管理控制器无法分配网络接入状态所需的内存", "hint": "请查看管理控制器的内存状态和系统日志。"},
             access_busy: {"why": "已有网络接入任务正在执行", "hint": "请等待当前任务完成并查看结果。"},
@@ -4290,7 +4297,7 @@ if (typeof i18n !== 'undefined') i18n.registerLanguage('zh-CN', {
             ssh_result_unknown: { why: '命令的结果没能送到页面，是否成功未知', hint: '请到那台主机上确认命令是否已经执行完，不要直接重复执行。' },
             // —— 账户、OTA、文件、网络、LED 等 ——
             credentials_invalid: { why: '用户名或密码不对', hint: '请检查后重新输入。' },
-            account_locked: { why: '连续输错次数太多，这个账户暂时被锁定', hint: '请等 5 分钟后再试。' },
+            account_locked: {"why":"连续输错次数太多，这个账户暂时被锁定","hint":"请保持设备开机，等 5 分钟后再试；重启会重新开始冷却。"},
             password_length: { why: '新密码的长度不对（需要 4 到 64 个字符）', hint: '请重新设置密码。' },
             old_password_wrong: { why: '当前密码不对', hint: '请检查后重新输入。' },
             root_required: { why: '这项操作需要 root 账户', hint: '请换用 root 账户登录后再操作。' },

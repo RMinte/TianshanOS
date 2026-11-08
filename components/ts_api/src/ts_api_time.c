@@ -14,6 +14,7 @@
 #include "esp_log.h"
 #include <time.h>
 #include <sys/time.h>
+#include <math.h>
 
 static const char *TAG = "ts_api_time";
 
@@ -111,7 +112,12 @@ static esp_err_t api_time_sync(const cJSON *params, ts_api_result_t *result)
         return ESP_ERR_INVALID_ARG;
     }
     
-    int64_t timestamp_ms = (int64_t)ts_json->valuedouble;
+    double value = ts_json->valuedouble;
+    if (!isfinite(value) || value < 0 || value >= 0x1p63 || floor(value) != value) {
+        ts_api_result_error(result, TS_API_ERR_INVALID_ARG, "Invalid timestamp_ms");
+        return ESP_ERR_INVALID_ARG;
+    }
+    int64_t timestamp_ms = (int64_t)value;
     
     ESP_LOGI(TAG, "Syncing time from browser: %lld ms", (long long)timestamp_ms);
     
@@ -255,6 +261,8 @@ esp_err_t ts_api_time_register(void)
             .description = "Get time sync info",
             .category = TS_API_CAT_SYSTEM,
             .handler = api_time_info,
+            .external_access = TS_API_ACCESS_PUBLIC,
+            .allowed_methods = TS_API_METHOD_READ,
             .requires_auth = false,
         },
         {
@@ -262,13 +270,17 @@ esp_err_t ts_api_time_register(void)
             .description = "Sync time from browser",
             .category = TS_API_CAT_SYSTEM,
             .handler = api_time_sync,
-            .requires_auth = false,
+            .external_access = TS_API_ACCESS_ADMIN,
+            .allowed_methods = TS_API_METHOD_WRITE,
+            .requires_auth = true,
         },
         {
             .name = "time.set_ntp",
             .description = "Set NTP server",
             .category = TS_API_CAT_SYSTEM,
             .handler = api_time_set_ntp,
+            .external_access = TS_API_ACCESS_ADMIN,
+            .allowed_methods = TS_API_METHOD_WRITE,
             .requires_auth = true,
         },
         {
@@ -276,6 +288,8 @@ esp_err_t ts_api_time_register(void)
             .description = "Set timezone",
             .category = TS_API_CAT_SYSTEM,
             .handler = api_time_set_timezone,
+            .external_access = TS_API_ACCESS_ADMIN,
+            .allowed_methods = TS_API_METHOD_WRITE,
             .requires_auth = true,
         },
         {
@@ -283,6 +297,8 @@ esp_err_t ts_api_time_register(void)
             .description = "Force NTP sync",
             .category = TS_API_CAT_SYSTEM,
             .handler = api_time_force_sync,
+            .external_access = TS_API_ACCESS_ADMIN,
+            .allowed_methods = TS_API_METHOD_WRITE,
             .requires_auth = true,
         },
     };

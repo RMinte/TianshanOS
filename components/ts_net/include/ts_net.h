@@ -99,6 +99,7 @@ esp_err_t ts_net_set_hostname(const char *hostname);
  * @brief Get hostname
  */
 const char *ts_net_get_hostname(void);
+/* Coherent bounded snapshot for request authority policy. */
 
 /**
  * @brief Convert IP to string

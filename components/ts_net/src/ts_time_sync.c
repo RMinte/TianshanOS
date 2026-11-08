@@ -318,3 +318,9 @@ bool ts_time_sync_needs_sync(void)
     /* 如果年份 < 2025，说明系统时间无效（ESP32 默认 1970） */
     return (timeinfo.tm_year + 1900) < TS_TIME_MIN_VALID_YEAR;
 }
+
+/* Existing time owner revision used by in-flight certificate/config checks. */
+uint32_t ts_time_sync_security_generation(void)
+{
+    return s_time_sync.info.sync_count;
+}

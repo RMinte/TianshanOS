@@ -90,7 +90,7 @@ static void vSemaphoreDelete(SemaphoreHandle_t s) {assert(s&&!s->owner);pthread_
 static void *task_entry(void *p) {current_task=p;current_task->fn(current_task->arg);assert(false);return NULL;}
 static int xTaskCreate(void (*fn)(void *),const char *name,unsigned stack,void *arg,unsigned priority,TaskHandle_t *out) {
     (void)name;(void)stack;(void)priority;if(fail_next_create){fail_next_create=false;return pdFALSE;}
-    TaskHandle_t t=calloc(1,sizeof(*t));assert(t&&task_count<128);t->fn=fn;t->arg=arg;tasks[task_count++]=t;*out=t;
+    TaskHandle_t t=calloc(1,sizeof(*t));assert(t&&task_count<128);t->fn=fn;t->arg=arg;tasks[task_count++]=t;if(out)*out=t;
     assert(!pthread_create(&t->thread,NULL,task_entry,t));return pdPASS;
 }
 static void vTaskDelete(TaskHandle_t handle) {assert(!handle);assert(current_task&&current_task->held==0);pthread_exit(NULL);}
@@ -111,7 +111,7 @@ def service_source():
     return re.sub(r'^#include[^\n]*\n', '', Path('components/ts_core/ts_service/src/ts_service.c').read_text(), flags=re.M)
 
 
-def run_native(code, extra_sources=(), extra_headers=None):
+def run_native(code, extra_sources=(), extra_headers=None, extra_include_dirs=()):
     with tempfile.TemporaryDirectory(prefix='ts-local-lifecycle-') as directory:
         root = Path(directory)
         (root / 'test.c').write_text(code)
@@ -122,6 +122,7 @@ def run_native(code, extra_sources=(), extra_headers=None):
             target.write_text(content)
         subprocess.run(['cc', '-std=gnu11', '-g', '-fsanitize=address,undefined', '-fno-sanitize-recover=all',
                         '-Wno-deprecated-declarations', '-I' + str(root),
+                        *['-I' + str(path) for path in extra_include_dirs],
                         '-Itests/runtime/rule_pack/stubs', '-Icomponents/ts_core/ts_service/include',
                         '-Icomponents/ts_console/include', '-Icomponents/ts_drivers/include',
                         '-Icomponents/ts_api/include', '-I' + str(IDF / 'components/json/cJSON'),

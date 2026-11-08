@@ -255,20 +255,26 @@ esp_err_t ts_api_dhcp_register(void)
     static const ts_api_endpoint_t endpoints[] = {
         {
             .name = "dhcp.status",
+            .external_access = TS_API_ACCESS_READ,
+            .allowed_methods = TS_API_METHOD_READ,
             .description = "Get DHCP server status",
             .category = TS_API_CAT_NETWORK,
             .handler = api_dhcp_status,
-            .requires_auth = false,
+            .requires_auth = true,
         },
         {
             .name = "dhcp.clients",
+            .external_access = TS_API_ACCESS_READ,
+            .allowed_methods = TS_API_METHOD_READ,
             .description = "List DHCP clients",
             .category = TS_API_CAT_NETWORK,
             .handler = api_dhcp_clients,
-            .requires_auth = false,
+            .requires_auth = true,
         },
         {
             .name = "dhcp.start",
+            .external_access = TS_API_ACCESS_ADMIN,
+            .allowed_methods = TS_API_METHOD_WRITE,
             .description = "Start DHCP server",
             .category = TS_API_CAT_NETWORK,
             .handler = api_dhcp_start,
@@ -276,6 +282,8 @@ esp_err_t ts_api_dhcp_register(void)
         },
         {
             .name = "dhcp.stop",
+            .external_access = TS_API_ACCESS_ADMIN,
+            .allowed_methods = TS_API_METHOD_WRITE,
             .description = "Stop DHCP server",
             .category = TS_API_CAT_NETWORK,
             .handler = api_dhcp_stop,

@@ -8,8 +8,8 @@ cmake_minimum_required(VERSION 3.16)
 
 # ============================================================================
 # 版本管理 - 使用 Python 脚本生成版本号
-# 格式: MAJOR.MINOR.PATCH+HASH.TIMESTAMP
-# 例如: 0.3.1+7fdcca4d.01311234
+# 格式: MAJOR.MINOR.PATCH+SOURCE_ID（不包含日期/时间）
+# 例如: 0.6.5+7fdcca4d
 # 
 # 配置阶段会生成版本号，每次 fullClean 或手动 reconfigure 会更新时间戳
 # ============================================================================
@@ -69,7 +69,7 @@ if(ROOT_PASSWORD_RESET)
         set(TIANSHAN_VERSION_BUILD "")
     endif()
     if(NOT ROOT_PASSWORD_RESET_RUN_ID)
-        string(TIMESTAMP ROOT_PASSWORD_RESET_RUN_ID "%H%M%S")
+        string(SHA256 ROOT_PASSWORD_RESET_RUN_ID "${TIANSHAN_VERSION_DISPLAY}")
     endif()
     string(REGEX REPLACE "[^a-zA-Z0-9.]" "." ROOT_PASSWORD_RESET_RUN_ID "${ROOT_PASSWORD_RESET_RUN_ID}")
     string(SUBSTRING "${ROOT_PASSWORD_RESET_RUN_ID}" 0 13 ROOT_PASSWORD_RESET_RUN_ID)
@@ -114,10 +114,19 @@ if(ROOT_PASSWORD_RESET)
 endif()
 
 # 项目定义
-project(TianShanOS VERSION ${TIANSHAN_VERSION_MAJOR}.${TIANSHAN_VERSION_MINOR}.${TIANSHAN_VERSION_PATCH})
+# Disabling application authorization is an explicit, separately named build.
+option(TS_DEVELOPMENT_BUILD "Build development-only firmware (never release)" OFF)
+if(TS_DEVELOPMENT_BUILD)
+    project(TianShanOS_Dev VERSION ${TIANSHAN_VERSION_MAJOR}.${TIANSHAN_VERSION_MINOR}.${TIANSHAN_VERSION_PATCH})
+else()
+    project(TianShanOS VERSION ${TIANSHAN_VERSION_MAJOR}.${TIANSHAN_VERSION_MINOR}.${TIANSHAN_VERSION_PATCH})
+endif()
+include(cmake/security_profile.cmake)
 
 if(NOT ROOT_PASSWORD_RESET)
+    include(cmake/json_limits.cmake)
     include(cmake/httpd_admission.cmake)
+    include(cmake/http_transport_polling.cmake)
     include(cmake/dhcps_bindings.cmake)
 endif()
 

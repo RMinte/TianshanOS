@@ -70,6 +70,10 @@ class SerialUpgrade(unittest.TestCase):
         self.assertIn('0x320000', args)
         self.assertEqual(args[args.index('0x20000') + 1], args[args.index('0x320000') + 1])
         self.assertEqual(self.calls[-1][0], 'hard_reset')
+        self.assertEqual(Path(args[args.index('0x20000') + 1]).name, 'TianshanOS.bin')
+        self.assertNotIn('TianShanOS.bin', {p.name for p in self.folder.iterdir()})
+        self.assertIn('TianshanOS.bin', {p.name for p in self.folder.iterdir()})
+        self.assertEqual((self.folder / 'TianshanOS.bin').read_bytes(), (self.build / 'TianShanOS.bin').read_bytes())
 
     def test_reinstall_preserves_configuration_regions(self):
         self.run_flash(self.entries)
@@ -83,7 +87,7 @@ class SerialUpgrade(unittest.TestCase):
         self.assertEqual([c[1][0] for c in self.calls], ['read_flash'])
 
     def test_bad_image_stops_before_connecting(self):
-        (self.folder / 'TianShanOS.bin').write_bytes(b'changed')
+        (self.folder / 'TianshanOS.bin').write_bytes(b'changed')
         with self.assertRaises(ValueError):
             self.run_flash(self.entries)
         self.assertFalse(self.calls)

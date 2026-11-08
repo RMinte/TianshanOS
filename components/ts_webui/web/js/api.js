@@ -1,6 +1,6 @@
 /**
  * TianshanOS API Client
- * 
+ *
  * 统一的 Core API 调用客户端，支持所有已注册的 API 端点
  */
 
@@ -156,7 +156,7 @@ const FAILURE_CODE_TOKEN = {1: 'invalid_request', 2: 'not_found', 3: 'no_permiss
     7: 'no_detail', 8: 'not_supported', 9: 'hardware_failed', 10: 'target_unreachable', 11: 'auth_required'};
 const FAILURE_CODE_NAME = {INVALID_ARG: 1, NOT_FOUND: 2, NO_PERMISSION: 3, BUSY: 4, TIMEOUT: 5, NO_MEM: 6, INTERNAL: 7,
     NOT_SUPPORTED: 8, HARDWARE: 9, CONNECTION: 10, AUTH: 11};
-const FAILURE_UNCONFIRMED = new Set(['result_unknown', 'save_outcome_unknown']);
+const FAILURE_UNCONFIRMED = new Set(['credential_write_uncertain', 'file_replace_uncertain', 'result_unknown', 'save_outcome_unknown']);
 function describeFailure({op, phase = 'failed', params = {}, result = null, error = null, token = null, endpoint = '', write} = {}) {
     const ready = typeof i18n !== 'undefined' && typeof t === 'function';
     // numbers the device sends in `data` (e.g. an HTTP status) can fill the placeholders of the reason's text; the caller's params win
@@ -222,7 +222,7 @@ class TianShanAPI {
         this.token = localStorage.getItem('ts_token');
         this.username = localStorage.getItem('ts_username');
         this.level = localStorage.getItem('ts_level');
-        
+
         // 检查 token 是否过期
         const expires = localStorage.getItem('ts_expires');
         if (expires && Date.now() > parseInt(expires)) {
@@ -244,7 +244,7 @@ class TianShanAPI {
         localStorage.removeItem('ts_expires');
         window.dispatchEvent(new CustomEvent('authChanged'));
     }
-    
+
     // Only the latest generation is retained; no credentials or key material.
     recordKeyGeneration(stage, fields = {}, requestId = this.keyGenerationTrace?.requestId) {
         const trace = this.keyGenerationTrace;
@@ -259,27 +259,28 @@ class TianShanAPI {
         const headers = {
             'Content-Type': 'application/json'
         };
-        
-        if (this.token) {
-            headers['Authorization'] = `Bearer ${this.token}`;
+
+        const requestToken = this.token;
+        if (requestToken) {
+            headers['Authorization'] = `Bearer ${requestToken}`;
         }
-        
+
         // 创建超时控制器
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), timeout);
-        
+
         const options = {
             method,
             headers,
             signal: controller.signal
         };
-        
+
         if (data && method !== 'GET') {
             options.body = JSON.stringify(data);
             // 调试：打印请求体大小
             console.debug(`API ${method} ${endpoint}: body size = ${options.body.length} bytes`);
         }
-        
+
         let httpStatus;
         const keyRequestId = endpoint === '/key/generate' && method === 'POST' ? data?.request_id : null;
         const traceKey = (stage, fields) => {
@@ -299,7 +300,7 @@ class TianShanAPI {
                 if (!response.ok) throw new ApiOperationError({error: text}, endpoint, {httpStatus: response.status});
                 throw parseErr;
             }
-            
+
             traceKey('response_parsed', {code: typeof json?.code === 'number' ? json.code : null, generated: json?.data?.generated === true});
             // 返回 JSON 响应，即使是错误码也返回（让调用者决定如何处理）
             if (!response.ok) throw new ApiOperationError(json, endpoint, {httpStatus: response.status});
@@ -323,7 +324,7 @@ class TianShanAPI {
                 json.message = message;
                 window.dispatchEvent(new CustomEvent('authExpired', { detail: { message } }));
             }
-            
+
             return json;
         } catch (error) {
             traceKey('request_error', {kind: controller.signal.aborted ? 'timeout' : error.kind || (error instanceof SyntaxError ? 'format' : httpStatus >= 400 ? 'http' : 'network'), httpStatus});
@@ -341,16 +342,10 @@ class TianShanAPI {
      */
     async call(apiName, params = null, method = null) {
         let endpoint = '/' + apiName.replace(/\./g, '/');
-        
-        // 自动判断方法：有参数且非查询类用 POST
-        if (!method) {
-            const isQuery = apiName.includes('.list') || apiName.includes('.status') || 
-                           apiName.includes('.info') || apiName.includes('.get') ||
-                           apiName.includes('.version') || apiName.includes('.partitions') ||
-                           apiName.includes('.progress') || apiName.includes('.stats');
-            method = (params && !isQuery) ? 'POST' : 'GET';
-        }
-        
+
+        // Read and write APIs accept POST. Keep explicit GET available.
+        method = method || 'POST';
+
         // GET 请求时，将 params 转为 query string
         if (method === 'GET' && params) {
             const queryParams = new URLSearchParams();
@@ -365,14 +360,14 @@ class TianShanAPI {
             }
             params = null;  // GET 请求不发送 body
         }
-        
+
         return this.request(endpoint, method, params);
     }
-    
+
     // =====================================================================
     //                         认证 API
     // =====================================================================
-    
+
     async login(username, password) {
         const result = await this.call('auth.login', { username, password }, 'POST');
         if (result.code === 0 && (typeof result.data?.token !== 'string' || !result.data.token)) {
@@ -391,7 +386,7 @@ class TianShanAPI {
         }
         return result;
     }
-    
+
     async logout() {
         // request() captures Authorization before local credentials are cleared.
         const pending = this.token ? this.call('auth.logout', {token: this.token}, 'POST') : null;
@@ -415,13 +410,31 @@ class TianShanAPI {
         }
         return { valid: false };
     }
-    
+
+    async passwordUpdate(endpoint, params, ownAccount) {
+        const token = this.token;
+        let result;
+        try {
+            result = await this.call(endpoint, {token, ...params}, 'POST');
+            return result;
+        } catch (error) {
+            result = error;
+            throw error;
+        } finally {
+            const revoked = result?.code === 0 && result.data?.reauth_required === true;
+            const uncertain = ownAccount && apiErrorReason(result) === 'credential_write_uncertain';
+            if ((revoked || uncertain) && this.token === token) {
+                this.clearAuth();
+                window.dispatchEvent(new CustomEvent('authExpired'));
+            }
+        }
+    }
+
     async changePassword(oldPassword, newPassword) {
-        return this.call('auth.change_password', {
-            token: this.token,
+        return this.passwordUpdate('auth.change_password', {
             old_password: oldPassword,
             new_password: newPassword
-        }, 'POST');
+        }, true);
     }
 
     async setAdminPassword(newPassword) {
@@ -432,10 +445,7 @@ class TianShanAPI {
     }
 
     async setRootPassword(newPassword) {
-        return this.call('auth.root.set_password', {
-            token: this.token,
-            new_password: newPassword
-        }, 'POST');
+        return this.passwordUpdate('auth.root.set_password', {new_password: newPassword}, true);
     }
 
     async resetAdminPassword() {
@@ -443,7 +453,7 @@ class TianShanAPI {
             token: this.token
         }, 'POST');
     }
-    
+
     isLoggedIn() {
         if (!this.token) {
             // 尝试从 localStorage 恢复
@@ -470,22 +480,22 @@ class TianShanAPI {
         }
         return true;
     }
-    
+
     getUsername() {
         return this.username || localStorage.getItem('ts_username');
     }
-    
+
     getLevel() {
         return this.level || localStorage.getItem('ts_level');
     }
-    
+
     /**
      * 检查是否有 root 权限（可访问终端、自动化、指令）
      */
     isRoot() {
         return this.getLevel() === 'root';
     }
-    
+
     /**
      * 检查是否是 admin 用户
      */
@@ -493,158 +503,157 @@ class TianShanAPI {
         const level = this.getLevel();
         return level === 'admin' || level === 'root';
     }
-    
+
     // =====================================================================
     //                         系统 API (system.*)
     // =====================================================================
-    
-    async getSystemInfo() { return this.call('system.info'); }
-    async getMemoryInfo() { return this.call('system.memory'); }
-    async getMemoryDetail() { return this.call('system.memory_detail'); }
-    async getTasks() { return this.call('system.tasks'); }
+
+    async getSystemInfo() { return this.call('system.info', null, 'GET'); }
+    async getMemoryInfo() { return this.call('system.memory', null, 'GET'); }
+    async getMemoryDetail() { return this.call('system.memory_detail', null, 'GET'); }
+    async getTasks() { return this.call('system.tasks', null, 'GET'); }
     async reboot(delay = 0) { return this.call('system.reboot', { delay }, 'POST'); }
-    
+
     // =====================================================================
     //                         时间 API (time.*)
     // =====================================================================
-    
-    async timeInfo() { return this.call('time.info'); }
+
+    async timeInfo() { return this.call('time.info', null, 'GET'); }
     async timeSync(timestampMs) { return this.call('time.sync', { timestamp_ms: timestampMs }, 'POST'); }
     async timeSetNtp(server, index = 0) { return this.call('time.set_ntp', { server, index }, 'POST'); }
     async timeSetTimezone(timezone) { return this.call('time.set_timezone', { timezone }, 'POST'); }
     async timeForceSync() { return this.call('time.force_sync', null, 'POST'); }
-    
+
     // =====================================================================
     //                         配置 API (config.*)
     // =====================================================================
-    
+
     // 基础配置
-    async configGet(key) { return this.call('config.get', { key }); }
+    async configGet(key) { return this.call('config.get', { key }, 'GET'); }
     async configSet(key, value, persist = false) { return this.call('config.set', { key, value, persist }, 'POST'); }
     async configDelete(key) { return this.call('config.delete', { key }, 'POST'); }
-    async configList(prefix = '') { return this.call('config.list', prefix ? { prefix } : null); }
+    async configList(prefix = '') { return this.call('config.list', prefix ? { prefix } : null, 'GET'); }
     async configSave() { return this.call('config.save', null, 'POST'); }
-    
+
     // 模块化配置
-    async configModuleList() { return this.call('config.module.list'); }
-    async configModuleShow(module) { return this.call('config.module.show', { module }); }
+    async configModuleList() { return this.call('config.module.list', null, 'GET'); }
+    async configModuleShow(module) { return this.call('config.module.show', { module }, 'GET'); }
     async configModuleSet(module, key, value) { return this.call('config.module.set', { module, key, value }, 'POST'); }
     async configModuleSave(module = null) { return this.call('config.module.save', module ? { module } : null, 'POST'); }
     async configModuleReset(module, persist = true) { return this.call('config.module.reset', { module, persist }, 'POST'); }
-    async configSync() { return this.call('config.sync', null, 'POST'); }
-    
+
     // =====================================================================
     //                         服务 API (service.*)
     // =====================================================================
-    
-    async serviceList() { return this.call('service.list'); }
-    async serviceStatus(name) { return this.call('service.status', { name }); }
+
+    async serviceList() { return this.call('service.list', null, 'GET'); }
+    async serviceStatus(name) { return this.call('service.status', { name }, 'GET'); }
     async serviceStart(name) { return this.call('service.start', { name }, 'POST'); }
     async serviceStop(name) { return this.call('service.stop', { name }, 'POST'); }
     async serviceRestart(name) { return this.call('service.restart', { name }, 'POST'); }
-    
+
     // =====================================================================
     //                         LED API (led.*)
     // =====================================================================
-    
-    async ledList() { return this.call('led.list'); }
+
+    async ledList() { return this.call('led.list', null, 'GET'); }
     async ledBrightness(device, brightness) { return this.call('led.brightness', { device, brightness }, 'POST'); }
     async ledClear(device) { return this.call('led.clear', { device }, 'POST'); }
     async ledSet(device, index, color) { return this.call('led.set', { device, index, color }, 'POST'); }
     async ledFill(device, color) { return this.call('led.fill', { device, color }, 'POST'); }
-    async ledEffectList(device = null) { return this.call('led.effect.list', device ? { device } : null); }
+    async ledEffectList(device = null) { return this.call('led.effect.list', device ? { device } : null, 'GET'); }
     async ledEffectStart(device, effect, params = {}) { return this.call('led.effect.start', { device, effect, ...params }, 'POST'); }
     async ledEffectStop(device) { return this.call('led.effect.stop', { device }, 'POST'); }
-    async ledColorParse(color) { return this.call('led.color.parse', { color }); }
-    async ledFilterList() { return this.call('led.filter.list'); }
+    async ledColorParse(color) { return this.call('led.color.parse', { color }, 'GET'); }
+    async ledFilterList() { return this.call('led.filter.list', null, 'GET'); }
     async ledFilterStart(device, filter, speed = 50) { return this.call('led.filter.start', { device, filter, speed }, 'POST'); }
     async ledFilterStop(device) { return this.call('led.filter.stop', { device }, 'POST'); }
     async ledSave(device) { return this.call('led.save', { device }, 'POST'); }
-    
+
     // Matrix-specific LED APIs
     async ledImage(path, device = 'matrix', center = 'image') { return this.call('led.image', { device, path, center }, 'POST'); }
     async ledQrcode(text, options = {}) { return this.call('led.qrcode', { device: 'matrix', text, ...options }, 'POST'); }
     async ledText(text, options = {}) { return this.call('led.text', { device: 'matrix', text, ...options }, 'POST'); }
     async ledTextStop(device = 'matrix') { return this.call('led.text.stop', { device }, 'POST'); }
-    
+
     // Color Correction APIs
-    async ledColorCorrectionGet() { return this.call('led.color_correction.get'); }
+    async ledColorCorrectionGet() { return this.call('led.color_correction.get', null, 'GET'); }
     async ledColorCorrectionSet(config) { return this.call('led.color_correction.set', config, 'POST'); }
     async ledColorCorrectionReset() { return this.call('led.color_correction.reset', null, 'POST'); }
     async ledColorCorrectionExport() { return this.call('led.color_correction.export', null, 'POST'); }
     async ledColorCorrectionImport() { return this.call('led.color_correction.import', null, 'POST'); }
-    
+
     // =====================================================================
     //                         网络 API (network.*, dhcp.*, nat.*)
     // =====================================================================
-    
+
     // 综合网络状态 (包含 ethernet, wifi_sta, wifi_ap)
-    async networkStatus() { return this.call('network.status'); }
+    async networkStatus() { return this.call('network.status', null, 'GET'); }
     async lpmuAccessStart(sudoPassword) { return this.call('network.lpmu_access.start', { sudo_password: sudoPassword }, 'POST'); }
-    async lpmuAccessStatus() { return this.call('network.lpmu_access.status'); }
+    async lpmuAccessStatus() { return this.call('network.lpmu_access.status', null, 'GET'); }
     async lpmuAccessLog(runId, offset = 0) { return this.call('network.lpmu_access.log', { run_id: runId, offset }, 'GET'); }
-    
+
     // WiFi 相关
-    async wifiMode(mode = null) { 
-        return mode ? this.call('network.wifi.mode', { mode }, 'POST') : this.call('network.wifi.mode'); 
+    async wifiMode(mode = null) {
+        return mode ? this.call('network.wifi.mode', { mode }, 'POST') : this.call('network.wifi.mode', null, 'POST');
     }
-    async wifiScan() { return this.call('network.wifi.scan'); }
+    async wifiScan() { return this.call('network.wifi.scan', null, 'POST'); }
     async wifiConnect(ssid, password) { return this.call('network.wifi.connect', { ssid, password }, 'POST'); }
     async wifiDisconnect() { return this.call('network.wifi.disconnect', null, 'POST'); }
-    async wifiApConfig(ssid, password = '', channel = 6, hidden = false) { 
-        return this.call('network.wifi.ap.config', { ssid, password, channel, hidden }, 'POST'); 
+    async wifiApConfig(ssid, password = '', channel = 6, hidden = false) {
+        return this.call('network.wifi.ap.config', { ssid, password, channel, hidden }, 'POST');
     }
-    async wifiApStations() { return this.call('network.wifi.ap.stations'); }
-    
+    async wifiApStations() { return this.call('network.wifi.ap.stations', null, 'GET'); }
+
     // 以太网
-    async ethStatus() { return this.call('network.eth.status'); }
-    
+    async ethStatus() { return this.call('network.eth.status', null, 'GET'); }
+
     // 主机名
-    async hostname(name = null) { 
-        return name ? this.call('network.hostname', { hostname: name }, 'POST') : this.call('network.hostname'); 
+    async hostname(name = null) {
+        return name ? this.call('network.hostname', { hostname: name }, 'POST') : this.call('network.hostname', null, 'POST');
     }
-    
+
     // DHCP 服务器
-    async dhcpStatus(iface = null) { return this.call('dhcp.status', iface ? { interface: iface } : null); }
-    async dhcpClients(iface = null) { return this.call('dhcp.clients', iface ? { interface: iface } : null); }
+    async dhcpStatus(iface = null) { return this.call('dhcp.status', iface ? { interface: iface } : null, 'GET'); }
+    async dhcpClients(iface = null) { return this.call('dhcp.clients', iface ? { interface: iface } : null, 'GET'); }
     async dhcpStart(iface = 'ap') { return this.call('dhcp.start', { interface: iface }, 'POST'); }
     async dhcpStop(iface = 'ap') { return this.call('dhcp.stop', { interface: iface }, 'POST'); }
-    
+
     // NAT 网关
-    async natStatus() { return this.call('nat.status'); }
+    async natStatus() { return this.call('nat.status', null, 'GET'); }
     async natEnable() { return this.call('nat.enable', null, 'POST'); }
     async natDisable() { return this.call('nat.disable', null, 'POST'); }
     async natSave() { return this.call('nat.save', null, 'POST'); }
-    
+
     // =====================================================================
     //                         设备 API (device.*, monitor.*, fan.*)
     // =====================================================================
-    
-    async deviceStatus(name = null) { return this.call('device.status', name ? { name } : null); }
+
+    async deviceStatus(name = null) { return this.call('device.status', name ? { name } : null, 'GET'); }
     async devicePower(name, on) { return this.call('device.power', { name, on }, 'POST'); }
     async deviceReset(name) { return this.call('device.reset', { name }, 'POST'); }
-    async agxStatus() { return this.call('monitor.status'); }
-    async agxData() { return this.call('monitor.data'); }
-    async fanStatus(id = null) { return this.call('fan.status', id !== null ? { id } : null); }
+    async agxStatus() { return this.call('monitor.status', null, 'GET'); }
+    async agxData() { return this.call('monitor.data', null, 'GET'); }
+    async fanStatus(id = null) { return this.call('fan.status', id !== null ? { id } : null, 'GET'); }
     async fanSet(id, duty) { return this.call('fan.set', { id, duty }, 'POST'); }
     async fanMode(id, mode) { return this.call('fan.mode', { id, mode }, 'POST'); }
-    
+
     // =====================================================================
     //                         电源 API (power.*)
     // =====================================================================
-    
-    async powerStatus() { return this.call('power.status'); }
-    async powerVoltage(channel = null) { return this.call('power.voltage', channel !== null ? { channel } : null); }
-    async powerStats() { return this.call('power.stats'); }
-    async powerProtectionStatus() { return this.call('power.protection.status'); }
+
+    async powerStatus() { return this.call('power.status', null, 'GET'); }
+    async powerVoltage(channel = null) { return this.call('power.voltage', channel !== null ? { channel } : null, 'GET'); }
+    async powerStats() { return this.call('power.stats', null, 'GET'); }
+    async powerProtectionStatus() { return this.call('power.protection.status', null, 'GET'); }
     async powerProtectionSet(config) { return this.call('power.protection.set', config, 'POST'); }
-    async powerProtectionConfig() { return this.call('power.protection.config'); }
-    
+    async powerProtectionConfig() { return this.call('power.protection.config', null, 'GET'); }
+
     // =====================================================================
     //                         存储/GPIO/温度 API
     // =====================================================================
-    
-    async storageStatus() { return this.call('storage.status'); }
+
+    async storageStatus() { return this.call('storage.status', null, 'GET'); }
     async storageMount() { return this.call('storage.mount', null, 'POST'); }
     async storageUnmount() { return this.call('storage.unmount', null, 'POST'); }
     async storageList(path = '/sdcard') { return this.call('storage.list', { path }, 'POST'); }
@@ -653,7 +662,7 @@ class TianShanAPI {
     async storageMkdir(path) { return this.call('storage.mkdir', { path }, 'POST'); }
     async storageRename(from, to) { return this.call('storage.rename', { from, to }, 'POST'); }
     async storageInfo(path) { return this.call('storage.info', { path }, 'POST'); }
-    
+
     /**
      * 下载文件
      * @param {string} path - 文件路径 (如 /sdcard/test.txt)
@@ -670,7 +679,7 @@ class TianShanAPI {
         }
         return response.blob();
     }
-    
+
     /**
      * 上传文件
      * @param {string} path - 目标路径 (如 /sdcard/uploads/file.txt)
@@ -690,18 +699,18 @@ class TianShanAPI {
         }
         return json;
     }
-    
-    async gpioList() { return this.call('gpio.list'); }
-    async gpioInfo(pin) { return this.call('gpio.info', { pin }); }
-    async tempStatus() { return this.call('temp.status'); }
-    
+
+    async gpioList() { return this.call('gpio.list', null, 'GET'); }
+    async gpioInfo(pin) { return this.call('gpio.info', { pin }, 'GET'); }
+    async tempStatus() { return this.call('temp.status', null, 'GET'); }
+
     // =====================================================================
     //                         SSH/SFTP API
     // =====================================================================
-    
+
     // SSH 测试连接 - 支持密码或密钥认证
     // options: { trust_new: bool, accept_changed: bool }
-    async sshTest(host, user, auth, port = 22, options = {}) { 
+    async sshTest(host, user, auth, port = 22, options = {}) {
         const params = { host, user, port };
         if (typeof auth === 'string') {
             params.password = auth;  // 兼容旧调用方式
@@ -714,12 +723,12 @@ class TianShanAPI {
         params.trust_new = options.trust_new ?? false;      // 新主机必须明确确认指纹
         params.confirmed_fingerprint = options.confirmed_fingerprint;
         params.accept_changed = options.accept_changed ?? false; // 指纹变化是否接受（默认 false）
-        return this.call('ssh.test', params, 'POST'); 
+        return this.call('ssh.test', params, 'POST');
     }
-    
+
     // SSH 执行命令 - 支持密码或密钥认证
     // options: { trust_new: bool, accept_changed: bool }
-    async sshExec(host, user, auth, command, port = 22, options = {}) { 
+    async sshExec(host, user, auth, command, port = 22, options = {}) {
         const params = { host, user, command, port };
         if (typeof auth === 'string') {
             params.password = auth;  // 兼容旧调用方式
@@ -732,140 +741,140 @@ class TianShanAPI {
         params.trust_new = options.trust_new ?? false;
         params.confirmed_fingerprint = options.confirmed_fingerprint;
         params.accept_changed = options.accept_changed ?? false;
-        return this.call('ssh.exec', params, 'POST'); 
+        return this.call('ssh.exec', params, 'POST');
     }
-    
+
     // 部署公钥 - options: { trust_new, accept_changed }
-    async sshCopyid(host, user, password, keyid, port = 22, verify = true, options = {}) { 
-        return this.call('ssh.copyid', { 
+    async sshCopyid(host, user, password, keyid, port = 22, verify = true, options = {}) {
+        return this.call('ssh.copyid', {
             host, user, password, keyid, port, verify,
             active_version: options.active_version,
             trust_new: options.trust_new ?? true, // 部署沿用 0.5.1：首次自动信任新主机
             confirmed_fingerprint: options.confirmed_fingerprint,
             accept_changed: options.accept_changed ?? false
-        }, 'POST'); 
+        }, 'POST');
     }
-    
+
     // 撤销公钥 - options: { trust_new, accept_changed }
-    async sshRevoke(host, user, password, keyid, port = 22, options = {}) { 
-        return this.call('ssh.revoke', { 
+    async sshRevoke(host, user, password, keyid, port = 22, options = {}) {
+        return this.call('ssh.revoke', {
             host, user, password, keyid, port,
             trust_new: options.trust_new ?? false,
             confirmed_fingerprint: options.confirmed_fingerprint,
             accept_changed: options.accept_changed ?? false
-        }, 'POST'); 
+        }, 'POST');
     }
     async sshKeygen(id, type = 'ecdsa', comment = '') { return this.call('ssh.keygen', { id, type, comment }, 'POST'); }
     async sftpLs(host, user, password, path, port = 22) { return this.call('sftp.ls', { host, user, password, path, port }, 'POST'); }
-    
+
     // =====================================================================
     //                         Key Management API
     // =====================================================================
-    
-    async keyList() { return this.call('key.list'); }
-    async keyInfo(id) { return this.call('key.info', { id }); }
-    async keyGenerate(id, type = 'rsa2048', comment = '', exportable = false, alias = '', hidden = false) { 
+
+    async keyList() { return this.call('key.list', null, 'GET'); }
+    async keyInfo(id) { return this.call('key.info', { id }, 'GET'); }
+    async keyGenerate(id, type = 'rsa2048', comment = '', exportable = false, alias = '', hidden = false) {
         const request_id = 'kg-' + Date.now().toString(36) + '-' + (this.keyGenerationSequence = (this.keyGenerationSequence || 0) + 1).toString(36);
         this.keyGenerationTrace = {requestId: request_id, id, events: []};
         this.recordKeyGeneration('submit');
         return this.call('key.generate', { id, type, comment, exportable, alias, hidden, request_id }, 'POST');
     }
     async keyDelete(id) { return this.call('key.delete', { id }, 'POST'); }
-    async keyExport(id) { return this.call('key.export', { id }); }
+    async keyExport(id) { return this.call('key.export', { id }, 'GET'); }
     async keyExportPrivate(id) { return this.call('key.exportPrivate', { id }, 'POST'); }
-    
+
     // =====================================================================
     //                         Known Hosts API
     // =====================================================================
-    
-    async hostsList() { return this.call('hosts.list'); }
-    async hostsInfo(host, port = 22) { return this.call('hosts.info', { host, port }); }
+
+    async hostsList() { return this.call('hosts.list', null, 'GET'); }
+    async hostsInfo(host, port = 22) { return this.call('hosts.info', { host, port }, 'GET'); }
     async hostsRemove(host, port = 22) { return this.call('hosts.remove', { host, port }, 'POST'); }
     async hostsUpdate(host, port = 22) { return this.call('hosts.update', { host, port }, 'POST'); }
     async hostsClear() { return this.call('hosts.clear', {}, 'POST'); }
-    
+
     // =====================================================================
     //                    Certificate (PKI) Management API
     // =====================================================================
-    
+
     /** 获取 HTTPS 证书 PKI 状态 */
-    async certStatus() { return this.call('cert.status'); }
-    
+    async certStatus() { return this.call('cert.status', null, 'GET'); }
+
     /** 生成 ECDSA P-256 密钥对 */
-    async certGenerateKeypair(force = false) { 
-        return this.call('cert.generate_keypair', { force }, 'POST'); 
+    async certGenerateKeypair(force = false) {
+        return this.call('cert.generate_keypair', { force }, 'POST');
     }
-    
+
     /** 生成证书签名请求 (CSR) */
-    async certGenerateCSR(opts = {}) { 
-        return this.call('cert.generate_csr', opts, 'POST'); 
+    async certGenerateCSR(opts = {}) {
+        return this.call('cert.generate_csr', opts, 'POST');
     }
-    
+
     /** 安装签发的证书 */
-    async certInstall(certPem) { 
-        return this.call('cert.install', { cert_pem: certPem }, 'POST'); 
+    async certInstall(certPem) {
+        return this.call('cert.install', { cert_pem: certPem }, 'POST');
     }
-    
+
     /** 安装 CA 证书链 */
-    async certInstallCA(caPem) { 
-        return this.call('cert.install_ca', { ca_pem: caPem }, 'POST'); 
+    async certInstallCA(caPem) {
+        return this.call('cert.install_ca', { ca_pem: caPem }, 'POST');
     }
-    
+
     /** 获取设备证书 PEM */
-    async certGetCertificate() { 
-        return this.call('cert.get_certificate'); 
+    async certGetCertificate() {
+        return this.call('cert.get_certificate', null, 'GET');
     }
-    
+
     /** 删除所有 PKI 凭证（需要 confirm=true） */
-    async certDelete() { 
-        return this.call('cert.delete', { confirm: true }, 'POST'); 
+    async certDelete() {
+        return this.call('cert.delete', { confirm: true }, 'POST');
     }
-    
+
     // =====================================================================
     //                      Config Pack API
     // =====================================================================
-    
+
     /** 获取配置包系统信息 */
-    async configPackInfo() { 
-        return this.call('config.pack.info'); 
+    async configPackInfo() {
+        return this.call('config.pack.info', null, 'GET');
     }
-    
+
     /** 导出设备证书（供他人加密配置给本设备） */
-    async configPackExportCert() { 
-        return this.call('config.pack.export_cert'); 
+    async configPackExportCert() {
+        return this.call('config.pack.export_cert', null, 'GET');
     }
-    
+
     /** 验证 .tscfg 配置包签名 */
-    async configPackVerify(content = null, path = null) { 
+    async configPackVerify(content = null, path = null) {
         const params = {};
         if (content) params.content = content;
         if (path) params.path = path;
-        return this.call('config.pack.verify', params, 'POST'); 
+        return this.call('config.pack.verify', params, 'POST');
     }
-    
+
     /** 导入并解密 .tscfg 配置包 */
-    async configPackImport(content = null, path = null, apply = false) { 
+    async configPackImport(content = null, path = null, apply = false) {
         const params = { apply };
         if (content) params.content = content;
         if (path) params.path = path;
-        return this.call('config.pack.import', params, 'POST'); 
+        return this.call('config.pack.import', params, 'POST');
     }
-    
+
     /** 导出配置为加密 .tscfg（仅 Developer 设备可用） */
-    async configPackExport(name, content, recipientCert, description = null, savePath = null) { 
-        const params = { 
-            name, 
+    async configPackExport(name, content, recipientCert, description = null, savePath = null) {
+        const params = {
+            name,
             content,
             recipient_cert: recipientCert
         };
         if (description) params.description = description;
         if (savePath) params.save_path = savePath;
-        return this.call('config.pack.export', params, 'POST'); 
+        return this.call('config.pack.export', params, 'POST');
     }
-    
+
     /** 列出目录中的 .tscfg 文件 */
-    async configPackList(path = '/sdcard/config') { 
-        return this.call('config.pack.list', { path }); 
+    async configPackList(path = '/sdcard/config') {
+        return this.call('config.pack.list', { path }, 'GET');
     }
 }
 

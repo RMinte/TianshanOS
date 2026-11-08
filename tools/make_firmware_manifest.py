@@ -11,7 +11,7 @@
     3. 提交 build/ 的变化。清单里的 source_base_commit 是第 1 步构建的那个提交，镜像随其后的提交一起进入仓库。
 
 清单字段：
-    version / build_version / idf_version   版本；build_version 形如 0.6.2+HASH.月日时分
+    version / build_version / idf_version   版本；build_version 形如 0.6.5+HASH（不含日期/时间）
     source_base_commit                      被构建提交的完整 SHA
     source_inputs_sha256                    参与固件构建的已跟踪源文件的内容哈希：被构建提交中，排除 build/ docs/ tests/
                                             help/ assets/ .github/ 和 README*.md 之外的每个文件，按路径排序，逐个取

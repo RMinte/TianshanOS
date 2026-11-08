@@ -922,6 +922,7 @@ if (typeof i18n !== 'undefined') i18n.registerLanguage('en-US', {
         importCommand: 'Import Command',
         // Empty states
         selectHostFirst: 'Please select a host first',
+        selectHostHint: 'Select a host card above to view its commands.',
         createFirstCommand: 'Create your first command',
         noCommandsForHost: 'No commands for this host',
         // Command modal
@@ -4262,6 +4263,12 @@ if (typeof i18n !== 'undefined') i18n.registerLanguage('en-US', {
         // what a kind of object is called inside a sentence ({kind})
         kinds: { source: 'data source', rule: 'rule', action: 'action template', sshHost: 'SSH host', sshCommand: 'SSH command' },
         reasons: {
+            file_replace_uncertain: {"why":"The file replacement could not be confirmed","hint":"Check the current file and retained previous copy before retrying. Keep temporary files until recovery is confirmed."},
+            credential_write_uncertain: {"why":"The password update could not be confirmed","hint":"This account’s sessions were revoked. Sign in again; the new password may already be active. Do not submit repeated changes automatically."},
+            ws_invalid_frame: {"why":"the test message framing is invalid","hint":"Check the remote WebSocket service and retry."},
+            ws_message_too_large: {"why":"the test message exceeds 64 KiB","hint":"Use a smaller diagnostic message or narrow the source data."},
+            ws_send_failed: {"why":"message delivery could not be confirmed","hint":"Check the connection and remote state before retrying."},
+            pack_apply_unsupported: {"why":"this device does not support applying a generic configuration pack","hint":"Import a supported pack from its configuration page. Existing settings were not changed."},
             access_password_required: {"why": "the application computer administrator password must be a single line", "hint": "Check the password entry."},
             access_state_unavailable: {"why": "the management controller could not allocate memory for the network access state", "hint": "Check the management controller memory status and system log."},
             access_busy: {"why": "a network access task is already running", "hint": "Wait for the current task to finish and check its result."},
@@ -4328,7 +4335,7 @@ if (typeof i18n !== 'undefined') i18n.registerLanguage('en-US', {
             ssh_result_unknown: { why: 'the result of the command did not reach this page, so it is not known whether it succeeded', hint: 'Check on that host whether the command has finished, and do not simply run it again.' },
             // -- Accounts, OTA, files, network, LED and more --
             credentials_invalid: { why: 'the username or password is wrong', hint: 'Check them and try again.' },
-            account_locked: { why: 'too many wrong attempts have locked this account for a while', hint: 'Wait 5 minutes and try again.' },
+            account_locked: {"why":"too many wrong attempts have locked this account for a while","hint":"Keep the device on and wait 5 minutes before trying again. Restarting begins a new cooldown."},
             password_length: { why: 'the new password must be 4 to 64 characters long', hint: 'Choose another password.' },
             old_password_wrong: { why: 'the current password is wrong', hint: 'Check it and try again.' },
             root_required: { why: 'this action needs the root account', hint: 'Log in as root and try again.' },

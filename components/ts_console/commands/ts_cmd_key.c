@@ -481,7 +481,7 @@ static int do_key_export(const char *key_id, const char *output_path)
     if (ret != ESP_OK) {
         ts_console_printf("FAILED\n");
         ts_console_printf(ret == ESP_ERR_NOT_ALLOWED
-            ? "  This file belongs to Automation. Choose another export path.\n"
+            ? "  This path is protected. Choose another export path.\n"
             : "  Could not save the public key. Check the path and storage.\n");
         return 1;
     }
@@ -514,7 +514,7 @@ static int do_key_export_private(const char *key_id, const char *output_path)
     esp_err_t ret = ts_storage_check_write_path(output_path, false);
     if (ret != ESP_OK) {
         ts_console_printf(ret == ESP_ERR_NOT_ALLOWED
-            ? "This file belongs to Automation. Choose another export path.\n" : "Invalid export path.\n");
+            ? "This path is protected. Choose another export path.\n" : "Invalid export path.\n");
         return 1;
     }
 

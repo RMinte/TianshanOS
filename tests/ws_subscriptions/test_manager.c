@@ -208,5 +208,17 @@ int main(void) {
 
 
 
+ start();a=open_peer(1);subscribe(a,"ota.progress",1000);
+ ts_ota_progress_t ota={.state=TS_OTA_STATE_WRITING,.received_size=1,.total_size=4,.progress_percent=25,.status_msg="owned snapshot"};
+ ts_event_t ota_event={.id=TS_EVENT_OTA_PROGRESS,.data=&ota,.data_size=sizeof(ota)};
+ event_handler(&ota_event,(void*)9);strcpy(ota.status_msg,"later mutation");run_batch();pump();
+ assert(strstr(payloads[1],"owned snapshot")&&!strstr(payloads[1],"later mutation")&&strstr(payloads[1],"writing"));
+ unsigned ota_before=frames[1];ota_event.data_size--;event_handler(&ota_event,(void*)9);run_batch();pump();assert(frames[1]==ota_before);
+ ota_event.data_size=sizeof(ota);ota.state=(ts_ota_state_t)(TS_OTA_STATE_ERROR+1);event_handler(&ota_event,(void*)9);run_batch();pump();assert(frames[1]==ota_before);
+ ota.state=TS_OTA_STATE_ERROR;ota.progress_percent=0;strcpy(ota.status_msg,"unconfirmed");test_now+=1000000;
+ event_handler(&ota_event,(void*)9);run_batch();pump();assert(strstr(payloads[1],"\"state\":\"error\"")&&strstr(payloads[1],"unconfirmed"));
+ stop();assert(!live_allocations);
+ puts("PASS actual typed OTA event: shared IDs, owned snapshot, bounded shape/state and original error progress");
+
  return 0;
 }

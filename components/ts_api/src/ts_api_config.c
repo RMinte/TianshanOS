@@ -13,6 +13,7 @@
 #include "ts_config_meta.h"
 #include "ts_log.h"
 #include <string.h>
+#include <math.h>
 
 #define TAG "api_config"
 
@@ -129,7 +130,11 @@ static esp_err_t api_config_set(const cJSON *params, ts_api_result_t *result)
     } else if (cJSON_IsNumber(value)) {
         /* Check if it's an integer or float */
         double d = value->valuedouble;
-        if (d == (int64_t)d) {
+        if (!isfinite(d)) {
+            ts_api_result_error(result, TS_API_ERR_INVALID_ARG, "Invalid numeric config value");
+            return ESP_ERR_INVALID_ARG;
+        }
+        if (d >= -0x1p63 && d < 0x1p63 && floor(d) == d) {
             ret = ts_config_set_int64(key->valuestring, (int64_t)d);
         } else {
             ret = ts_config_set_double(key->valuestring, d);
@@ -613,6 +618,9 @@ esp_err_t ts_api_config_register(void)
             .description = "Get configuration value",
             .category = TS_API_CAT_CONFIG,
             .handler = api_config_get,
+            /* Only system.language is public; other keys keep the dispatcher Root gate. */
+            .external_access = TS_API_ACCESS_PUBLIC,
+            .allowed_methods = TS_API_METHOD_READ,
             .requires_auth = false,
             .permission = NULL
         },
@@ -621,6 +629,8 @@ esp_err_t ts_api_config_register(void)
             .description = "Set configuration value",
             .category = TS_API_CAT_CONFIG,
             .handler = api_config_set,
+            .external_access = TS_API_ACCESS_ADMIN,
+            .allowed_methods = TS_API_METHOD_WRITE,
             .requires_auth = true,
             .permission = "config.write"
         },
@@ -629,6 +639,8 @@ esp_err_t ts_api_config_register(void)
             .description = "Delete configuration value",
             .category = TS_API_CAT_CONFIG,
             .handler = api_config_delete,
+            .external_access = TS_API_ACCESS_ADMIN,
+            .allowed_methods = TS_API_METHOD_WRITE,
             .requires_auth = true,
             .permission = "config.admin"
         },
@@ -637,7 +649,9 @@ esp_err_t ts_api_config_register(void)
             .description = "List configuration keys",
             .category = TS_API_CAT_CONFIG,
             .handler = api_config_list,
-            .requires_auth = false,
+            .external_access = TS_API_ACCESS_ADMIN,
+            .allowed_methods = TS_API_METHOD_READ,
+            .requires_auth = true,
             .permission = NULL
         },
         {
@@ -645,6 +659,8 @@ esp_err_t ts_api_config_register(void)
             .description = "Save configuration to storage",
             .category = TS_API_CAT_CONFIG,
             .handler = api_config_save,
+            .external_access = TS_API_ACCESS_ADMIN,
+            .allowed_methods = TS_API_METHOD_WRITE,
             .requires_auth = true,
             .permission = "config.write"
         },
@@ -654,7 +670,9 @@ esp_err_t ts_api_config_register(void)
             .description = "List all config modules",
             .category = TS_API_CAT_CONFIG,
             .handler = api_config_module_list,
-            .requires_auth = false,
+            .external_access = TS_API_ACCESS_READ,
+            .allowed_methods = TS_API_METHOD_READ,
+            .requires_auth = true,
             .permission = NULL
         },
         {
@@ -662,7 +680,9 @@ esp_err_t ts_api_config_register(void)
             .description = "Show module configuration",
             .category = TS_API_CAT_CONFIG,
             .handler = api_config_module_show,
-            .requires_auth = false,
+            .external_access = TS_API_ACCESS_READ,
+            .allowed_methods = TS_API_METHOD_READ,
+            .requires_auth = true,
             .permission = NULL
         },
         {
@@ -670,6 +690,8 @@ esp_err_t ts_api_config_register(void)
             .description = "Set module configuration",
             .category = TS_API_CAT_CONFIG,
             .handler = api_config_module_set,
+            .external_access = TS_API_ACCESS_ADMIN,
+            .allowed_methods = TS_API_METHOD_WRITE,
             .requires_auth = true,
             .permission = "config.write"
         },
@@ -678,6 +700,8 @@ esp_err_t ts_api_config_register(void)
             .description = "Save module configuration to NVS",
             .category = TS_API_CAT_CONFIG,
             .handler = api_config_module_save,
+            .external_access = TS_API_ACCESS_ADMIN,
+            .allowed_methods = TS_API_METHOD_WRITE,
             .requires_auth = true,
             .permission = "config.write"
         },
@@ -686,6 +710,8 @@ esp_err_t ts_api_config_register(void)
             .description = "Reset module configuration",
             .category = TS_API_CAT_CONFIG,
             .handler = api_config_module_reset,
+            .external_access = TS_API_ACCESS_ADMIN,
+            .allowed_methods = TS_API_METHOD_WRITE,
             .requires_auth = true,
             .permission = "config.admin"
         },

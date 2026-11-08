@@ -1,4 +1,5 @@
 """Exercise the production variable expander, including exact capacities."""
+from host_paths import build_dir
 from pathlib import Path
 import os, re, subprocess
 source = Path('components/ts_automation/src/ts_action_manager.c').read_text()
@@ -36,7 +37,7 @@ int main(void){
  puts("PASS production expansion: 62/63 chars, exact fit, overflow rejects empty, unknown and Shell expressions preserved, long names, numeric values");
 }
 '''
-build=Path('/tmp/tianshan-runtime-tests');build.mkdir(exist_ok=True)
+build=build_dir('expansion');build.mkdir(exist_ok=True)
 (build/'expansion.c').write_text(code)
 env={**os.environ,'DEVELOPER_DIR':'/Library/Developer/CommandLineTools'}
 subprocess.run(['cc','-D_POSIX_C_SOURCE=200809L','-std=c11','-g','-fsanitize=address,undefined','-ftrivial-auto-var-init=pattern','-Itests/runtime/stubs','-Itests/certificate/stubs','-Icomponents/ts_automation/include','-Icomponents/ts_security/include',str(build/'expansion.c'),'-o',str(build/'expansion')],check=True,env=env)

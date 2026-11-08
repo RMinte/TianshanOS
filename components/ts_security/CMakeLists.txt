@@ -30,6 +30,7 @@ idf_component_register(
         ch405labs_esp_libssh2
         json
     PRIV_REQUIRES
+        app_update
         ts_storage
         esp_timer
         ts_config_pack

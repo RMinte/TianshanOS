@@ -7,17 +7,21 @@
  */
 
 #include <string.h>
+#include <math.h>
+#include <stdatomic.h>
+#include "ts_http_fetch.h"
+#include "ts_http_url.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "cJSON.h"
 #include "ts_api.h"
 #include "ts_ota.h"
+#include "ts_security.h"
 #include "nvs_flash.h"
 #include "nvs.h"
-#include "lwip/netdb.h"
-#include "lwip/sockets.h"
 
 static const char *TAG = "ts_api_ota";
+static atomic_flag s_ota_probe_busy = ATOMIC_FLAG_INIT;
 
 // NVS 存储键
 #define NVS_NAMESPACE_OTA "ota_config"
@@ -93,15 +97,16 @@ static esp_err_t save_ota_server_config(void)
 static esp_err_t api_ota_server_get(const cJSON *params, ts_api_result_t *result)
 {
     (void)params;
-    
+
     cJSON *json = cJSON_CreateObject();
-    if (!json) {
+    if (!json || !cJSON_AddStringToObject(json, "url", s_ota_server_url) ||
+        !cJSON_AddBoolToObject(json, "configured", s_ota_server_url[0] != '\0')) {
+        cJSON_Delete(json);
         ts_api_result_error(result, TS_API_ERR_NO_MEM, "内存不足");
         return ESP_ERR_NO_MEM;
     }
 
-    cJSON_AddStringToObject(json, "url", s_ota_server_url);
-    
+
     ts_api_result_ok(result, json);
     return ESP_OK;
 }
@@ -125,7 +130,7 @@ static esp_err_t api_ota_server_set(const cJSON *params, ts_api_result_t *result
 
     // URL 可以是空字符串（表示清除）
     const char *url = cJSON_IsString(url_item) ? url_item->valuestring : "";
-    
+
     // 验证 URL 长度
     if (strlen(url) >= sizeof(s_ota_server_url)) {
         ts_api_result_error(result, TS_API_ERR_INVALID_ARG, "URL 过长");
@@ -136,7 +141,7 @@ static esp_err_t api_ota_server_set(const cJSON *params, ts_api_result_t *result
     strncpy(s_ota_server_url, url, sizeof(s_ota_server_url) - 1);
     s_ota_server_url[sizeof(s_ota_server_url) - 1] = '\0';
 
-    ESP_LOGI(TAG, "OTA server URL set to: %s", s_ota_server_url[0] ? s_ota_server_url : "(empty)");
+    ESP_LOGI(TAG, "OTA server configuration updated (configured=%d)", s_ota_server_url[0] != 0);
 
     // 检查是否需要持久化
     cJSON *save_item = cJSON_GetObjectItem(params, "save");
@@ -154,7 +159,7 @@ static esp_err_t api_ota_server_set(const cJSON *params, ts_api_result_t *result
     cJSON *json = cJSON_CreateObject();
     cJSON_AddStringToObject(json, "url", s_ota_server_url);
     cJSON_AddBoolToObject(json, "saved", do_save);
-    
+
     ts_api_result_ok(result, json);
     return ESP_OK;
 }
@@ -265,7 +270,7 @@ static esp_err_t api_ota_progress(const cJSON *params, ts_api_result_t *result)
     cJSON_AddNumberToObject(json, "percent", progress.progress_percent);
     cJSON_AddNumberToObject(json, "total_size", progress.total_size);
     cJSON_AddNumberToObject(json, "received_size", progress.received_size);
-    cJSON_AddStringToObject(json, "message", progress.status_msg ? progress.status_msg : "");
+    cJSON_AddStringToObject(json, "message", progress.status_msg);
 
     ts_api_result_ok(result, json);
     return ESP_OK;
@@ -306,51 +311,73 @@ static esp_err_t api_ota_version(const cJSON *params, ts_api_result_t *result)
  * @brief Get partition information
  * API: ota.partitions
  */
+static bool ota_partition_json(cJSON *json, const char *name, const ts_ota_partition_info_t *info)
+{
+    cJSON *node = cJSON_AddObjectToObject(json, name);
+    bool complete = node && cJSON_AddStringToObject(node, "label", info->label) &&
+        cJSON_AddNumberToObject(node, "address", info->address) &&
+        cJSON_AddNumberToObject(node, "size", info->size) &&
+        cJSON_AddBoolToObject(node, "is_bootable", info->is_bootable);
+    if (complete && info->is_bootable) complete =
+        cJSON_AddStringToObject(node, "version", info->version.version) &&
+        cJSON_AddStringToObject(node, "project", info->version.project_name);
+    return complete;
+}
+
+
 static esp_err_t api_ota_partitions(const cJSON *params, ts_api_result_t *result)
 {
-    ts_ota_partition_info_t running, next;
-    
+    (void)params;
+    ts_ota_partition_info_t running = {0}, next = {0};
     esp_err_t ret = ts_ota_get_running_partition_info(&running);
+    if (ret == ESP_OK) ret = ts_ota_get_next_partition_info(&next);
     if (ret != ESP_OK) {
-        ts_api_result_error(result, TS_API_ERR_INTERNAL, "获取分区信息失败");
+        ts_api_result_error(result, TS_API_ERR_INTERNAL, "Partition information unavailable");
         return ret;
     }
-    
-    ts_ota_get_next_partition_info(&next);
-
     cJSON *json = cJSON_CreateObject();
-    if (!json) {
-        ts_api_result_error(result, TS_API_ERR_NO_MEM, "内存不足");
+    bool complete = json && ota_partition_json(json, "running", &running) &&
+        ota_partition_json(json, "next", &next) &&
+        cJSON_AddBoolToObject(json, "can_rollback", ts_ota_can_rollback());
+    if (!complete) {
+        cJSON_Delete(json);
+        ts_api_result_error(result, TS_API_ERR_NO_MEM, "Out of memory");
         return ESP_ERR_NO_MEM;
     }
-
-    // Running partition
-    cJSON *running_json = cJSON_AddObjectToObject(json, "running");
-    cJSON_AddStringToObject(running_json, "label", running.label);
-    cJSON_AddNumberToObject(running_json, "address", running.address);
-    cJSON_AddNumberToObject(running_json, "size", running.size);
-    cJSON_AddBoolToObject(running_json, "is_bootable", running.is_bootable);
-    if (running.is_bootable) {
-        cJSON_AddStringToObject(running_json, "version", running.version.version);
-        cJSON_AddStringToObject(running_json, "project", running.version.project_name);
-    }
-
-    // Next partition
-    cJSON *next_json = cJSON_AddObjectToObject(json, "next");
-    cJSON_AddStringToObject(next_json, "label", next.label);
-    cJSON_AddNumberToObject(next_json, "address", next.address);
-    cJSON_AddNumberToObject(next_json, "size", next.size);
-    cJSON_AddBoolToObject(next_json, "is_bootable", next.is_bootable);
-    if (next.is_bootable) {
-        cJSON_AddStringToObject(next_json, "version", next.version.version);
-        cJSON_AddStringToObject(next_json, "project", next.version.project_name);
-    }
-    
-    // Check if rollback is possible
-    cJSON_AddBoolToObject(json, "can_rollback", ts_ota_can_rollback());
-
     ts_api_result_ok(result, json);
     return ESP_OK;
+}
+
+/* Reboot confirmation must survive the RAM session it is confirming. Keep
+ * complete partition management data behind READ; only running identity is public. */
+static esp_err_t api_ota_partitions_for_session(const cJSON *params, uint32_t session_id,
+                                               ts_api_result_t *result)
+{
+#ifdef CONFIG_TS_WEBUI_AUTH_REQUIRED
+    if (ts_security_check_permission(session_id, TS_PERM_READ))
+        return api_ota_partitions(params, result);
+
+    ts_ota_partition_info_t running = {0};
+    esp_err_t ret = ts_ota_get_running_partition_info(&running);
+    if (ret != ESP_OK) {
+        ts_api_result_error(result, TS_API_ERR_INTERNAL, "Partition information unavailable");
+        return ret;
+    }
+    cJSON *json = cJSON_CreateObject();
+    cJSON *identity = json ? cJSON_AddObjectToObject(json, "running") : NULL;
+    if (!identity || !cJSON_AddStringToObject(identity, "label", running.label) ||
+        !cJSON_AddStringToObject(identity, "version", running.version.version) ||
+        !cJSON_AddStringToObject(identity, "project", running.version.project_name)) {
+        cJSON_Delete(json);
+        ts_api_result_error(result, TS_API_ERR_NO_MEM, "Out of memory");
+        return ESP_ERR_NO_MEM;
+    }
+    ts_api_result_ok(result, json);
+    return ESP_OK;
+#else
+    (void)session_id;
+    return api_ota_partitions(params, result);
+#endif
 }
 
 /**
@@ -368,6 +395,12 @@ static esp_err_t api_ota_start_url(const cJSON *params, ts_api_result_t *result)
     cJSON *url_item = cJSON_GetObjectItem(params, "url");
     if (!url_item || !cJSON_IsString(url_item)) {
         ts_api_result_error(result, TS_API_ERR_INVALID_ARG, "缺少 url 参数");
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    struct http_parser_url parsed;
+    if (strnlen(url_item->valuestring, 2049) > 2048 || !ts_http_url_parse(url_item->valuestring, &parsed)) {
+        ts_api_result_error(result, TS_API_ERR_INVALID_ARG, "Invalid HTTP or HTTPS URL");
         return ESP_ERR_INVALID_ARG;
     }
 
@@ -558,7 +591,9 @@ static esp_err_t api_ota_upload_begin(const cJSON *params, ts_api_result_t *resu
     }
 
     cJSON *size_item = cJSON_GetObjectItem(params, "size");
-    if (!size_item || !cJSON_IsNumber(size_item)) {
+    if (!cJSON_IsNumber(size_item) || !isfinite(size_item->valuedouble) ||
+        size_item->valuedouble <= 0 || size_item->valuedouble > UINT32_MAX ||
+        floor(size_item->valuedouble) != size_item->valuedouble) {
         ts_api_result_error(result, TS_API_ERR_INVALID_ARG, "缺少 size 参数");
         return ESP_ERR_INVALID_ARG;
     }
@@ -654,6 +689,10 @@ static esp_err_t api_ota_www_start(const cJSON *params, ts_api_result_t *result)
     cJSON *url_item = cJSON_GetObjectItem(params, "url");
     char url[300] = {0};
     
+    if (url_item && cJSON_IsString(url_item) && strlen(url_item->valuestring) >= sizeof(url)) {
+        ts_api_result_error(result, TS_API_ERR_INVALID_ARG, "URL too long");
+        return ESP_ERR_INVALID_ARG;
+    }
     if (url_item && cJSON_IsString(url_item) && url_item->valuestring[0]) {
         strncpy(url, url_item->valuestring, sizeof(url) - 1);
     } else if (s_ota_server_url[0]) {
@@ -741,7 +780,7 @@ static esp_err_t api_ota_www_progress(const cJSON *params, ts_api_result_t *resu
     cJSON_AddNumberToObject(json, "received", progress.received_size);
     cJSON_AddNumberToObject(json, "total", progress.total_size);
     cJSON_AddNumberToObject(json, "percent", progress.progress_percent);
-    cJSON_AddStringToObject(json, "message", progress.status_msg ? progress.status_msg : "");
+    cJSON_AddStringToObject(json, "message", progress.status_msg);
     cJSON_AddBoolToObject(json, "running", ts_ota_www_is_running());
 
     ts_api_result_ok(result, json);
@@ -817,172 +856,66 @@ static esp_err_t api_ota_www_start_sdcard(const cJSON *params, ts_api_result_t *
  * 
  * 此 API 从 ESP32 设备测试到 OTA 服务器的连接
  */
+static esp_err_t ota_test_connection_impl(const cJSON *params, ts_api_result_t *result)
+{
+    const cJSON *item = cJSON_GetObjectItemCaseSensitive(params, "url");
+    struct http_parser_url parsed;
+    if (!cJSON_IsString(item) || !ts_http_url_parse(item->valuestring, &parsed) ||
+        parsed.field_data[UF_HOST].len >= 256) {
+        ts_api_result_error(result, TS_API_ERR_INVALID_ARG, "Invalid HTTP or HTTPS URL");
+        return ESP_ERR_INVALID_ARG;
+    }
+    cJSON *data = cJSON_CreateObject();
+    if (!data) {
+        ts_api_result_error(result, TS_API_ERR_NO_MEM, "Insufficient device memory");
+        return ESP_ERR_NO_MEM;
+    }
+    char host[256], port[8];
+    size_t length = parsed.field_data[UF_HOST].len;
+    memcpy(host, item->valuestring + parsed.field_data[UF_HOST].off, length);
+    host[length] = 0;
+    snprintf(port, sizeof(port), "%u", parsed.field_set & (1U << UF_PORT) ? parsed.port :
+        parsed.field_data[UF_SCHEMA].len == 5 ? 443U : 80U);
+    int64_t started = esp_timer_get_time();
+    ts_http_fetch_config_t config = {.url = item->valuestring, .method = HTTP_METHOD_GET,
+        .timeout_ms = 5000, .headers_only = true, .maximum_body = 4096};
+    ts_http_fetch_result_t reply;
+    esp_err_t ret = ts_http_fetch(&config, &reply);
+    bool http_ok = ret == ESP_OK && reply.connected && reply.status >= 100 && reply.status < 600;
+    int64_t http_ms = (esp_timer_get_time() - started) / 1000 - reply.dns_time_ms - reply.connect_time_ms;
+    bool complete = cJSON_AddStringToObject(data, "url", item->valuestring) &&
+        cJSON_AddStringToObject(data, "host", host) && cJSON_AddStringToObject(data, "port", port) &&
+        cJSON_AddBoolToObject(data, "dns_ok", reply.dns_ok) &&
+        cJSON_AddNumberToObject(data, "dns_time_ms", (double)reply.dns_time_ms) &&
+        cJSON_AddStringToObject(data, "resolved_ip", reply.resolved_ip) &&
+        cJSON_AddBoolToObject(data, "tcp_ok", reply.connected) &&
+        cJSON_AddNumberToObject(data, "tcp_time_ms", (double)reply.connect_time_ms) &&
+        cJSON_AddBoolToObject(data, "http_ok", http_ok) &&
+        cJSON_AddNumberToObject(data, "http_time_ms", (double)(http_ms > 0 ? http_ms : 0)) &&
+        cJSON_AddNumberToObject(data, "http_status", reply.status);
+    if (!reply.dns_ok) complete = complete && cJSON_AddStringToObject(data, "dns_error", esp_err_to_name(ret));
+    else if (!reply.connected) complete = complete && cJSON_AddStringToObject(data, "tcp_error", esp_err_to_name(ret));
+    else if (!http_ok) complete = complete && cJSON_AddStringToObject(data, "http_error", esp_err_to_name(ret));
+    free(reply.body);
+    if (!complete) {
+        cJSON_Delete(data);
+        ts_api_result_error(result, TS_API_ERR_NO_MEM, "Insufficient device memory");
+        return ESP_ERR_NO_MEM;
+    }
+    ts_api_result_ok(result, data);
+    return ESP_OK;
+}
+
+
 static esp_err_t api_ota_test_connection(const cJSON *params, ts_api_result_t *result)
 {
-    if (!params) {
-        ts_api_result_error(result, TS_API_ERR_INVALID_ARG, "缺少参数");
-        return ESP_ERR_INVALID_ARG;
+    if (atomic_flag_test_and_set(&s_ota_probe_busy)) {
+        ts_api_result_error(result, TS_API_ERR_BUSY, "Network diagnostic busy");
+        return ESP_ERR_INVALID_STATE;
     }
-
-    cJSON *url_item = cJSON_GetObjectItem(params, "url");
-    if (!url_item || !cJSON_IsString(url_item) || !url_item->valuestring[0]) {
-        ts_api_result_error(result, TS_API_ERR_INVALID_ARG, "缺少 url 参数");
-        return ESP_ERR_INVALID_ARG;
-    }
-
-    const char *url = url_item->valuestring;
-    ESP_LOGI(TAG, "Testing connection to: %s", url);
-
-    cJSON *json = cJSON_CreateObject();
-    cJSON_AddStringToObject(json, "url", url);
-
-    // 解析 URL 获取主机名
-    const char *host_start = strstr(url, "://");
-    if (!host_start) {
-        ts_api_result_error(result, TS_API_ERR_INVALID_ARG, "URL 格式无效");
-        cJSON_Delete(json);
-        return ESP_ERR_INVALID_ARG;
-    }
-    host_start += 3;
-
-    char host[128] = {0};
-    char port_str[8] = "80";
-    const char *port_pos = strchr(host_start, ':');
-    const char *path_pos = strchr(host_start, '/');
-    
-    if (port_pos && (!path_pos || port_pos < path_pos)) {
-        // 有端口号
-        size_t host_len = port_pos - host_start;
-        if (host_len >= sizeof(host)) host_len = sizeof(host) - 1;
-        strncpy(host, host_start, host_len);
-        
-        const char *port_end = path_pos ? path_pos : port_pos + strlen(port_pos);
-        size_t port_len = port_end - (port_pos + 1);
-        if (port_len >= sizeof(port_str)) port_len = sizeof(port_str) - 1;
-        strncpy(port_str, port_pos + 1, port_len);
-    } else if (path_pos) {
-        size_t host_len = path_pos - host_start;
-        if (host_len >= sizeof(host)) host_len = sizeof(host) - 1;
-        strncpy(host, host_start, host_len);
-    } else {
-        strncpy(host, host_start, sizeof(host) - 1);
-    }
-
-    cJSON_AddStringToObject(json, "host", host);
-    cJSON_AddStringToObject(json, "port", port_str);
-
-    // DNS 解析测试
-    struct addrinfo hints = {
-        .ai_family = AF_INET,
-        .ai_socktype = SOCK_STREAM,
-    };
-    struct addrinfo *res = NULL;
-    
-    int64_t dns_start = esp_timer_get_time();
-    int dns_err = getaddrinfo(host, port_str, &hints, &res);
-    int64_t dns_time = (esp_timer_get_time() - dns_start) / 1000;  // ms
-    
-    cJSON_AddNumberToObject(json, "dns_time_ms", dns_time);
-
-    if (dns_err != 0 || res == NULL) {
-        cJSON_AddBoolToObject(json, "dns_ok", false);
-        cJSON_AddStringToObject(json, "dns_error", "DNS 解析失败");
-        ESP_LOGE(TAG, "DNS lookup failed for %s: %d", host, dns_err);
-        ts_api_result_ok(result, json);
-        return ESP_OK;
-    }
-
-    struct sockaddr_in *addr = (struct sockaddr_in *)res->ai_addr;
-    char ip_str[16];
-    inet_ntoa_r(addr->sin_addr, ip_str, sizeof(ip_str));
-    cJSON_AddBoolToObject(json, "dns_ok", true);
-    cJSON_AddStringToObject(json, "resolved_ip", ip_str);
-    ESP_LOGI(TAG, "DNS resolved %s -> %s", host, ip_str);
-
-    // TCP 连接测试
-    int sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    if (sock < 0) {
-        freeaddrinfo(res);
-        cJSON_AddBoolToObject(json, "tcp_ok", false);
-        cJSON_AddStringToObject(json, "tcp_error", "创建 socket 失败");
-        ts_api_result_ok(result, json);
-        return ESP_OK;
-    }
-
-    // 设置超时
-    struct timeval tv = {
-        .tv_sec = 5,
-        .tv_usec = 0,
-    };
-    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-    setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
-
-    int64_t tcp_start = esp_timer_get_time();
-    int conn_err = connect(sock, res->ai_addr, res->ai_addrlen);
-    int64_t tcp_time = (esp_timer_get_time() - tcp_start) / 1000;  // ms
-    
-    freeaddrinfo(res);
-    cJSON_AddNumberToObject(json, "tcp_time_ms", tcp_time);
-
-    if (conn_err != 0) {
-        close(sock);
-        cJSON_AddBoolToObject(json, "tcp_ok", false);
-        cJSON_AddStringToObject(json, "tcp_error", "TCP 连接失败");
-        ESP_LOGE(TAG, "TCP connect failed to %s:%s", host, port_str);
-        ts_api_result_ok(result, json);
-        return ESP_OK;
-    }
-
-    cJSON_AddBoolToObject(json, "tcp_ok", true);
-    ESP_LOGI(TAG, "TCP connection successful to %s:%s in %lld ms", host, port_str, tcp_time);
-
-    // HTTP 请求测试
-    char request[512];
-    snprintf(request, sizeof(request),
-             "GET / HTTP/1.1\r\n"
-             "Host: %s:%s\r\n"
-             "Connection: close\r\n"
-             "\r\n",
-             host, port_str);
-
-    int64_t http_start = esp_timer_get_time();
-    int sent = send(sock, request, strlen(request), 0);
-    if (sent <= 0) {
-        close(sock);
-        cJSON_AddBoolToObject(json, "http_ok", false);
-        cJSON_AddStringToObject(json, "http_error", "HTTP 发送失败");
-        ts_api_result_ok(result, json);
-        return ESP_OK;
-    }
-
-    char response[1024];
-    int received = recv(sock, response, sizeof(response) - 1, 0);
-    int64_t http_time = (esp_timer_get_time() - http_start) / 1000;  // ms
-    close(sock);
-
-    cJSON_AddNumberToObject(json, "http_time_ms", http_time);
-
-    if (received <= 0) {
-        cJSON_AddBoolToObject(json, "http_ok", false);
-        cJSON_AddStringToObject(json, "http_error", "HTTP 无响应");
-        ts_api_result_ok(result, json);
-        return ESP_OK;
-    }
-
-    response[received] = '\0';
-    
-    // 解析 HTTP 状态码
-    int http_status = 0;
-    if (strncmp(response, "HTTP/", 5) == 0) {
-        sscanf(response + 9, "%d", &http_status);
-    }
-
-    cJSON_AddBoolToObject(json, "http_ok", true);
-    cJSON_AddNumberToObject(json, "http_status", http_status);
-    ESP_LOGI(TAG, "HTTP response: status=%d, time=%lld ms", http_status, http_time);
-
-    ts_api_result_ok(result, json);
-    return ESP_OK;
+    esp_err_t ret = ota_test_connection_impl(params, result);
+    atomic_flag_clear(&s_ota_probe_busy);
+    return ret;
 }
 
 // ============================================================================
@@ -1003,20 +936,26 @@ esp_err_t ts_api_ota_register(void)
     ts_api_endpoint_t endpoints[] = {
         {
             .name = "ota.status",
+            .external_access = TS_API_ACCESS_READ,
+            .allowed_methods = TS_API_METHOD_READ,
             .category = TS_API_CAT_SYSTEM,
             .handler = api_ota_status,
-            .requires_auth = false,
+            .requires_auth = true,
             .description = "获取 OTA 状态",
         },
         {
             .name = "ota.progress",
+            .external_access = TS_API_ACCESS_READ,
+            .allowed_methods = TS_API_METHOD_READ,
             .category = TS_API_CAT_SYSTEM,
             .handler = api_ota_progress,
-            .requires_auth = false,
+            .requires_auth = true,
             .description = "获取 OTA 进度",
         },
         {
             .name = "ota.version",
+            .external_access = TS_API_ACCESS_PUBLIC,
+            .allowed_methods = TS_API_METHOD_READ,
             .category = TS_API_CAT_SYSTEM,
             .handler = api_ota_version,
             .requires_auth = false,
@@ -1024,20 +963,27 @@ esp_err_t ts_api_ota_register(void)
         },
         {
             .name = "ota.partitions",
+            .external_access = TS_API_ACCESS_PUBLIC,
+            .allowed_methods = TS_API_METHOD_READ,
             .category = TS_API_CAT_SYSTEM,
             .handler = api_ota_partitions,
             .requires_auth = false,
+            .session_handler = api_ota_partitions_for_session,
             .description = "获取分区信息",
         },
         {
             .name = "ota.start_url",
+            .external_access = TS_API_ACCESS_ADMIN,
+            .allowed_methods = TS_API_METHOD_WRITE,
             .category = TS_API_CAT_SYSTEM,
             .handler = api_ota_start_url,
             .requires_auth = true,
             .description = "从 URL 启动 OTA",
         },
         {
-            .name = "ota.upgrade_url",  // Alias for start_url
+            .name = "ota.upgrade_url",
+            .external_access = TS_API_ACCESS_ADMIN,
+            .allowed_methods = TS_API_METHOD_WRITE,  // Alias for start_url
             .category = TS_API_CAT_SYSTEM,
             .handler = api_ota_start_url,
             .requires_auth = true,
@@ -1045,13 +991,17 @@ esp_err_t ts_api_ota_register(void)
         },
         {
             .name = "ota.start_file",
+            .external_access = TS_API_ACCESS_ADMIN,
+            .allowed_methods = TS_API_METHOD_WRITE,
             .category = TS_API_CAT_SYSTEM,
             .handler = api_ota_start_file,
             .requires_auth = true,
             .description = "从 SD 卡启动 OTA",
         },
         {
-            .name = "ota.upgrade_file",  // Alias for start_file
+            .name = "ota.upgrade_file",
+            .external_access = TS_API_ACCESS_ADMIN,
+            .allowed_methods = TS_API_METHOD_WRITE,  // Alias for start_file
             .category = TS_API_CAT_SYSTEM,
             .handler = api_ota_start_file,
             .requires_auth = true,
@@ -1059,6 +1009,8 @@ esp_err_t ts_api_ota_register(void)
         },
         {
             .name = "ota.abort",
+            .external_access = TS_API_ACCESS_ADMIN,
+            .allowed_methods = TS_API_METHOD_WRITE,
             .category = TS_API_CAT_SYSTEM,
             .handler = api_ota_abort,
             .requires_auth = true,
@@ -1066,6 +1018,8 @@ esp_err_t ts_api_ota_register(void)
         },
         {
             .name = "ota.validate",
+            .external_access = TS_API_ACCESS_ADMIN,
+            .allowed_methods = TS_API_METHOD_WRITE,
             .category = TS_API_CAT_SYSTEM,
             .handler = api_ota_validate,
             .requires_auth = true,
@@ -1073,6 +1027,8 @@ esp_err_t ts_api_ota_register(void)
         },
         {
             .name = "ota.rollback",
+            .external_access = TS_API_ACCESS_ADMIN,
+            .allowed_methods = TS_API_METHOD_WRITE,
             .category = TS_API_CAT_SYSTEM,
             .handler = api_ota_rollback,
             .requires_auth = true,
@@ -1080,6 +1036,8 @@ esp_err_t ts_api_ota_register(void)
         },
         {
             .name = "ota.upload_begin",
+            .external_access = TS_API_ACCESS_ADMIN,
+            .allowed_methods = TS_API_METHOD_WRITE,
             .category = TS_API_CAT_SYSTEM,
             .handler = api_ota_upload_begin,
             .requires_auth = true,
@@ -1087,6 +1045,8 @@ esp_err_t ts_api_ota_register(void)
         },
         {
             .name = "ota.upload_end",
+            .external_access = TS_API_ACCESS_ADMIN,
+            .allowed_methods = TS_API_METHOD_WRITE,
             .category = TS_API_CAT_SYSTEM,
             .handler = api_ota_upload_end,
             .requires_auth = true,
@@ -1094,6 +1054,8 @@ esp_err_t ts_api_ota_register(void)
         },
         {
             .name = "ota.upload_abort",
+            .external_access = TS_API_ACCESS_ADMIN,
+            .allowed_methods = TS_API_METHOD_WRITE,
             .category = TS_API_CAT_SYSTEM,
             .handler = api_ota_upload_abort,
             .requires_auth = true,
@@ -1101,13 +1063,17 @@ esp_err_t ts_api_ota_register(void)
         },
         {
             .name = "ota.server.get",
+            .external_access = TS_API_ACCESS_READ,
+            .allowed_methods = TS_API_METHOD_READ,
             .category = TS_API_CAT_SYSTEM,
             .handler = api_ota_server_get,
-            .requires_auth = false,
+            .requires_auth = true,
             .description = "获取 OTA 服务器地址",
         },
         {
             .name = "ota.server.set",
+            .external_access = TS_API_ACCESS_ADMIN,
+            .allowed_methods = TS_API_METHOD_WRITE,
             .category = TS_API_CAT_SYSTEM,
             .handler = api_ota_server_set,
             .requires_auth = true,
@@ -1116,6 +1082,8 @@ esp_err_t ts_api_ota_register(void)
         // WWW Partition OTA
         {
             .name = "ota.www.start",
+            .external_access = TS_API_ACCESS_ADMIN,
+            .allowed_methods = TS_API_METHOD_WRITE,
             .category = TS_API_CAT_SYSTEM,
             .handler = api_ota_www_start,
             .requires_auth = true,
@@ -1123,6 +1091,8 @@ esp_err_t ts_api_ota_register(void)
         },
         {
             .name = "ota.www.start_sdcard",
+            .external_access = TS_API_ACCESS_ADMIN,
+            .allowed_methods = TS_API_METHOD_WRITE,
             .category = TS_API_CAT_SYSTEM,
             .handler = api_ota_www_start_sdcard,
             .requires_auth = true,
@@ -1130,13 +1100,17 @@ esp_err_t ts_api_ota_register(void)
         },
         {
             .name = "ota.www.progress",
+            .external_access = TS_API_ACCESS_READ,
+            .allowed_methods = TS_API_METHOD_READ,
             .category = TS_API_CAT_SYSTEM,
             .handler = api_ota_www_progress,
-            .requires_auth = false,
+            .requires_auth = true,
             .description = "获取 WWW OTA 进度",
         },
         {
             .name = "ota.www.abort",
+            .external_access = TS_API_ACCESS_ADMIN,
+            .allowed_methods = TS_API_METHOD_WRITE,
             .category = TS_API_CAT_SYSTEM,
             .handler = api_ota_www_abort,
             .requires_auth = true,
@@ -1145,9 +1119,11 @@ esp_err_t ts_api_ota_register(void)
         // Network diagnostics
         {
             .name = "ota.test_connection",
+            .external_access = TS_API_ACCESS_ADMIN,
+            .allowed_methods = TS_API_METHOD_WRITE,
             .category = TS_API_CAT_SYSTEM,
             .handler = api_ota_test_connection,
-            .requires_auth = false,
+            .requires_auth = true,
             .description = "测试 OTA 服务器连接",
         },
     };

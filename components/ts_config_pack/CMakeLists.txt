@@ -12,4 +12,5 @@ idf_component_register(
     PRIV_REQUIRES
         ts_storage
         mbedtls
+        nvs_flash
 )

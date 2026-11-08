@@ -277,6 +277,9 @@ static esp_err_t ts_gpio_set_level(void *gpio,int level) {assert(gpio==(void*)1&
 const char *ts_device_state_to_str(ts_device_state_t state) {return state==TS_DEVICE_STATE_ON?"on":"off";}
 '''
 code += body('components/ts_net/src/ts_eth.c','dhcp_start_task')
+system = (IDF / 'components/esp_system/include/esp_system.h').read_text()
+code += system[system.index('typedef enum {'):system.index('} esp_reset_reason_t;') + len('} esp_reset_reason_t;')]
+code += '\nstatic esp_reset_reason_t esp_reset_reason(void) {return ESP_RST_POWERON;}\n'
 code += body('components/ts_drivers/src/ts_device_ctrl.c','lpmu_startup_detect_task')
 code += '#include "' + str(root / 'components/ts_automation/include/ts_action_manager.h') + '"\n'
 action_source=Path('components/ts_automation/src/ts_action_manager.c').read_text()

@@ -30,7 +30,7 @@ static record_t records[128];
 static size_t record_count;
 static struct { char partition[16], ns[16]; } handles[128];
 static unsigned handle_count, file_reads, private_reads, erased;
-static bool fail_auth_commit, encrypted_net, fail_pack;
+static bool fail_auth_commit, encrypted_net, fail_pack, encrypted_late;
 static unsigned pack_reads;
 static const char *color_file;
 static bool color_sd=true, fail_color_write, fail_power_write;
@@ -144,6 +144,7 @@ void nvs_release_iterator(nvs_iterator_t it) { free(it); }
 int legacy_stat(const char *path, struct stat *out)
 {
     if(color_file && strstr(path,"/led_color_correction.json")){memset(out,0,sizeof(*out));out->st_size=strlen(color_file);return 0;}
+    if (encrypted_late && strstr(path, "/ui_widgets.tscfg")) { memset(out,0,sizeof(*out)); return 0; }
     if (encrypted_net && strstr(path, "/net.tscfg")) { memset(out,0,sizeof(*out)); return 0; }
     errno=ENOENT; return -1;
 }
@@ -156,13 +157,16 @@ esp_err_t ts_cert_init(void)
 esp_err_t ts_config_pack_init(void) { return ESP_OK; }
 ts_config_pack_result_t ts_config_pack_load(const char *path, ts_config_pack_t **out)
 {
-    assert(strstr(path,"/net.tscfg")); ++pack_reads;
+    ++pack_reads;
+    if(strstr(path,"/ui_widgets.tscfg")) return TS_CONFIG_PACK_ERR_SIGNATURE;
+    assert(strstr(path,"/net.tscfg"));
     if (fail_pack) return TS_CONFIG_PACK_ERR_DECRYPT;
     *out=calloc(1,sizeof(**out)); assert(*out);
     (*out)->content=strdup("{\"eth.ip\":\"192.0.2.8\"}");
     (*out)->content_len=strlen((*out)->content);
     return TS_CONFIG_PACK_OK;
 }
+const char *ts_config_pack_strerror(ts_config_pack_result_t result){(void)result;return "synthetic selected pack trust error";}
 void ts_config_pack_free(ts_config_pack_t *pack)
 {
     if (pack) { free(pack->content); free(pack); }
@@ -181,7 +185,7 @@ static void fixture(void)
 {
     for (size_t i=0;i<record_count;++i) free(records[i].data);
     memset(records,0,sizeof(records)); record_count=handle_count=0;
-    file_reads=private_reads=erased=pack_reads=0; fail_auth_commit=encrypted_net=fail_pack=fail_color_write=false;
+    file_reads=private_reads=erased=pack_reads=0; fail_auth_commit=encrypted_net=fail_pack=fail_color_write=encrypted_late=false;
     color_file=NULL;color_sd=true;
     put("keys_nvs","ts_keystore","index",NVS_TYPE_STR,"synthetic-key",14);
     put("keys_nvs","ts_pki","privkey",NVS_TYPE_STR,"synthetic-private",18);
@@ -200,6 +204,12 @@ static void fixture(void)
 static record_t *system_record(const char *ns,const char *key) {return find("nvs",ns,key);}
 
 bool ts_storage_sd_mounted(void) {return color_sd;}
+static unsigned boot_schemas;
+static esp_err_t storage_service_init(void *handle,void *data){(void)handle;(void)data;return ESP_OK;}
+static esp_err_t storage_service_start(void *handle,void *data){(void)handle;(void)data;return ESP_OK;}
+esp_err_t ts_config_schemas_init(void){++boot_schemas;assert(system_record("ts_auth","cred_root"));return ESP_OK;}
+#include "config_boot.inc"
+
 esp_err_t ts_storage_write_file(const char *path,const void *data,size_t size)
 {(void)path;(void)data;(void)size;return ESP_ERR_NOT_SUPPORTED;}
 
@@ -338,15 +348,28 @@ int main(void)
     assert(ts_config_migrate_system(false)==ESP_OK && !file_reads && !private_reads);
     assert(system_record("ts_auth","cred_root") && system_record("ts_net","config"));
     fixture(); encrypted_net=fail_pack=true;
-    assert(ts_config_migrate_system(true)==ESP_FAIL && pack_reads==1 && !erased);
+    assert(ts_config_migrate_system(true)==ESP_ERR_NOT_FINISHED && pack_reads==1 && !erased);
+    assert(system_record("ts_cfg_state","system_base_v"));
+    /* A Root password change while SD trust is pending is never replayed away. */
+    put("nvs","ts_auth","cred_root",NVS_TYPE_BLOB,"current-root",13);
+    assert(ts_config_migrate_system(true)==ESP_ERR_NOT_FINISHED);
+    assert(!memcmp(system_record("ts_auth","cred_root")->data,"current-root",13));
     assert(!system_record("ts_cfg_state","system_v") && find("keys_nvs","ts_auth","cred_root"));
     fail_pack=false;
-    assert(ts_config_migrate_system(true)==ESP_OK && pack_reads==2);
+    assert(ts_config_migrate_system(true)==ESP_OK && pack_reads==3);
+    assert(!memcmp(system_record("ts_auth","cred_root")->data,"current-root",13));
     assert(!memcmp(system_record("ts_net","config")->data,"{\"eth.ip\":\"192.0.2.8\"}",22));
     put("nvs","ts_ui","widgets",NVS_TYPE_BLOB,"{\"widgets\":[1]}",15);
     unsigned reads=file_reads;
-    assert(ts_config_migrate_system(true)==ESP_OK && reads==file_reads && pack_reads==2);
+    assert(ts_config_migrate_system(true)==ESP_OK && reads==file_reads && pack_reads==3);
     assert(!memcmp(system_record("ts_ui","widgets")->data,"{\"widgets\":[1]}",15));
+    fixture();encrypted_net=encrypted_late=true;
+    assert(ts_config_migrate_system(true)==ESP_ERR_NOT_FINISHED&&!erased);
+    assert(!memcmp(system_record("ts_net","config")->data,"{\"eth.ip\":\"192.0.2.1\"}",22));
+    fixture();encrypted_net=fail_pack=true;boot_schemas=0;
+    assert(ts_services_prepare_config()==ESP_OK&&boot_schemas==1);
+    assert(!system_record("ts_cfg_state","system_v")&&!erased);
+    assert(!memcmp(system_record("ts_net","config")->data,"{\"eth.ip\":\"192.0.2.1\"}",22));
     color_storage();
     driver_storage();
     fixture();

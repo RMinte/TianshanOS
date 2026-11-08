@@ -104,7 +104,8 @@ esp_err_t ts_pki_client_init_with_config(const ts_pki_client_config_t *config);
 /**
  * @brief Deinitialize PKI client
  */
-void ts_pki_client_deinit(void);
+/* Busy retains all resources; retry before deinitializing certificate services. */
+esp_err_t ts_pki_client_deinit(void);
 
 /**
  * @brief Get default configuration

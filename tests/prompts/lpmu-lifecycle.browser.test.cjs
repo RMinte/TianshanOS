@@ -52,7 +52,7 @@ async function open(language) {
     await page.goto(base + '/#/network');
     await page.waitForFunction(() => i18n.isReady());
     await page.evaluate(async () => {
-        closeLoginModal(); api.token='fixture'; api.username='root'; api.level=2;
+        closeLoginModal(); api.token='fixture'; api.username='root'; api.level='root';
         updateAuthUI(); router.appReady=true;
         const navigate=router.navigate.bind(router);
         router.navigate=(...args) => window.navigationWork=navigate(...args);

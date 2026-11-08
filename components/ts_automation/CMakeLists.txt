@@ -26,6 +26,7 @@ idf_component_register(
         ts_storage
         json
     PRIV_REQUIRES
+        ts_http_fetch
         ts_api
         ts_led
         ts_hal

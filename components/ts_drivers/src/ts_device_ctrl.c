@@ -11,6 +11,7 @@
 #include "ts_log.h"
 #include "ts_event.h"
 #include "esp_timer.h"
+#include "esp_system.h"
 #include "esp_heap_caps.h"
 #include "driver/gpio.h"
 #include "freertos/FreeRTOS.h"
@@ -78,6 +79,8 @@ typedef struct {
 /*===========================================================================*/
 
 static agx_instance_t s_agx = {0};
+/* Serialize reset GPIO/state commits with a completed shutdown, never delays. */
+static portMUX_TYPE s_agx_power_lock = portMUX_INITIALIZER_UNLOCKED;
 static lpmu_instance_t s_lpmu = {0};
 static bool s_initialized = false;
 
@@ -236,10 +239,12 @@ static esp_err_t agx_power_off(void)
     
     // 设置 RESET = HIGH（断电/关机）
     // 注意：不要调用 gpio_reset_pin，会导致电平毛刺
+    portENTER_CRITICAL(&s_agx_power_lock);
     gpio_set_level(pin_reset, 1);  // HIGH = 断电（持续）
+    s_agx.state = TS_DEVICE_STATE_OFF;
+    portEXIT_CRITICAL(&s_agx_power_lock);
     TS_LOGI(TAG, "RESET set to HIGH (GPIO%d), AGX powered off", pin_reset);
     
-    s_agx.state = TS_DEVICE_STATE_OFF;
     TS_LOGI(TAG, "AGX powered off");
     
     // 发送设备状态变更事件 (WebSocket)
@@ -271,29 +276,48 @@ static esp_err_t agx_reset(void)
         return ESP_ERR_INVALID_STATE;
     }
     
+    if (!GPIO_IS_VALID_OUTPUT_GPIO(pin_reset)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
     // 重启脉冲：LOW → HIGH → LOW（断电后重新通电）
     // 注意：不要调用 gpio_reset_pin()，避免电平毛刺（robOS 经验）
     TS_LOGI(TAG, "Sending RESET pulse (GPIO%d: LOW->HIGH->LOW, HIGH for %dms)...", 
             pin_reset, TS_AGX_RESET_PULSE_MS);
+    portENTER_CRITICAL(&s_agx_power_lock);
     gpio_set_level(pin_reset, 0);  // LOW = 确保通电状态
+    s_agx.state = TS_DEVICE_STATE_ON;  // ON means supplied, not OS-ready.
+    portEXIT_CRITICAL(&s_agx_power_lock);
     vTaskDelay(pdMS_TO_TICKS(50)); // 短暂延时
+    portENTER_CRITICAL(&s_agx_power_lock);
+    if (s_agx.state == TS_DEVICE_STATE_OFF) {
+        portEXIT_CRITICAL(&s_agx_power_lock);
+        return ESP_ERR_INVALID_STATE;
+    }
     gpio_set_level(pin_reset, 1);  // HIGH = 断电
+    portEXIT_CRITICAL(&s_agx_power_lock);
     vTaskDelay(pdMS_TO_TICKS(TS_AGX_RESET_PULSE_MS));
+    portENTER_CRITICAL(&s_agx_power_lock);
+    if (s_agx.state == TS_DEVICE_STATE_OFF) {
+        portEXIT_CRITICAL(&s_agx_power_lock);
+        return ESP_ERR_INVALID_STATE;
+    }
     gpio_set_level(pin_reset, 0);  // LOW = 重新通电
+    s_agx.power_on_time = esp_timer_get_time() / 1000;
+    uint32_t boot_count = ++s_agx.boot_count;
+    s_agx.state = TS_DEVICE_STATE_ON;
+    portEXIT_CRITICAL(&s_agx_power_lock);
     TS_LOGI(TAG, "RESET pulse complete, GPIO%d back to LOW (powered on)", pin_reset);
     
-    s_agx.boot_count++;
-    s_agx.state = TS_DEVICE_STATE_BOOTING;
-    
-    TS_LOGI(TAG, "AGX reset complete (boot #%lu)", s_agx.boot_count);
+    TS_LOGI(TAG, "AGX reset complete (boot #%lu)", boot_count);
     
     // 发送设备状态变更事件 (WebSocket)
     cJSON *status = cJSON_CreateObject();
     if (status) {
         cJSON_AddStringToObject(status, "device", "agx");
         cJSON_AddBoolToObject(status, "power", true);
-        cJSON_AddStringToObject(status, "state", "resetting");
-        cJSON_AddNumberToObject(status, "boot_count", s_agx.boot_count);
+        cJSON_AddStringToObject(status, "state", "on");
+        cJSON_AddNumberToObject(status, "boot_count", boot_count);
         char *json_str = cJSON_PrintUnformatted(status);
         if (json_str) {
             ts_event_post(TS_EVENT_BASE_DEVICE_MON, TS_EVENT_DEVICE_STATUS_CHANGED, 
@@ -896,18 +920,22 @@ static void lpmu_startup_detect_task(void *arg)
         s_lpmu.power_on_time = esp_timer_get_time() / 1000;
     } else {
         // LPMU 不在线，尝试开机
-        TS_LOGI(TAG, "LPMU not detected, attempting power on...");
+        TS_LOGI(TAG, "LPMU not detected, checking automatic power-on...");
         s_lpmu.state = TS_DEVICE_STATE_BOOTING;
         
-        // 发送开机脉冲
-        if (s_lpmu.gpio.power_btn) {
+        // Only cold controller power-on may automatically press the power button.
+        esp_reset_reason_t reset_reason = esp_reset_reason();
+        if (s_lpmu.gpio.power_btn && reset_reason == ESP_RST_POWERON) {
             ts_gpio_set_level(s_lpmu.gpio.power_btn, 1);
             vTaskDelay(pdMS_TO_TICKS(TS_LPMU_POWER_PULSE_MS));
             ts_gpio_set_level(s_lpmu.gpio.power_btn, 0);
+            TS_LOGI(TAG, "LPMU power pulse sent");
+        } else {
+            TS_LOGI(TAG, "LPMU automatic power pulse skipped (reset reason %d)", reset_reason);
         }
         
         // 等待 LPMU 启动（最多 80 秒）
-        TS_LOGI(TAG, "LPMU power pulse sent, waiting for boot (max 80s)...");
+        TS_LOGI(TAG, "Waiting for LPMU boot (max 80s)...");
         bool booted = false;
         for (int i = 0; i < 16; i++) {  // 16 * 5s = 80s
             vTaskDelay(pdMS_TO_TICKS(5000));

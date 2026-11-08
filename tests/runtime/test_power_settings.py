@@ -40,6 +40,7 @@ code = r'''
 #include <stdlib.h>
 #include <string.h>
 #include "ts_api.h"
+#include "ts_security.h"
 #include "ts_power_policy.h"
 #include "ts_power_monitor.h"
 #include "freertos/semphr.h"
@@ -290,7 +291,7 @@ argtable = idf / 'components/console/argtable3'
 with tempfile.TemporaryDirectory(prefix='ts-power-settings-') as directory:
     build = Path(directory); (build / 'test.c').write_text(code)
     subprocess.run(['cc', '-std=gnu11', '-g', '-Wno-deprecated-declarations', '-fsanitize=address,undefined',
-                    '-fno-sanitize-recover=all', '-Itests/runtime/storage_stubs', '-Icomponents/ts_api/include',
+                    '-fno-sanitize-recover=all', '-Itests/runtime/storage_stubs', '-Icomponents/ts_api/include', '-Icomponents/ts_security/include',
                     '-Icomponents/ts_drivers/include', '-I' + str(cjson), '-I' + str(argtable),
                     str(build / 'test.c'), str(cjson / 'cJSON.c'), *map(str, argtable.glob('*.c')),
                     '-lpthread', '-lm', '-o', str(build / 'test')], check=True)

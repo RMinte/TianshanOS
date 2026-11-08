@@ -1,3 +1,4 @@
+#include "ts_time_sync.h"
 /**
  * @file main.c
  * @brief TianShanOS Main Entry Point
@@ -134,6 +135,7 @@ static void print_system_info(void)
  */
 void app_main(void)
 {
+    /* Install before config migration or any network/service TLS consumer. */
     esp_err_t ret;
 
     // 打印启动横幅

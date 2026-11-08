@@ -8,11 +8,13 @@
  */
 
 #include "ts_api.h"
+#include "ts_security.h"
 #include "ts_temp_source.h"
 #include "ts_variable.h"
 #include "ts_log.h"
 #include "esp_timer.h"
 #include <string.h>
+#include <math.h>
 
 #define TAG "api_temp"
 
@@ -194,6 +196,17 @@ static esp_err_t api_temp_manual(const cJSON *params, ts_api_result_t *result)
     esp_err_t ret = ESP_OK;
     
     /* Set manual temperature if provided */
+    const cJSON *temperature = cJSON_IsNumber(temp_item) ? temp_item : temp_01c_item;
+    if (temperature) {
+        double value = temperature->valuedouble;
+        double scale = temperature == temp_01c_item ? 1.0 : 10.0;
+        if (!cJSON_IsNumber(temperature) || !isfinite(value) ||
+            value < TS_TEMP_MIN_VALID / scale || value > TS_TEMP_MAX_VALID / scale ||
+            (scale == 1.0 && floor(value) != value)) {
+            ts_api_result_error(result, TS_API_ERR_INVALID_ARG, "Invalid manual temperature");
+            return ESP_ERR_INVALID_ARG;
+        }
+    }
     if (cJSON_IsNumber(temp_item)) {
         int16_t temp_01c = (int16_t)(temp_item->valuedouble * 10.0);
         ret = ts_temp_set_manual(temp_01c);
@@ -541,48 +554,69 @@ static esp_err_t api_temp_bind(const cJSON *params, ts_api_result_t *result)
 /*                          Registration                                      */
 /*===========================================================================*/
 
+static esp_err_t api_temp_bind_for_session(const cJSON *params, uint32_t session_id, ts_api_result_t *result)
+{
+#ifdef CONFIG_TS_WEBUI_AUTH_REQUIRED
+    ts_session_t caller;
+    if (ts_security_validate_session(session_id, &caller) != ESP_OK || caller.level < TS_PERM_ADMIN) {
+        ts_api_result_error(result, TS_API_ERR_AUTH, "Unauthorized");
+        return ESP_ERR_NOT_ALLOWED;
+    }
+    /* Match the handler's case-insensitive legacy names, including unbind and
+     * malformed requests: a non-Root caller cannot enter any setter branch. */
+    if ((cJSON_GetObjectItem(params, "variables") || cJSON_GetObjectItem(params, "variable")) && caller.level < TS_PERM_ROOT) {
+        ts_api_result_error(result, TS_API_ERR_NO_PERMISSION, "Root permission required");
+        return ESP_ERR_NOT_ALLOWED;
+    }
+#else
+    (void)session_id;
+#endif
+    return api_temp_bind(params, result);
+}
+
 static const ts_api_endpoint_t s_temp_endpoints[] = {
     {
-        .name = "temp.sources",
+        .name = "temp.sources", .external_access=TS_API_ACCESS_READ, .allowed_methods=TS_API_METHOD_READ,
         .description = "Get all temperature sources info",
         .category = TS_API_CAT_DEVICE,  // Use DEVICE category
         .handler = api_temp_sources,
-        .requires_auth = false,
+        .requires_auth=true,
     },
     {
-        .name = "temp.read",
+        .name = "temp.read", .external_access=TS_API_ACCESS_READ, .allowed_methods=TS_API_METHOD_READ,
         .description = "Read current temperature",
         .category = TS_API_CAT_DEVICE,
         .handler = api_temp_read,
-        .requires_auth = false,
+        .requires_auth=true,
     },
     {
-        .name = "temp.manual",
+        .name = "temp.manual", .external_access=TS_API_ACCESS_ADMIN, .allowed_methods=TS_API_METHOD_WRITE,
         .description = "Set/get manual temperature mode",
         .category = TS_API_CAT_DEVICE,
         .handler = api_temp_manual,
-        .requires_auth = true,
+        .requires_auth=true,
     },
     {
-        .name = "temp.status",
+        .name = "temp.status", .external_access=TS_API_ACCESS_PUBLIC, .allowed_methods=TS_API_METHOD_READ,
         .description = "Get temperature system status",
         .category = TS_API_CAT_DEVICE,
         .handler = api_temp_status,
-        .requires_auth = false,
+        .requires_auth=false,
     },
     {
-        .name = "temp.select",
+        .name = "temp.select", .external_access=TS_API_ACCESS_ADMIN, .allowed_methods=TS_API_METHOD_WRITE,
         .description = "Set/get preferred temperature source",
         .category = TS_API_CAT_DEVICE,
         .handler = api_temp_select,
-        .requires_auth = true,
+        .requires_auth=true,
     },
     {
-        .name = "temp.bind",
+        .name = "temp.bind", .external_access=TS_API_ACCESS_ADMIN, .allowed_methods=TS_API_METHOD_WRITE,
         .description = "Bind/unbind temperature to a system variable",
         .category = TS_API_CAT_DEVICE,
         .handler = api_temp_bind,
-        .requires_auth = true,
+        .session_handler = api_temp_bind_for_session,
+        .requires_auth=true,
     },
 };
 

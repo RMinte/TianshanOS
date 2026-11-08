@@ -13,6 +13,7 @@
 #include "esp_log.h"
 #include "esp_heap_caps.h"
 #include <string.h>
+#include <errno.h>
 #include <stdatomic.h>
 #include "freertos/task.h"
 
@@ -82,6 +83,7 @@ esp_err_t ts_http_server_start(void)
     config.server_port = CONFIG_TS_NET_HTTP_PORT;
 #endif
     config.open_fn = session_open;
+    config.ctrl_port = 32768;
     config.max_uri_handlers = MAX_ROUTES;
     config.uri_match_fn = httpd_uri_match_wildcard;
     config.global_user_ctx = NULL;
@@ -100,12 +102,15 @@ esp_err_t ts_http_server_start(void)
     // 注意：任务栈必须在内部 RAM，因为 flash 操作时 PSRAM 不可用
     config.task_caps = MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT;
     
-    esp_err_t ret = httpd_start(&s_server, &config);
+    httpd_handle_t started = NULL;
+    esp_err_t ret = httpd_start(&started, &config);
     if (ret == ESP_OK) {
-        TS_LOGI(TAG, "HTTP server started on port %d", config.server_port);
+        s_server = started;
+        TS_LOGI(TAG, "HTTP server started on port %u", config.server_port);
     }
     return ret;
 }
+
 
 esp_err_t ts_http_server_admit_ws(httpd_req_t *req, unsigned client_limit)
 {
@@ -154,6 +159,72 @@ done:
     return ret;
 }
 
+bool ts_http_authorize_route(ts_http_request_t *req, const ts_http_route_t *route)
+{
+#ifdef CONFIG_TS_WEBUI_AUTH_REQUIRED
+    if (route->requires_auth || route->required_level) {
+        char auth[128];
+        uint32_t session_id;
+        ts_perm_level_t level = TS_PERM_NONE;
+        if (ts_http_get_header(req, "Authorization", auth, sizeof(auth)) != ESP_OK ||
+            ts_auth_validate_request(auth, &session_id, &level) != ESP_OK) {
+            ts_http_send_error(req, 401, "Unauthorized");
+            return false;
+        }
+        ts_perm_level_t required = route->required_level ? (ts_perm_level_t)route->required_level : TS_PERM_READ;
+        if (level < required) {
+            ts_http_send_error(req, 403, required == TS_PERM_ROOT ? "Root permission required" : "Permission denied");
+            return false;
+        }
+    }
+#else
+    (void)req; (void)route;
+#endif
+    return true;
+}
+
+esp_err_t ts_http_admit_body(ts_http_request_t *req, const ts_http_route_t *route)
+{
+    const size_t limit=route->max_body_bytes?route->max_body_bytes:1024U*1024U;
+    size_t length=req->req->content_len;
+    if (length==SIZE_MAX || length>limit) {
+        ts_http_send_error(req,413,"Request body too large");
+        return ESP_FAIL;
+    }
+    ts_httpd_set_body_receive_budget(route->body_timeout_ms);
+    return ESP_OK;
+}
+
+esp_err_t ts_http_receive_body(ts_http_request_t *req)
+{
+    size_t length = req->req->content_len;
+    if (!length) return ESP_OK;
+    if (length == SIZE_MAX) {
+        ts_http_send_error(req, 413, "Request body too large");
+        return ESP_FAIL;
+    }
+    char *body = TS_MALLOC_PSRAM(length + 1);
+    if (!body) {
+        ts_http_send_error(req, 500, "Memory allocation failed");
+        return ESP_FAIL;
+    }
+    size_t received = 0;
+    while (received < length) {
+        int ret = httpd_req_recv(req->req, body + received, length - received);
+        if (ret <= 0) {
+            free(body);
+            ts_http_send_error(req, ret == HTTPD_SOCK_ERR_TIMEOUT ? 408 : 400,
+                ret == HTTPD_SOCK_ERR_TIMEOUT ? "Request body timed out" : "Incomplete request body");
+            return ESP_FAIL; /* Caller closes the connection with unread bytes. */
+        }
+        received += ret;
+    }
+    body[length] = '\0';
+    req->body = body;
+    req->body_len = length;
+    return ESP_OK;
+}
+
 static esp_err_t http_handler_wrapper(httpd_req_t *req)
 {
     if(s_stopping && req->method!=HTTP_GET) {
@@ -175,48 +246,20 @@ static esp_err_t http_handler_wrapper(httpd_req_t *req)
     };
 
 #ifdef CONFIG_TS_WEBUI_AUTH_REQUIRED
-    if (route->requires_auth) {
-        char auth[128];
-        uint32_t session_id;
-        ts_perm_level_t level;
-        if (ts_http_get_header(&ts_req, "Authorization", auth, sizeof(auth)) != ESP_OK ||
-            ts_auth_validate_request(auth, &session_id, &level) != ESP_OK || level < TS_PERM_READ)
-            return ts_http_send_error(&ts_req, 401, "Unauthorized");
-    }
+    if (!ts_http_authorize_route(&ts_req, route)) return ESP_FAIL;
 #endif
     
-    // Read body if present - must loop to receive all data
-    if (req->content_len > 0) {
-        ts_req.body = TS_MALLOC_PSRAM(req->content_len + 1);
-        if (ts_req.body) {
-            size_t total_received = 0;
-            while (total_received < req->content_len) {
-                int ret = httpd_req_recv(req, ts_req.body + total_received, 
-                                         req->content_len - total_received);
-                if (ret <= 0) {
-                    if (ret == HTTPD_SOCK_ERR_TIMEOUT) {
-                        // Timeout, continue trying
-                        continue;
-                    }
-                    // Error or connection closed
-                    TS_LOGW(TAG, "Body recv error at %zu/%zu bytes: %d", 
-                            total_received, (size_t)req->content_len, ret);
-                    break;
-                }
-                total_received += ret;
-            }
-            ts_req.body[total_received] = '\0';
-            ts_req.body_len = total_received;
-            
-            if (total_received != req->content_len) {
-                TS_LOGW(TAG, "Incomplete body: got %zu of %zu bytes", 
-                        total_received, (size_t)req->content_len);
-            }
-        } else {
-            TS_LOGE(TAG, "Failed to allocate %zu bytes for body", (size_t)req->content_len);
-        }
+    if (route->admit && !route->admit(&ts_req, route->user_data)) return ESP_FAIL;
+
+    if (ts_http_admit_body(&ts_req, route) != ESP_OK) return ESP_FAIL;
+    if (ts_http_receive_body(&ts_req) != ESP_OK) return ESP_FAIL;
+
+    /* A large body may outlive the session or a role change. Route-owned
+     * authorization is live again at execution, before any business effect. */
+    if (!ts_http_authorize_route(&ts_req, route)) {
+        free(ts_req.body);
+        return ESP_FAIL;
     }
-    
     esp_err_t result = route->handler(&ts_req, route->user_data);
     
     free(ts_req.body);
@@ -280,14 +323,18 @@ esp_err_t ts_http_send_response(ts_http_request_t *req, int status,
 {
     if (!req || !req->req) return ESP_ERR_INVALID_ARG;
     
-    httpd_resp_set_status(req->req, status == 200 ? "200 OK" :
-                                    status == 201 ? "201 Created" :
-                                    status == 400 ? "400 Bad Request" :
-                                    status == 401 ? "401 Unauthorized" :
-                                    status == 403 ? "403 Forbidden" :
-                                    status == 404 ? "404 Not Found" :
-                                    status == 500 ? "500 Internal Server Error" : "200 OK");
-    
+    if (status < 100 || status > 599) status = 500;
+    const char *reason = status == 200 ? "OK" : status == 201 ? "Created" :
+        status == 400 ? "Bad Request" : status == 401 ? "Unauthorized" :
+        status == 403 ? "Forbidden" : status == 404 ? "Not Found" :
+        status == 405 ? "Method Not Allowed" : status == 408 ? "Request Timeout" :
+        status == 409 ? "Conflict" : status == 413 ? "Content Too Large" :
+        status == 429 ? "Too Many Requests" : status == 500 ? "Internal Server Error" :
+        status == 503 ? "Service Unavailable" : "Response";
+    char status_line[48];
+    snprintf(status_line, sizeof(status_line), "%d %s", status, reason);
+    httpd_resp_set_status(req->req, status_line);
+
     if (content_type) {
         httpd_resp_set_type(req->req, content_type);
     }
@@ -297,6 +344,9 @@ esp_err_t ts_http_send_response(ts_http_request_t *req, int status,
 
 esp_err_t ts_http_send_json(ts_http_request_t *req, int status, const char *json)
 {
+    if (!req || !req->req) return ESP_ERR_INVALID_ARG;
+    esp_err_t ret = httpd_resp_set_hdr(req->req, "Cache-Control", "no-store");
+    if (ret != ESP_OK) return ret;
     return ts_http_send_response(req, status, "application/json", json);
 }
 
@@ -322,9 +372,34 @@ static bool is_compressible(const char *ext)
             strcmp(ext, ".html") == 0 || strcmp(ext, ".json") == 0);
 }
 
-esp_err_t ts_http_send_file(ts_http_request_t *req, const char *filepath)
+static esp_err_t send_file(ts_http_request_t *req, const char *filepath, bool private_response)
 {
     if (!req || !filepath) return ESP_ERR_INVALID_ARG;
+    /* SDK keeps header value pointers until the response is sent. */
+    char disposition[3 * 256 + 80] = "attachment; filename=\"download\"; filename*=UTF-8''";
+    /* API downloads must not inherit the public asset cache policy, including
+     * errors before the file is opened or its content type is known. */
+    if (private_response) {
+        const char *filename = strrchr(filepath, '/');
+        filename = filename ? filename + 1 : filepath;
+        size_t length = strnlen(filename, 256);
+        if (length == 256) return ESP_ERR_INVALID_SIZE;
+        /* Encode bytes, not a quoted user-controlled header value. UTF-8 names
+         * round-trip without allowing quotes, CR/LF or path delimiters. */
+        size_t used = strlen(disposition);
+        static const char hex[] = "0123456789ABCDEF";
+        for (size_t i = 0; i < length; ++i) {
+            unsigned char c = (unsigned char)filename[i];
+            if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                (c >= '0' && c <= '9') || c == '.' || c == '-' || c == '_') disposition[used++] = c;
+            else { disposition[used++] = '%'; disposition[used++] = hex[c >> 4]; disposition[used++] = hex[c & 15]; }
+        }
+        disposition[used] = 0;
+        if (httpd_resp_set_hdr(req->req, "Cache-Control", "no-store") != ESP_OK ||
+            httpd_resp_set_hdr(req->req, "Content-Disposition", disposition) != ESP_OK ||
+            httpd_resp_set_hdr(req->req, "Content-Security-Policy", "sandbox; default-src 'none'; frame-ancestors 'none'") != ESP_OK ||
+            httpd_resp_set_hdr(req->req, "X-Content-Type-Options", "nosniff") != ESP_OK) return ESP_FAIL;
+    }
     
     /* ===== Content-Type 检测 ===== */
     const char *ext = strrchr(filepath, '.');
@@ -347,7 +422,7 @@ esp_err_t ts_http_send_file(ts_http_request_t *req, const char *filepath)
     char gz_path[140];
     bool use_gzip = false;
     
-    if (is_compressible(ext) && client_accepts_gzip(req->req)) {
+    if (!private_response && is_compressible(ext) && client_accepts_gzip(req->req)) {
         snprintf(gz_path, sizeof(gz_path), "%s.gz", filepath);
         if (ts_storage_exists(gz_path)) {
             actual_filepath = gz_path;
@@ -367,7 +442,8 @@ esp_err_t ts_http_send_file(ts_http_request_t *req, const char *filepath)
     }
     
     /* ===== 设置响应头 ===== */
-    httpd_resp_set_type(req->req, content_type);
+    esp_err_t type_result = httpd_resp_set_type(req->req, content_type);
+    if (private_response && type_result != ESP_OK) return type_result;
     
     if (use_gzip) {
         httpd_resp_set_hdr(req->req, "Content-Encoding", "gzip");
@@ -378,15 +454,16 @@ esp_err_t ts_http_send_file(ts_http_request_t *req, const char *filepath)
      * JS/CSS/字体等通过 index.html 中的 ?v= 版本参数实现缓存失效。
      */
     const char *basename = strrchr(filepath, '/');
-    if (basename && strcmp(basename, "/index.html") == 0) {
+    if (!private_response && basename && strcmp(basename, "/index.html") == 0) {
         httpd_resp_set_hdr(req->req, "Cache-Control", "no-cache, no-store, must-revalidate");
-    } else if (ext) {
+    } else if (!private_response && ext) {
         httpd_resp_set_hdr(req->req, "Cache-Control", "public, max-age=604800, immutable");
     }
     
     /* ===== 发送文件内容 ===== */
     
     /* 对于小文件（<32KB），直接发送 */
+    if (!size) return httpd_resp_send(req->req, NULL, 0);
     if (size < 32 * 1024) {
         char *buf = TS_MALLOC_PSRAM(size);
         if (!buf) {
@@ -406,6 +483,7 @@ esp_err_t ts_http_send_file(ts_http_request_t *req, const char *filepath)
     /* 对于大文件，使用分块传输（chunked transfer） */
     FILE *f = fopen(actual_filepath, "r");
     if (!f) {
+        if (errno == EBUSY) return ts_http_send_error(req, 503, "WebUI update in progress");
         return ts_http_send_error(req, 500, "Failed to open file");
     }
     
@@ -439,6 +517,16 @@ esp_err_t ts_http_send_file(ts_http_request_t *req, const char *filepath)
     free(chunk);
     fclose(f);
     return ret;
+}
+
+esp_err_t ts_http_send_file(ts_http_request_t *req, const char *filepath)
+{
+    return send_file(req, filepath, false);
+}
+
+esp_err_t ts_http_send_private_file(ts_http_request_t *req, const char *filepath)
+{
+    return send_file(req, filepath, true);
 }
 
 esp_err_t ts_http_send_error(ts_http_request_t *req, int status, const char *message)
@@ -525,7 +613,12 @@ esp_err_t ts_http_set_cors(ts_http_request_t *req, const char *origin)
 {
     if (!req || !req->req) return ESP_ERR_INVALID_ARG;
     
-    httpd_resp_set_hdr(req->req, "Access-Control-Allow-Origin", origin ? origin : "*");
+    (void)origin; /* Legacy callers cannot select or widen the browser policy. */
+    esp_err_t ret = ts_http_validate_browser_request(req->req, req->cors_origin, sizeof(req->cors_origin));
+    if (ret != ESP_OK) return ret;
+    if (!req->cors_origin[0]) return ESP_OK; /* Non-browser clients need no ACAO. */
+    httpd_resp_set_hdr(req->req, "Access-Control-Allow-Origin", req->cors_origin);
+    httpd_resp_set_hdr(req->req, "Vary", "Origin");
     httpd_resp_set_hdr(req->req, "Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
     httpd_resp_set_hdr(req->req, "Access-Control-Allow-Headers", "Content-Type, Authorization");
     

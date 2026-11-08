@@ -46,7 +46,8 @@ int main(void) {
     atomic_store(&allowed,true);simulated_ms=5000;wait_running(true);
     unsigned count=starts;
     for(int i=0;i<100;++i)https_conditions_changed(NULL,NULL);settle();assert(starts==count);
-    stored_generation=2;settle();ts_https_runtime_t r;ts_https_get_runtime(&r);assert(r.loaded_generation==1);
+    stored_generation=2;settle();ts_https_runtime_t r;ts_https_get_runtime(&r);assert(r.loaded_generation==2);
+    assert(starts==count+1);count=starts;
     assert(https_service_stop(NULL,NULL)==0);assert(!ts_https_is_running());
     for(int i=0;i<100;++i)https_conditions_changed(NULL,NULL);simulated_ms=100000;settle();assert(starts==count);
     start_error=ESP_FAIL;assert(https_service_start(NULL,NULL)==0);settle();assert(starts==count+1);

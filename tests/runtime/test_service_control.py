@@ -1,6 +1,7 @@
 """Actual API -> queue admission -> executor entry -> SSH -> durable run registry.
 Only transport, driver storage and RTOS scheduling are simulated.
 """
+from host_paths import build_dir
 from pathlib import Path
 import os,re,subprocess
 root=Path.cwd();sdk=Path(os.environ.get('IDF_PATH','/Users/massif/esp/v5.5.2/esp-idf'))/'components/json/cJSON'
@@ -320,7 +321,7 @@ int main(void)
     puts("PASS service API/executor: queued plan and persistence before launch, stale start cancellation, responsive cached reads, admitted-I/O cleanup, deleted-definition controls, frozen target, expiry, queue rejection and unknown remote state");
 }
 '''
-build=Path(os.environ.get('SERVICE_TEST_BUILD','/tmp/tianshan-service-runs-tests'));build.mkdir(exist_ok=True);(build/'service_control.c').write_text(code)
+build=Path(os.environ['SERVICE_TEST_BUILD']) if os.environ.get('SERVICE_TEST_BUILD') else build_dir('service-runs');build.mkdir(exist_ok=True);(build/'service_control.c').write_text(code)
 args=['cc','-std=c11','-D_DEFAULT_SOURCE','-g','-fsanitize=address,undefined','-Wno-deprecated-declarations']
 for path in ['tests/runtime/state_stubs','tests/runtime/ssh_stubs','tests/runtime/stubs','tests/runtime/storage_stubs','tests/certificate/stubs','components/ts_security/include','components/ts_automation/include','components/ts_automation/src','components/ts_api/include',str(sdk)]:args+=['-I'+path]
 args += [str(build/'service_control.c'),'components/ts_security/src/ts_ssh_service.c','components/ts_security/src/ts_ssh_run_store.c','components/ts_security/src/ts_ssh_log_watch.c','components/ts_security/src/ts_ssh_probe.c','components/ts_security/src/ts_ssh_pattern.c',str(sdk/'cJSON.c'),'-lpthread','-lm','-o',str(build/'service_control')]

@@ -110,12 +110,12 @@
   "login.locked": {
     "zh-CN": {
       "type": "inline",
-      "text": "登录失败：连续输错次数太多，这个账户暂时被锁定。请等 5 分钟后再试。",
+      "text": "登录失败：连续输错次数太多，这个账户暂时被锁定。请保持设备开机，等 5 分钟后再试；重启会重新开始冷却。",
       "details": null
     },
     "en-US": {
       "type": "inline",
-      "text": "Login failed: too many wrong attempts have locked this account for a while. Wait 5 minutes and try again.",
+      "text": "Login failed: too many wrong attempts have locked this account for a while. Keep the device on and wait 5 minutes before trying again. Restarting begins a new cooldown.",
       "details": null
     }
   },

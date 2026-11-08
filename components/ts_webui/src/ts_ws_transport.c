@@ -26,7 +26,7 @@ static bool s_peer_bound[TS_WS_CONNECTIONS];
 static int s_log_levels[TS_WS_CONNECTIONS];
 static uint64_t s_log_revisions[TS_WS_CONNECTIONS];
 typedef enum {MSG_ORDINARY, MSG_TOPIC, MSG_RESULT, MSG_POWER, MSG_POWER_TICK} message_kind_t;
-struct ts_ws_message { unsigned refs; char *text; size_t len, capacity; message_kind_t kind; ts_perm_level_t required_level; };
+struct ts_ws_message { unsigned refs; char *text; size_t len, capacity; message_kind_t kind; ts_perm_level_t required_level; bool session_scoped; uint32_t required_session; };
 static char s_power_payloads[TS_WS_POWER_SLOTS][TS_WS_POWER_BYTES];
 static unsigned s_power_bytes;
 static ts_ws_transport_stats_t s_tx_stats;
@@ -110,7 +110,7 @@ esp_err_t ts_ws_peer_bind_session(ts_ws_peer_t peer, uint32_t session_id)
     portEXIT_CRITICAL(&s_lock);
     return ret;
 }
-bool ts_ws_peer_authorized(ts_ws_peer_t peer, ts_perm_level_t required)
+static bool peer_authorized(ts_ws_peer_t peer, ts_perm_level_t required, const uint32_t *expected_session)
 {
     uint32_t session_id = 0;
     bool valid = false;
@@ -123,7 +123,7 @@ bool ts_ws_peer_authorized(ts_ws_peer_t peer, ts_perm_level_t required)
         }
     }
     portEXIT_CRITICAL(&s_lock);
-    if (!valid) return false;
+    if (!valid || (expected_session && (!*expected_session || session_id != *expected_session))) return false;
 #ifdef CONFIG_TS_WEBUI_AUTH_REQUIRED
     if (required == TS_PERM_NONE) return true;
     ts_session_t session;
@@ -154,6 +154,14 @@ bool ts_ws_peer_authorized(ts_ws_peer_t peer, ts_perm_level_t required)
     (void)required;
     return true;
 #endif
+}
+bool ts_ws_peer_authorized(ts_ws_peer_t peer, ts_perm_level_t required)
+{
+    return peer_authorized(peer, required, NULL);
+}
+bool ts_ws_peer_authorized_for_session(ts_ws_peer_t peer, ts_perm_level_t required, uint32_t session_id)
+{
+    return peer_authorized(peer, required, &session_id);
 }
 void ts_ws_peer_close(ts_ws_peer_t peer)
 {
@@ -209,7 +217,7 @@ static ts_ws_message_t *message_alloc(size_t capacity, message_kind_t kind)
     size_t used=kind>=MSG_POWER ? s_power_bytes : s_tx_stats.bytes-s_power_bytes;
     size_t limit=kind>=MSG_POWER ? TS_WS_POWER_BUDGET : TS_WS_TOTAL_BYTES-TS_WS_POWER_BUDGET;
     for (unsigned i=begin; capacity <= limit-used && i<end; ++i) if (!s_messages[i].refs) {
-        m = &s_messages[i]; m->refs = 1; m->capacity = capacity; m->kind=kind; m->required_level=TS_PERM_NONE;
+        m = &s_messages[i]; m->refs = 1; m->capacity = capacity; m->kind=kind; m->required_level=TS_PERM_NONE; m->session_scoped=false; m->required_session=0;
         if(kind>=MSG_POWER)s_power_bytes+=capacity;
         s_tx_stats.bytes += capacity;
         if(s_tx_stats.bytes > s_tx_stats.bytes_high) s_tx_stats.bytes_high=s_tx_stats.bytes;
@@ -261,6 +269,10 @@ ts_ws_message_t *ts_ws_message_text(const char *text, size_t len)
 void ts_ws_message_require(ts_ws_message_t *message, ts_perm_level_t required)
 {
     if (message) message->required_level = required;
+}
+void ts_ws_message_require_session(ts_ws_message_t *message, uint32_t session_id)
+{
+    if (message) { message->session_scoped = true; message->required_session = session_id; }
 }
 ts_ws_message_t *ts_ws_message_json(const char *topic, const cJSON *data, int64_t timestamp)
 {
@@ -325,7 +337,9 @@ static void deliver(void *arg)
      * on this same task. The stop owner keeps the server alive until refs drain. */
     if (valid && (!d->check || d->check(d->revision, d->delivery)) &&
         httpd_ws_get_fd_info(d->peer.server, d->peer.fd) == HTTPD_WS_CLIENT_WEBSOCKET) {
-        if (!ts_ws_peer_authorized(d->peer, d->message->required_level)) {
+        if (!(d->message->session_scoped ?
+              ts_ws_peer_authorized_for_session(d->peer, d->message->required_level, d->message->required_session) :
+              ts_ws_peer_authorized(d->peer, d->message->required_level))) {
             ret = ESP_ERR_NOT_ALLOWED;
         } else {
             httpd_ws_frame_t frame = {.type = HTTPD_WS_TYPE_TEXT,
@@ -524,9 +538,18 @@ static esp_err_t broadcast_filtered(const httpd_ws_frame_t *frame, int level)
     if(!s_server.stopping) for(unsigned i=0;i<TS_WS_CONNECTIONS;i++)
         if(s_peers[i].connection && (level < 0 || level <= s_log_levels[i])) {revisions[n]=s_log_revisions[i];peers[n++]=s_peers[i];}
     portEXIT_CRITICAL(&s_lock);
+    if(level >= 0) {
+        unsigned candidates = n;
+        n = 0;
+        for(unsigned i=0;i<candidates;i++) if(ts_ws_peer_authorized(peers[i], TS_PERM_ADMIN)) {
+            peers[n] = peers[i];
+            revisions[n++] = revisions[i];
+        }
+    }
     if(!n) return ESP_OK;
     ts_ws_message_t *m=ts_ws_message_text((const char*)frame->payload,frame->len);
     if(!m) return ESP_ERR_NO_MEM;
+    if(level >= 0) m->required_level = TS_PERM_ADMIN;
     esp_err_t ret=ESP_OK;
     for(unsigned i=0;i<n;i++) {
         esp_err_t result=ts_ws_transport_submit(peers[i],m,revisions[i],level,level<0?NULL:log_allowed,NULL);
@@ -614,6 +637,15 @@ unsigned ts_ws_peer_snapshot_for_level(ts_ws_peer_t *peers, unsigned capacity, t
     unsigned count = ts_ws_peer_snapshot(peers, capacity), kept = 0;
     for (unsigned i=0; i<count; ++i)
         if (ts_ws_peer_authorized(peers[i], required)) peers[kept++] = peers[i];
+    return kept;
+}
+unsigned ts_ws_peer_snapshot_for_session(ts_ws_peer_t *peers, unsigned capacity,
+                                         ts_perm_level_t required, uint32_t session_id)
+{
+    if (!session_id) return 0; /* Internal work has no raw browser observers. */
+    unsigned count = ts_ws_peer_snapshot(peers, capacity), kept = 0;
+    for (unsigned i=0; i<count; ++i)
+        if (ts_ws_peer_authorized_for_session(peers[i], required, session_id)) peers[kept++] = peers[i];
     return kept;
 }
 static esp_err_t reserve_kind(const ts_ws_peer_t *peers, unsigned count, message_kind_t kind,

@@ -16,6 +16,8 @@
 
 #include "esp_err.h"
 #include "cJSON.h"
+#include "ts_api_params.h"
+#include "ts_api_policy.h"
 #include <stdint.h>
 #include <stdbool.h>
 
@@ -89,6 +91,9 @@ typedef struct {
  */
 typedef esp_err_t (*ts_api_handler_t)(const cJSON *params, ts_api_result_t *result);
 
+/** Optional external dispatch: identity is a verified C value, never a JSON field. */
+typedef esp_err_t (*ts_api_session_handler_t)(const cJSON *params, uint32_t caller_session_id, ts_api_result_t *result);
+
 /**
  * @brief API endpoint definition
  */
@@ -97,8 +102,11 @@ typedef struct {
     const char *description;     /**< API description */
     ts_api_category_t category;  /**< API category */
     ts_api_handler_t handler;    /**< Handler function */
-    bool requires_auth;          /**< Requires authentication */
-    const char *permission;      /**< Required permission (optional) */
+    bool requires_auth;          /**< Compatibility metadata; external_access is authoritative. */
+    const char *permission;      /**< Capability metadata/invariants (optional), not role inference. */
+    ts_api_external_access_t external_access; /**< Explicit role; zero means internal only. */
+    uint8_t allowed_methods;     /**< Nonzero for external roles, zero for internal only. */
+    ts_api_session_handler_t session_handler; /**< External session-aware path; internal call uses handler. */
 } ts_api_endpoint_t;
 
 /*===========================================================================*/
@@ -156,6 +164,10 @@ void ts_api_parse_query(cJSON *params, char *query);
  * @return ESP_OK on success
  */
 esp_err_t ts_api_call(const char *name, const cJSON *params, ts_api_result_t *result);
+
+/* Coarse external admission from the live registry. Body-dependent resource
+ * checks remain in call_for_session after parsing; this lookup never allocates. */
+esp_err_t ts_api_get_access(const char *name, ts_api_access_t *access);
 
 /* Browser/session boundary. Trusted internal callers continue to use ts_api_call. */
 esp_err_t ts_api_call_for_session(const char *name, const cJSON *params,

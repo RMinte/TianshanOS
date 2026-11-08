@@ -1266,6 +1266,13 @@ POST /api/v1/log/capture
 }
 ```
 
+### ota.partitions
+获取当前运行身份；有效 READ 及以上会话还可读取完整分区详情。
+
+**请求**：`GET /api/v1/ota/partitions`（也兼容只读 POST）。
+
+未登录或会话失效时只返回 `data.running.label/version/project`，供原升级页面跨重启核对目标；不含地址、容量、备用分区或回滚资格。有效 READ 会话保留原完整响应。其他 OTA 操作的鉴权不变。
+
 ### ota.version
 获取固件版本信息。
 

@@ -266,46 +266,46 @@ esp_err_t ts_api_monitor_register(void)
     
     static const ts_api_endpoint_t endpoints[] = {
         {
-            .name = "monitor.status",
+            .name = "monitor.status", .external_access=TS_API_ACCESS_READ, .allowed_methods=TS_API_METHOD_READ,
             .description = "Get Compute monitor status",
             .category = TS_API_CAT_DEVICE,
             .handler = api_monitor_status,
-            .requires_auth = false,
+            .requires_auth=true,
         },
         {
-            .name = "monitor.data",
+            .name = "monitor.data", .external_access=TS_API_ACCESS_READ, .allowed_methods=TS_API_METHOD_READ,
             .description = "Get latest Compute telemetry data",
             .category = TS_API_CAT_DEVICE,
             .handler = api_monitor_data,
-            .requires_auth = false,
+            .requires_auth=true,
         },
         {
-            .name = "monitor.config",
+            .name = "monitor.config", .external_access=TS_API_ACCESS_READ, .allowed_methods=TS_API_METHOD_READ,
             .description = "Get Compute monitor configuration",
             .category = TS_API_CAT_DEVICE,
             .handler = api_monitor_config,
-            .requires_auth = false,
+            .requires_auth=true,
         },
         {
-            .name = "monitor.set_server",
+            .name = "monitor.set_server", .external_access=TS_API_ACCESS_ADMIN, .allowed_methods=TS_API_METHOD_WRITE,
             .description = "Set compute monitoring server IP and port",
             .category = TS_API_CAT_DEVICE,
             .handler = api_monitor_set_server,
-            .requires_auth = true,
+            .requires_auth=true,
         },
         {
-            .name = "monitor.start",
+            .name = "monitor.start", .external_access=TS_API_ACCESS_ADMIN, .allowed_methods=TS_API_METHOD_WRITE,
             .description = "Start Compute monitoring",
             .category = TS_API_CAT_DEVICE,
             .handler = api_monitor_start,
-            .requires_auth = true,
+            .requires_auth=true,
         },
         {
-            .name = "monitor.stop",
+            .name = "monitor.stop", .external_access=TS_API_ACCESS_ADMIN, .allowed_methods=TS_API_METHOD_WRITE,
             .description = "Stop Compute monitoring",
             .category = TS_API_CAT_DEVICE,
             .handler = api_monitor_stop,
-            .requires_auth = true,
+            .requires_auth=true,
         },
     };
     

@@ -10,6 +10,9 @@
 #define API_PREFIX "/api/v1"
 #define HTTPD_SOCK_ERR_TIMEOUT -2
 #define HTTPD_500_INTERNAL_SERVER_ERROR 500
+#define HTTPD_404_NOT_FOUND 404
+#define HTTPD_405_METHOD_NOT_ALLOWED 405
+typedef int httpd_err_code_t;
 #define ESP_LOG_ERROR 1
 static unsigned body_reads, body_allocations, handled;
 static int response_status;
@@ -18,14 +21,18 @@ static void *body_malloc(size_t n) {body_allocations++;return malloc(n);}
 #define TS_MALLOC_PSRAM body_malloc
 static void esp_log_level_set(const char *tag,int level) {(void)tag;(void)level;}
 typedef struct {const char *uri;int method;esp_err_t(*handler)(httpd_req_t*);void *user_ctx;} httpd_uri_t;
-typedef struct {unsigned server_port,max_uri_handlers,recv_wait_timeout,send_wait_timeout,stack_size,task_caps;int max_open_sockets,keep_alive_idle,keep_alive_interval,keep_alive_count;bool keep_alive_enable,lru_purge_enable;void *uri_match_fn,*global_user_ctx,*global_user_ctx_free_fn,*global_transport_ctx,*global_transport_ctx_free_fn;esp_err_t(*open_fn)(httpd_handle_t,int);} httpd_config_t;
+typedef struct {unsigned server_port,ctrl_port,max_uri_handlers,recv_wait_timeout,send_wait_timeout,stack_size,task_caps;int max_open_sockets,keep_alive_idle,keep_alive_interval,keep_alive_count;bool keep_alive_enable,lru_purge_enable;void *uri_match_fn,*global_user_ctx,*global_user_ctx_free_fn,*global_transport_ctx,*global_transport_ctx_free_fn;esp_err_t(*open_fn)(httpd_handle_t,int);} httpd_config_t;
 #define HTTPD_DEFAULT_CONFIG() ((httpd_config_t){.server_port=80})
 #define MALLOC_CAP_INTERNAL 4
 static void *httpd_uri_match_wildcard;
-static esp_err_t httpd_start(httpd_handle_t *handle,const httpd_config_t *config) {(void)config;*handle=(void*)11;return ESP_OK;}
-static esp_err_t httpd_stop(httpd_handle_t handle) {(void)handle;return ESP_OK;}
+static unsigned primary_sdk_stops;
+static esp_err_t httpd_start(httpd_handle_t *handle,const httpd_config_t *config) {
+ assert(config->ctrl_port==32768&&config->server_port==80);*handle=(void*)11;return ESP_OK;
+}
+static esp_err_t httpd_stop(httpd_handle_t handle) {assert(handle==(void*)11);primary_sdk_stops++;return ESP_OK;}
+
 static httpd_uri_t captured[64];static unsigned route_count;
-static esp_err_t httpd_register_uri_handler(httpd_handle_t handle,const httpd_uri_t *route) {(void)handle;captured[route_count++]=*route;return ESP_OK;}
+static esp_err_t httpd_register_uri_handler(httpd_handle_t handle,const httpd_uri_t *route) {assert(handle==(void*)11);captured[route_count++]=*route;return ESP_OK;}
 static esp_err_t httpd_unregister_uri_handler(httpd_handle_t h,const char *uri,int method) {(void)h;(void)uri;(void)method;return ESP_OK;}
 static int httpd_req_recv(httpd_req_t *req,char *body,size_t size) {(void)req;body_reads++;memset(body,'x',size);return (int)size;}
 static esp_err_t httpd_resp_set_status(httpd_req_t *req,const char *status) {(void)req;response_status=atoi(status);return ESP_OK;}
@@ -58,6 +65,10 @@ esp_err_t ts_auth_validate_request(const char *header,uint32_t *sid,ts_perm_leve
 int httpd_ws_get_fd_info(httpd_handle_t h,int fd){(void)h;(void)fd;return 0;}
 static int httpd_get_client_list(httpd_handle_t h,size_t *n,int *fds){(void)h;(void)fds;*n=0;return ESP_OK;}
 static int httpd_ws_send_frame(httpd_req_t *req,httpd_ws_frame_t *frame){(void)req;(void)frame;return ESP_OK;}
+#include "ts_http_server.h"
+/* SDK receive-budget hook and Origin policy have separate whole-policy suites. */
+void ts_httpd_set_body_receive_budget(uint32_t ms){(void)ms;}
+esp_err_t ts_http_validate_browser_request(httpd_req_t *req,char *out,size_t size){(void)req;if(out&&size)out[0]=0;return ESP_OK;}
 #include "ts_http_server.c"
 static esp_err_t upload_handler(ts_http_request_t *req,void *user_data) {
  assert(user_data==NULL);assert(req->body_len==4&&!memcmp(req->body,"xxxx",4));handled++;return ts_http_send_json(req,200,"{\"status\":\"success\"}");
@@ -65,8 +76,9 @@ static esp_err_t upload_handler(ts_http_request_t *req,void *user_data) {
 static void request(unsigned index,const char *token,bool allowed) {
  unsigned reads=body_reads,allocations=body_allocations,handlers=handled;response_status=0;authorization=token;
  httpd_req_t req={.handle=(void*)11,.method=HTTP_POST,.uri=captured[index].uri,.user_ctx=captured[index].user_ctx,.content_len=4};
- assert(captured[index].handler(&req)==ESP_OK);
- assert(response_status==(allowed?200:401));assert(handled==handlers+allowed);
+ esp_err_t ret=captured[index].handler(&req);assert(allowed?ret==ESP_OK:ret!=ESP_OK);
+ int denied_status=token&&(!strcmp(token,"Bearer read")||!strcmp(token,"Bearer admin"))?403:401;
+ assert(response_status==(allowed?200:denied_status));assert(handled==handlers+allowed);
  assert(body_reads==reads+allowed&&body_allocations==allocations+allowed);
 }
 #define login_handler upload_handler
@@ -77,9 +89,17 @@ static void request(unsigned index,const char *token,bool allowed) {
 #define ota_www_upload_handler upload_handler
 #define api_handler upload_handler
 #define options_handler upload_handler
+/* Generic API admission is exercised in test_api_prebody.py; this unit
+ * isolates the full transport owner, dedicated route roles and body handling. */
+static bool api_admit(ts_http_request_t *req,void *data){(void)req;(void)data;return true;}
 #include "webui_route_registration.inc"
-int main(void) {
- assert(ts_http_server_start()==ESP_OK);assert(ts_webui_api_init()==ESP_OK);
+#include "https_route_wrapper.inc"
+static void exercise_routes(void) {
+ route_count=0;
+ assert(ts_http_server_start()==ESP_OK);
+ assert(ts_http_server_get_handle()==(void*)11);
+ assert(ts_http_server_start()==ESP_OK);
+ assert(ts_webui_api_init()==ESP_OK);
  unsigned uploads=0,public_generic=0;
  for(unsigned i=0;i<route_count;i++) {
   const char *uri=captured[i].uri;
@@ -90,12 +110,27 @@ int main(void) {
 #else
    request(i,NULL,true);request(i,"Bearer expired",true);
 #endif
+#ifdef CONFIG_TS_WEBUI_AUTH_REQUIRED
+   request(i,"Bearer read",false);request(i,"Bearer admin",true);request(i,"Bearer root",true);
+   esp_err_t(*original)(httpd_req_t*)=captured[i].handler;captured[i].handler=https_handler_wrapper;
+   request(i,NULL,false);request(i,"Bearer read",false);request(i,"Bearer admin",true);request(i,"Bearer root",true);captured[i].handler=original;
+   if(strcmp(uri,"/api/v1/file/upload")){
+    ts_http_route_t *copy=captured[i].user_ctx;assert(copy->required_level==TS_PERM_ADMIN);copy->requires_auth=false;
+    request(i,"Bearer read",false);request(i,"Bearer admin",true);request(i,"Bearer root",true);copy->requires_auth=true;
+   }
+#else
    request(i,"Bearer read",true);request(i,"Bearer admin",true);request(i,"Bearer root",true);
+#endif
   }
   if(!strcmp(uri,"/api/v1/*") && captured[i].method!=HTTP_OPTIONS) {
    public_generic++;assert(!s_registered_routes[i].requires_auth);request(i,NULL,true);
   }
  }
  assert(uploads==3&&public_generic==4);assert(ts_http_server_stop()==ESP_OK);
- puts("PASS actual HTTP routes/wrapper: upload rejects before body/read/allocation; READ/Admin/Root and public generic routes unchanged (also auth-disabled build)");
+ puts("PASS actual HTTP routes/wrapper: upload roles enforce original Admin file/firmware/WWW capability before body/read/allocation on HTTP and HTTPS; public generic routes unchanged (also auth-disabled build)");
+}
+
+int main(void){
+ exercise_routes();assert(primary_sdk_stops==1&&!s_server&&!s_route_count);
+ puts("PASS complete original HTTP owner and dedicated upload roles; HTTPS wrapper admission also checked, SDK boundaries substituted");
 }

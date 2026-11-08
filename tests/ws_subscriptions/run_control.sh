@@ -9,8 +9,10 @@ python3 - "$build" <<'PYCODE'
 from pathlib import Path
 import sys
 s=Path('components/ts_api/src/ts_api_ssh.c').read_text()
-a=s.index('static esp_err_t api_ssh_cancel('); b=s.index('\n}',a)+2
-Path(sys.argv[1],'api_cancel.inc').write_text(s[a:b])
+parts=[]
+for name in ['api_ssh_cancel_impl','api_ssh_cancel','api_ssh_cancel_for_session']:
+ a=s.index('static esp_err_t '+name+'(');b=s.index('\n}',a)+2;parts.append(s[a:b])
+Path(sys.argv[1],'api_cancel.inc').write_text('\n'.join(parts))
 PYCODE
 "${CC:-cc}" -std=gnu11 -g -Wno-deprecated-declarations -Wno-macro-redefined -fsanitize=address,undefined \
  -I"$build" -Itests/ws_subscriptions/stubs -Icomponents/ts_webui/include -Icomponents/ts_webui/src -Icomponents/ts_security/include -Icomponents/ts_automation/include -Icomponents/ts_drivers/include -Icomponents/ts_console/include -Icomponents/ts_net/include -I"$cjson" \

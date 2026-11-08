@@ -351,7 +351,7 @@ static struct {
 static int fs_mutation_error(const char *command, const char *path, esp_err_t ret)
 {
     if (ret == ESP_ERR_NOT_ALLOWED) {
-        ts_console_error("%s: '%s' belongs to Automation. Use Automation > Configuration & backup, or edit items in their lists.\n", command, path);
+        ts_console_error("%s: '%s' is protected. Use its dedicated configuration or update workflow.\n", command, path);
     } else if (ret == ESP_ERR_INVALID_ARG) {
         ts_console_error("%s: invalid path '%s'.\n", command, path);
     } else {

@@ -1,3 +1,4 @@
+#include "ts_http_fetch.h"
 /**
  * @file ts_compute_monitor.c
  * @brief Compute Device Monitor Implementation for TianShanOS
@@ -25,7 +26,6 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "esp_websocket_client.h"
-#include "esp_http_client.h"
 #include "nvs_flash.h"
 #include "nvs.h"
 #include "cJSON.h"
@@ -121,7 +121,7 @@ static void compute_monitor_task(void *arg);
 static esp_err_t socketio_handshake(void);
 static void websocket_event_handler(void *arg, esp_event_base_t event_base,
                                     int32_t event_id, void *event_data);
-static esp_err_t parse_tegrastats_data(const char *json_str, ts_compute_data_t *data);
+static esp_err_t parse_tegrastats_data(const cJSON *root, ts_compute_data_t *data);
 static void update_temp_source(const ts_compute_data_t *data);
 static void publish_status_event(ts_compute_status_t status);
 static void publish_data_event(const ts_compute_data_t *data);
@@ -700,80 +700,38 @@ static void update_temp_source(const ts_compute_data_t *data)
  * 
  * 获取 session id 和配置
  */
+static bool compute_http_current(void *context)
+{
+    return !atomic_load(&((compute_monitor_ctx_t *)context)->should_stop);
+}
+
 static esp_err_t socketio_handshake(void)
 {
+    compute_monitor_ctx_t *ctx = s_ctx;
     char url[256];
-    snprintf(url, sizeof(url), 
-             "http://%s:%d/socket.io/?EIO=4&transport=polling",
-             s_ctx->config.server_ip, s_ctx->config.server_port);
-    
-    ESP_LOGI(TAG, "Socket.IO handshake: %s", url);
-    
-    esp_http_client_config_t http_cfg = {
-        .url = url,
-        .timeout_ms = 5000,
-    };
-    
-    esp_http_client_handle_t client = esp_http_client_init(&http_cfg);
-    if (client == NULL) {
-        set_error("HTTP client init failed");
-        return ESP_FAIL;
+    int size = snprintf(url, sizeof(url), "http://%s:%d/socket.io/?EIO=4&transport=polling",
+        ctx->config.server_ip, ctx->config.server_port);
+    if (size < 0 || (size_t)size >= sizeof(url)) return ESP_ERR_INVALID_SIZE;
+    ts_http_fetch_config_t request = {.url = url, .method = HTTP_METHOD_GET,
+        .timeout_ms = 5000, .maximum_body = HTTP_BUFFER_SIZE - 1,
+        .current = compute_http_current, .context = ctx};
+    ts_http_fetch_result_t reply = {0};
+    esp_err_t ret = ts_http_fetch(&request, &reply);
+    if (ret != ESP_OK) { set_error("HTTP handshake failed"); return ret; }
+    const char *start = reply.status == 200 && reply.body ? strchr(reply.body, '{') : NULL;
+    cJSON *json = start ? cJSON_Parse(start) : NULL;
+    const cJSON *sid = json ? cJSON_GetObjectItemCaseSensitive(json, "sid") : NULL;
+    ret = ESP_ERR_INVALID_RESPONSE;
+    if (cJSON_IsString(sid)) {
+        size_t length = strlen(sid->valuestring);
+        if (length && length < sizeof(ctx->session_id)) {
+            memcpy(ctx->session_id, sid->valuestring, length + 1);
+            ret = ESP_OK;
+        }
     }
-    
-    esp_err_t err = esp_http_client_open(client, 0);
-    if (err != ESP_OK) {
-        set_error("HTTP open failed");
-        esp_http_client_cleanup(client);
-        return err;
-    }
-    
-    int content_length = esp_http_client_fetch_headers(client);
-    if (content_length < 0) {
-        set_error("HTTP fetch headers failed");
-        esp_http_client_close(client);
-        esp_http_client_cleanup(client);
-        return ESP_FAIL;
-    }
-    
-    char buffer[HTTP_BUFFER_SIZE];
-    int read_len = esp_http_client_read(client, buffer, sizeof(buffer) - 1);
-    
-    esp_http_client_close(client);
-    esp_http_client_cleanup(client);
-    
-    if (read_len <= 0) {
-        set_error("HTTP read failed");
-        return ESP_FAIL;
-    }
-    
-    buffer[read_len] = '\0';
-    ESP_LOGD(TAG, "Handshake response: %s", buffer);
-    
-    /* 解析响应：格式为 "0{\"sid\":\"xxxxx\",...}" */
-    char *json_start = strchr(buffer, '{');
-    if (json_start == NULL) {
-        set_error("Invalid handshake response");
-        return ESP_FAIL;
-    }
-    
-    cJSON *root = cJSON_Parse(json_start);
-    if (root == NULL) {
-        set_error("JSON parse failed");
-        return ESP_FAIL;
-    }
-    
-    cJSON *sid = cJSON_GetObjectItem(root, "sid");
-    if (sid == NULL || !cJSON_IsString(sid)) {
-        set_error("SID not found");
-        cJSON_Delete(root);
-        return ESP_FAIL;
-    }
-    
-    strncpy(s_ctx->session_id, sid->valuestring, sizeof(s_ctx->session_id) - 1);
-    cJSON_Delete(root);
-    
-    ESP_LOGI(TAG, "Got session ID: %s", s_ctx->session_id);
-    return ESP_OK;
+    cJSON_Delete(json); free(reply.body);
+    if (ret != ESP_OK) set_error("Invalid handshake response");
+    return ret;
 }
 
 /**
@@ -809,7 +767,7 @@ static void websocket_event_handler(void *arg, esp_event_base_t event_base,
             if (data->data_len > 0 && data->data_ptr != NULL) {
                 char *msg = strndup(data->data_ptr, data->data_len);
                 if (msg != NULL) {
-                    ESP_LOGD(TAG, "WS recv: %s", msg);
+                    ESP_LOGD(TAG, "WebSocket frame received (bytes=%d)", data->data_len);
                     
                     /* 处理 Socket.IO 消息 */
                     if (strcmp(msg, "3probe") == 0) {
@@ -852,7 +810,7 @@ static void websocket_event_handler(void *arg, esp_event_base_t event_base,
                                     memset(&agx_data, 0, sizeof(agx_data));
                                     
                                     if (parse_tegrastats_data(
-                                            cJSON_Print(event_data_json), 
+                                            event_data_json,
                                             &agx_data) == ESP_OK) {
                                         
                                         /* 更新数据 */
@@ -906,18 +864,10 @@ static void websocket_event_handler(void *arg, esp_event_base_t event_base,
 /**
  * @brief 解析 tegrastats 数据
  */
-static esp_err_t parse_tegrastats_data(const char *json_str, ts_compute_data_t *data)
+static esp_err_t parse_tegrastats_data(const cJSON *root, ts_compute_data_t *data)
 {
-    if (json_str == NULL || data == NULL) {
-        return ESP_ERR_INVALID_ARG;
-    }
-    
-    cJSON *root = cJSON_Parse(json_str);
-    if (root == NULL) {
-        ESP_LOGE(TAG, "Failed to parse tegrastats JSON");
-        return ESP_FAIL;
-    }
-    
+    if (!cJSON_IsObject(root) || !data) return ESP_ERR_INVALID_ARG;
+
     /* 时间戳 */
     cJSON *timestamp = cJSON_GetObjectItem(root, "timestamp");
     if (timestamp != NULL && cJSON_IsString(timestamp)) {
@@ -1021,7 +971,6 @@ static esp_err_t parse_tegrastats_data(const char *json_str, ts_compute_data_t *
         }
     }
     
-    cJSON_Delete(root);
     return ESP_OK;
 }
 
@@ -1065,7 +1014,7 @@ static void compute_monitor_task(void *arg)
                  ctx->config.server_ip, ctx->config.server_port,
                  ctx->session_id);
         
-        ESP_LOGI(TAG, "Connecting WebSocket: %s", ws_url);
+        ESP_LOGI(TAG, "Connecting monitor WebSocket");
         
         esp_websocket_client_config_t ws_cfg = {
             .uri = ws_url,

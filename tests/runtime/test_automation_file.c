@@ -16,6 +16,8 @@ static int test_rename(const char *, const char *);
 #define mkdir(path, mode) test_mkdir(path, mode)
 #define unlink(path) test_unlink(path)
 #define rename(from, to) test_rename(from, to)
+#include "../../components/ts_storage/src/ts_file_store.c"
+#undef TAG
 #include "../../components/ts_automation/src/ts_automation_file.c"
 #undef fopen
 #undef stat
@@ -72,7 +74,8 @@ static void loaded(ts_auto_file_location_t location,const char *expected)
 static void interrupted(ts_auto_file_location_t location)
 {
     const paths_t *p=&s_paths[location];
-    assert(write_pending(p->pending,new_json)==ESP_OK);
+    bool created;
+    assert(store_prepare(p->pending,new_json,strlen(new_json),&created)==ESP_OK && created);
     assert(test_rename(p->current,p->previous)==0);
     loaded(location,old_json);
 }

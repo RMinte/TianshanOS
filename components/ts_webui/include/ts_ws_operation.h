@@ -21,6 +21,8 @@ void ts_ws_op_enable(void);
 void ts_ws_op_stop_admission(void);
 bool ts_ws_op_busy(void);
 ts_ws_operation_t *ts_ws_op_create(ts_ws_op_kind_t kind, ts_ws_peer_t peer, esp_err_t *error);
+/* Trusted creator, before open/task start. Zero means internal/no raw observers. */
+void ts_ws_op_set_exec_owner(ts_ws_operation_t *op, uint32_t session_id);
 void ts_ws_op_bind(ts_ws_operation_t *op, void *data, void (*destroy)(void *));
 void *ts_ws_op_data(ts_ws_operation_t *op); /* caller owns a reference */
 uint32_t ts_ws_op_id(ts_ws_operation_t *op);

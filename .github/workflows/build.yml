@@ -1,4 +1,4 @@
-name: TianShanOS Build
+name: TianshanOS Build
 
 on:
   push:
@@ -38,6 +38,7 @@ jobs:
           node-version: '22'
       - run: python3 -m unittest discover -s tests/ci -p 'test_*.py'
       - run: python3 tests/release/test_release.py
+      - run: python3 tests/release/test_security_profile.py
       - run: python3 tests/release/test_serial_upgrade.py
       - name: Select checks and release eligibility
         id: scope
@@ -58,17 +59,26 @@ jobs:
       - run: npm ci --prefix tests/prompts
       - run: npm test --prefix tests/prompts
       - run: python3 tests/release/test_web_minify.py
+      - name: Fetch matching ESP-IDF sources for browser Origin regression
+        run: |
+          export IDF_PATH="$RUNNER_TEMP/web-idf"
+          echo "IDF_PATH=$IDF_PATH" >> "$GITHUB_ENV"
+          git clone --depth 1 --branch "$IDF_VERSION" --filter=blob:none --sparse https://github.com/espressif/esp-idf.git "$IDF_PATH"
+          git -C "$IDF_PATH" sparse-checkout set components/esp_http_server
       - name: Install Chrome for actual-page regressions
         working-directory: tests/prompts
         run: npx playwright install --with-deps chrome
       - run: npm run test:browser --prefix tests/prompts
+        env:
+          TS_TEST_WEB_TLS: '1'
+          NODE_PATH: ${{ github.workspace }}/tests/prompts/node_modules
       - name: Offline xterm and vendor regressions
         run: npm run test:xterm --prefix tests/prompts
         env:
           OFFLINE_RESULTS: ${{ runner.temp }}/xterm-source
 
   runtime-tests:
-    needs: changes
+    needs: [changes, build]
     if: needs.changes.outputs.run_full == 'true'
     name: Runtime and fan regression tests
     runs-on: ubuntu-latest
@@ -85,11 +95,16 @@ jobs:
           export IDF_PATH="$RUNNER_TEMP/runtime-idf"
           echo "IDF_PATH=$IDF_PATH" >> "$GITHUB_ENV"
           git clone --depth 1 --branch "$IDF_VERSION" --filter=blob:none --sparse https://github.com/espressif/esp-idf.git "$IDF_PATH"
-          git -C "$IDF_PATH" sparse-checkout set components/json components/mbedtls components/nvs_flash components/console components/soc components/bootloader_support components/esp_app_format components/esp_http_server components/lwip components/esp_netif
+          git -C "$IDF_PATH" sparse-checkout set components/json components/mbedtls components/nvs_flash components/console components/soc components/bootloader_support components/esp_app_format components/esp_http_server components/esp_https_server components/http_parser components/esp_http_client components/esp_system components/esp-tls components/tcp_transport components/spiffs components/vfs components/lwip components/esp_netif
           git -C "$IDF_PATH" submodule update --init --recursive --depth 1 components/json/cJSON components/mbedtls/mbedtls
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - name: Fetch the managed WebSocket source from this exact build
+        uses: actions/download-artifact@v4
+        with:
+          name: runtime-dependencies-${{ github.sha }}
+          path: managed_components/espressif__esp_websocket_client
       - run: bash tests/runtime/run_all.sh
       - run: bash tests/ws_subscriptions/run_operation_adapter.sh
       - name: Current WebSocket and lifecycle regressions
@@ -185,6 +200,15 @@ jobs:
           rm -f build/CMakeCache.txt
           idf.py build
 
+      - name: Preserve the exact managed source used by runtime fixtures
+        uses: actions/upload-artifact@v4
+        with:
+          name: runtime-dependencies-${{ github.sha }}
+          path: managed_components/espressif__esp_websocket_client/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Get version info
         id: version
         run: |
@@ -216,6 +240,9 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+      - name: Bind security build policy to this firmware
+        run: python3 tools/check_release.py --seal-build build
+
       - name: Package USB / serial partition upgrade
         run: python3 tools/serial_upgrade.py package --build-dir build --output "build/tianshanos-serial-v$(cat version.txt)"
 
@@ -229,6 +256,8 @@ jobs:
             build/partition_table/partition-table.bin
             build/flasher_args.json
             build/tianshanos-serial-*.zip
+            build/security-build.json
+            build/security-artifact.json
           retention-days: 30
 
       - name: Upload full build (for debugging)
@@ -313,26 +342,25 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           BUILD_VERSION: ${{ needs.build.outputs.version }}
           BUILD_COMMIT: ${{ needs.build.outputs.commit }}
-      - name: Add build identity to the Chinese release notes
+      - name: Normalize public firmware filename
         run: |
           python3 - <<'PYTHON'
-          import os
+          import json
           from pathlib import Path
-          notes = Path('docs/releases') / (os.environ['RELEASE_TAG'] + '.md')
-          with notes.open('a') as output:
-              output.write('\n\n## 本次构建\n\n')
-              output.write('固件版本：`' + os.environ['BUILD_VERSION'] + '`\n\n')
-              output.write('源码提交：`' + os.environ['BUILD_COMMIT'] + '`\n')
+          root = Path('firmware')
+          (root / 'TianShanOS.bin').rename(root / 'TianshanOS.bin')
+          args = root / 'flasher_args.json'
+          data = json.loads(args.read_text())
+          data['app']['file'] = 'TianshanOS.bin'
+          data['flash_files'] = {address: 'TianshanOS.bin' if name == 'TianShanOS.bin' else name for address, name in data['flash_files'].items()}
+          args.write_text(json.dumps(data, indent=2) + '\n')
           PYTHON
-        env:
-          RELEASE_TAG: ${{ steps.preflight.outputs.tag }}
-          BUILD_VERSION: ${{ needs.build.outputs.version }}
-          BUILD_COMMIT: ${{ needs.build.outputs.commit }}
+
       - name: Create or upload the release assets
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.preflight.outputs.tag }}
-          name: ${{ steps.preflight.outputs.tag }}
+          name: TianshanOS ${{ steps.preflight.outputs.tag }}
           files: |
             firmware/**/*.bin
             firmware/**/flasher_args.json

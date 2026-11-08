@@ -105,6 +105,7 @@ static void add_runtime(cJSON *data, const ts_cert_pki_status_t *s)
     } else {
         cJSON_AddNullToObject(https, "last_error_stage"); cJSON_AddNullToObject(https, "last_error");
     }
+
 }
 
 static esp_err_t install_error(ts_api_result_t *result, esp_err_t err, ts_cert_op_error_t detail)
@@ -488,6 +489,8 @@ esp_err_t ts_api_cert_register(void)
     static const ts_api_endpoint_t cert_apis[] = {
         {
             .name = "cert.status",
+            .external_access = TS_API_ACCESS_PUBLIC,
+            .allowed_methods = TS_API_METHOD_READ,
             .description = "Get PKI certificate status",
             .category = TS_API_CAT_SECURITY,
             .handler = api_cert_status,
@@ -496,46 +499,58 @@ esp_err_t ts_api_cert_register(void)
         },
         {
             .name = "cert.generate_keypair",
+            .external_access = TS_API_ACCESS_ADMIN,
+            .allowed_methods = TS_API_METHOD_WRITE,
             .description = "Generate ECDSA P-256 key pair",
             .category = TS_API_CAT_SECURITY,
             .handler = api_cert_generate_keypair,
-            .requires_auth = false,
-            .permission = NULL
+            .requires_auth = true,
+            .permission = "cert.manage"
         },
         {
             .name = "cert.generate_csr",
+            .external_access = TS_API_ACCESS_ADMIN,
+            .allowed_methods = TS_API_METHOD_WRITE,
             .description = "Generate Certificate Signing Request",
             .category = TS_API_CAT_SECURITY,
             .handler = api_cert_generate_csr,
-            .requires_auth = false,
-            .permission = NULL
+            .requires_auth = true,
+            .permission = "cert.manage"
         },
         {
             .name = "cert.install",
+            .external_access = TS_API_ACCESS_ADMIN,
+            .allowed_methods = TS_API_METHOD_WRITE,
             .description = "Install signed certificate",
             .category = TS_API_CAT_SECURITY,
             .handler = api_cert_install,
-            .requires_auth = false,
-            .permission = NULL
+            .requires_auth = true,
+            .permission = "cert.manage"
         },
         {
             .name = "cert.install_ca",
+            .external_access = TS_API_ACCESS_ADMIN,
+            .allowed_methods = TS_API_METHOD_WRITE,
             .description = "Install CA certificate chain",
             .category = TS_API_CAT_SECURITY,
             .handler = api_cert_install_ca,
-            .requires_auth = false,
-            .permission = NULL
+            .requires_auth = true,
+            .permission = "cert.manage"
         },
         {
             .name = "cert.delete",
+            .external_access = TS_API_ACCESS_ADMIN,
+            .allowed_methods = TS_API_METHOD_WRITE,
             .description = "Delete all PKI credentials",
             .category = TS_API_CAT_SECURITY,
             .handler = api_cert_delete,
-            .requires_auth = false,
-            .permission = NULL
+            .requires_auth = true,
+            .permission = "cert.manage"
         },
         {
             .name = "cert.get_certificate",
+            .external_access = TS_API_ACCESS_PUBLIC,
+            .allowed_methods = TS_API_METHOD_READ,
             .description = "Get device certificate PEM",
             .category = TS_API_CAT_SECURITY,
             .handler = api_cert_get_certificate,

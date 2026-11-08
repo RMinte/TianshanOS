@@ -254,18 +254,18 @@ static esp_err_t api_ui_widgets_set(const cJSON *params, ts_api_result_t *result
 
 static const ts_api_endpoint_t ui_endpoints[] = {
     {
-        .name = "ui.widgets.get",
+        .name = "ui.widgets.get", .external_access=TS_API_ACCESS_READ, .allowed_methods=TS_API_METHOD_READ,
         .description = "Get data widgets configuration",
         .category = TS_API_CAT_SYSTEM,
         .handler = api_ui_widgets_get,
-        .requires_auth = false,
+        .requires_auth=true,
     },
     {
-        .name = "ui.widgets.set",
+        .name = "ui.widgets.set", .external_access=TS_API_ACCESS_ADMIN, .allowed_methods=TS_API_METHOD_WRITE,
         .description = "Save data widgets configuration",
         .category = TS_API_CAT_SYSTEM,
         .handler = api_ui_widgets_set,
-        .requires_auth = true,
+        .requires_auth=true,
     },
 };
 

@@ -1,11 +1,26 @@
 """Actual LED composition/driver, explicit controls and NVS round trips; local HAL only."""
 from pathlib import Path
 import re
+import os
+from zipfile import ZipFile
 from test_console_lifecycle import RTOS, IDF, body, run_native
 
 LED = Path('components/ts_led/src')
 CLI = 'components/ts_console/commands/ts_cmd_led.c'
 API = 'components/ts_api/src/ts_api_led.c'
+_original_body = body
+def body(path, name):
+    if str(path) == CLI and os.environ.get('LED_PRIVACY_SOURCE_PACKAGE'):
+        with ZipFile(os.environ['LED_PRIVACY_SOURCE_PACKAGE']) as package:
+            text = package.read('current-source/'+CLI).decode() if 'current-source/'+CLI in package.namelist() else None
+        if text is None:
+            import subprocess
+            text = subprocess.check_output(['git','show','35e081ac8:'+CLI],cwd=os.environ['SOURCE_REPOSITORY'],text=True)
+        match = re.search(r'^(?:static )?[\w *]+\b'+name+r'\([^;]*?\)\s*\{',text,re.M)
+        assert match,name
+        return text[match.start():text.index('\n}',match.end())+2]+'\n'
+    return _original_body(path,name)
+
 
 
 def whole(path):
@@ -15,6 +30,24 @@ def whole(path):
 
 
 code = '#define _DEFAULT_SOURCE\n' + RTOS + r'''
+#define TAG "fixture"
+#undef TS_LOGI
+#undef TS_LOGD
+#undef TS_LOGW
+#undef TS_LOGE
+static bool private_log_capture;
+static char private_log[32768];static size_t private_log_used;static unsigned private_failures;
+static void private_emit(const char *tag,const char *format,...){
+ (void)tag;if(!private_log_capture)return;va_list a;va_start(a,format);int n=vsnprintf(private_log+private_log_used,sizeof(private_log)-private_log_used,format,a);va_end(a);assert(n>=0&&(size_t)n<sizeof(private_log)-private_log_used);private_log_used+=n;
+}
+#define TS_LOGI private_emit
+#define TS_LOGD private_emit
+#define TS_LOGW private_emit
+#define TS_LOGE private_emit
+static void private_check(bool ok,const char *label){if(!ok){++private_failures;fprintf(stderr,"FAIL LED diagnostic %s\n",label);}}
+static void private_absent(const char *secret){
+ private_check(!strstr(private_log,secret),"raw content absent");char hex[2048];size_t n=0;for(size_t i=0;i<strlen(secret);i++)n+=snprintf(hex+n,sizeof(hex)-n,"%02X ",(unsigned char)secret[i]);private_check(!strstr(private_log,hex),"hex content absent");
+}
 #include <math.h>
 #include <ctype.h>
 #include <strings.h>
@@ -119,7 +152,8 @@ code += r'''
 static ts_led_image_t s_current_image;
 static ts_font_t *s_current_font;
 static char s_current_font_name[32];
-static const char *ts_console_get_raw_cmdline(void) {return NULL;}
+static const char *private_raw_command;
+static const char *ts_console_get_raw_cmdline(void) {return private_raw_command;}
 static ts_led_layer_t s_current_image_layer;
 static int ts_console_error(const char *format,...) {(void)format;return 0;}
 static int ts_console_printf(const char *format,...) {(void)format;return 0;}
@@ -127,6 +161,12 @@ static int ts_console_success(const char *format,...) {(void)format;return 0;}
 void ts_api_result_error(ts_api_result_t *r,ts_api_result_code_t code,const char *message) {r->code=code;r->message=(char*)message;}
 void ts_api_result_ok(ts_api_result_t *r,cJSON *data) {r->code=TS_API_OK;r->data=data;}
 '''
+# Replay only the actual diagnostic prelude of cmd_led; full argtable dispatch
+# is not exercised here. The normal draw/text/file business path below is real.
+cmd = body(CLI,'cmd_led')
+start = cmd.index('    const char *cmdline = ts_console_get_raw_cmdline();')
+stop = cmd.index('    if (nerrors != 0 && cmdline)',start)
+code += '\nstatic void private_command_diagnostic(int nerrors){\n'+cmd[start:stop]+'\n}\n'
 for name in ['resolve_device_name','do_led_on','do_led_off','do_led_effect','do_led_image','do_led_qrcode','parse_text_align','extract_param_from_cmdline','extract_text_from_cmdline','parse_escape_sequences','build_font_path','do_led_draw_text','do_led_clear']:
     code += body(CLI,name)
 for name in ['parse_color_param','api_led_set','api_led_fill','api_led_clear','api_led_effect_start','api_led_qrcode','api_led_save']:
@@ -360,6 +400,17 @@ int main(void) {
     api(api_led_effect_start,"{\"device\":\"touch\",\"effect\":\"solid\",\"color\":\"red\"}");api(api_led_effect_start,"{\"device\":\"board\",\"effect\":\"solid\",\"color\":\"blue\"}");api(api_led_effect_start,"{\"device\":\"matrix\",\"effect\":\"solid\",\"color\":\"green\"}");assert(((ts_led_layer_impl_t*)layers[0])->anim_color.r==255&&((ts_led_layer_impl_t*)layers[1])->anim_color.b==255&&((ts_led_layer_impl_t*)layers[2])->anim_color.g==255);
     int custom=7;def.func=custom_animation;def.user_data=&custom;assert(ts_led_animation_start(layers[0],&def)==ESP_OK&&((ts_led_layer_impl_t*)layers[0])->anim_data==&custom);assert(ts_led_animation_stop(layers[0])==ESP_OK&&custom==7);
     assert(do_led_off("touch")==0&&do_led_on("touch","red")==0);start_render();frames(s_touch,3,false);assert(((fake_strip*)((ts_led_device_impl_t*)s_touch)->strip_handle)->pixels[0].r>0);
+    /* Real raw-command extraction and rendering copy; diagnostics are observed
+     * separately from the private console response. Renderer tasks are stopped. */
+    stop_render();private_log_capture=true;private_raw_command="led --draw-text --device matrix --font normal --text \"private-LED-凭据\"";
+    private_command_diagnostic(2);private_absent("private-LED-凭据");
+    assert(do_led_draw_text("matrix",NULL,NULL,"green","left",NULL,NULL,0,0,false,false,30)==0);
+    private_check(!strcmp(s_overlays[0].text,"private-LED-凭据"),"UTF-8 exact renderer input preserved");private_absent("private-LED-凭据");
+    private_raw_command=NULL;private_log_used=0;private_log[0]=0;
+    assert(do_led_draw_text("matrix","plain-private-text","normal","green","left",NULL,NULL,0,0,false,false,30)==0);private_check(!strcmp(s_overlays[0].text,"plain-private-text"),"direct text renderer input preserved");private_absent("plain-private-text");
+    FILE *private_file=fopen("private-text-secret.txt","wb");assert(private_file);fputs("file-private-凭据\r\n",private_file);fclose(private_file);private_log_used=0;private_log[0]=0;
+    assert(do_led_draw_text("matrix",NULL,"normal","green","left","private-text-secret.txt",NULL,0,0,false,false,30)==0);private_check(!strcmp(s_overlays[0].text,"file-private-凭据"),"file contents and newline trim preserved");private_absent("file-private-凭据");private_absent("private-text-secret.txt");assert(unlink("private-text-secret.txt")==0);
+    private_check(private_log_used>0,"safe diagnostic metadata retained");private_log_capture=false;private_log_used=0;private_log[0]=0;start_render();
     assert(do_led_draw_text("matrix","A","normal","green","left",NULL,"left",1,2,true,false,50)==0);ts_led_layer_t overlay=s_overlays[0].overlay_layer;assert(ts_led_text_overlay_is_active("matrix"));
     ts_led_effect_config_t invert={.type=TS_LED_EFFECT_INVERT};assert(ts_led_layer_set_effect(layers[2],&invert)==ESP_OK);
     api(api_led_clear,"{\"device\":\"matrix\"}");assert(((ts_led_layer_impl_t*)overlay)->visible);frames(s_matrix,3,false);assert(((fake_strip*)((ts_led_device_impl_t*)s_matrix)->strip_handle)->lit_frames>0);
@@ -389,7 +440,7 @@ int main(void) {
     teardown();fresh();assert(ts_led_load_boot_config("matrix")==ESP_OK);frames(s_matrix,4,true);assert(ts_led_get_current_state("matrix",&state)==ESP_OK&&!state.enabled&&!strcmp(state.qrcode_text,"B07")&&!state.image_path[0]&&!state.animation[0]&&state.brightness==149&&state.filter_speed==29);
     assert(do_led_effect("matrix","solid",50,"red")==0);assert(ts_led_save_boot_config("matrix")==ESP_OK&&nvs_find("led.mat.clr")>=0);assert(do_led_effect("matrix","solid",50,NULL)==0);assert(ts_led_save_boot_config("matrix")==ESP_OK&&nvs_find("led.mat.clr")<0);
     teardown();fresh();assert(ts_led_load_boot_config("matrix")==ESP_OK);assert(!((ts_led_layer_impl_t*)ts_led_layer_get(s_matrix,0))->anim_data);
-    check_fades();start_render();check_b09_render();teardown();check_qr_color_restore();free(s_delayed_image_timer);s_delayed_image_timer=NULL;vSemaphoreDelete(action_context.stats_mutex);free(s_anim_state);puts("PASS actual LED controls, independent RGB ownership, composition/CC/driver HAL output gate, QR layer handoff and NVS save/reset/rebuild/load");
+    check_fades();start_render();check_b09_render();teardown();check_qr_color_restore();free(s_delayed_image_timer);s_delayed_image_timer=NULL;vSemaphoreDelete(action_context.stats_mutex);free(s_anim_state);assert(private_failures==0);puts("PASS LED diagnostic privacy: raw UTF-8 command/direct/file render bytes preserved, raw and hex omitted");puts("PASS actual LED controls, independent RGB ownership, composition/CC/driver HAL output gate, QR layer handoff and NVS save/reset/rebuild/load");
 }
 '''
 headers = {path.name: path.read_text() for path in Path('components/ts_led/include').glob('*.h')}

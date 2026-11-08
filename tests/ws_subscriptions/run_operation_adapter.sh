@@ -23,6 +23,9 @@ import sys
 source=Path('components/ts_webui/src/ts_webui_api.c').read_text()
 a=source.index('esp_err_t ts_webui_api_init(void)');b=source.index('\n}',a)+2
 Path(sys.argv[1],'webui_route_registration.inc').write_text(source[a:b])
+source=Path('components/ts_net/src/ts_https_server.c').read_text()
+a=source.index('static esp_err_t https_handler_wrapper(httpd_req_t *req)\n{');b=source.index('\n}',a)+2
+Path(sys.argv[1],'https_route_wrapper.inc').write_text(source[a:b])
 PY_ROUTES
 for auth in enabled disabled; do
  auth_flags=()

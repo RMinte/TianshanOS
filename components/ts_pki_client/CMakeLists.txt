@@ -4,7 +4,7 @@ idf_component_register(
     INCLUDE_DIRS
         "include"
     REQUIRES
-        esp_http_client
+        ts_http_fetch
         json
         ts_cert
     PRIV_REQUIRES

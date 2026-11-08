@@ -109,6 +109,7 @@ typedef enum { ETH_OP_START, ETH_OP_STOP, ETH_OP_RESTART } eth_operation_t;
 
 static ts_net_manager_state_t s_state = {0};
 
+
 /* ============================================================================
  * 前向声明
  * ========================================================================== */
@@ -275,9 +276,9 @@ static void update_eth_ip_from_netif(void)
                              TS_NET_IP_STR_MAX_LEN);
         
         /* 获取 DNS */
-        esp_netif_dns_info_t dns;
-        if (esp_netif_get_dns_info(netif, ESP_NETIF_DNS_MAIN, &dns) == ESP_OK) {
-            ts_net_ip_u32_to_str(dns.ip.u_addr.ip4.addr,
+        ts_net_ip_info_t host;
+        if (ts_net_get_ip_info(TS_NET_IF_ETH, &host) == ESP_OK) {
+            ts_net_ip_u32_to_str(host.dns1,
                                  s_state.eth_status.ip_info.dns1,
                                  TS_NET_IP_STR_MAX_LEN);
         }
@@ -428,7 +429,7 @@ esp_err_t ts_net_manager_init(void)
     }
     
     /* 初始化默认配置 */
-    strncpy(s_state.hostname, TS_NET_DEFAULT_HOSTNAME, sizeof(s_state.hostname) - 1);
+    strlcpy(s_state.hostname, TS_NET_DEFAULT_HOSTNAME, sizeof(s_state.hostname));
     
     /* 以太网默认配置 - 作为网关/DHCP服务器，默认使用静态IP */
     s_state.eth_config.enabled = true;
@@ -1132,8 +1133,7 @@ esp_err_t ts_net_manager_set_hostname(const char *hostname)
     if (!hostname) return ESP_ERR_INVALID_ARG;
     
     xSemaphoreTake(s_state.mutex, portMAX_DELAY);
-    strncpy(s_state.hostname, hostname, TS_NET_HOSTNAME_MAX_LEN - 1);
-    s_state.hostname[TS_NET_HOSTNAME_MAX_LEN - 1] = '\0';
+    strlcpy(s_state.hostname, hostname, sizeof(s_state.hostname));
     xSemaphoreGive(s_state.mutex);
     
     TS_LOGI(TAG, "Hostname set to %s", hostname);
@@ -1263,8 +1263,9 @@ esp_err_t ts_net_manager_load_config(void)
     }
     s_state.eth_status.config_error = eth_result;
 
-    str_len = TS_NET_HOSTNAME_MAX_LEN;
-    nvs_get_str(handle, NVS_KEY_HOSTNAME, s_state.hostname, &str_len);
+    char hostname[TS_NET_HOSTNAME_MAX_LEN] = {0};
+    str_len = sizeof(hostname);
+    if (nvs_get_str(handle, NVS_KEY_HOSTNAME, hostname, &str_len) == ESP_OK) strlcpy(s_state.hostname, hostname, sizeof(s_state.hostname));
     
     /* 加载 WiFi AP 配置 */
 #ifdef CONFIG_TS_NET_WIFI_ENABLE
@@ -1321,7 +1322,7 @@ esp_err_t ts_net_manager_reset_config(void)
     s_state.eth_config.static_ip.dns2[0] = '\0';
     s_state.eth_status.config_error = ESP_OK;
     
-    strncpy(s_state.hostname, TS_NET_DEFAULT_HOSTNAME, TS_NET_HOSTNAME_MAX_LEN);
+    strlcpy(s_state.hostname, TS_NET_DEFAULT_HOSTNAME, sizeof(s_state.hostname));
     
     xSemaphoreGive(s_state.mutex);
     

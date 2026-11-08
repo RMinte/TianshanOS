@@ -325,9 +325,19 @@ ssize_t ts_storage_read_file(const char *path, void *buf, size_t max_size);
  */
 char *ts_storage_read_string(const char *path);
 
-/* Generic file mutations cannot replace the automation owner's files or roots.
+/* Generic file mutations cannot replace the WWW code volume or automation
+ * owner's files or roots.
  * include_children also checks directory moves/removals of their parents. */
 esp_err_t ts_storage_check_write_path(const char *path, bool include_children);
+
+/* External generic mutations are SD data operations, never WWW/SPIFFS/other
+ * VFS mounts. Compose this boundary with the managed configuration owner guard;
+ * trusted internal persistence continues to use check_write_path directly. */
+esp_err_t ts_storage_check_external_write_path(const char *path, bool include_children);
+
+/* Ordinary SD reads need a session; config/PKI and internal mounts need Root.
+ * Unknown mounts, malformed paths and unresolved FAT metadata errors refuse. */
+esp_err_t ts_storage_external_read_requires_admin(const char *path, bool *requires_admin);
 
 /* Open a streamed download destination under the same ownership check.
  * The caller writes/closes the stream; network transfer does not hold the SD gate. */
@@ -335,6 +345,11 @@ esp_err_t ts_storage_open_write(const char *path, FILE **file);
 
 /** Write a complete buffer to a file. */
 esp_err_t ts_storage_write_file(const char *path, const void *data, size_t size);
+/* Replace ordinary SD data using fresh sibling sidecars. The old target is not
+ * truncated on preparation failure. An uncertain rename retains sidecars for
+ * explicit recovery; cleanup failure after commit still reports success. */
+esp_err_t ts_storage_replace_file(const char *path, const void *data, size_t size);
+
 
 /**
  * @brief Write string to file

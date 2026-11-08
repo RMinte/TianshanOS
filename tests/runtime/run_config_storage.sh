@@ -1,8 +1,9 @@
 #!/bin/bash
 set -euo pipefail
 cd "$(dirname "$0")/../.."
+source tests/runtime/host_env.sh
 : "${IDF_PATH:=/Users/massif/esp/v5.5.2/esp-idf}"
-: "${CONFIG_TEST_BUILD:=/tmp/tianshan-config-storage-tests}"
+: "${CONFIG_TEST_BUILD:=$TS_TEST_BUILD_ROOT/config-storage}"
 mkdir -p "$CONFIG_TEST_BUILD"
 crypto_link=()
 if [[ "$(uname -s)" != Darwin ]]; then crypto_link=(-lcrypto); fi
@@ -52,6 +53,10 @@ for path,names in [
   assert match,name
   out.append(text[match.start():text.index('\n}',match.start())+2])
 Path(sys.argv[1],'system_driver_persistence.inc').write_text('\n'.join(out))
+source=Path('main/ts_services.c').read_text()
+start=source.index('esp_err_t ts_services_prepare_config(void)')
+end=source.index('\n}',start)+2
+Path(sys.argv[1],'config_boot.inc').write_text(source[start:end])
 PY_DRIVER
 cc "${common[@]}" "${migration_includes[@]}" -Icomponents/ts_drivers/include -I"$CONFIG_TEST_BUILD" tests/runtime/test_system_migration.c \
   "$CONFIG_TEST_BUILD/led_persistence.o" "$IDF_PATH/components/json/cJSON/cJSON.c" \
@@ -59,7 +64,7 @@ cc "${common[@]}" "${migration_includes[@]}" -Icomponents/ts_drivers/include -I"
 "$CONFIG_TEST_BUILD/migration"
 
 cc "${common[@]}" -Itests/runtime/storage_stubs -Itests/runtime/rule_pack/stubs \
-  -Icomponents/ts_automation/src -Icomponents/ts_core/ts_config/include -Icomponents/ts_security/include \
+  -Icomponents/ts_automation/src -Icomponents/ts_storage/include -Icomponents/ts_core/ts_config/include -Icomponents/ts_security/include \
   -I"$IDF_PATH/components/json/cJSON" tests/runtime/test_automation_file.c \
   tests/runtime/storage_stubs/crypto.c "$IDF_PATH/components/json/cJSON/cJSON.c" \
   "${crypto_link[@]}" -lm -o "$CONFIG_TEST_BUILD/files"
@@ -94,11 +99,14 @@ parts=[source[begin:end]]
 for name in ['extract_json_value','cjson_to_value','auto_discover_json_fields','process_source_mappings',
              'find_source_index','current_source_index','current_connection_index','sio_find_connection',
              'sio_release_connection','ts_source_transport_changed','sio_handle_event_message',
-             'ws_handle_message','sio_websocket_event_handler','read_variable_source','ts_source_sio_websocket_url','read_rest_source','sio_http_handshake','stream_connect']:
-    match=re.search(r'^(?:static )?(?:int|void|esp_err_t|sio_connection_t \*)\s*'+name+r'\([^;]+?\)\s*\{',source,re.M)
+             'ws_handle_message','sio_websocket_event_handler','read_variable_source','ts_source_sio_url','read_rest_source','sio_http_handshake','stream_connect']:
+    match=re.search(r'^(?:static )?(?:int|void|bool|esp_err_t|sio_connection_t \*)\s*'+name+r'\([^;]+?\)\s*\{',source,re.M)
     assert match,name
     parts.append(source[match.start():source.index('\n}',match.start())+2])
 api_source=Path('components/ts_api/src/ts_api_automation.c').read_text()
+start=api_source.index('/* A diagnostic sample is one complete WS message')
+end=api_source.index('// WebSocket 测试状态',start)
+parts.append(api_source[start:end])
 end=api_source.index('} ws_test_ctx_t;')+len('} ws_test_ctx_t;')
 parts.append(api_source[api_source.rfind('typedef struct {',0,end):end])
 match=re.search(r'^static void ws_test_handler\([^;]+?\)\s*\{',api_source,re.M)
@@ -198,6 +206,8 @@ cc "${common[@]}" -DCONFIG_TS_AUTOMATION_MAX_RULES=64 -Itests/runtime/storage_st
   -Icomponents/ts_jsonpath/include \
   -Icomponents/ts_api/include \
   -I"$IDF_PATH/components/json/cJSON" -I"$CONFIG_TEST_BUILD" \
+  -Icomponents/ts_http_fetch/include -Itests/runtime/http_fetch_stubs -I"$IDF_PATH/components/http_parser" \
+  components/ts_http_fetch/src/ts_http_url.c "$IDF_PATH/components/http_parser/http_parser.c" \
   tests/runtime/test_automation_config.c components/ts_api/src/ts_api_auto_config.c \
   components/ts_automation/src/ts_automation_document.c \
   components/ts_automation/src/ts_automation_control.c \

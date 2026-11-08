@@ -79,6 +79,9 @@ CONFIG_LWIP_DNS_SUPPORT_MDNS_QUERIES=y
 # 生产环境还应启用：
 #   CONFIG_SECURE_BOOT=y
 #   CONFIG_SECURE_FLASH_ENC_ENABLED=y
+# Signed release proofs occupy the final APP sector, outside ESP image_len.
+# Provisioning bootloaders must encrypt the complete APP slot.
+# CONFIG_SECURE_FLASH_ENCRYPT_ONLY_IMAGE_LEN_IN_APP_PART is not set
 #   CONFIG_SECURE_BOOT_DISABLE_JTAG=y
 # ============================================================================
 
@@ -143,7 +146,7 @@ CONFIG_LWIP_IPV4_NAPT=y
 # 注：ESP-IDF 5.x NAPT 使用默认连接数，不再需要手动配置
 
 # LWIP Socket 配置（增加限制以支持多连接）
-CONFIG_LWIP_MAX_SOCKETS=16
+CONFIG_LWIP_MAX_SOCKETS=32
 
 # LWIP TCP 缓冲区优化（减少内存占用）
 CONFIG_LWIP_TCP_SND_BUF_DEFAULT=4096
@@ -188,7 +191,6 @@ CONFIG_TS_WEBUI_WS_ENABLE=y
 CONFIG_TS_WEBUI_WS_MAX_CLIENTS=8
 CONFIG_TS_WEBUI_AUTH_REQUIRED=y
 CONFIG_TS_WEBUI_CORS_ENABLE=y
-CONFIG_TS_WEBUI_STATIC_PATH="/www"
 
 # ============================================================================
 # LED Matrix 配置
@@ -253,3 +255,6 @@ CONFIG_TS_CONFIG_PACK_SIGNING_ROOT_SHA256="ae5d4fe5cb45f725f4e8e26178ce583dfe550
 # CONFIG_TS_NET_WIFI_AP_PASS="tianshan123"
 # CONFIG_TS_NET_WIFI_AP_CHANNEL=1
 # CONFIG_TS_NET_WIFI_AP_MAX_CONN=4
+
+
+CONFIG_MBEDTLS_HAVE_TIME_DATE=y

@@ -14,7 +14,9 @@
 #include "mdns.h"
 #endif
 #include <string.h>
+#include "freertos/FreeRTOS.h"
 #include <lwip/ip4_addr.h>
+#include "lwip/dns.h"
 
 #define TAG "ts_net"
 
@@ -160,6 +162,15 @@ static esp_netif_t *get_netif(ts_net_if_t iface)
     }
 }
 
+static esp_err_t read_eth_host_dns(void *context)
+{
+    ts_net_ip_info_t *info = context;
+    const ip_addr_t *main = dns_getserver(0), *backup = dns_getserver(1);
+    info->dns1 = IP_IS_V4(main) ? ip4_addr_get_u32(ip_2_ip4(main)) : 0;
+    info->dns2 = IP_IS_V4(backup) ? ip4_addr_get_u32(ip_2_ip4(backup)) : 0;
+    return ESP_OK;
+}
+
 esp_err_t ts_net_get_ip_info(ts_net_if_t iface, ts_net_ip_info_t *info)
 {
     if (!info) return ESP_ERR_INVALID_ARG;
@@ -175,6 +186,9 @@ esp_err_t ts_net_get_ip_info(ts_net_if_t iface, ts_net_ip_info_t *info)
     info->netmask = ip_info.netmask.addr;
     info->gateway = ip_info.gw.addr;
     
+    /* esp-netif reads offered DNS for a DHCP server interface. Report the
+     * resolver actually used by this host instead of its clients' options. */
+    if (iface == TS_NET_IF_ETH) return esp_netif_tcpip_exec(read_eth_host_dns, info);
     esp_netif_dns_info_t dns;
     if (esp_netif_get_dns_info(netif, ESP_NETIF_DNS_MAIN, &dns) == ESP_OK) {
         info->dns1 = dns.ip.u_addr.ip4.addr;
@@ -291,6 +305,8 @@ esp_err_t ts_net_set_hostname(const char *hostname)
     strncpy(s_hostname, hostname, sizeof(s_hostname) - 1);
     return ESP_OK;
 }
+
+
 
 const char *ts_net_get_hostname(void)
 {

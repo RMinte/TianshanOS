@@ -678,10 +678,16 @@ class WebTerminal {
      */
     sendSshInput(data) {
         if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-            this.ws.send(JSON.stringify({
-                type: 'ssh_input',
-                data: data
-            }));
+            // Keep complete JSON messages below the server frame budget. SSH
+            // input is a stream; preserve every character and surrogate pair.
+            for (let start = 0; start < data.length;) {
+                let end = Math.min(start + 2048, data.length);
+                const last = data.charCodeAt(end - 1);
+                if (end < data.length && last >= 0xD800 && last <= 0xDBFF &&
+                    data.charCodeAt(end) >= 0xDC00 && data.charCodeAt(end) <= 0xDFFF) --end;
+                this.ws.send(JSON.stringify({type: 'ssh_input', data: data.slice(start, end)}));
+                start = end;
+            }
         }
     }
     

@@ -17,7 +17,7 @@ for source,names,out in [
  ('components/ts_webui/src/ts_webui.c',['ts_webui_stop','ts_webui_deinit','ts_webui_is_running'],'webui_stop.inc')]:
  s=Path(source).read_text();parts=[]
  for name in names:
-  m=re.search(r'^(?:esp_err_t|bool) '+name+r'\(void\)\s*\{',s,re.M);assert m,name
+  m=re.search(r'^(?:static )?(?:esp_err_t|bool|void) '+name+r'\([^;]*\)\s*\{',s,re.M);assert m,name
   parts.append(s[m.start():s.index('\n}',m.start())+2])
  Path(sys.argv[1],out).write_text('\n'.join(parts))
 PY

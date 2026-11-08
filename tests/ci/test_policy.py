@@ -3,6 +3,7 @@ import gzip
 import importlib.util
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 import tempfile
@@ -19,14 +20,33 @@ def load(name):
 profile, gate, web, release = [load(name) for name in ('check_profile', 'check_gate', 'check_web_artifacts', 'check_release_state')]
 
 class PolicyTests(unittest.TestCase):
+    def test_runtime_inputs_are_prepared_on_a_fresh_runner(self):
+        workflow=(ROOT/'.github/workflows/build.yml').read_text()
+        runtime=workflow.split('  runtime-tests:\n',1)[1].split('\n  build:\n',1)[0]
+        self.assertIn('needs: [changes, build]',runtime)
+        sparse=runtime.split('sparse-checkout set ',1)[1].split('\n',1)[0].split()
+        referenced=set()
+        for fixture in (ROOT/'tests/runtime').glob('*.py'):
+            referenced.update(re.findall(r'components/([A-Za-z0-9_-]+)/',fixture.read_text()))
+        sdk={name for name in referenced if not name.startswith(('ts_','ch405','espressif__'))}
+        self.assertTrue(sdk <= {path.split('/')[1] for path in sparse},'Missing SDK runtime sources: '+str(sorted(sdk-{path.split('/')[1] for path in sparse})))
+        self.assertIn('name: runtime-dependencies-${{ github.sha }}',runtime)
+        self.assertIn('path: managed_components/espressif__esp_websocket_client',runtime)
+        build=workflow.split('\n  build:\n',1)[1].split('\n  web-artifacts:\n',1)[0]
+        self.assertIn('name: runtime-dependencies-${{ github.sha }}',build)
+        self.assertIn('path: managed_components/espressif__esp_websocket_client/',build)
+        self.assertIn('include-hidden-files: true',build)
+        self.assertIn('if-no-files-found: error',build)
+
     def test_events_keep_main_release_and_force_full(self):
         cases = [
-            ('RMinte-AI/TianshanOS','push','refs/heads/main',{},True),
-            ('RMinte-AI/TianshanOS','push','refs/heads/develop',{},False),
+            ('RMinte/TianshanOS','push','refs/heads/main',{},True),
+            ('RMinte/TianshanOS','push','refs/heads/develop',{},False),
             ('massif-01/TianshanOS','push','refs/heads/main',{},False),
-            ('RMinte-AI/TianshanOS','push','refs/tags/v0.6.1',{},True),
-            ('RMinte-AI/TianshanOS','release','refs/tags/v0.6.1',{'action':'published'},True),
-            ('RMinte-AI/TianshanOS','workflow_dispatch','refs/heads/main',{},False),
+            ('RMinte-AI/TianshanOS','push','refs/heads/main',{},False),
+            ('RMinte/TianshanOS','push','refs/tags/v0.6.1',{},True),
+            ('RMinte/TianshanOS','release','refs/tags/v0.6.1',{'action':'published'},True),
+            ('RMinte/TianshanOS','workflow_dispatch','refs/heads/main',{},False),
         ]
         for repo,event,ref,payload,publish in cases:
             with self.subTest(repo=repo,event=event):

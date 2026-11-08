@@ -8,9 +8,9 @@
  * 
  * SECURITY PRINCIPLES:
  * ====================
- * 1. Private keys NEVER leave secure storage (no export API)
- * 2. Memory is securely zeroed after use (prevents RAM dump attacks)
- * 3. Only public keys can be exported to files
+ * 1. Private export requires an explicit exportable flag and authorized caller
+ * 2. Temporary private-key buffers are cleared before release
+ * 3. Ordinary internal SSH use can load non-exportable private keys
  * 4. NVS encryption protects keys at rest (when enabled)
  * 
  * STORAGE CAPACITY:
@@ -19,7 +19,7 @@
  * - Max keys: 8 (TS_KEYSTORE_MAX_KEYS)
  * - RSA-4096: ~4.2KB per key (private + public + metadata)
  * - ECDSA P-256: ~0.6KB per key
- * - Total capacity: 8x RSA-4096 or 50+ ECDSA keys
+ * - At most 8 keys; actual capacity depends on serialized sizes and NVS overhead
  * 
  * CONFIGURATION:
  * ==============
@@ -104,7 +104,7 @@ typedef struct {
     uint32_t last_used;                         /**< Last used timestamp */
     bool has_public_key;                        /**< Whether public key is stored */
     bool exportable;                            /**< Whether private key can be exported */
-    bool hidden;                                /**< Whether key ID is hidden from unauthenticated users */
+    bool hidden;                                /**< Whether key ID is hidden from external readers below Admin */
 } ts_keystore_key_info_t;
 
 /**
@@ -114,7 +114,7 @@ typedef struct {
     bool exportable;                /**< Allow private key export (default: false) */
     const char *comment;            /**< Key comment (optional) */
     const char *alias;              /**< Display alias (optional, recommended for hidden keys) */
-    bool hidden;                    /**< Hide key ID from unauthenticated users (default: false) */
+    bool hidden;                    /**< Hide key ID from external readers below Admin (default: false) */
 } ts_keystore_gen_opts_t;
 
 /** Per-call generation outcome. Storage success is independent of HTTP delivery. */
@@ -181,17 +181,21 @@ bool ts_keystore_is_initialized(void);
  * Stores a private key (and optionally public key) in the secure storage.
  * The private key is encrypted at rest using NVS encryption.
  * 
- * @param[in] id        Unique key identifier (max TS_KEYSTORE_ID_MAX_LEN chars)
+ * @param[in] id        New unique key ID (up to 10 bytes with current NVS suffixes)
  * @param[in] keypair   Key pair to store
  * @param[in] type      Key type
  * @param[in] comment   Optional comment (can be NULL)
  * 
+ * Existing IDs and any unlisted fragments are rejected without writes.
+ * Finish explicit deletion before reusing an ID; there is no overwrite mode.
+ *
  * @return
  *      - ESP_OK on success
  *      - ESP_ERR_INVALID_ARG if id or keypair is invalid
  *      - ESP_ERR_NO_MEM if out of memory
  *      - ESP_ERR_NVS_NOT_ENOUGH_SPACE if storage is full
- *      - ESP_ERR_INVALID_STATE if keystore not initialized
+ *      - ESP_ERR_INVALID_STATE if keystore not initialized or ID occupied
+ *      - ESP_ERR_NOT_FINISHED if failed creation cleanup could not be confirmed
  */
 esp_err_t ts_keystore_store_key(const char *id, 
                                  const ts_keystore_keypair_t *keypair,
@@ -281,8 +285,8 @@ esp_err_t ts_keystore_get_key_info(const char *id, ts_keystore_key_info_t *info)
  * 
  * Retrieves a list of all stored key IDs and their metadata.
  * 
- * @param[out] keys       Array to receive key info (must be at least TS_KEYSTORE_MAX_KEYS)
- * @param[out] count      Pointer to receive actual number of keys
+ * @param[out] keys       Array to receive key info
+ * @param[in,out] count   Input capacity; output count (zero on read failure)
  * 
  * @return
  *      - ESP_OK on success
@@ -297,7 +301,7 @@ esp_err_t ts_keystore_list_keys(ts_keystore_key_info_t *keys, size_t *count);
  * Extended version of ts_keystore_list_keys with filtering support.
  * 
  * @param[out] keys           Array to receive key info
- * @param[out] count          Pointer to receive actual number of keys
+ * @param[in,out] count       Input capacity; output count (zero on read failure)
  * @param[in]  show_hidden    If true, include hidden keys; if false, exclude them
  * 
  * @return
@@ -306,6 +310,17 @@ esp_err_t ts_keystore_list_keys(ts_keystore_key_info_t *keys, size_t *count);
  *      - ESP_ERR_INVALID_STATE if keystore not initialized
  */
 esp_err_t ts_keystore_list_keys_ex(ts_keystore_key_info_t *keys, size_t *count, bool show_hidden);
+
+/** Read one visibility-checked metadata/public-key snapshot under the existing
+ * writer lock. Both public-key outputs may be NULL for metadata only.
+ * Hidden and absent records return NOT_FOUND when show_hidden is false.
+ * No private key bytes are returned. */
+esp_err_t ts_keystore_read_public_record(const char *id, bool show_hidden,
+    ts_keystore_key_info_t *info, char **public_key, size_t *public_key_len);
+/* Explicit export only: checks immutable exportability and reads the same key
+ * under the store owner. Ordinary internal private-key use remains supported. */
+esp_err_t ts_keystore_read_exportable_private_record(const char *id,
+    ts_keystore_key_info_t *info, char **private_key, size_t *private_key_len);
 
 /**
  * @brief Update last used timestamp

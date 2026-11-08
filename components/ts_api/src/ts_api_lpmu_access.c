@@ -748,27 +748,27 @@ static esp_err_t api_lpmu_access_log(const cJSON *params, ts_api_result_t *resul
 
 static const ts_api_endpoint_t lpmu_access_endpoints[] = {
     {
-        .name = "network.lpmu_access.start",
+        .name = "network.lpmu_access.start", .external_access=TS_API_ACCESS_ADMIN, .allowed_methods=TS_API_METHOD_WRITE,
         .description = "Start application computer upstream-network access setup",
         .category = TS_API_CAT_NETWORK,
         .handler = api_lpmu_access_start,
-        .requires_auth = true,
+        .requires_auth=true,
         .permission = "network.config",
     },
     {
-        .name = "network.lpmu_access.status",
+        .name = "network.lpmu_access.status", .external_access=TS_API_ACCESS_ADMIN, .allowed_methods=TS_API_METHOD_READ,
         .description = "Get application computer upstream-network access setup status",
         .category = TS_API_CAT_NETWORK,
         .handler = api_lpmu_access_status,
-        .requires_auth = true,
+        .requires_auth=true,
         .permission = "network.view",
     },
     {
-        .name = "network.lpmu_access.log",
+        .name = "network.lpmu_access.log", .external_access=TS_API_ACCESS_ADMIN, .allowed_methods=TS_API_METHOD_READ,
         .description = "Get the execution log for an application computer network access run",
         .category = TS_API_CAT_NETWORK,
         .handler = api_lpmu_access_log,
-        .requires_auth = true,
+        .requires_auth=true,
         .permission = "network.view",
     },
 };

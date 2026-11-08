@@ -19,8 +19,8 @@ if [ -z "$IDF_PATH" ]; then
     }
 fi
 
-GIT_SHORT_SHA="$(git rev-parse --short=6 HEAD 2>/dev/null || echo nogit)"
-RUN_ID="$(date -u +%H%M%S).${GIT_SHORT_SHA}"
+BUILD_ID="$(python3 tools/gen_version.py "$PROJECT_DIR")"
+RUN_ID="${BUILD_ID#*+}"
 
 echo "构建 root/admin 密码恢复固件..."
 echo "Run ID: ${RUN_ID}"

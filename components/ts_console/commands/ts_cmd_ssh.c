@@ -1481,7 +1481,7 @@ static int do_ssh_keygen(const char *type_str, const char *output_path, const ch
     free(private_pem);
     if (ret != ESP_OK) {
         ts_console_printf(ret == ESP_ERR_NOT_ALLOWED
-            ? "FAILED: This file belongs to Automation. Choose another output path.\n"
+            ? "FAILED: This path is protected. Choose another output path.\n"
             : "FAILED: Could not save the private key. Check the path and storage.\n");
         ts_crypto_keypair_free(keypair);
         return 1;
@@ -1515,7 +1515,7 @@ static int do_ssh_keygen(const char *type_str, const char *output_path, const ch
     ret = ts_storage_write_file(pub_path, openssh_pub, strlen(openssh_pub));
     if (ret != ESP_OK) {
         ts_console_printf(ret == ESP_ERR_NOT_ALLOWED
-            ? "FAILED: This file belongs to Automation. Choose another output path.\n"
+            ? "FAILED: This path is protected. Choose another output path.\n"
             : "FAILED: Could not save the public key. Check the path and storage.\n");
         free(openssh_pub);
         ts_crypto_keypair_free(keypair);

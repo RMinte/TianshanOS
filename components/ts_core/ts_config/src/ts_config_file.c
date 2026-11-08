@@ -22,7 +22,6 @@
 #include "ts_config.h"
 #include "ts_config_file.h"
 #include "ts_config_module.h"
-#include "ts_config_pack.h"
 #include "esp_log.h"
 #include "esp_vfs.h"
 #include "esp_heap_caps.h"
@@ -234,7 +233,7 @@ esp_err_t ts_config_file_load_all(void)
     }
 
     // 遍历目录，加载 JSON 配置文件
-    // 注意: .tscfg 加密配置在 security 服务启动后由 ts_config_file_load_encrypted() 加载
+    // Encrypted files belong to the one-time migration/configuration owner.
     DIR *dir = opendir(s_config_path);
     if (dir == NULL) {
         ESP_LOGE(TAG, "Failed to open configuration directory");
@@ -285,7 +284,7 @@ esp_err_t ts_config_file_load_all(void)
         const char *ext = strrchr(entry->d_name, '.');
         if (ext == NULL) continue;
         
-        // 只处理 .json 明文配置（.tscfg 由 ts_config_file_load_encrypted() 在 security 服务启动后加载）
+        // This generic backend never replays encrypted system/automation files.
         if (strcmp(ext, ".json") != 0) continue;
         
         snprintf(filepath, MAX_PATH_LEN, "%.127s/%.127s", s_config_path, entry->d_name);
@@ -336,88 +335,6 @@ esp_err_t ts_config_file_load_all(void)
                  loaded_count, skipped_count, tscfg_name_count);
     } else {
         ESP_LOGI(TAG, "Loaded %d JSON configs, skipped %d", loaded_count, skipped_count);
-    }
-    return ESP_OK;
-}
-
-esp_err_t ts_config_file_load_encrypted(void)
-{
-    if (!s_file_initialized) {
-        return ESP_ERR_INVALID_STATE;
-    }
-    
-    // 首先初始化 config pack 子系统（需要证书已加载）
-    esp_err_t init_ret = ts_config_pack_init();
-    if (init_ret != ESP_OK) {
-        ESP_LOGW(TAG, "Config pack init failed: %s, skipping encrypted configs", 
-                 esp_err_to_name(init_ret));
-        return ESP_OK;  // 不是致命错误
-    }
-
-    ESP_LOGI(TAG, "Loading encrypted configuration files from: %s", s_config_path);
-
-    // 检查目录是否存在
-    if (!path_exists(s_config_path)) {
-        ESP_LOGD(TAG, "Configuration path does not exist");
-        return ESP_OK;
-    }
-
-    DIR *dir = opendir(s_config_path);
-    if (dir == NULL) {
-        ESP_LOGE(TAG, "Failed to open configuration directory");
-        return ESP_FAIL;
-    }
-
-    int loaded_count = 0;
-    int failed_count = 0;
-    struct dirent *entry;
-    
-    // 堆分配避免栈溢出
-    #define TSCFG_MAX_PATH_LEN 256
-    char *filepath = heap_caps_malloc(TSCFG_MAX_PATH_LEN, MALLOC_CAP_SPIRAM);
-    if (filepath == NULL) {
-        closedir(dir);
-        return ESP_ERR_NO_MEM;
-    }
-
-    while ((entry = readdir(dir)) != NULL) {
-        const char *ext = strrchr(entry->d_name, '.');
-        if (ext == NULL || strcmp(ext, ".tscfg") != 0) {
-            continue;
-        }
-        
-        snprintf(filepath, TSCFG_MAX_PATH_LEN, "%.127s/%.127s", s_config_path, entry->d_name);
-        
-        ESP_LOGI(TAG, "Loading encrypted: %s", entry->d_name);
-        
-        // 解密并加载配置
-        ts_config_pack_t *pack = NULL;
-        ts_config_pack_result_t pack_ret = ts_config_pack_load(filepath, &pack);
-        
-        if (pack_ret == TS_CONFIG_PACK_OK && pack && pack->content) {
-            // 解密成功，解析 JSON 并应用配置
-            esp_err_t ret = ts_config_load_json_string(pack->content);
-            if (ret == ESP_OK) {
-                ESP_LOGI(TAG, "Loaded encrypted config: %s (signer: %s)", 
-                         entry->d_name, pack->sig_info.signer_cn);
-                loaded_count++;
-            } else {
-                ESP_LOGW(TAG, "Failed to parse decrypted content: %s", entry->d_name);
-                failed_count++;
-            }
-            ts_config_pack_free(pack);
-        } else {
-            ESP_LOGW(TAG, "Failed to decrypt %s: %s", entry->d_name,
-                     ts_config_pack_strerror(pack_ret));
-            failed_count++;
-        }
-    }
-
-    free(filepath);
-    closedir(dir);
-
-    if (loaded_count > 0 || failed_count > 0) {
-        ESP_LOGI(TAG, "Encrypted configs: %d loaded, %d failed", loaded_count, failed_count);
     }
     return ESP_OK;
 }

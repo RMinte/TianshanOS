@@ -28,7 +28,11 @@ code = r'''
 #include <stdlib.h>
 #include <string.h>
 #include <stdarg.h>
+#include <math.h>
+#define pdPASS 1
 #include "ts_api.h"
+#include "ts_security.h"
+#define ESP_ERR_NOT_ALLOWED 0x10d
 #include "freertos/semphr.h"
 #include "argtable3.h"
 #define TS_LOGD(...) ((void)0)
@@ -118,7 +122,7 @@ cjson = IDF / 'components/json/cJSON'; argtable = IDF / 'components/console/argt
 with tempfile.TemporaryDirectory(prefix='ts-system-reboot-') as directory:
     build = Path(directory); (build / 'test.c').write_text(code)
     subprocess.run(['cc', '-std=gnu11', '-g', '-fsanitize=address,undefined', '-fno-sanitize-recover=all',
-                    '-Wno-deprecated-declarations', '-Itests/runtime/storage_stubs', '-Icomponents/ts_api/include',
+                    '-Wno-deprecated-declarations', '-Itests/runtime/storage_stubs', '-Icomponents/ts_api/include', '-Icomponents/ts_security/include',
                     '-I' + str(cjson), '-I' + str(argtable), str(build / 'test.c'), str(cjson / 'cJSON.c'),
                     *map(str, argtable.glob('*.c')), '-lpthread', '-lm', '-o', str(build / 'test')], check=True)
     cases = [args.case] if args.case else normal if args.group == 'normal' else defects if args.group == 'defect' else normal + defects

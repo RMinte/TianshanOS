@@ -24,7 +24,6 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include "esp_err.h"
-#include "esp_partition.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -83,7 +82,7 @@ typedef struct {
     size_t total_size;          ///< Total firmware size (0 if unknown)
     size_t received_size;       ///< Bytes received so far
     uint8_t progress_percent;   ///< Progress percentage (0-100)
-    const char *status_msg;     ///< Human-readable status message
+    char status_msg[64];     ///< Human-readable status message
 } ts_ota_progress_t;
 
 /**
@@ -641,17 +640,7 @@ bool ts_ota_download_is_running(void);
 /**
  * @brief OTA event IDs
  */
-typedef enum {
-    TS_EVENT_OTA_STARTED,           ///< OTA update started
-    TS_EVENT_OTA_PROGRESS,          ///< Progress update
-    TS_EVENT_OTA_COMPLETED,         ///< Update completed successfully
-    TS_EVENT_OTA_FAILED,            ///< Update failed
-    TS_EVENT_OTA_ABORTED,           ///< Update aborted by user
-    TS_EVENT_OTA_PENDING_REBOOT,    ///< Waiting for reboot
-    TS_EVENT_OTA_ROLLBACK_PENDING,  ///< Rollback is pending
-    TS_EVENT_OTA_ROLLBACK_EXECUTED, ///< Rollback was executed
-    TS_EVENT_OTA_VALIDATED,         ///< Firmware validated
-} ts_event_ota_id_t;
+#include "ts_ota_events.h"
 
 #ifdef __cplusplus
 }

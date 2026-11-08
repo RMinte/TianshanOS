@@ -1,0 +1,1664 @@
+{
+  "auth.admin.reset_password": [
+    5,
+    4,
+    2,
+    1
+  ],
+  "auth.admin.set_password": [
+    5,
+    4,
+    2,
+    1
+  ],
+  "auth.change_password": [
+    6,
+    0,
+    2,
+    0
+  ],
+  "auth.login": [
+    1,
+    0,
+    2,
+    0
+  ],
+  "auth.logout": [
+    6,
+    0,
+    2,
+    0
+  ],
+  "auth.root.set_password": [
+    5,
+    4,
+    2,
+    1
+  ],
+  "auth.status": [
+    6,
+    0,
+    2,
+    0
+  ],
+  "automation.action.stats": [
+    2,
+    1,
+    3,
+    1
+  ],
+  "automation.action.stats.reset": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "automation.actions.add": [
+    5,
+    4,
+    14,
+    1
+  ],
+  "automation.actions.delete": [
+    5,
+    4,
+    14,
+    1
+  ],
+  "automation.actions.execute": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "automation.actions.export": [
+    5,
+    4,
+    2,
+    1
+  ],
+  "automation.actions.get": [
+    2,
+    1,
+    3,
+    1
+  ],
+  "automation.actions.import": [
+    5,
+    4,
+    2,
+    1
+  ],
+  "automation.actions.list": [
+    2,
+    1,
+    3,
+    1
+  ],
+  "automation.actions.update": [
+    5,
+    4,
+    14,
+    1
+  ],
+  "automation.config.apply": [
+    5,
+    4,
+    2,
+    1
+  ],
+  "automation.config.backup": [
+    5,
+    4,
+    14,
+    1
+  ],
+  "automation.config.enable": [
+    5,
+    4,
+    14,
+    1
+  ],
+  "automation.config.preview": [
+    5,
+    4,
+    2,
+    1
+  ],
+  "automation.config.refresh": [
+    5,
+    4,
+    14,
+    1
+  ],
+  "automation.config.status": [
+    2,
+    1,
+    3,
+    1
+  ],
+  "automation.pause": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "automation.proxy.fetch": [
+    2,
+    1,
+    2,
+    1
+  ],
+  "automation.proxy.socketio_test": [
+    5,
+    4,
+    2,
+    1
+  ],
+  "automation.proxy.websocket_test": [
+    5,
+    4,
+    2,
+    1
+  ],
+  "automation.reload": [
+    5,
+    4,
+    14,
+    1
+  ],
+  "automation.resume": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "automation.rules.add": [
+    5,
+    4,
+    14,
+    1
+  ],
+  "automation.rules.delete": [
+    5,
+    4,
+    14,
+    1
+  ],
+  "automation.rules.disable": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "automation.rules.enable": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "automation.rules.export": [
+    5,
+    4,
+    2,
+    1
+  ],
+  "automation.rules.get": [
+    2,
+    1,
+    3,
+    1
+  ],
+  "automation.rules.import": [
+    5,
+    4,
+    2,
+    1
+  ],
+  "automation.rules.list": [
+    2,
+    1,
+    3,
+    1
+  ],
+  "automation.rules.trigger": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "automation.rules.update": [
+    5,
+    4,
+    14,
+    1
+  ],
+  "automation.services.list": [
+    2,
+    1,
+    3,
+    1
+  ],
+  "automation.services.status": [
+    2,
+    1,
+    3,
+    1
+  ],
+  "automation.services.stop": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "automation.sources.add": [
+    5,
+    4,
+    14,
+    1
+  ],
+  "automation.sources.add_mapping": [
+    5,
+    4,
+    14,
+    1
+  ],
+  "automation.sources.delete": [
+    5,
+    4,
+    14,
+    1
+  ],
+  "automation.sources.disable": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "automation.sources.enable": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "automation.sources.export": [
+    5,
+    4,
+    2,
+    1
+  ],
+  "automation.sources.import": [
+    5,
+    4,
+    2,
+    1
+  ],
+  "automation.sources.list": [
+    2,
+    1,
+    3,
+    1
+  ],
+  "automation.sources.remove_mapping": [
+    5,
+    4,
+    14,
+    1
+  ],
+  "automation.sources.update": [
+    5,
+    4,
+    14,
+    1
+  ],
+  "automation.start": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "automation.status": [
+    2,
+    1,
+    3,
+    1
+  ],
+  "automation.stop": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "automation.test.device": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "automation.test.gpio": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "automation.test.led": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "automation.test.ssh": [
+    5,
+    4,
+    2,
+    1
+  ],
+  "automation.variables.delete": [
+    5,
+    4,
+    14,
+    1
+  ],
+  "automation.variables.get": [
+    2,
+    1,
+    3,
+    1
+  ],
+  "automation.variables.list": [
+    2,
+    1,
+    3,
+    1
+  ],
+  "automation.variables.set": [
+    5,
+    4,
+    14,
+    1
+  ],
+  "cert.delete": [
+    4,
+    3,
+    14,
+    -1
+  ],
+  "cert.generate_csr": [
+    4,
+    3,
+    14,
+    -1
+  ],
+  "cert.generate_keypair": [
+    4,
+    3,
+    14,
+    -1
+  ],
+  "cert.get_certificate": [
+    1,
+    0,
+    3,
+    -1
+  ],
+  "cert.install": [
+    4,
+    3,
+    14,
+    -1
+  ],
+  "cert.install_ca": [
+    4,
+    3,
+    14,
+    -1
+  ],
+  "cert.status": [
+    1,
+    0,
+    3,
+    -1
+  ],
+  "config.delete": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "config.get": [
+    1,
+    0,
+    3,
+    0
+  ],
+  "config.list": [
+    4,
+    3,
+    3,
+    1
+  ],
+  "config.module.list": [
+    2,
+    1,
+    3,
+    1
+  ],
+  "config.module.reset": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "config.module.save": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "config.module.set": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "config.module.show": [
+    2,
+    1,
+    3,
+    1
+  ],
+  "config.pack.apply": [
+    4,
+    3,
+    14,
+    -1
+  ],
+  "config.pack.content": [
+    4,
+    3,
+    14,
+    -1
+  ],
+  "config.pack.export": [
+    4,
+    3,
+    14,
+    -1
+  ],
+  "config.pack.export_cert": [
+    2,
+    1,
+    3,
+    -1
+  ],
+  "config.pack.import": [
+    4,
+    3,
+    14,
+    -1
+  ],
+  "config.pack.info": [
+    2,
+    1,
+    3,
+    -1
+  ],
+  "config.pack.list": [
+    2,
+    1,
+    3,
+    -1
+  ],
+  "config.pack.verify": [
+    4,
+    3,
+    14,
+    -1
+  ],
+  "config.save": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "config.set": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "device.fan.set": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "device.fan.status": [
+    1,
+    0,
+    3,
+    0
+  ],
+  "device.ping": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "device.power": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "device.power.status": [
+    1,
+    0,
+    3,
+    0
+  ],
+  "device.reset": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "device.status": [
+    1,
+    0,
+    3,
+    0
+  ],
+  "device.usb.set": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "device.usb.status": [
+    1,
+    0,
+    3,
+    0
+  ],
+  "dhcp.clients": [
+    2,
+    1,
+    3,
+    1
+  ],
+  "dhcp.start": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "dhcp.status": [
+    2,
+    1,
+    3,
+    1
+  ],
+  "dhcp.stop": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "fan.config": [
+    2,
+    1,
+    3,
+    1
+  ],
+  "fan.curve": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "fan.enable": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "fan.limits": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "fan.mode": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "fan.save": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "fan.set": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "fan.status": [
+    1,
+    0,
+    3,
+    0
+  ],
+  "gpio.info": [
+    2,
+    1,
+    3,
+    1
+  ],
+  "gpio.list": [
+    2,
+    1,
+    3,
+    1
+  ],
+  "gpio.set": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "gpio.toggle": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "hosts.clear": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "hosts.info": [
+    2,
+    1,
+    3,
+    1
+  ],
+  "hosts.list": [
+    2,
+    1,
+    3,
+    1
+  ],
+  "hosts.remove": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "hosts.update": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "key.delete": [
+    4,
+    3,
+    14,
+    -1
+  ],
+  "key.export": [
+    2,
+    1,
+    3,
+    -1
+  ],
+  "key.exportPrivate": [
+    4,
+    3,
+    14,
+    -1
+  ],
+  "key.generate": [
+    4,
+    3,
+    14,
+    -1
+  ],
+  "key.info": [
+    2,
+    1,
+    3,
+    -1
+  ],
+  "key.list": [
+    2,
+    1,
+    3,
+    -1
+  ],
+  "led.boot.config": [
+    2,
+    1,
+    3,
+    1
+  ],
+  "led.brightness": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "led.clear": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "led.color.hsv": [
+    2,
+    1,
+    3,
+    1
+  ],
+  "led.color.parse": [
+    2,
+    1,
+    3,
+    1
+  ],
+  "led.color_correction.export": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "led.color_correction.get": [
+    2,
+    1,
+    3,
+    1
+  ],
+  "led.color_correction.import": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "led.color_correction.reset": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "led.color_correction.set": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "led.effect.list": [
+    2,
+    1,
+    3,
+    1
+  ],
+  "led.effect.start": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "led.effect.stop": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "led.fill": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "led.filter.list": [
+    2,
+    1,
+    3,
+    1
+  ],
+  "led.filter.start": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "led.filter.stop": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "led.image": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "led.list": [
+    1,
+    0,
+    3,
+    0
+  ],
+  "led.qrcode": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "led.save": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "led.set": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "led.text": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "led.text.stop": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "log.capture": [
+    4,
+    3,
+    14,
+    -1
+  ],
+  "log.clear": [
+    4,
+    3,
+    14,
+    -1
+  ],
+  "log.list": [
+    4,
+    3,
+    3,
+    -1
+  ],
+  "log.setLevel": [
+    4,
+    3,
+    14,
+    -1
+  ],
+  "log.stats": [
+    4,
+    3,
+    3,
+    -1
+  ],
+  "monitor.config": [
+    2,
+    1,
+    3,
+    1
+  ],
+  "monitor.data": [
+    2,
+    1,
+    3,
+    1
+  ],
+  "monitor.set_server": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "monitor.start": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "monitor.status": [
+    2,
+    1,
+    3,
+    1
+  ],
+  "monitor.stop": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "nat.disable": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "nat.enable": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "nat.save": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "nat.status": [
+    2,
+    1,
+    3,
+    1
+  ],
+  "network.eth.status": [
+    1,
+    0,
+    3,
+    0
+  ],
+  "network.hostname": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "network.lpmu_access.log": [
+    4,
+    3,
+    3,
+    1
+  ],
+  "network.lpmu_access.start": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "network.lpmu_access.status": [
+    4,
+    3,
+    3,
+    1
+  ],
+  "network.status": [
+    1,
+    0,
+    3,
+    0
+  ],
+  "network.wifi.ap.config": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "network.wifi.ap.stations": [
+    2,
+    1,
+    3,
+    1
+  ],
+  "network.wifi.connect": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "network.wifi.disconnect": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "network.wifi.mode": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "network.wifi.scan": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "ota.abort": [
+    4,
+    3,
+    14,
+    -1
+  ],
+  "ota.partitions": [
+    1,
+    0,
+    3,
+    -1
+  ],
+  "ota.progress": [
+    2,
+    1,
+    3,
+    -1
+  ],
+  "ota.rollback": [
+    4,
+    3,
+    14,
+    -1
+  ],
+  "ota.server.get": [
+    2,
+    1,
+    3,
+    -1
+  ],
+  "ota.server.set": [
+    4,
+    3,
+    14,
+    -1
+  ],
+  "ota.start_file": [
+    4,
+    3,
+    14,
+    -1
+  ],
+  "ota.start_url": [
+    4,
+    3,
+    14,
+    -1
+  ],
+  "ota.status": [
+    2,
+    1,
+    3,
+    -1
+  ],
+  "ota.test_connection": [
+    4,
+    3,
+    14,
+    -1
+  ],
+  "ota.upgrade_file": [
+    4,
+    3,
+    14,
+    -1
+  ],
+  "ota.upgrade_url": [
+    4,
+    3,
+    14,
+    -1
+  ],
+  "ota.upload_abort": [
+    4,
+    3,
+    14,
+    -1
+  ],
+  "ota.upload_begin": [
+    4,
+    3,
+    14,
+    -1
+  ],
+  "ota.upload_end": [
+    4,
+    3,
+    14,
+    -1
+  ],
+  "ota.validate": [
+    4,
+    3,
+    14,
+    -1
+  ],
+  "ota.version": [
+    1,
+    0,
+    3,
+    -1
+  ],
+  "ota.www.abort": [
+    4,
+    3,
+    14,
+    -1
+  ],
+  "ota.www.progress": [
+    2,
+    1,
+    3,
+    -1
+  ],
+  "ota.www.start": [
+    4,
+    3,
+    14,
+    -1
+  ],
+  "ota.www.start_sdcard": [
+    4,
+    3,
+    14,
+    -1
+  ],
+  "power.chip": [
+    1,
+    0,
+    3,
+    0
+  ],
+  "power.debug": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "power.interval.set": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "power.monitor.start": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "power.monitor.stop": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "power.protection.config": [
+    2,
+    1,
+    3,
+    1
+  ],
+  "power.protection.set": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "power.protection.status": [
+    1,
+    0,
+    3,
+    0
+  ],
+  "power.stats": [
+    2,
+    1,
+    3,
+    1
+  ],
+  "power.stats.reset": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "power.status": [
+    1,
+    0,
+    3,
+    0
+  ],
+  "power.threshold.set": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "power.voltage": [
+    1,
+    0,
+    3,
+    0
+  ],
+  "service.list": [
+    1,
+    0,
+    3,
+    0
+  ],
+  "service.restart": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "service.start": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "service.status": [
+    1,
+    0,
+    3,
+    0
+  ],
+  "service.stop": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "sftp.get": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "sftp.ls": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "sftp.mkdir": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "sftp.put": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "sftp.rm": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "sftp.stat": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "ssh.cancel": [
+    5,
+    4,
+    14,
+    1
+  ],
+  "ssh.commands.add": [
+    5,
+    4,
+    14,
+    1
+  ],
+  "ssh.commands.export": [
+    5,
+    4,
+    14,
+    1
+  ],
+  "ssh.commands.get": [
+    2,
+    1,
+    3,
+    1
+  ],
+  "ssh.commands.import": [
+    5,
+    4,
+    14,
+    1
+  ],
+  "ssh.commands.list": [
+    2,
+    1,
+    3,
+    1
+  ],
+  "ssh.commands.remove": [
+    5,
+    4,
+    14,
+    1
+  ],
+  "ssh.commands.update": [
+    5,
+    4,
+    14,
+    1
+  ],
+  "ssh.copyid": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "ssh.exec": [
+    5,
+    4,
+    14,
+    1
+  ],
+  "ssh.exec_status": [
+    5,
+    4,
+    3,
+    1
+  ],
+  "ssh.exec_stream": [
+    5,
+    4,
+    14,
+    1
+  ],
+  "ssh.hosts.add": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "ssh.hosts.export": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "ssh.hosts.get": [
+    2,
+    1,
+    3,
+    1
+  ],
+  "ssh.hosts.import": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "ssh.hosts.list": [
+    2,
+    1,
+    3,
+    1
+  ],
+  "ssh.hosts.remove": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "ssh.hosts.update": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "ssh.keygen": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "ssh.revoke": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "ssh.services.start": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "ssh.test": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "storage.delete": [
+    4,
+    3,
+    14,
+    -1
+  ],
+  "storage.info": [
+    2,
+    1,
+    3,
+    -1
+  ],
+  "storage.list": [
+    2,
+    1,
+    3,
+    -1
+  ],
+  "storage.mkdir": [
+    4,
+    3,
+    14,
+    -1
+  ],
+  "storage.mount": [
+    4,
+    3,
+    14,
+    -1
+  ],
+  "storage.read": [
+    2,
+    1,
+    3,
+    -1
+  ],
+  "storage.rename": [
+    4,
+    3,
+    14,
+    -1
+  ],
+  "storage.status": [
+    1,
+    0,
+    3,
+    -1
+  ],
+  "storage.unmount": [
+    4,
+    3,
+    14,
+    -1
+  ],
+  "system.apis": [
+    2,
+    1,
+    3,
+    1
+  ],
+  "system.cpu": [
+    1,
+    0,
+    3,
+    0
+  ],
+  "system.info": [
+    1,
+    0,
+    3,
+    0
+  ],
+  "system.log.level": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "system.memory": [
+    1,
+    0,
+    3,
+    0
+  ],
+  "system.memory_detail": [
+    4,
+    3,
+    3,
+    1
+  ],
+  "system.reboot": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "system.tasks": [
+    4,
+    3,
+    3,
+    1
+  ],
+  "temp.bind": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "temp.manual": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "temp.read": [
+    2,
+    1,
+    3,
+    1
+  ],
+  "temp.select": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "temp.sources": [
+    2,
+    1,
+    3,
+    1
+  ],
+  "temp.status": [
+    1,
+    0,
+    3,
+    0
+  ],
+  "time.force_sync": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "time.info": [
+    1,
+    0,
+    3,
+    0
+  ],
+  "time.set_ntp": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "time.set_timezone": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "time.sync": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "ui.widgets.get": [
+    2,
+    1,
+    3,
+    1
+  ],
+  "ui.widgets.set": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "wifi.connect": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "wifi.disconnect": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "wifi.scan": [
+    4,
+    3,
+    14,
+    1
+  ],
+  "wifi.status": [
+    1,
+    0,
+    3,
+    0
+  ]
+}

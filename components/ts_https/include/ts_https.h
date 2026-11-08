@@ -58,7 +58,7 @@ typedef enum {
     TS_HTTPS_ROLE_VIEWER,           /**< Read-only access (OU=viewer) */
     TS_HTTPS_ROLE_OPERATOR,         /**< Operation access (OU=operator) */
     TS_HTTPS_ROLE_ADMIN,            /**< Full access (OU=admin) */
-    TS_HTTPS_ROLE_DEVICE            /**< Device identity (OU=device) */
+    TS_HTTPS_ROLE_DEVICE            /**< Device identity and viewer reads; no management rank */
 } ts_https_role_t;
 
 /**

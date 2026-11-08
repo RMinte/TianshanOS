@@ -3,6 +3,7 @@
 #include "ts_ws_transport.h"
 #include "ts_ws_operation.h"
 #include "ts_api.h"
+#include "ts_ota.h"
 #include "ts_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -314,6 +315,26 @@ static void telemetry_worker(void *arg)
     portENTER_CRITICAL(&s_lock); s_worker=NULL; portEXIT_CRITICAL(&s_lock);
     vTaskDelete(NULL);
 }
+static cJSON *ota_progress_event(const ts_event_t *event)
+{
+    if (event->id != TS_EVENT_OTA_PROGRESS || event->data_size != sizeof(ts_ota_progress_t)) return NULL;
+    ts_ota_progress_t progress;
+    memcpy(&progress, event->data, sizeof(progress));
+    if ((unsigned)progress.state > TS_OTA_STATE_ERROR || progress.progress_percent > 100 ||
+        !memchr(progress.status_msg, 0, sizeof(progress.status_msg))) return NULL;
+    static const char *states[] = {"idle", "checking", "downloading", "verifying", "writing", "pending_reboot", "error"};
+    cJSON *data = cJSON_CreateObject();
+    if (!data || !cJSON_AddStringToObject(data, "state", states[progress.state]) ||
+        !cJSON_AddNumberToObject(data, "percent", progress.progress_percent) ||
+        !cJSON_AddNumberToObject(data, "received_size", progress.received_size) ||
+        !cJSON_AddNumberToObject(data, "total_size", progress.total_size) ||
+        !cJSON_AddStringToObject(data, "message", progress.status_msg)) {
+        cJSON_Delete(data);
+        return NULL;
+    }
+    return data;
+}
+
 static void event_handler(const ts_event_t *event, void *arg)
 {
     unsigned topic=(unsigned)(uintptr_t)arg;
@@ -326,7 +347,7 @@ static void event_handler(const ts_event_t *event, void *arg)
     if(topic==0 || !demand) return;
     if(!event || !event->data || !event->data_size) return;
     /* Parse bounded event bytes, not an assumed NUL terminated buffer. */
-    cJSON *data=cJSON_ParseWithLength(event->data,event->data_size);
+    cJSON *data=topic==9 ? ota_progress_event(event) : cJSON_ParseWithLength(event->data,event->data_size);
     if(data) {ts_ws_broadcast_to_topic(topics[topic].name,data);cJSON_Delete(data);}
 }
 esp_err_t ts_ws_subscriptions_init(void)

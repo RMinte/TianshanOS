@@ -482,21 +482,30 @@ esp_err_t ts_storage_sd_refresh(void)
     ts_storage_sd_unlock();return ret;
 }
 
-/* Compare the resolved directory name, including FAT aliases/case rules. */
-bool ts_storage_sd_name_is(const char *path, const char *name)
+/* Resolve the actual FAT name; distinguish absence from I/O/driver failure. */
+esp_err_t ts_storage_sd_resolve_name(const char *path, char *name, size_t capacity)
 {
+    if (!path || !name || !capacity) return ESP_ERR_INVALID_ARG;
     ts_storage_sd_lock();
-    bool matches = false;
+    esp_err_t ret = ESP_FAIL;
     size_t mount_length = strlen(s_mount_point);
     if (s_card && mount_length && !strncmp(path, s_mount_point, mount_length) && path[mount_length] == '/') {
         BYTE drive = ff_diskio_get_pdrv_card(s_card);
         FILINFO info;
         char fat_path[TS_STORAGE_MAX_PATH];
         if (drive != 0xff) {
-            snprintf(fat_path, sizeof(fat_path), "%u:%s", drive, path + mount_length);
-            matches = f_stat(fat_path, &info) == FR_OK && !strcasecmp(info.fname, name);
+            int length = snprintf(fat_path, sizeof(fat_path), "%u:%s", drive, path + mount_length);
+            if (length >= 0 && (size_t)length < sizeof(fat_path)) {
+                FRESULT result = f_stat(fat_path, &info);
+                if (result == FR_OK && strlen(info.fname) < capacity) {
+                    strcpy(name, info.fname);
+                    ret = ESP_OK;
+                } else if (result == FR_NO_FILE || result == FR_NO_PATH) {
+                    ret = ESP_ERR_NOT_FOUND;
+                }
+            }
         }
     }
     ts_storage_sd_unlock();
-    return matches;
+    return ret;
 }

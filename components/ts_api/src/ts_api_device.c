@@ -14,15 +14,17 @@
 #include "ts_power.h"
 #include "ts_usb_mux.h"
 #include <string.h>
+#include <math.h>
+#include <stdatomic.h>
+#include "esp_timer.h"
 #include <sys/socket.h>
+#include <sys/select.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <errno.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include "lwip/inet_chksum.h"
-#include "lwip/ip.h"
-#include "lwip/icmp.h"
 
 #define TAG "api_device"
 
@@ -429,117 +431,108 @@ static esp_err_t api_device_usb_set(const cJSON *params, ts_api_result_t *result
  * @param host: IP address (default: "10.10.99.99" for LPMU)
  * @param timeout: timeout in ms (default: 1000)
  */
-static esp_err_t api_device_ping(const cJSON *params, ts_api_result_t *result)
+static atomic_flag s_ping_busy = ATOMIC_FLAG_INIT;
+
+static bool ping_wait(int fd, bool writing, int64_t deadline)
 {
-    const char *host = "10.10.99.99";
-    int timeout_ms = 1000;
-    
-    cJSON *host_json = cJSON_GetObjectItem(params, "host");
-    if (host_json && cJSON_IsString(host_json)) {
-        host = host_json->valuestring;
+    for (;;) {
+        int64_t remaining = deadline - esp_timer_get_time();
+        if (remaining <= 0) return false;
+        struct timeval timeout = {.tv_sec = remaining / 1000000,
+                                  .tv_usec = remaining % 1000000};
+        fd_set ready;
+        FD_ZERO(&ready);
+        FD_SET(fd, &ready);
+        int ret = select(fd + 1, writing ? NULL : &ready,
+                         writing ? &ready : NULL, NULL, &timeout);
+        if (ret > 0) return esp_timer_get_time() < deadline;
+        if (ret == 0 || errno != EINTR) return false;
     }
-    
-    cJSON *timeout_json = cJSON_GetObjectItem(params, "timeout");
-    if (timeout_json && cJSON_IsNumber(timeout_json)) {
-        timeout_ms = timeout_json->valueint;
+}
+
+static esp_err_t device_ping_impl(const cJSON *params, ts_api_result_t *result)
+{
+    const cJSON *host_item = cJSON_GetObjectItemCaseSensitive(params, "host");
+    const cJSON *timeout_item = cJSON_GetObjectItemCaseSensitive(params, "timeout");
+    const char *host = host_item && cJSON_IsString(host_item) ? host_item->valuestring : "10.10.99.99";
+    unsigned timeout_ms = 1000;
+    struct sockaddr_in address = {.sin_family = AF_INET};
+    if ((host_item && !cJSON_IsString(host_item)) || inet_pton(AF_INET, host, &address.sin_addr) != 1 ||
+        (timeout_item && (!cJSON_IsNumber(timeout_item) || !isfinite(timeout_item->valuedouble) ||
+            timeout_item->valuedouble < 1 || timeout_item->valuedouble > 30000 ||
+            floor(timeout_item->valuedouble) != timeout_item->valuedouble))) {
+        ts_api_result_error(result, TS_API_ERR_INVALID_ARG, "Invalid IPv4 address or timeout (1-30000 ms)");
+        return ESP_ERR_INVALID_ARG;
     }
-    
-    // 创建 ICMP raw socket
-    int sock = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
-    if (sock < 0) {
-        cJSON *data = cJSON_CreateObject();
-        cJSON_AddStringToObject(data, "host", host);
-        cJSON_AddBoolToObject(data, "reachable", false);
-        cJSON_AddStringToObject(data, "error", "socket creation failed");
-        ts_api_result_ok(result, data);
-        return ESP_OK;
-    }
-    
-    // 设置接收超时
-    struct timeval tv;
-    tv.tv_sec = timeout_ms / 1000;
-    tv.tv_usec = (timeout_ms % 1000) * 1000;
-    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-    
-    struct sockaddr_in addr;
-    memset(&addr, 0, sizeof(addr));
-    addr.sin_family = AF_INET;
-    inet_pton(AF_INET, host, &addr.sin_addr);
-    
-    // 构建 ICMP echo request
-    struct {
-        uint8_t type;
-        uint8_t code;
-        uint16_t checksum;
-        uint16_t id;
-        uint16_t seq;
-        uint8_t data[32];
-    } icmp_pkt;
-    
-    memset(&icmp_pkt, 0, sizeof(icmp_pkt));
-    icmp_pkt.type = 8;  // ICMP_ECHO
-    icmp_pkt.code = 0;
-    icmp_pkt.id = htons(0x1234);
-    icmp_pkt.seq = htons(1);
-    memset(icmp_pkt.data, 0xAB, sizeof(icmp_pkt.data));
-    
-    // 计算校验和
-    icmp_pkt.checksum = 0;
-    icmp_pkt.checksum = inet_chksum(&icmp_pkt, sizeof(icmp_pkt));
-    
-    int64_t start_time = esp_timer_get_time();
-    
-    // 发送 ICMP echo request
-    int sent = sendto(sock, &icmp_pkt, sizeof(icmp_pkt), 0, 
-                      (struct sockaddr *)&addr, sizeof(addr));
-    
+    if (timeout_item) timeout_ms = (unsigned)timeout_item->valuedouble;
+    int64_t started = esp_timer_get_time();
+    int64_t deadline = started + (int64_t)timeout_ms * 1000;
     bool reachable = false;
-    int latency_ms = 0;
-    const char *error_msg = NULL;
-    
-    if (sent > 0) {
-        // 等待 ICMP echo reply
-        char recv_buf[64];
-        struct sockaddr_in from;
-        socklen_t from_len = sizeof(from);
-        
-        int recv_len = recvfrom(sock, recv_buf, sizeof(recv_buf), 0,
-                                (struct sockaddr *)&from, &from_len);
-        
-        if (recv_len > 0) {
-            // IP 头部通常是 20 字节，ICMP 回复在其后
-            // 检查是否是 ICMP echo reply (type = 0)
-            if (recv_len >= 28) {  // 20 (IP) + 8 (ICMP header)
-                uint8_t icmp_type = recv_buf[20];
-                if (icmp_type == 0) {  // ICMP_ECHOREPLY
-                    reachable = true;
-                    latency_ms = (int)((esp_timer_get_time() - start_time) / 1000);
-                } else {
-                    error_msg = "unexpected icmp type";
+    const char *error = "socket creation failed";
+    int fd = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
+    if (fd >= 0) {
+        int flags = fcntl(fd, F_GETFL, 0);
+        error = "socket setup failed";
+        if (flags >= 0 && fcntl(fd, F_SETFL, flags | O_NONBLOCK) == 0) {
+            struct {
+                uint8_t type, code;
+                uint16_t checksum, id, sequence;
+                uint8_t payload[32];
+            } packet = {.type = 8, .id = (uint16_t)started, .sequence = 1};
+            packet.checksum = inet_chksum(&packet, sizeof(packet));
+            ssize_t sent;
+            do {
+                sent = sendto(fd, &packet, sizeof(packet), 0,
+                              (struct sockaddr *)&address, sizeof(address));
+            } while (sent < 0 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) &&
+                     ping_wait(fd, true, deadline));
+            error = sent == (ssize_t)sizeof(packet) ? "timeout" : "send failed";
+            while (sent == (ssize_t)sizeof(packet) && ping_wait(fd, false, deadline)) {
+                uint8_t reply[128];
+                struct sockaddr_in from = {0};
+                socklen_t length = sizeof(from);
+                ssize_t received = recvfrom(fd, reply, sizeof(reply), 0,
+                                            (struct sockaddr *)&from, &length);
+                if (received < 0) {
+                    if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) continue;
+                    error = "receive failed";
+                    break;
                 }
-            } else {
-                error_msg = "short packet";
+                /* Ignore unrelated packets without extending the operation deadline. */
+                unsigned header = received > 0 ? (reply[0] & 15U) * 4U : 0;
+                if (header >= 20 && received >= header + 8 && (reply[0] >> 4) == 4 &&
+                    from.sin_addr.s_addr == address.sin_addr.s_addr && reply[header] == 0 &&
+                    reply[header + 1] == 0 && !memcmp(reply + header + 4, &packet.id, 4)) {
+                    reachable = true;
+                    break;
+                }
             }
-        } else {
-            error_msg = "timeout";
         }
-    } else {
-        error_msg = "send failed";
+        close(fd);
     }
-    
-    close(sock);
-    
     cJSON *data = cJSON_CreateObject();
-    cJSON_AddStringToObject(data, "host", host);
-    cJSON_AddBoolToObject(data, "reachable", reachable);
-    if (reachable) {
-        cJSON_AddNumberToObject(data, "latency_ms", latency_ms);
-    } else if (error_msg) {
-        cJSON_AddStringToObject(data, "error", error_msg);
+    bool complete = data && cJSON_AddStringToObject(data, "host", host) &&
+        cJSON_AddBoolToObject(data, "reachable", reachable);
+    complete = complete && (reachable ? cJSON_AddNumberToObject(data, "latency_ms",
+        (double)(esp_timer_get_time() - started) / 1000) : cJSON_AddStringToObject(data, "error", error));
+    if (!complete) {
+        cJSON_Delete(data);
+        ts_api_result_error(result, TS_API_ERR_NO_MEM, "Insufficient device memory");
+        return ESP_ERR_NO_MEM;
     }
-    
     ts_api_result_ok(result, data);
     return ESP_OK;
+}
+
+static esp_err_t api_device_ping(const cJSON *params, ts_api_result_t *result)
+{
+    if (atomic_flag_test_and_set(&s_ping_busy)) {
+        ts_api_result_error(result, TS_API_ERR_BUSY, "Network diagnostic busy");
+        return ESP_ERR_INVALID_STATE;
+    }
+    esp_err_t ret = device_ping_impl(params, result);
+    atomic_flag_clear(&s_ping_busy);
+    return ret;
 }
 
 /*===========================================================================*/
@@ -549,6 +542,8 @@ static esp_err_t api_device_ping(const cJSON *params, ts_api_result_t *result)
 static const ts_api_endpoint_t device_endpoints[] = {
     {
         .name = "device.status",
+        .external_access = TS_API_ACCESS_PUBLIC,
+        .allowed_methods = TS_API_METHOD_READ,
         .description = "Get device power status",
         .category = TS_API_CAT_DEVICE,
         .handler = api_device_status,
@@ -556,6 +551,8 @@ static const ts_api_endpoint_t device_endpoints[] = {
     },
     {
         .name = "device.power",
+        .external_access = TS_API_ACCESS_ADMIN,
+        .allowed_methods = TS_API_METHOD_WRITE,
         .description = "Control device power (on/off/force_off)",
         .category = TS_API_CAT_DEVICE,
         .handler = api_device_power,
@@ -564,6 +561,8 @@ static const ts_api_endpoint_t device_endpoints[] = {
     },
     {
         .name = "device.reset",
+        .external_access = TS_API_ACCESS_ADMIN,
+        .allowed_methods = TS_API_METHOD_WRITE,
         .description = "Reset device",
         .category = TS_API_CAT_DEVICE,
         .handler = api_device_reset,
@@ -572,6 +571,8 @@ static const ts_api_endpoint_t device_endpoints[] = {
     },
     {
         .name = "device.fan.status",
+        .external_access = TS_API_ACCESS_PUBLIC,
+        .allowed_methods = TS_API_METHOD_READ,
         .description = "Get fan status",
         .category = TS_API_CAT_FAN,
         .handler = api_device_fan_status,
@@ -579,6 +580,8 @@ static const ts_api_endpoint_t device_endpoints[] = {
     },
     {
         .name = "device.fan.set",
+        .external_access = TS_API_ACCESS_ADMIN,
+        .allowed_methods = TS_API_METHOD_WRITE,
         .description = "Set fan mode and duty",
         .category = TS_API_CAT_FAN,
         .handler = api_device_fan_set,
@@ -587,6 +590,8 @@ static const ts_api_endpoint_t device_endpoints[] = {
     },
     {
         .name = "device.power.status",
+        .external_access = TS_API_ACCESS_PUBLIC,
+        .allowed_methods = TS_API_METHOD_READ,
         .description = "Get power measurements",
         .category = TS_API_CAT_POWER,
         .handler = api_device_power_status,
@@ -594,6 +599,8 @@ static const ts_api_endpoint_t device_endpoints[] = {
     },
     {
         .name = "device.usb.status",
+        .external_access = TS_API_ACCESS_PUBLIC,
+        .allowed_methods = TS_API_METHOD_READ,
         .description = "Get USB MUX status",
         .category = TS_API_CAT_DEVICE,
         .handler = api_device_usb_status,
@@ -601,6 +608,8 @@ static const ts_api_endpoint_t device_endpoints[] = {
     },
     {
         .name = "device.usb.set",
+        .external_access = TS_API_ACCESS_ADMIN,
+        .allowed_methods = TS_API_METHOD_WRITE,
         .description = "Set USB MUX target",
         .category = TS_API_CAT_DEVICE,
         .handler = api_device_usb_set,
@@ -609,10 +618,12 @@ static const ts_api_endpoint_t device_endpoints[] = {
     },
     {
         .name = "device.ping",
+        .external_access = TS_API_ACCESS_ADMIN,
+        .allowed_methods = TS_API_METHOD_WRITE,
         .description = "Test network connectivity (TCP port check)",
         .category = TS_API_CAT_DEVICE,
         .handler = api_device_ping,
-        .requires_auth = false,
+        .requires_auth = true,
     },
 };
 

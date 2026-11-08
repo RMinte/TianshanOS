@@ -8,6 +8,7 @@
 
 #include "ts_api.h"
 #include "ts_storage.h"
+#include "ts_security.h"
 #include "ts_log.h"
 #include <string.h>
 #include <dirent.h>
@@ -205,7 +206,7 @@ static esp_err_t api_storage_delete(const cJSON *params, ts_api_result_t *result
         return ESP_ERR_INVALID_ARG;
     }
     
-    esp_err_t ret = ts_storage_check_write_path(path, true);
+    esp_err_t ret = ts_storage_check_external_write_path(path, true);
     if (ret != ESP_OK) return storage_mutation_failure(result, ret, "Failed to delete");
     if (!ts_storage_exists(path)) {
         ts_api_result_error(result, TS_API_ERR_NOT_FOUND, "File not found");
@@ -248,7 +249,9 @@ static esp_err_t api_storage_mkdir(const cJSON *params, ts_api_result_t *result)
     
     const char *path = path_param->valuestring;
     
-    esp_err_t ret = ts_storage_mkdir_p(path);
+    esp_err_t ret = ts_storage_check_external_write_path(path, false);
+    if (ret != ESP_OK) return storage_mutation_failure(result, ret, "Failed to create directory");
+    ret = ts_storage_mkdir_p(path);
     if (ret != ESP_OK) {
         return storage_mutation_failure(result, ret, "Failed to create directory");
     }
@@ -282,8 +285,8 @@ static esp_err_t api_storage_rename(const cJSON *params, ts_api_result_t *result
     const char *from = from_param->valuestring;
     const char *to = to_param->valuestring;
     
-    esp_err_t ret = ts_storage_check_write_path(from, true);
-    if (ret == ESP_OK) ret = ts_storage_check_write_path(to, true);
+    esp_err_t ret = ts_storage_check_external_write_path(from, true);
+    if (ret == ESP_OK) ret = ts_storage_check_external_write_path(to, true);
     if (ret != ESP_OK) return storage_mutation_failure(result, ret, "Failed to rename");
     if (!ts_storage_exists(from)) {
         ts_api_result_error(result, TS_API_ERR_NOT_FOUND, "Source file not found");
@@ -429,6 +432,57 @@ static esp_err_t api_storage_read(const cJSON *params, ts_api_result_t *result)
     return ESP_OK;
 }
 
+/* Only external calls carry an authenticated C session; internal reads keep
+ * their original handler and do not inherit untrusted JSON identity fields. */
+static esp_err_t storage_read_for_session(const cJSON *params, uint32_t session_id,
+                                         ts_api_handler_t handler, bool default_sd,
+                                         ts_api_result_t *result)
+{
+    const cJSON *item = cJSON_GetObjectItem(params, "path");
+    const char *path = cJSON_IsString(item) ? item->valuestring : default_sd ? "/sdcard" : NULL;
+    if (!path) return handler(params, result);
+#ifdef CONFIG_TS_WEBUI_AUTH_REQUIRED
+    ts_session_t session;
+    if (ts_security_validate_session(session_id, &session) != ESP_OK || session.level < TS_PERM_READ) {
+        ts_api_result_error(result, TS_API_ERR_AUTH, "Unauthorized");
+        return ESP_ERR_NOT_ALLOWED;
+    }
+#else
+    (void)session_id;
+#endif
+    bool needs_admin;
+    esp_err_t ret = ts_storage_external_read_requires_admin(path, &needs_admin);
+    if (ret != ESP_OK) {
+        ts_api_result_error(result, ret == ESP_ERR_INVALID_ARG ? TS_API_ERR_INVALID_ARG : TS_API_ERR_INTERNAL,
+            ret == ESP_ERR_INVALID_ARG ? "storage_path_invalid" : "storage_read_failed");
+        return ret;
+    }
+#ifdef CONFIG_TS_WEBUI_AUTH_REQUIRED
+    if (ts_security_validate_session(session_id, &session) != ESP_OK || session.level < TS_PERM_READ) {
+        ts_api_result_error(result, TS_API_ERR_AUTH, "Unauthorized");
+        return ESP_ERR_NOT_ALLOWED;
+    }
+    if (needs_admin && session.level < TS_PERM_ADMIN) {
+        ts_api_result_error(result, TS_API_ERR_NO_PERMISSION, "Administrator permission required");
+        return ESP_ERR_NOT_ALLOWED;
+    }
+#endif
+    return handler(params, result);
+}
+
+static esp_err_t storage_list_for_session(const cJSON *params, uint32_t session, ts_api_result_t *result)
+{
+    return storage_read_for_session(params, session, api_storage_list, true, result);
+}
+static esp_err_t storage_info_for_session(const cJSON *params, uint32_t session, ts_api_result_t *result)
+{
+    return storage_read_for_session(params, session, api_storage_info, false, result);
+}
+static esp_err_t storage_file_for_session(const cJSON *params, uint32_t session, ts_api_result_t *result)
+{
+    return storage_read_for_session(params, session, api_storage_read, false, result);
+}
+
 /*===========================================================================*/
 /*                          Registration                                      */
 /*===========================================================================*/
@@ -436,6 +490,8 @@ static esp_err_t api_storage_read(const cJSON *params, ts_api_result_t *result)
 static const ts_api_endpoint_t s_storage_endpoints[] = {
     {
         .name = "storage.status",
+        .external_access = TS_API_ACCESS_PUBLIC,
+        .allowed_methods = TS_API_METHOD_READ,
         .description = "Get storage status",
         .category = TS_API_CAT_STORAGE,
         .handler = api_storage_status,
@@ -443,6 +499,8 @@ static const ts_api_endpoint_t s_storage_endpoints[] = {
     },
     {
         .name = "storage.mount",
+        .external_access = TS_API_ACCESS_ADMIN,
+        .allowed_methods = TS_API_METHOD_WRITE,
         .description = "Mount SD card",
         .category = TS_API_CAT_STORAGE,
         .handler = api_storage_mount,
@@ -450,6 +508,8 @@ static const ts_api_endpoint_t s_storage_endpoints[] = {
     },
     {
         .name = "storage.unmount",
+        .external_access = TS_API_ACCESS_ADMIN,
+        .allowed_methods = TS_API_METHOD_WRITE,
         .description = "Unmount SD card",
         .category = TS_API_CAT_STORAGE,
         .handler = api_storage_unmount,
@@ -457,13 +517,18 @@ static const ts_api_endpoint_t s_storage_endpoints[] = {
     },
     {
         .name = "storage.list",
+        .external_access = TS_API_ACCESS_READ,
+        .allowed_methods = TS_API_METHOD_READ,
         .description = "List directory contents",
         .category = TS_API_CAT_STORAGE,
         .handler = api_storage_list,
-        .requires_auth = false
+        .session_handler = storage_list_for_session,
+        .requires_auth = true
     },
     {
         .name = "storage.delete",
+        .external_access = TS_API_ACCESS_ADMIN,
+        .allowed_methods = TS_API_METHOD_WRITE,
         .description = "Delete file or directory",
         .category = TS_API_CAT_STORAGE,
         .handler = api_storage_delete,
@@ -471,6 +536,8 @@ static const ts_api_endpoint_t s_storage_endpoints[] = {
     },
     {
         .name = "storage.mkdir",
+        .external_access = TS_API_ACCESS_ADMIN,
+        .allowed_methods = TS_API_METHOD_WRITE,
         .description = "Create directory",
         .category = TS_API_CAT_STORAGE,
         .handler = api_storage_mkdir,
@@ -478,6 +545,8 @@ static const ts_api_endpoint_t s_storage_endpoints[] = {
     },
     {
         .name = "storage.rename",
+        .external_access = TS_API_ACCESS_ADMIN,
+        .allowed_methods = TS_API_METHOD_WRITE,
         .description = "Rename/move file",
         .category = TS_API_CAT_STORAGE,
         .handler = api_storage_rename,
@@ -485,17 +554,23 @@ static const ts_api_endpoint_t s_storage_endpoints[] = {
     },
     {
         .name = "storage.info",
+        .external_access = TS_API_ACCESS_READ,
+        .allowed_methods = TS_API_METHOD_READ,
         .description = "Get file info",
         .category = TS_API_CAT_STORAGE,
         .handler = api_storage_info,
-        .requires_auth = false
+        .session_handler = storage_info_for_session,
+        .requires_auth = true
     },
     {
         .name = "storage.read",
+        .external_access = TS_API_ACCESS_READ,
+        .allowed_methods = TS_API_METHOD_READ,
         .description = "Read file content",
         .category = TS_API_CAT_STORAGE,
         .handler = api_storage_read,
-        .requires_auth = false
+        .session_handler = storage_file_for_session,
+        .requires_auth = true
     }
 };
 

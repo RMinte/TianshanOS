@@ -73,6 +73,9 @@ static ts_config_pack_result_t decrypted_fixture(const char *text,size_t length,
 {
     if(reject_pack)return TS_CONFIG_PACK_ERR_SIGNATURE;
     *out=calloc(1,sizeof(**out));assert(*out);
+    (*out)->acceptance.policy=1;(*out)->acceptance.accepted_at=1;
+    memset((*out)->acceptance.package_sha256,'a',64);memset((*out)->acceptance.signer_sha256,'b',64);
+    memset((*out)->acceptance.root_sha256,'c',64);memset((*out)->acceptance.recipient,'d',64);
     (*out)->content=strndup(text,length);(*out)->content_len=length;return TS_CONFIG_PACK_OK;
 }
 ts_config_pack_result_t ts_config_pack_load_verified_mem(const char *text,size_t length,
@@ -84,9 +87,10 @@ ts_config_pack_result_t ts_config_pack_load_verified_mem(const char *text,size_t
     if(missing_signing_root)return TS_CONFIG_PACK_ERR_TRUST_NOT_CONFIGURED;
     return decrypted_fixture(text,length,out);
 }
-ts_config_pack_result_t ts_config_pack_load_mem(const char *text,size_t length,ts_config_pack_t **out)
+ts_config_pack_result_t ts_config_pack_load_rule_mem(const char *text,size_t length,ts_config_pack_t **out)
 {
     ++pack_calls;++raw_pack_calls;
+    if(missing_signing_root)return TS_CONFIG_PACK_ERR_TRUST_NOT_CONFIGURED;
     return decrypted_fixture(text,length,out);
 }
 void ts_config_pack_free(ts_config_pack_t *pack) { free(pack->content);free(pack); }
@@ -182,7 +186,9 @@ int main(void)
     assert(!strcmp(error.reason,"signature_invalid"));
     reset();snprintf(path,sizeof(path),"%s/sources",test_root);assert(!mkdir(path,0775));reject_pack=false;missing_signing_root=true;
     write_file("sources/card.tscfg","{\"type\":\"automation_source\",\"source\":{\"id\":\"card\",\"type\":\"rest\",\"enabled\":true,\"url\":\"http://192.0.2.10/status\",\"method\":\"GET\",\"auth_header\":\"synthetic-token\",\"json_path\":\"data.power\",\"mappings\":[{\"json_path\":\"data.power\",\"var_name\":\"card.power\"}]}}");
-    json=read_config(true);assert(raw_pack_calls==1);
+    assert(ts_auto_legacy_read(true,&json,&error)!=ESP_OK&&!json&&raw_pack_calls==1);
+    assert(!strcmp(error.reason,"signing_trust_unconfigured"));missing_signing_root=false;
+    json=read_config(true);assert(raw_pack_calls==2);
     ts_auto_document_t *document=NULL;assert(ts_auto_document_decode(json,&document,&error)==ESP_OK);
     assert(document->source_count==1 && document->sources[0].type==TS_AUTO_SRC_REST &&
         !strcmp(document->sources[0].rest.url,"http://192.0.2.10/status") &&

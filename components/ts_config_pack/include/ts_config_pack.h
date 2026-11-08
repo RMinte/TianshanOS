@@ -65,6 +65,7 @@ typedef enum {
     TS_CONFIG_PACK_ERR_TRUST_NOT_CONFIGURED,
     TS_CONFIG_PACK_ERR_SIGNER_ROLE,
     TS_CONFIG_PACK_ERR_CREDENTIAL_CHANGED,
+    TS_CONFIG_PACK_ERR_UNSUPPORTED,
 } ts_config_pack_result_t;
 
 /** Local acceptance of exact v1 package bytes; never constructed from package metadata. */
@@ -99,6 +100,7 @@ typedef struct {
     char *content;                       /**< Decrypted JSON content */
     size_t content_len;                  /**< Content length */
     ts_config_pack_sig_info_t sig_info;  /**< Signature info */
+    ts_config_pack_acceptance_t acceptance; /**< Verified local proof, never SD metadata */
     int64_t created_at;                  /**< Creation timestamp (Unix epoch) */
     char *source_file;                   /**< Original source filename */
     char *target_device;                 /**< Target device CN */
@@ -149,7 +151,13 @@ bool ts_config_pack_can_export(void);
  * @param pack Output: loaded configuration (caller must free with ts_config_pack_free)
  * @return TS_CONFIG_PACK_OK on success, error code otherwise
  */
+/* Ordinary data retains its original Developer certificate usage and pinned CA
+ * chain verification. Existing local data can load before NTP; new imports need
+ * current time. No SD metadata grants trust or creates a trusted timestamp. */
 ts_config_pack_result_t ts_config_pack_load(const char *path, ts_config_pack_t **pack);
+
+/* Command-bearing automation additionally requires code-signing usage. */
+ts_config_pack_result_t ts_config_pack_load_rule_mem(const char *bytes, size_t length, ts_config_pack_t **pack);
 
 /**
  * @brief Load and decrypt from memory buffer
@@ -323,14 +331,15 @@ ts_config_pack_result_t ts_config_pack_validate_file(
 );
 
 /**
- * @brief Apply configuration from a validated .tscfg file
- * 
- * Decrypts and applies the configuration from a .tscfg file.
- * The file should have been validated first.
- * 
- * @param path Full path to .tscfg file
- * @param applied_modules Output: JSON array of applied module names (optional)
- * @return TS_CONFIG_PACK_OK on success
+ * @brief Legacy generic configuration application (not supported)
+ *
+ * Generic module application is not implemented. This legacy entry point
+ * returns TS_CONFIG_PACK_ERR_UNSUPPORTED without opening or decrypting the file.
+ * Use the configuration owner's supported import operation instead.
+ *
+ * @param path Full path to .tscfg file (not opened)
+ * @param applied_modules Output: always NULL, including errors (optional)
+ * @return Unsupported, invalid argument, or uninitialized subsystem
  */
 ts_config_pack_result_t ts_config_pack_apply_file(
     const char *path,

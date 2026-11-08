@@ -28,6 +28,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <time.h>
+#include <errno.h>
 #include <sys/stat.h>
 
 static const char *TAG = "ts_keystore";
@@ -88,24 +89,19 @@ static void make_nvs_key(char *buf, size_t buf_len, const char *id, const char *
  */
 static int parse_index(const char *index_str, char ids[][TS_KEYSTORE_ID_MAX_LEN], size_t max_ids)
 {
-    if (!index_str || !ids || max_ids == 0) {
-        return 0;
+    size_t count = 0;
+    for (const char *p = index_str; *p;) {
+        const char *end = strchr(p, ',');
+        size_t len = end ? (size_t)(end - p) : strlen(p);
+        if (!len || len >= TS_KEYSTORE_ID_MAX_LEN || count == max_ids)
+            return -1;
+        memcpy(ids[count], p, len);
+        ids[count++][len] = 0;
+        if (!end) break;
+        p = end + 1;
+        if (!*p) return -1;
     }
-    
-    int count = 0;
-    char *copy = TS_STRDUP_PSRAM(index_str);
-    if (!copy) return 0;
-    char *saveptr = NULL;
-    char *token = strtok_r(copy, ",", &saveptr);
-    while (token && count < max_ids) {
-        strncpy(ids[count], token, TS_KEYSTORE_ID_MAX_LEN - 1);
-        ids[count][TS_KEYSTORE_ID_MAX_LEN - 1] = '\0';
-        count++;
-        token = strtok_r(NULL, ",", &saveptr);
-    }
-
-    free(copy);
-    return count;
+    return (int)count;
 }
 
 /**
@@ -172,6 +168,7 @@ static esp_err_t remove_from_index(const char *id)
     /* 重建索引，排除指定 ID */
     char ids[TS_KEYSTORE_MAX_KEYS][TS_KEYSTORE_ID_MAX_LEN];
     int count = parse_index(index_str, ids, TS_KEYSTORE_MAX_KEYS);
+    if (count < 0) return ESP_ERR_INVALID_RESPONSE;
     
     char new_index[MAX_INDEX_LEN] = {0};
     for (int i = 0; i < count; i++) {
@@ -227,94 +224,85 @@ static esp_err_t load_metadata(const char *id, ts_keystore_key_info_t *info)
 {
     char key[TS_KEYSTORE_ID_MAX_LEN + 8];
     make_nvs_key(key, sizeof(key), id, "_meta");
-    
-    /* 获取长度 */
     size_t len = 0;
     esp_err_t ret = nvs_get_str(s_keystore.nvs_handle, key, NULL, &len);
     if (ret != ESP_OK) return ret;
-    
+    /* JSON escaping can use six bytes per stored comment/alias byte. */
+    if (!len || len > 6 * (TS_KEYSTORE_COMMENT_MAX_LEN + TS_KEYSTORE_ALIAS_MAX_LEN) + 256)
+        return ESP_ERR_INVALID_SIZE;
     char *str = TS_MALLOC_PSRAM(len);
     if (!str) return ESP_ERR_NO_MEM;
-    
-    ret = nvs_get_str(s_keystore.nvs_handle, key, str, &len);
-    if (ret != ESP_OK) {
+    size_t actual = len;
+    ret = nvs_get_str(s_keystore.nvs_handle, key, str, &actual);
+    if (ret != ESP_OK || actual != len || str[len - 1] || strlen(str) + 1 != len) {
         free(str);
-        return ret;
+        return ret == ESP_OK ? ESP_ERR_INVALID_RESPONSE : ret;
     }
-    
-    /* 解析 JSON */
-    cJSON *json = cJSON_Parse(str);
+    for (size_t i = 0; i + 1 < len; ++i) {
+        if (str[i] != '\\') continue;
+        if (i + 5 < len && !memcmp(str + i, "\\u0000", 6)) {
+            free(str);
+            return ESP_ERR_INVALID_RESPONSE;
+        }
+        ++i; /* Skip the escaped byte; a literal backslash is not a Unicode escape. */
+    }
+    cJSON *json = cJSON_ParseWithLengthOpts(str, len, NULL, true);
     free(str);
-    
-    if (!json) return ESP_ERR_INVALID_RESPONSE;
-    
-    memset(info, 0, sizeof(*info));
-    strncpy(info->id, id, sizeof(info->id) - 1);
-    
-    cJSON *item;
-    if ((item = cJSON_GetObjectItem(json, "type"))) {
-        info->type = ts_keystore_type_from_string(item->valuestring);
+    if (!cJSON_IsObject(json)) { cJSON_Delete(json); return ESP_ERR_INVALID_RESPONSE; }
+    ts_keystore_key_info_t decoded = {0};
+    snprintf(decoded.id, sizeof(decoded.id), "%s", id);
+    bool has_type = false, valid = true;
+    const cJSON *item;
+    cJSON_ArrayForEach(item, json) {
+        /* Ambiguous metadata must never turn a private record into a public one. */
+        for (const cJSON *prior = json->child; prior != item; prior = prior->next)
+            if (!strcmp(prior->string, item->string)) valid = false;
+        const char *name = item->string;
+        if (!strcmp(name, "type")) {
+            if (!cJSON_IsString(item)) { valid = false; continue; }
+            decoded.type = ts_keystore_type_from_string(item->valuestring);
+            has_type = decoded.type != TS_KEYSTORE_TYPE_UNKNOWN || !strcmp(item->valuestring, "unknown");
+        } else if (!strcmp(name, "comment") || !strcmp(name, "alias")) {
+            char *dest = !strcmp(name, "comment") ? decoded.comment : decoded.alias;
+            size_t capacity = !strcmp(name, "comment") ? sizeof(decoded.comment) : sizeof(decoded.alias);
+            if (!cJSON_IsString(item) || strlen(item->valuestring) >= capacity) valid = false;
+            else strcpy(dest, item->valuestring);
+        } else if (!strcmp(name, "created_at") || !strcmp(name, "last_used")) {
+            double value = item->valuedouble;
+            if (!cJSON_IsNumber(item) || !(value >= 0 && value <= UINT32_MAX) || value != (uint32_t)value)
+                valid = false;
+            else if (!strcmp(name, "created_at")) decoded.created_at = (uint32_t)value;
+            else decoded.last_used = (uint32_t)value;
+        } else if (!strcmp(name, "has_pubkey") || !strcmp(name, "exportable") || !strcmp(name, "hidden")) {
+            if (!cJSON_IsBool(item)) valid = false;
+            else if (!strcmp(name, "has_pubkey")) decoded.has_public_key = cJSON_IsTrue(item);
+            else if (!strcmp(name, "exportable")) decoded.exportable = cJSON_IsTrue(item);
+            else decoded.hidden = cJSON_IsTrue(item);
+        } else valid = false;
     }
-    if ((item = cJSON_GetObjectItem(json, "comment"))) {
-        strncpy(info->comment, item->valuestring, sizeof(info->comment) - 1);
-    }
-    if ((item = cJSON_GetObjectItem(json, "alias"))) {
-        strncpy(info->alias, item->valuestring, sizeof(info->alias) - 1);
-    }
-    if ((item = cJSON_GetObjectItem(json, "created_at"))) {
-        info->created_at = (uint32_t)item->valuedouble;
-    }
-    if ((item = cJSON_GetObjectItem(json, "last_used"))) {
-        info->last_used = (uint32_t)item->valuedouble;
-    }
-    if ((item = cJSON_GetObjectItem(json, "has_pubkey"))) {
-        info->has_public_key = cJSON_IsTrue(item);
-    }
-    if ((item = cJSON_GetObjectItem(json, "exportable"))) {
-        info->exportable = cJSON_IsTrue(item);
-    } else {
-        info->exportable = false;  /* 旧密钥默认不可导出 */
-    }
-    if ((item = cJSON_GetObjectItem(json, "hidden"))) {
-        info->hidden = cJSON_IsTrue(item);
-    } else {
-        info->hidden = false;  /* 旧密钥默认不隐藏 */
-    }
-    
     cJSON_Delete(json);
+    if (!valid || !has_type) return ESP_ERR_INVALID_RESPONSE;
+    /* Absent legacy flags retain their documented false defaults. */
+    *info = decoded;
     return ESP_OK;
 }
 
 /* ========== 公开 API ========== */
 
 /* 内部函数：带选项的密钥存储 */
-static esp_err_t store_key_locked(const char *id,
+static esp_err_t write_new_key_locked(const char *id,
                                           const ts_keystore_keypair_t *keypair,
                                           ts_keystore_key_type_t type,
                                           const ts_keystore_gen_opts_t *opts,
                                           ts_keystore_generate_result_t *detail)
 {
-    if (!s_keystore.initialized) {
-        return ESP_ERR_INVALID_STATE;
-    }
-    
-    if (!id || strlen(id) == 0 || strlen(id) >= TS_KEYSTORE_ID_MAX_LEN) {
-        ESP_LOGE(TAG, "Invalid key ID");
-        return ESP_ERR_INVALID_ARG;
-    }
-    
-    if (!keypair || !keypair->private_key || keypair->private_key_len == 0) {
-        ESP_LOGE(TAG, "Invalid keypair");
-        return ESP_ERR_INVALID_ARG;
-    }
-    
     bool exportable = opts ? opts->exportable : false;
     const char *comment = opts ? opts->comment : NULL;
     const char *alias = opts ? opts->alias : NULL;
     bool hidden = opts ? opts->hidden : false;
     
-    ESP_LOGI(TAG, "Storing key '%s' (type=%s, privkey_len=%zu, exportable=%d, hidden=%d)", 
-             id, ts_keystore_type_to_string(type), keypair->private_key_len, exportable, hidden);
+    ESP_LOGI(TAG, "Storing key (type=%s, privkey_len=%zu, exportable=%d, hidden=%d)",
+             ts_keystore_type_to_string(type), keypair->private_key_len, exportable, hidden);
     
     char nvs_key[TS_KEYSTORE_ID_MAX_LEN + 8];
     esp_err_t ret;
@@ -338,7 +326,7 @@ static esp_err_t store_key_locked(const char *id,
                            keypair->public_key, keypair->public_key_len);
         if (ret != ESP_OK) {
             ESP_LOGW(TAG, "Failed to store public key: %s", esp_err_to_name(ret));
-            if (detail) return ret; /* Generated keys require their public key. */
+            return ret;
         } else {
             has_pubkey = true;
         }
@@ -385,20 +373,8 @@ static esp_err_t store_key_locked(const char *id,
     }
     
     if (detail) { detail->stored = true; detail->failed_stage = NULL; }
-    ESP_LOGI(TAG, "Key '%s' stored successfully", id);
+    ESP_LOGI(TAG, "Key stored successfully");
     return ESP_OK;
-}
-
-static esp_err_t ts_keystore_store_key_ex(const char *id,
-                                         const ts_keystore_keypair_t *keypair,
-                                         ts_keystore_key_type_t type,
-                                         const ts_keystore_gen_opts_t *opts)
-{
-    if (!s_keystore.initialized) return ESP_ERR_INVALID_STATE;
-    xSemaphoreTake(s_keystore.write_lock, portMAX_DELAY);
-    esp_err_t ret = store_key_locked(id, keypair, type, opts, NULL);
-    xSemaphoreGive(s_keystore.write_lock);
-    return ret;
 }
 
 /* New generation cannot replace an indexed key or an unlisted fragment. */
@@ -454,6 +430,53 @@ static esp_err_t cleanup_new_key(const char *id, const char *old_index,
     return first_error != ESP_OK ? first_error : ret;
 }
 
+static bool valid_key_id(const char *id)
+{
+    return id && *id && strlen(id) <= NVS_KEY_NAME_MAX_SIZE - 1 - 5 && !strchr(id, ',');
+}
+
+/* PEM/OpenSSH text may include its final NUL in the stored length. */
+static bool key_text_length(const char *bytes, size_t size, size_t maximum, size_t *length)
+{
+    if (!bytes || !size || size > maximum + 1) return false;
+    size_t used = strnlen(bytes, size);
+    if (!used || used > maximum || (used != size && used + 1 != size)) return false;
+    *length = used;
+    return true;
+}
+
+/* Every writer follows the product's existing create-only contract. Check all
+ * fragments under the same owner as bytes/flags/index and failure cleanup. */
+static esp_err_t create_key(const char *id, const ts_keystore_keypair_t *keypair,
+    ts_keystore_key_type_t type, const ts_keystore_gen_opts_t *opts,
+    ts_keystore_generate_result_t *detail)
+{
+    ts_keystore_generate_result_t local;
+    if (!detail) detail = &local;
+    *detail = (ts_keystore_generate_result_t){.failed_stage="validation", .cleanup_complete=true};
+    size_t length;
+    if (!valid_key_id(id) || !keypair ||
+        !key_text_length(keypair->private_key, keypair->private_key_len, TS_KEYSTORE_PRIVKEY_MAX_LEN, &length) ||
+        (keypair->public_key_len && !key_text_length(keypair->public_key, keypair->public_key_len, TS_KEYSTORE_PUBKEY_MAX_LEN, &length)))
+        return ESP_ERR_INVALID_ARG;
+    if (!s_keystore.write_lock) return ESP_ERR_INVALID_STATE;
+    char old_index[MAX_INDEX_LEN];
+    bool index_present;
+    xSemaphoreTake(s_keystore.write_lock, portMAX_DELAY);
+    esp_err_t ret = check_new_key(id, old_index, &index_present, detail);
+    if (ret == ESP_OK) {
+        ret = write_new_key_locked(id, keypair, type, opts, detail);
+        if (ret != ESP_OK) {
+            bool index_attempted = !strcmp(detail->failed_stage, "index_write") ||
+                                   !strcmp(detail->failed_stage, "commit");
+            detail->cleanup_error = cleanup_new_key(id, old_index, index_attempted, index_present);
+            detail->cleanup_complete = detail->cleanup_error == ESP_OK;
+        }
+    }
+    xSemaphoreGive(s_keystore.write_lock);
+    return ret;
+}
+
 esp_err_t ts_keystore_init(void)
 {
     /* Static lock remains valid for writers waiting while the service stops. */
@@ -499,101 +522,70 @@ esp_err_t ts_keystore_store_key(const char *id,
         .exportable = false,
         .comment = comment,
     };
-    return ts_keystore_store_key_ex(id, keypair, type, &opts);
+    ts_keystore_generate_result_t detail;
+    esp_err_t ret = create_key(id, keypair, type, &opts, &detail);
+    return !detail.cleanup_complete ? ESP_ERR_NOT_FINISHED : ret;
 }
 
-esp_err_t ts_keystore_load_private_key(const char *id,
-                                        char **private_key,
-                                        size_t *private_key_len)
+static esp_err_t touch_key_locked(const char *id);
+
+/* Caller holds the stable keystore writer/read-snapshot owner. */
+static esp_err_t load_key_bytes_locked(const char *id, const char *suffix,
+    size_t maximum, char **bytes, size_t *length)
 {
-    if (!s_keystore.initialized) {
-        return ESP_ERR_INVALID_STATE;
+    *bytes = NULL;
+    *length = 0;
+    char key[TS_KEYSTORE_ID_MAX_LEN + 8];
+    make_nvs_key(key, sizeof(key), id, suffix);
+    size_t size = 0;
+    esp_err_t ret = nvs_get_blob(s_keystore.nvs_handle, key, NULL, &size);
+    if (ret != ESP_OK) return ret == ESP_ERR_NVS_NOT_FOUND ? ESP_ERR_NOT_FOUND : ret;
+    if (!size || size > maximum + 1) return ESP_ERR_INVALID_SIZE;
+    char *buffer = TS_MALLOC_PSRAM(size + 1);
+    if (!buffer) return ESP_ERR_NO_MEM;
+    size_t actual = size;
+    ret = nvs_get_blob(s_keystore.nvs_handle, key, buffer, &actual);
+    if (ret != ESP_OK || actual != size) {
+        secure_free_key(buffer, size + 1);
+        return ret == ESP_OK ? ESP_ERR_INVALID_RESPONSE : ret;
     }
-    
-    if (!id || !private_key || !private_key_len) {
-        return ESP_ERR_INVALID_ARG;
+    buffer[size] = 0;
+    size_t used;
+    if (!key_text_length(buffer, size, maximum, &used)) {
+        secure_free_key(buffer, size + 1);
+        return ESP_ERR_INVALID_RESPONSE;
     }
-    
-    char nvs_key[TS_KEYSTORE_ID_MAX_LEN + 8];
-    make_nvs_key(nvs_key, sizeof(nvs_key), id, "_priv");
-    
-    /* 获取长度 */
-    size_t len = 0;
-    esp_err_t ret = nvs_get_blob(s_keystore.nvs_handle, nvs_key, NULL, &len);
-    if (ret != ESP_OK) {
-        return (ret == ESP_ERR_NVS_NOT_FOUND) ? ESP_ERR_NOT_FOUND : ret;
-    }
-    
-    /* 分配内存并读取 */
-    char *buf = TS_MALLOC_PSRAM(len + 1);  /* +1 for null terminator */
-    if (!buf) {
-        return ESP_ERR_NO_MEM;
-    }
-    
-    ret = nvs_get_blob(s_keystore.nvs_handle, nvs_key, buf, &len);
-    if (ret != ESP_OK) {
-        free(buf);
-        return ret;
-    }
-    
-    buf[len] = '\0';  /* Ensure null termination for PEM string */
-    *private_key = buf;
-    
-    /* 
-     * 返回字符串长度（不含 null 终止符）
-     * libssh2_userauth_publickey_frommemory 期望的长度不包含 null
-     * 它内部会自己添加 null 并传递 len+1 给 mbedTLS
-     */
-    *private_key_len = strlen(buf);
-    
-    /* 更新使用时间 */
-    ts_keystore_touch_key(id);
-    
-    ESP_LOGI(TAG, "Loaded private key '%s' (%zu bytes)", id, *private_key_len);
+    *bytes = buffer;
+    *length = used;
     return ESP_OK;
 }
 
-esp_err_t ts_keystore_load_public_key(const char *id,
-                                       char **public_key,
-                                       size_t *public_key_len)
+esp_err_t ts_keystore_load_private_key(const char *id, char **private_key, size_t *private_key_len)
 {
-    if (!s_keystore.initialized) {
-        return ESP_ERR_INVALID_STATE;
-    }
-    
-    if (!id || !public_key || !public_key_len) {
-        return ESP_ERR_INVALID_ARG;
-    }
-    
-    char nvs_key[TS_KEYSTORE_ID_MAX_LEN + 8];
-    make_nvs_key(nvs_key, sizeof(nvs_key), id, "_pub");
-    
-    /* 获取长度 */
-    size_t len = 0;
-    esp_err_t ret = nvs_get_blob(s_keystore.nvs_handle, nvs_key, NULL, &len);
-    if (ret != ESP_OK) {
-        return (ret == ESP_ERR_NVS_NOT_FOUND) ? ESP_ERR_NOT_FOUND : ret;
-    }
-    
-    /* 分配内存并读取 */
-    char *buf = TS_MALLOC_PSRAM(len + 1);
-    if (!buf) {
-        return ESP_ERR_NO_MEM;
-    }
-    
-    ret = nvs_get_blob(s_keystore.nvs_handle, nvs_key, buf, &len);
-    if (ret != ESP_OK) {
-        free(buf);
-        return ret;
-    }
-    
-    buf[len] = '\0';
-    *public_key = buf;
-    /* 返回字符串长度（不含 null 终止符） */
-    *public_key_len = strlen(buf);
-    
-    ESP_LOGI(TAG, "Loaded public key '%s' (%zu bytes)", id, *public_key_len);
-    return ESP_OK;
+    if (private_key) *private_key = NULL;
+    if (private_key_len) *private_key_len = 0;
+    if (!id || !private_key || !private_key_len) return ESP_ERR_INVALID_ARG;
+    if (!s_keystore.write_lock) return ESP_ERR_INVALID_STATE;
+    xSemaphoreTake(s_keystore.write_lock, portMAX_DELAY);
+    esp_err_t ret = s_keystore.initialized ? load_key_bytes_locked(id, "_priv",
+        TS_KEYSTORE_PRIVKEY_MAX_LEN, private_key, private_key_len) : ESP_ERR_INVALID_STATE;
+    if (ret == ESP_OK && touch_key_locked(id) != ESP_OK)
+        ESP_LOGW(TAG, "Key loaded; usage timestamp was not persisted");
+    xSemaphoreGive(s_keystore.write_lock);
+    return ret;
+}
+
+esp_err_t ts_keystore_load_public_key(const char *id, char **public_key, size_t *public_key_len)
+{
+    if (public_key) *public_key = NULL;
+    if (public_key_len) *public_key_len = 0;
+    if (!id || !public_key || !public_key_len) return ESP_ERR_INVALID_ARG;
+    if (!s_keystore.write_lock) return ESP_ERR_INVALID_STATE;
+    xSemaphoreTake(s_keystore.write_lock, portMAX_DELAY);
+    esp_err_t ret = s_keystore.initialized ? load_key_bytes_locked(id, "_pub",
+        TS_KEYSTORE_PUBKEY_MAX_LEN, public_key, public_key_len) : ESP_ERR_INVALID_STATE;
+    xSemaphoreGive(s_keystore.write_lock);
+    return ret;
 }
 
 esp_err_t ts_keystore_delete_key(const char *id)
@@ -611,7 +603,7 @@ esp_err_t ts_keystore_delete_key(const char *id)
         xSemaphoreGive(s_keystore.write_lock);
         return ESP_ERR_INVALID_STATE;
     }
-    ESP_LOGI(TAG, "Deleting key '%s'", id);
+    ESP_LOGI(TAG, "Deleting key");
     
     char nvs_key[TS_KEYSTORE_ID_MAX_LEN + 8];
     
@@ -647,230 +639,157 @@ bool ts_keystore_key_exists(const char *id)
 
 esp_err_t ts_keystore_get_key_info(const char *id, ts_keystore_key_info_t *info)
 {
-    if (!s_keystore.initialized) {
-        return ESP_ERR_INVALID_STATE;
-    }
-    
-    if (!id || !info) {
-        return ESP_ERR_INVALID_ARG;
-    }
-    
-    return load_metadata(id, info);
+    if (!id || !info) return ESP_ERR_INVALID_ARG;
+    if (!s_keystore.write_lock) return ESP_ERR_INVALID_STATE;
+    xSemaphoreTake(s_keystore.write_lock, portMAX_DELAY);
+    esp_err_t ret = s_keystore.initialized ? load_metadata(id, info) : ESP_ERR_INVALID_STATE;
+    xSemaphoreGive(s_keystore.write_lock);
+    return ret;
 }
 
 esp_err_t ts_keystore_list_keys(ts_keystore_key_info_t *keys, size_t *count)
 {
-    if (!s_keystore.initialized) {
-        return ESP_ERR_INVALID_STATE;
-    }
-    
-    if (!keys || !count) {
-        return ESP_ERR_INVALID_ARG;
-    }
-    
-    ESP_LOGI(TAG, "Listing keys, max_count=%zu", *count);
-    
-    /* 读取索引 */
+    return ts_keystore_list_keys_ex(keys, count, true);
+}
+
+/* One complete index/metadata snapshot shares the existing writer owner. */
+static esp_err_t list_keys_locked(ts_keystore_key_info_t *keys, size_t capacity,
+    size_t *count, bool show_hidden)
+{
+    *count = 0;
+    if (!capacity) return ESP_OK;
     char index_str[MAX_INDEX_LEN] = {0};
-    size_t len = sizeof(index_str);
-    
-    esp_err_t ret = nvs_get_str(s_keystore.nvs_handle, KEYSTORE_INDEX_KEY, index_str, &len);
-    
-    ESP_LOGI(TAG, "NVS read index: ret=%s, index='%s'", esp_err_to_name(ret), index_str);
-    if (ret == ESP_ERR_NVS_NOT_FOUND) {
-        *count = 0;
-        return ESP_OK;
-    } else if (ret != ESP_OK) {
-        return ret;
-    }
-    
-    /* 解析索引 */
+    size_t length = sizeof(index_str);
+    esp_err_t result = nvs_get_str(s_keystore.nvs_handle, KEYSTORE_INDEX_KEY, index_str, &length);
+    if (result == ESP_ERR_NVS_NOT_FOUND) return ESP_OK;
+    if (result != ESP_OK) return result;
     char ids[TS_KEYSTORE_MAX_KEYS][TS_KEYSTORE_ID_MAX_LEN];
-    int num_keys = parse_index(index_str, ids, TS_KEYSTORE_MAX_KEYS);
-    
-    ESP_LOGI(TAG, "Parsed %d keys from index", num_keys);
-    
-    /* 加载每个密钥的元数据 */
-    size_t valid_count = 0;
-    for (int i = 0; i < num_keys && valid_count < TS_KEYSTORE_MAX_KEYS; i++) {
-        ESP_LOGI(TAG, "Loading metadata for key[%d]: '%s'", i, ids[i]);
-        if (load_metadata(ids[i], &keys[valid_count]) == ESP_OK) {
-            valid_count++;
-        } else {
-            ESP_LOGW(TAG, "Failed to load metadata for key '%s'", ids[i]);
-        }
+    int total = parse_index(index_str, ids, TS_KEYSTORE_MAX_KEYS);
+    if (total < 0) return ESP_ERR_INVALID_RESPONSE;
+    for (int i = 0; i < total && *count < capacity; ++i) {
+        ts_keystore_key_info_t item;
+        result = load_metadata(ids[i], &item);
+        if (result != ESP_OK) { *count = 0; return result; }
+        if (!show_hidden && item.hidden) continue;
+        keys[(*count)++] = item;
     }
-    
-    ESP_LOGI(TAG, "Returning %zu valid keys", valid_count);
-    *count = valid_count;
     return ESP_OK;
 }
 
 esp_err_t ts_keystore_list_keys_ex(ts_keystore_key_info_t *keys, size_t *count, bool show_hidden)
 {
-    if (!s_keystore.initialized) {
-        return ESP_ERR_INVALID_STATE;
-    }
-    
-    if (!keys || !count) {
-        return ESP_ERR_INVALID_ARG;
-    }
-    
-    ESP_LOGI(TAG, "Listing keys (show_hidden=%d), max_count=%zu", show_hidden, *count);
-    
-    /* 读取索引 */
-    char index_str[MAX_INDEX_LEN] = {0};
-    size_t len = sizeof(index_str);
-    
-    esp_err_t ret = nvs_get_str(s_keystore.nvs_handle, KEYSTORE_INDEX_KEY, index_str, &len);
-    
-    if (ret == ESP_ERR_NVS_NOT_FOUND) {
-        *count = 0;
-        return ESP_OK;
-    } else if (ret != ESP_OK) {
-        return ret;
-    }
-    
-    /* 解析索引 */
-    char ids[TS_KEYSTORE_MAX_KEYS][TS_KEYSTORE_ID_MAX_LEN];
-    int num_keys = parse_index(index_str, ids, TS_KEYSTORE_MAX_KEYS);
-    
-    ESP_LOGI(TAG, "Parsed %d keys from index", num_keys);
-    
-    /* 加载每个密钥的元数据，根据 show_hidden 过滤 */
-    size_t valid_count = 0;
-    for (int i = 0; i < num_keys && valid_count < TS_KEYSTORE_MAX_KEYS; i++) {
-        ts_keystore_key_info_t temp_info;
-        if (load_metadata(ids[i], &temp_info) == ESP_OK) {
-            /* 如果不显示隐藏密钥，则跳过隐藏的密钥 */
-            if (!show_hidden && temp_info.hidden) {
-                ESP_LOGD(TAG, "Skipping hidden key '%s'", ids[i]);
-                continue;
-            }
-            keys[valid_count] = temp_info;
-            valid_count++;
-        } else {
-            ESP_LOGW(TAG, "Failed to load metadata for key '%s'", ids[i]);
-        }
-    }
-    
-    ESP_LOGI(TAG, "Returning %zu valid keys (filtered)", valid_count);
-    *count = valid_count;
-    return ESP_OK;
+    if (!keys || !count) return ESP_ERR_INVALID_ARG;
+    size_t capacity = *count;
+    if (capacity > TS_KEYSTORE_MAX_KEYS) capacity = TS_KEYSTORE_MAX_KEYS;
+    *count = 0;
+    if (!s_keystore.write_lock) return ESP_ERR_INVALID_STATE;
+    xSemaphoreTake(s_keystore.write_lock, portMAX_DELAY);
+    esp_err_t result = s_keystore.initialized ?
+        list_keys_locked(keys, capacity, count, show_hidden) : ESP_ERR_INVALID_STATE;
+    xSemaphoreGive(s_keystore.write_lock);
+    return result;
 }
 
-esp_err_t ts_keystore_touch_key(const char *id)
+esp_err_t ts_keystore_read_public_record(const char *id, bool show_hidden,
+    ts_keystore_key_info_t *info, char **public_key, size_t *public_key_len)
 {
-    if (!s_keystore.initialized || !id) {
-        return ESP_ERR_INVALID_ARG;
-    }
-    
+    if (public_key) *public_key = NULL;
+    if (public_key_len) *public_key_len = 0;
+    if (!id || !info || (!!public_key != !!public_key_len)) return ESP_ERR_INVALID_ARG;
+    memset(info, 0, sizeof(*info));
+    if (!s_keystore.write_lock) return ESP_ERR_INVALID_STATE;
     xSemaphoreTake(s_keystore.write_lock, portMAX_DELAY);
+    esp_err_t result = s_keystore.initialized ? load_metadata(id, info) : ESP_ERR_INVALID_STATE;
+    if (result == ESP_ERR_NVS_NOT_FOUND) result = ESP_ERR_NOT_FOUND;
+    if (result == ESP_OK && info->hidden && !show_hidden) result = ESP_ERR_NOT_FOUND;
+    if (result == ESP_OK && public_key)
+        result = load_key_bytes_locked(id, "_pub", TS_KEYSTORE_PUBKEY_MAX_LEN, public_key, public_key_len);
+    xSemaphoreGive(s_keystore.write_lock);
+    if (result != ESP_OK) memset(info, 0, sizeof(*info));
+    return result;
+}
+
+esp_err_t ts_keystore_read_exportable_private_record(const char *id,
+    ts_keystore_key_info_t *info, char **private_key, size_t *private_key_len)
+{
+    if (private_key) *private_key = NULL;
+    if (private_key_len) *private_key_len = 0;
+    if (!id || !info || !private_key || !private_key_len) return ESP_ERR_INVALID_ARG;
+    memset(info, 0, sizeof(*info));
+    if (!s_keystore.write_lock) return ESP_ERR_INVALID_STATE;
+    xSemaphoreTake(s_keystore.write_lock, portMAX_DELAY);
+    esp_err_t ret = s_keystore.initialized ? load_metadata(id, info) : ESP_ERR_INVALID_STATE;
+    if (ret == ESP_ERR_NVS_NOT_FOUND) ret = ESP_ERR_NOT_FOUND;
+    if (ret == ESP_OK && !info->exportable) ret = ESP_ERR_NOT_ALLOWED;
+    if (ret == ESP_OK)
+        ret = load_key_bytes_locked(id, "_priv", TS_KEYSTORE_PRIVKEY_MAX_LEN, private_key, private_key_len);
+    xSemaphoreGive(s_keystore.write_lock);
+    if (ret != ESP_OK) memset(info, 0, sizeof(*info));
+    return ret;
+}
+
+static esp_err_t touch_key_locked(const char *id)
+{
     ts_keystore_key_info_t info;
-    esp_err_t ret = s_keystore.initialized ? load_metadata(id, &info) : ESP_ERR_INVALID_STATE;
+    esp_err_t ret = load_metadata(id, &info);
     if (ret == ESP_OK) {
         info.last_used = (uint32_t)time(NULL);
         ret = store_metadata(id, &info);
     }
+    return ret;
+}
+
+esp_err_t ts_keystore_touch_key(const char *id)
+{
+    if (!id) return ESP_ERR_INVALID_ARG;
+    if (!s_keystore.write_lock) return ESP_ERR_INVALID_STATE;
+    xSemaphoreTake(s_keystore.write_lock, portMAX_DELAY);
+    esp_err_t ret = s_keystore.initialized ? touch_key_locked(id) : ESP_ERR_INVALID_STATE;
     xSemaphoreGive(s_keystore.write_lock);
     return ret;
 }
 
-esp_err_t ts_keystore_import_from_file(const char *id, 
-                                        const char *path,
-                                        const char *comment)
+static esp_err_t read_key_file(const char *path, size_t maximum, bool optional, char **bytes, size_t *length)
 {
-    if (!s_keystore.initialized) {
-        return ESP_ERR_INVALID_STATE;
+    *bytes = NULL; *length = 0;
+    FILE *file = fopen(path, "rb");
+    if (!file) return optional && errno == ENOENT ? ESP_OK : errno == ENOENT ? ESP_ERR_NOT_FOUND : ESP_FAIL;
+    esp_err_t ret = ESP_OK;
+    long size = -1;
+    if (fseek(file, 0, SEEK_END) || (size = ftell(file)) < 0 || fseek(file, 0, SEEK_SET)) ret = ESP_FAIL;
+    else if ((size == 0 && !optional) || (size_t)size > maximum) ret = ESP_ERR_INVALID_SIZE;
+    char *buffer = ret == ESP_OK && size ? TS_MALLOC_PSRAM((size_t)size + 1) : NULL;
+    if (ret == ESP_OK && size && !buffer) ret = ESP_ERR_NO_MEM;
+    if (ret == ESP_OK && size) {
+        if (fread(buffer, 1, (size_t)size, file) != (size_t)size || ferror(file)) ret = ESP_FAIL;
+        buffer[size] = 0;
     }
-    
-    if (!id || !path) {
-        return ESP_ERR_INVALID_ARG;
-    }
-    
-    ESP_LOGI(TAG, "Importing key from %s as '%s'", path, id);
-    
-    /* 读取私钥文件 */
-    FILE *f = fopen(path, "r");
-    if (!f) {
-        ESP_LOGE(TAG, "Cannot open private key file: %s", path);
-        return ESP_ERR_NOT_FOUND;
-    }
-    
-    fseek(f, 0, SEEK_END);
-    long priv_len = ftell(f);
-    fseek(f, 0, SEEK_SET);
-    
-    if (priv_len <= 0 || priv_len > TS_KEYSTORE_PRIVKEY_MAX_LEN) {
-        fclose(f);
-        return ESP_ERR_INVALID_SIZE;
-    }
-    
-    char *priv_key = TS_MALLOC_PSRAM(priv_len + 1);
-    if (!priv_key) {
-        fclose(f);
-        return ESP_ERR_NO_MEM;
-    }
-    
-    size_t read_len = fread(priv_key, 1, priv_len, f);
-    fclose(f);
-    priv_key[read_len] = '\0';
-    
-    /* 尝试读取公钥文件 */
+    if (fclose(file) && ret == ESP_OK) ret = ESP_FAIL;
+    if (ret != ESP_OK) { secure_free_key(buffer, size > 0 ? (size_t)size + 1 : 0); return ret; }
+    *bytes = buffer; *length = (size_t)size;
+    return ESP_OK;
+}
+
+esp_err_t ts_keystore_import_from_file(const char *id, const char *path, const char *comment)
+{
+    if (!s_keystore.initialized) return ESP_ERR_INVALID_STATE;
+    if (!valid_key_id(id) || !path) return ESP_ERR_INVALID_ARG;
     char pub_path[256];
-    snprintf(pub_path, sizeof(pub_path), "%s.pub", path);
-    
-    char *pub_key = NULL;
-    size_t pub_len = 0;
-    
-    f = fopen(pub_path, "r");
-    if (f) {
-        fseek(f, 0, SEEK_END);
-        pub_len = ftell(f);
-        fseek(f, 0, SEEK_SET);
-        
-        if (pub_len > 0 && pub_len < TS_KEYSTORE_PUBKEY_MAX_LEN) {
-            pub_key = TS_MALLOC_PSRAM(pub_len + 1);
-            if (pub_key) {
-                size_t read = fread(pub_key, 1, pub_len, f);
-                pub_key[read] = '\0';
-                pub_len = read;
-            }
-        }
-        fclose(f);
-    }
-    
-    /* 检测密钥类型 */
+    int path_length = snprintf(pub_path, sizeof(pub_path), "%s.pub", path);
+    if (path_length < 0 || (size_t)path_length >= sizeof(pub_path)) return ESP_ERR_INVALID_SIZE;
+    char *priv_key = NULL, *pub_key = NULL;
+    size_t priv_len = 0, pub_len = 0;
+    esp_err_t ret = read_key_file(path, TS_KEYSTORE_PRIVKEY_MAX_LEN, false, &priv_key, &priv_len);
+    if (ret == ESP_OK) ret = read_key_file(pub_path, TS_KEYSTORE_PUBKEY_MAX_LEN, true, &pub_key, &pub_len);
+    if (ret != ESP_OK) { secure_free_key(priv_key, priv_len); free(pub_key); return ret; }
+    /* Preserve the existing opaque import formats; no new crypto parser restriction. */
     ts_keystore_key_type_t type = TS_KEYSTORE_TYPE_UNKNOWN;
-    if (strstr(priv_key, "BEGIN RSA PRIVATE KEY")) {
-        /* 需要进一步检测位数 */
-        if (priv_len > 2500) {
-            type = TS_KEYSTORE_TYPE_RSA_4096;
-        } else {
-            type = TS_KEYSTORE_TYPE_RSA_2048;
-        }
-    } else if (strstr(priv_key, "BEGIN EC PRIVATE KEY")) {
-        if (priv_len > 300) {
-            type = TS_KEYSTORE_TYPE_ECDSA_P384;
-        } else {
-            type = TS_KEYSTORE_TYPE_ECDSA_P256;
-        }
-    }
-    
-    /* 存储密钥 */
-    ts_keystore_keypair_t keypair = {
-        .private_key = priv_key,
-        .private_key_len = read_len,
-        .public_key = pub_key,
-        .public_key_len = pub_len,
-    };
-    
-    esp_err_t ret = ts_keystore_store_key(id, &keypair, type, comment);
-    
-    /* 安全清零私钥内存 */
-    secure_free_key(priv_key, read_len);
-    if (pub_key) free(pub_key);
-    
+    if (strstr(priv_key, "BEGIN RSA PRIVATE KEY")) type = priv_len > 2500 ? TS_KEYSTORE_TYPE_RSA_4096 : TS_KEYSTORE_TYPE_RSA_2048;
+    else if (strstr(priv_key, "BEGIN EC PRIVATE KEY")) type = priv_len > 300 ? TS_KEYSTORE_TYPE_ECDSA_P384 : TS_KEYSTORE_TYPE_ECDSA_P256;
+    ts_keystore_keypair_t keypair = {priv_key, priv_len, pub_key, pub_len};
+    ret = ts_keystore_store_key(id, &keypair, type, comment);
+    secure_free_key(priv_key, priv_len);
+    free(pub_key);
     return ret;
 }
 
@@ -884,7 +803,7 @@ esp_err_t ts_keystore_export_public_key_to_file(const char *id, const char *path
         return ESP_ERR_INVALID_ARG;
     }
     
-    ESP_LOGI(TAG, "Exporting public key '%s' to %s", id, path);
+    ESP_LOGI(TAG, "Exporting public key to file");
     
     /*
      * 安全策略：只允许导出公钥，私钥永不离开安全存储
@@ -897,12 +816,12 @@ esp_err_t ts_keystore_export_public_key_to_file(const char *id, const char *path
     
     esp_err_t ret = ts_keystore_load_public_key(id, &pub_key, &pub_len);
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to load public key '%s': %s", id, esp_err_to_name(ret));
+        ESP_LOGE(TAG, "Failed to load public key: %s", esp_err_to_name(ret));
         return ret;
     }
     
     if (!pub_key || pub_len == 0) {
-        ESP_LOGE(TAG, "Key '%s' has no public key", id);
+        ESP_LOGE(TAG, "Key has no public key");
         return ESP_ERR_NOT_FOUND;
     }
     
@@ -911,7 +830,7 @@ esp_err_t ts_keystore_export_public_key_to_file(const char *id, const char *path
     free(pub_key);
     if (ret != ESP_OK) return ret;
 
-    ESP_LOGI(TAG, "Public key '%s' exported to %s", id, path);
+    ESP_LOGI(TAG, "Public key exported to file");
     return ESP_OK;
 }
 
@@ -936,33 +855,13 @@ esp_err_t ts_keystore_export_private_key_to_file(const char *id, const char *pat
         return ESP_ERR_INVALID_ARG;
     }
     
-    /* 检查密钥是否存在并获取元数据 */
+    /* Metadata policy and private bytes are one version under the store owner. */
     ts_keystore_key_info_t info;
-    esp_err_t ret = ts_keystore_get_key_info(id, &info);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Key '%s' not found", id);
-        return ESP_ERR_NOT_FOUND;
-    }
-    
-    /* 安全检查：只有 exportable=true 的密钥才能导出 */
-    if (!info.exportable) {
-        ESP_LOGE(TAG, "Key '%s' is not exportable (security policy)", id);
-        ESP_LOGW(TAG, "To export private keys, generate with --exportable flag");
-        return ESP_ERR_NOT_ALLOWED;
-    }
-    
-    ESP_LOGW(TAG, "Exporting private key '%s' to %s (exportable=true)", id, path);
-    
-    /* 加载私钥 */
     char *priv_key = NULL;
     size_t priv_len = 0;
-    
-    ret = ts_keystore_load_private_key(id, &priv_key, &priv_len);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to load private key '%s': %s", id, esp_err_to_name(ret));
-        return ret;
-    }
-    
+    esp_err_t ret = ts_keystore_read_exportable_private_record(id, &info, &priv_key, &priv_len);
+    if (ret != ESP_OK) return ret;
+
     /* 写入私钥文件 */
     FILE *file = NULL;
     ret = ts_storage_open_write(path, &file);
@@ -978,7 +877,7 @@ esp_err_t ts_keystore_export_private_key_to_file(const char *id, const char *pat
     secure_free_key(priv_key, priv_len);
     if (written != priv_len || closed != 0) return ESP_FAIL;
 
-    ESP_LOGI(TAG, "Private key '%s' exported to %s", id, path);
+    ESP_LOGI(TAG, "Private key exported to file");
     return ESP_OK;
 }
 
@@ -994,7 +893,7 @@ esp_err_t ts_keystore_generate_key_with_result(const char *id,
         return ESP_ERR_INVALID_STATE;
     }
     
-    if (!id || !*id || strlen(id) > NVS_KEY_NAME_MAX_SIZE - 1 - 5 || strchr(id, ',') || type == TS_KEYSTORE_TYPE_UNKNOWN) {
+    if (!valid_key_id(id) || type == TS_KEYSTORE_TYPE_UNKNOWN) {
         return ESP_ERR_INVALID_ARG;
     }
     
@@ -1004,8 +903,8 @@ esp_err_t ts_keystore_generate_key_with_result(const char *id,
         opts = &default_opts;
     }
     
-    ESP_LOGI(TAG, "Generating %s key as '%s' (exportable=%d)", 
-             ts_keystore_type_to_string(type), id, opts->exportable);
+    ESP_LOGI(TAG, "Generating %s key (exportable=%d)",
+             ts_keystore_type_to_string(type), opts->exportable);
     
     /* 映射 keystore 类型到 crypto 类型 */
     ts_crypto_key_type_t crypto_type;
@@ -1026,10 +925,9 @@ esp_err_t ts_keystore_generate_key_with_result(const char *id,
             return ESP_ERR_INVALID_ARG;
     }
     
-    char old_index[MAX_INDEX_LEN];
-    bool index_present;
+    char initial_index[MAX_INDEX_LEN];
     xSemaphoreTake(s_keystore.write_lock, portMAX_DELAY);
-    esp_err_t ret = check_new_key(id, old_index, &index_present, detail);
+    esp_err_t ret = check_new_key(id, initial_index, NULL, detail);
     xSemaphoreGive(s_keystore.write_lock);
     if (ret != ESP_OK) return ret;
     detail->failed_stage = "generate";
@@ -1079,19 +977,8 @@ esp_err_t ts_keystore_generate_key_with_result(const char *id,
         .public_key_len = pub_len,
     };
     
-    xSemaphoreTake(s_keystore.write_lock, portMAX_DELAY);
-    ret = check_new_key(id, old_index, &index_present, detail);
-    if (ret == ESP_OK) {
-        ret = store_key_locked(id, &kp, type, opts, detail);
-        if (ret != ESP_OK) {
-            bool index_attempted = strcmp(detail->failed_stage, "index_write") == 0 ||
-                                   strcmp(detail->failed_stage, "commit") == 0;
-            detail->cleanup_error = cleanup_new_key(id, old_index, index_attempted, index_present);
-            detail->cleanup_complete = detail->cleanup_error == ESP_OK;
-        }
-    }
-    xSemaphoreGive(s_keystore.write_lock);
-    
+    ret = create_key(id, &kp, type, opts, detail);
+
     /* 安全清零私钥内存 */
     secure_free_key(priv_key, priv_len);
     if (pub_key) free(pub_key);

@@ -1,3 +1,6 @@
+#include "ts_http_fetch.h"
+#include "ts_http_url.h"
+#include "ts_api_ws_test_transport.h"
 #include "ts_api_auto_config.h"
 #include "ts_action_codec.h"
 #include "ts_rule_codec.h"
@@ -22,6 +25,7 @@
  */
 
 #include "ts_api.h"
+#include "ts_security.h"
 #include "ts_action_filter.h"
 #include "ts_api_service.h"
 #include "ts_automation.h"
@@ -1082,8 +1086,7 @@ static esp_err_t api_automation_actions_execute(const cJSON *params, ts_api_resu
     esp_err_t ret = ts_action_template_execute_versioned(id->valuestring,version->valuestring,&exec_result,&reason);
     if(reason){ts_api_result_error(result,TS_API_ERR_BUSY,reason);return ESP_OK;}
 
-    TS_LOGI(TAG, "Execute result: ret=%s, status=%d, output=%s",
-            esp_err_to_name(ret), exec_result.status, exec_result.output);
+    TS_LOGI(TAG, "Execute result: ret=%s, status=%d", esp_err_to_name(ret), exec_result.status);
 
     result->data = cJSON_CreateObject();
 
@@ -1158,7 +1161,6 @@ static esp_err_t api_automation_action_stats_reset(const cJSON *params, ts_api_r
 /*                     Proxy APIs for External Connection Test               */
 /*===========================================================================*/
 
-#include "esp_http_client.h"
 #include "esp_websocket_client.h"
 
 /**
@@ -1169,6 +1171,20 @@ static esp_err_t api_automation_action_stats_reset(const cJSON *params, ts_api_r
  *
  * Special handling for local API calls (127.0.0.1 or self IP) - calls API directly.
  */
+static bool proxy_fetch_current(void *context)
+{
+#ifdef CONFIG_TS_WEBUI_AUTH_REQUIRED
+    uint32_t session_id = (uint32_t)(uintptr_t)context;
+    if (session_id) {
+        ts_session_t caller;
+        return ts_security_validate_session(session_id, &caller) == ESP_OK && caller.level >= TS_PERM_ROOT;
+    }
+#else
+    (void)context;
+#endif
+    return true;
+}
+
 static esp_err_t api_automation_proxy_fetch(const cJSON *params, ts_api_result_t *result)
 {
     return ts_api_automation_proxy_fetch_for_session(params, 0, result);
@@ -1190,173 +1206,181 @@ esp_err_t ts_api_automation_proxy_fetch_for_session(const cJSON *params, uint32_
     const char *url = url_json->valuestring;
     const char *method_str = (method_json && cJSON_IsString(method_json)) ? method_json->valuestring : "GET";
     cJSON *timeout_json = cJSON_GetObjectItem(params, "timeout");
-    int timeout_ms = (timeout_json && cJSON_IsNumber(timeout_json)) ? timeout_json->valueint : 15000;
-
-    TS_LOGI(TAG, "Proxy fetch: %s %s (timeout=%dms)", method_str, url, timeout_ms);
-
-    // 检测是否是本地 API 调用 (127.0.0.1 或 localhost)
-    // 格式: http://127.0.0.1/api/v1/xxx 或 http://localhost/api/v1/xxx
-    bool is_local = (strstr(url, "://127.0.0.1") != NULL ||
-                     strstr(url, "://localhost") != NULL);
+    int timeout_ms = 15000;
+    struct http_parser_url parsed;
+    if (!ts_http_url_parse(url, &parsed) ||
+        (method_json && !cJSON_IsNull(method_json) && !cJSON_IsString(method_json)) ||
+        (headers_json && !cJSON_IsNull(headers_json) && !cJSON_IsObject(headers_json)) ||
+        (timeout_json && (!cJSON_IsNumber(timeout_json) || !isfinite(timeout_json->valuedouble) ||
+            timeout_json->valuedouble < 1 || timeout_json->valuedouble > 30000 ||
+            timeout_json->valuedouble != (int)timeout_json->valuedouble))) {
+        ts_api_result_error(result, TS_API_ERR_INVALID_ARG, "Invalid HTTP target, headers or timeout");
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (timeout_json) timeout_ms = (int)timeout_json->valuedouble;
+    if (headers_json && cJSON_IsNull(headers_json)) headers_json = NULL;
+    bool is_local = ts_http_url_is_local_api(url, &parsed);
 
     if (is_local) {
         // 提取 API 路径: /api/v1/system/memory -> system.memory
-        const char *api_path = strstr(url, "/api/v1/");
-        if (api_path) {
-            api_path += 8;  // 跳过 "/api/v1/"
+        const char *api_path = url + parsed.field_data[UF_PATH].off;
+        api_path += 8;  // 跳过 "/api/v1/"
 
-            // 将路径转换为 API 名称: system/memory -> system.memory
-            char api_name[64] = {0};
-            size_t i = 0, j = 0;
-            while (api_path[i] && j < sizeof(api_name) - 1) {
-                if (api_path[i] == '/') {
-                    api_name[j++] = '.';
-                } else if (api_path[i] == '?') {
-                    break;  // 停止于查询参数
-                } else {
-                    api_name[j++] = api_path[i];
-                }
-                i++;
-            }
-            api_name[j] = '\0';
-
-            TS_LOGI(TAG, "Local API call detected, calling directly: %s", api_name);
-
-            // 直接调用本地 API
-            ts_api_result_t local_result = {0};
-            cJSON *api_params = cJSON_CreateObject();
-            const char *query = strchr(api_path, '?');
-            if (query) {
-                char *copy = strdup(query + 1);
-                if (!copy) {
-                    cJSON_Delete(api_params);
-                    ts_api_result_error(result, TS_API_ERR_NO_MEM, "Query allocation failed");
-                    return ESP_ERR_NO_MEM;
-                }
-                ts_api_parse_query(api_params, copy);
-                free(copy);
-            }
-
-            esp_err_t ret = ts_api_call_for_session(api_name, api_params, session_id, &local_result);
-            cJSON_Delete(api_params);
-
-            if (ret == ESP_OK && local_result.code == TS_API_OK) {
-                cJSON *data = cJSON_CreateObject();
-                cJSON_AddNumberToObject(data, "status", 200);
-                cJSON_AddNumberToObject(data, "content_length", 0);
-
-                // 包装本地 API 响应
-                cJSON *body = cJSON_CreateObject();
-                cJSON_AddNumberToObject(body, "code", local_result.code);
-                if (local_result.message) {
-                    cJSON_AddStringToObject(body, "message", local_result.message);
-                }
-                if (local_result.data) {
-                    cJSON_AddItemToObject(body, "data", cJSON_Duplicate(local_result.data, true));
-                }
-                cJSON_AddItemToObject(data, "body", body);
-
-                result->code = TS_API_OK;
-                result->message = strdup("Local API call successful");
-                result->data = data;
-            } else {
-                result->code = local_result.code ? local_result.code : TS_API_ERR_INTERNAL;
-                result->message = local_result.message ? strdup(local_result.message) : strdup("Local API call failed");
-            }
-
-            // 清理本地结果
-            if (local_result.message) free(local_result.message);
-            if (local_result.data) cJSON_Delete(local_result.data);
-
-            return ESP_OK;
+        // 将路径转换为 API 名称: system/memory -> system.memory
+        char api_name[64] = {0};
+        size_t i = 0, j = 0;
+        size_t path_length = parsed.field_data[UF_PATH].len - 8;
+        while (i < path_length && j < sizeof(api_name) - 1) {
+            api_name[j++] = api_path[i] == '/' ? '.' : api_path[i];
+            i++;
         }
+        if (i != path_length) {
+            ts_api_result_error(result, TS_API_ERR_INVALID_ARG, "API name is too long");
+            return ESP_ERR_INVALID_ARG;
+        }
+        api_name[j] = '\0';
+
+        TS_LOGI(TAG, "Local API dispatch requested");
+
+        ts_api_access_t access;
+        esp_err_t policy_ret = ts_api_get_access(api_name, &access);
+        uint8_t method_bit = !strcasecmp(method_str, "GET") ? TS_API_METHOD_GET :
+            !strcasecmp(method_str, "POST") ? TS_API_METHOD_POST : !strcasecmp(method_str, "PUT") ? TS_API_METHOD_PUT :
+            !strcasecmp(method_str, "DELETE") ? TS_API_METHOD_DELETE : 0;
+        if (policy_ret != ESP_OK || !method_bit || !(access.allowed_methods & method_bit)) {
+            ts_api_result_error(result, policy_ret == ESP_ERR_NOT_FOUND ? TS_API_ERR_NOT_FOUND : TS_API_ERR_NOT_SUPPORTED,
+                                policy_ret != ESP_OK ? "API policy unavailable" : "Method not allowed");
+            return policy_ret != ESP_OK ? policy_ret : ESP_ERR_NOT_SUPPORTED;
+        }
+        // 直接调用本地 API
+        ts_api_result_t local_result = {0};
+        cJSON *api_params = cJSON_CreateObject();
+        if (!api_params) {
+            ts_api_result_error(result, TS_API_ERR_NO_MEM, "Parameter allocation failed");
+            return ESP_ERR_NO_MEM;
+        }
+        const char *query = (parsed.field_set & (1U << UF_QUERY)) ? url + parsed.field_data[UF_QUERY].off : NULL;
+        if (query) {
+            char *copy = strndup(query, parsed.field_data[UF_QUERY].len);
+            if (!copy) {
+                cJSON_Delete(api_params);
+                ts_api_result_error(result, TS_API_ERR_NO_MEM, "Query allocation failed");
+                return ESP_ERR_NO_MEM;
+            }
+            ts_api_params_status_t parsed = ts_api_params_add_query(api_params, copy);
+            free(copy);
+            if (parsed != TS_API_PARAMS_OK) {
+                cJSON_Delete(api_params);
+                ts_api_result_error(result, parsed == TS_API_PARAMS_NO_MEM ? TS_API_ERR_NO_MEM : TS_API_ERR_INVALID_ARG,
+                                    "Invalid or unavailable query");
+                return parsed == TS_API_PARAMS_NO_MEM ? ESP_ERR_NO_MEM : ESP_ERR_INVALID_ARG;
+            }
+        }
+
+        cJSON *data = cJSON_CreateObject(), *body = cJSON_CreateObject();
+        char *success = strdup("Local API call successful");
+        bool prepared = data && body && success && cJSON_AddNumberToObject(data, "status", 200) &&
+            cJSON_AddNumberToObject(data, "content_length", 0) && cJSON_AddNumberToObject(body, "code", 0);
+        if (!prepared || !cJSON_AddItemToObjectCS(data, "body", body)) {
+            cJSON_Delete(data); cJSON_Delete(body); cJSON_Delete(api_params); free(success);
+            ts_api_result_error(result, TS_API_ERR_NO_MEM, "Response allocation failed");
+            return ESP_ERR_NO_MEM;
+        }
+        esp_err_t ret = ts_api_call_for_session(api_name, api_params, session_id, &local_result);
+        cJSON_Delete(api_params);
+        if (ret == ESP_OK && local_result.code == TS_API_OK) {
+            bool complete = !local_result.message || cJSON_AddStringToObject(body, "message", local_result.message);
+            if (complete && local_result.data) {
+                complete = cJSON_AddItemToObjectCS(body, "data", local_result.data);
+                if (complete) local_result.data = NULL;
+            }
+            if (complete) {
+                result->code = TS_API_OK; result->message = success; success = NULL;
+                result->data = data; data = NULL;
+            } else ts_api_result_error(result, TS_API_ERR_INTERNAL, "result_unknown");
+        } else {
+            result->code = local_result.code ? local_result.code : TS_API_ERR_INTERNAL;
+            result->message = local_result.message; local_result.message = NULL;
+            result->data = local_result.data; local_result.data = NULL;
+        }
+        free(success); cJSON_Delete(data); ts_api_result_free(&local_result);
+
+        return ESP_OK;
     }
 
     // 外部 HTTP 请求
-    esp_http_client_method_t method = HTTP_METHOD_GET;
-    if (strcasecmp(method_str, "POST") == 0) method = HTTP_METHOD_POST;
-    else if (strcasecmp(method_str, "PUT") == 0) method = HTTP_METHOD_PUT;
-
-    // 配置 HTTP 客户端（支持 HTTP 和 HTTPS）
-    esp_http_client_config_t config = {
-        .url = url,
-        .method = method,
-        .timeout_ms = timeout_ms,
-        .buffer_size = 4096,
-        .buffer_size_tx = 1024,
-        .skip_cert_common_name_check = true,  // 跳过 CN 检查（测试用）
-        .crt_bundle_attach = esp_crt_bundle_attach,  // 使用证书包验证 HTTPS
-    };
-
-    esp_http_client_handle_t client = esp_http_client_init(&config);
-    if (!client) {
-        ts_api_result_reason(result, TS_API_ERR_INTERNAL, "proxy_init_failed", NULL);
-        return ESP_OK;
-    }
-
-    // 添加自定义头
-    if (headers_json && cJSON_IsObject(headers_json)) {
-        cJSON *header = NULL;
-        cJSON_ArrayForEach(header, headers_json) {
-            if (cJSON_IsString(header)) {
-                esp_http_client_set_header(client, header->string, header->valuestring);
-            }
+    /* C session 0 is the existing trusted internal handler contract. Every
+     * external entry declares READ and supplies a verified nonzero session.
+     * Local proxy calls above inherit that session and the destination policy. */
+#ifdef CONFIG_TS_WEBUI_AUTH_REQUIRED
+    if (session_id) {
+        ts_session_t caller;
+        if (ts_security_validate_session(session_id, &caller) != ESP_OK) {
+            ts_api_result_error(result, TS_API_ERR_AUTH, "Unauthorized");
+            return ESP_ERR_NOT_ALLOWED;
+        }
+        if (caller.level < TS_PERM_ROOT) {
+            ts_api_result_error(result, TS_API_ERR_NO_PERMISSION, "Root permission required");
+            return ESP_ERR_NOT_ALLOWED;
         }
     }
+#endif
 
-    // 执行请求
-    esp_err_t err = esp_http_client_open(client, 0);
-    if (err != ESP_OK) {
-        esp_http_client_cleanup(client);
-        ts_api_result_reason(result, TS_API_ERR_CONNECTION, "proxy_connect_failed", esp_err_to_name(err));
+    esp_http_client_method_t method;
+    if (!strcasecmp(method_str, "GET")) method = HTTP_METHOD_GET;
+    else if (!strcasecmp(method_str, "POST")) method = HTTP_METHOD_POST;
+    else if (!strcasecmp(method_str, "PUT")) method = HTTP_METHOD_PUT;
+    else if (!strcasecmp(method_str, "DELETE")) method = HTTP_METHOD_DELETE;
+    else {
+        ts_api_result_error(result, TS_API_ERR_INVALID_ARG, "Unsupported HTTP method");
+        return ESP_ERR_INVALID_ARG;
+    }
+    cJSON *ca = cJSON_GetObjectItem(params, "cert_pem");
+    cJSON *skip = cJSON_GetObjectItem(params, "skip_verify");
+    if ((ca && !cJSON_IsString(ca)) || (skip && !cJSON_IsFalse(skip))) {
+        ts_api_result_error(result, TS_API_ERR_INVALID_ARG, "Certificate verification is required");
+        return ESP_ERR_INVALID_ARG;
+    }
+    char *success = strdup("Request successful");
+    if (!success) {
+        ts_api_result_error(result, TS_API_ERR_NO_MEM, "Response allocation failed");
+        return ESP_ERR_NO_MEM;
+    }
+    ts_http_fetch_config_t request = {.url = url, .method = method, .headers = headers_json,
+        .cert_pem = ca ? ca->valuestring : NULL, .timeout_ms = (unsigned)timeout_ms, .maximum_body = 8192,
+        .current = proxy_fetch_current, .context = (void *)(uintptr_t)session_id};
+    ts_http_fetch_result_t reply = {0};
+    esp_err_t error = ts_http_fetch(&request, &reply);
+    if (error != ESP_OK) {
+        free(success);
+        if (!proxy_fetch_current((void *)(uintptr_t)session_id)) {
+            ts_api_result_error(result, TS_API_ERR_NO_PERMISSION, "Root permission required");
+            return ESP_ERR_NOT_ALLOWED;
+        }
+        ts_api_result_reason(result, error == ESP_ERR_INVALID_ARG ? TS_API_ERR_INVALID_ARG : TS_API_ERR_CONNECTION,
+            "proxy_connect_failed", esp_err_to_name(error));
         return ESP_OK;
     }
-
-    int content_length = esp_http_client_fetch_headers(client);
-    int status_code = esp_http_client_get_status_code(client);
-
-    // 读取响应体（限制大小防止内存溢出）
-    int max_len = 8192;
-    char *body = heap_caps_malloc(max_len + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (!body) {
-        body = malloc(max_len + 1);
+    if (!proxy_fetch_current((void *)(uintptr_t)session_id)) {
+        free(reply.body); free(success);
+        ts_api_result_error(result, TS_API_ERR_NO_PERMISSION, "Root permission required");
+        return ESP_ERR_NOT_ALLOWED;
     }
-
-    int read_len = 0;
-    if (body) {
-        read_len = esp_http_client_read(client, body, max_len);
-        if (read_len >= 0) {
-            body[read_len] = '\0';
-        } else {
-            body[0] = '\0';
-        }
-    }
-
-    esp_http_client_close(client);
-    esp_http_client_cleanup(client);
-
-    // 构建响应
-    if (status_code >= 200 && status_code < 400) {
+    if (reply.status >= 200 && reply.status < 400) {
         cJSON *data = cJSON_CreateObject();
-        cJSON_AddNumberToObject(data, "status", status_code);
-        cJSON_AddNumberToObject(data, "content_length", content_length);
-
-        // 尝试解析为 JSON，如果失败则作为字符串返回
-        cJSON *body_json = cJSON_Parse(body);
-        if (body_json) {
-            cJSON_AddItemToObject(data, "body", body_json);
+        cJSON *body = cJSON_Parse(reply.body);
+        if (!body) body = cJSON_CreateString(reply.body ? reply.body : "");
+        if (!data || !body || !cJSON_AddNumberToObject(data, "status", reply.status) ||
+            !cJSON_AddNumberToObject(data, "content_length", (double)reply.content_length) ||
+            !cJSON_AddItemToObjectCS(data, "body", body)) {
+            cJSON_Delete(data); cJSON_Delete(body);
+            ts_api_result_error(result, TS_API_ERR_NO_MEM, "result_unknown");
         } else {
-            cJSON_AddStringToObject(data, "body", body ? body : "");
+            result->code = TS_API_OK; result->data = data;
+            result->message = success; success = NULL;
         }
-
-        result->code = TS_API_OK;
-        result->message = strdup("Request successful");
-        result->data = data;
-    } else {
-        proxy_http_error(result, status_code, body);
-    }
-
-    if (body) free(body);
+    } else proxy_http_error(result, reply.status, reply.body);
+    free(reply.body); free(success);
     return ESP_OK;
 }
 
@@ -1510,10 +1534,73 @@ static cJSON *extract_json_value(cJSON *json, const char *path)
     return current;
 }
 
+/* A diagnostic sample is one complete WS message, not an SDK read fragment.
+ * Keep frame offsets independent from RFC continuation frames. The 64 KiB cap
+ * includes all continuation frames and is checked before allocating. */
+#define PROXY_WS_SAMPLE_MAX (64U * 1024U)
+typedef struct {
+    char *data;
+    size_t length, capacity, frame_length, frame_offset;
+    uint8_t frame_opcode;
+    bool started, frame_open, frame_fin;
+} proxy_ws_sample_t;
+
+/* 0: incomplete/control, 1: complete; failure returns a stable reason. */
+static int proxy_ws_sample_append(proxy_ws_sample_t *sample,
+                                  const esp_websocket_event_data_t *event,
+                                  const char **reason)
+{
+    if (event->op_code >= 8) return 0;
+    if (event->data_len < 0 || event->payload_len < 0 || event->payload_offset < 0 ||
+        (event->data_len && !event->data_ptr)) goto invalid;
+    size_t length=(size_t)event->data_len, offset=(size_t)event->payload_offset;
+    size_t total=(size_t)event->payload_len;
+    if (offset>total || length>total-offset) goto invalid;
+    if (!offset) {
+        if (sample->frame_open) goto invalid;
+        if (event->op_code==1 || event->op_code==2) {
+            if (sample->started) goto invalid;
+            sample->length=0;sample->started=true;
+        } else if (event->op_code!=0 || !sample->started) goto invalid;
+        if (total>PROXY_WS_SAMPLE_MAX-sample->length) goto too_large;
+        sample->frame_length=total;sample->frame_offset=0;
+        sample->frame_opcode=event->op_code;sample->frame_fin=event->fin;
+        sample->frame_open=true;
+    } else if (!sample->frame_open || total!=sample->frame_length ||
+               event->op_code!=sample->frame_opcode || event->fin!=sample->frame_fin) goto invalid;
+    if (offset!=sample->frame_offset) goto invalid;
+    if (length>PROXY_WS_SAMPLE_MAX-sample->length) goto too_large;
+    size_t needed=sample->length+length+1;
+    if (needed>sample->capacity) {
+        size_t capacity=(needed+4095U)&~(size_t)4095U;
+        if (capacity>PROXY_WS_SAMPLE_MAX+1U) capacity=PROXY_WS_SAMPLE_MAX+1U;
+        char *next=heap_caps_realloc(sample->data,capacity,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+        if (!next) next=heap_caps_realloc(sample->data,capacity,MALLOC_CAP_8BIT);
+        if (!next) { *reason="no_memory";return -1; }
+        sample->data=next;sample->capacity=capacity;
+    }
+    if (length) memcpy(sample->data+sample->length,event->data_ptr,length);
+    sample->length+=length;sample->frame_offset+=length;
+    sample->data[sample->length]='\0';
+    if (sample->frame_offset==sample->frame_length) {
+        sample->frame_open=false;
+        if (sample->frame_fin) {
+            sample->started=false;
+            if (memchr(sample->data,'\0',sample->length)) goto invalid;
+            return 1;
+        }
+    }
+    return 0;
+too_large:
+    *reason="ws_message_too_large";return -1;
+invalid:
+    *reason="ws_invalid_frame";return -1;
+}
+
 // WebSocket 测试状态
 typedef struct {
-    char *message;                  // 接收到的消息
-    size_t message_len;
+    proxy_ws_sample_t sample;       // Complete bounded message
+    bool failed;
     char *error;                    // 错误信息
     bool connected;                 // 已连接标志
     bool received;                  // 已收到数据标志
@@ -1544,27 +1631,14 @@ static void ws_test_handler(void *handler_args, esp_event_base_t base, int32_t e
             break;
 
         case WEBSOCKET_EVENT_DATA:
-            if (data->op_code < 8 && !ctx->received) {
-                if (data->data_len > 0 && data->data_ptr) {
-                    TS_LOGI(TAG, "WS test: received %d bytes", data->data_len);
-                    if (!ctx->message) {
-                        ctx->message = heap_caps_malloc(8192, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-                        if (!ctx->message) ctx->message = malloc(8192);
-                    }
-                    if (!ctx->message) {
-                        ctx->error = strdup("no_memory");
-                        if (ctx->data_sem) xSemaphoreGive(ctx->data_sem);
-                        break;
-                    }
-                    size_t space = 8191 - ctx->message_len;
-                    size_t copied = (size_t)data->data_len < space ? (size_t)data->data_len : space;
-                    memcpy(ctx->message + ctx->message_len, data->data_ptr, copied);
-                    ctx->message_len += copied;
-                    ctx->message[ctx->message_len] = '\0';
-                }
-                if (ctx->message_len > 0 && data->fin && (data->payload_len == 0 ||
-                    data->payload_offset + data->data_len >= data->payload_len)) {
-                    ctx->received = true;
+            if (!ctx->received && !ctx->failed) {
+                const char *reason=NULL;
+                int state=proxy_ws_sample_append(&ctx->sample,data,&reason);
+                if (state<0) {
+                    ctx->failed=true;ctx->error=strdup(reason);
+                    if (ctx->data_sem) xSemaphoreGive(ctx->data_sem);
+                } else if (state>0) {
+                    ctx->received=true;
                     if (ctx->data_sem) xSemaphoreGive(ctx->data_sem);
                 }
             }
@@ -1572,7 +1646,8 @@ static void ws_test_handler(void *handler_args, esp_event_base_t base, int32_t e
 
         case WEBSOCKET_EVENT_ERROR:
             TS_LOGE(TAG, "WS test: error");
-            ctx->error = strdup("ws_connect_failed");
+            ctx->failed=true;
+            if (!ctx->error) ctx->error = strdup("ws_connect_failed");
             // 释放所有信号量
             if (ctx->connect_sem) xSemaphoreGive(ctx->connect_sem);
             if (ctx->data_sem) xSemaphoreGive(ctx->data_sem);
@@ -1599,6 +1674,33 @@ static void ws_test_handler(void *handler_args, esp_event_base_t base, int32_t e
  *   - message: Raw message or extracted value
  *   - raw: Full raw message (if json_path is specified)
  */
+/* One operation budget across diagnostic connect, send, probe and sample waits.
+ * SDK stop/destroy still joins the transport task before freeing callback state. */
+static bool proxy_test_timeout(const cJSON *value, unsigned fallback, unsigned *out)
+{
+    if (!value) { *out = fallback; return true; }
+    if (!cJSON_IsNumber(value) || !isfinite(value->valuedouble) ||
+        value->valuedouble < 1 || value->valuedouble > 30000 ||
+        value->valuedouble != (unsigned)value->valuedouble) return false;
+    *out = (unsigned)value->valuedouble;
+    return true;
+}
+
+static unsigned proxy_test_remaining_ms(int64_t deadline)
+{
+    int64_t remaining = deadline - esp_timer_get_time();
+    return remaining > 0 ? (unsigned)(remaining / 1000) : 0;
+}
+
+static bool proxy_test_send(esp_websocket_client_handle_t client, const char *text,
+                            int64_t deadline)
+{
+    unsigned remaining = proxy_test_remaining_ms(deadline);
+    size_t length = strlen(text);
+    return remaining && esp_websocket_client_send_text(client, text, length,
+        pdMS_TO_TICKS(remaining)) == (int)length;
+}
+
 static esp_err_t api_automation_proxy_ws_test(const cJSON *params, ts_api_result_t *result)
 {
     cJSON *uri_json = cJSON_GetObjectItem(params, "uri");
@@ -1613,14 +1715,27 @@ static esp_err_t api_automation_proxy_ws_test(const cJSON *params, ts_api_result
     }
 
     const char *uri = uri_json->valuestring;
-    int timeout_ms = (timeout_json && cJSON_IsNumber(timeout_json)) ? timeout_json->valueint : 10000;
+    struct http_parser_url parsed;
+    if (!ts_ws_url_parse(uri, &parsed)) {
+        ts_api_result_error(result, TS_API_ERR_INVALID_ARG, "Invalid WebSocket URL");
+        return ESP_OK;
+    }
+    unsigned timeout_ms;
+    if (!proxy_test_timeout(timeout_json, 10000, &timeout_ms) ||
+        (subscribe_json && !cJSON_IsNull(subscribe_json) && (!cJSON_IsString(subscribe_json) ||
+            strnlen(subscribe_json->valuestring, 4097) > 4096)) ||
+        (json_path_json && !cJSON_IsNull(json_path_json) && (!cJSON_IsString(json_path_json) ||
+            strnlen(json_path_json->valuestring, 256) > 255))) {
+        ts_api_result_error(result, TS_API_ERR_INVALID_ARG, "Invalid diagnostic timeout or message");
+        return ESP_OK;
+    }
+    int64_t deadline = esp_timer_get_time() + (int64_t)timeout_ms * 1000;
     const char *subscribe_msg = (subscribe_json && cJSON_IsString(subscribe_json)) ? subscribe_json->valuestring : NULL;
     const char *json_path = (json_path_json && cJSON_IsString(json_path_json)) ? json_path_json->valuestring : NULL;
 
-    TS_LOGI(TAG, "WS test: uri=%s timeout=%d", uri, timeout_ms);
+    TS_LOGI(TAG, "WS test timeout=%u", timeout_ms);
 
     ws_test_ctx_t ctx = {
-        .message = NULL,
         .error = NULL,
         .connected = false,
         .received = false,
@@ -1636,17 +1751,39 @@ static esp_err_t api_automation_proxy_ws_test(const cJSON *params, ts_api_result
         return ESP_OK;
     }
 
+    cJSON *data = cJSON_CreateObject();
+    if (!data) {
+        vSemaphoreDelete(ctx.connect_sem);
+        vSemaphoreDelete(ctx.data_sem);
+        ts_api_result_error(result, TS_API_ERR_NO_MEM, "no_memory");
+        return ESP_OK;
+    }
+    result->data = data;
+
+    ts_api_ws_test_transport_t transport;
+    esp_err_t setup = ts_api_ws_test_transport_init(&transport, uri, deadline);
+    if (setup != ESP_OK) {
+        vSemaphoreDelete(ctx.connect_sem);
+        vSemaphoreDelete(ctx.data_sem);
+        ts_api_result_reason(result, setup == ESP_ERR_NO_MEM ? TS_API_ERR_NO_MEM : TS_API_ERR_CONNECTION,
+            "proxy_init_failed", esp_err_to_name(setup));
+        return ESP_OK;
+    }
+
     // 配置 WebSocket 客户端
     esp_websocket_client_config_t ws_cfg = {
         .uri = uri,
+        .port = transport.port,
+        .ext_transport = transport.websocket,
         .buffer_size = 4096,
         .network_timeout_ms = timeout_ms,
-        .reconnect_timeout_ms = timeout_ms,  // 禁用自动重连（使用大超时）
+        .disable_auto_reconnect = true,
         .crt_bundle_attach = esp_crt_bundle_attach,
     };
 
     esp_websocket_client_handle_t client = esp_websocket_client_init(&ws_cfg);
     if (!client) {
+        ts_api_ws_test_transport_destroy(&transport);
         vSemaphoreDelete(ctx.connect_sem);
         vSemaphoreDelete(ctx.data_sem);
         result->code = TS_API_ERR_INTERNAL;
@@ -1654,12 +1791,13 @@ static esp_err_t api_automation_proxy_ws_test(const cJSON *params, ts_api_result
         return ESP_OK;
     }
 
-    esp_websocket_register_events(client, WEBSOCKET_EVENT_ANY, ws_test_handler, &ctx);
+    esp_err_t err = esp_websocket_register_events(client, WEBSOCKET_EVENT_ANY, ws_test_handler, &ctx);
 
     // 启动连接
-    esp_err_t err = esp_websocket_client_start(client);
+    if (err == ESP_OK) err = esp_websocket_client_start(client);
     if (err != ESP_OK) {
         esp_websocket_client_destroy(client);
+        ts_api_ws_test_transport_destroy(&transport);
         vSemaphoreDelete(ctx.connect_sem);
         vSemaphoreDelete(ctx.data_sem);
         ts_api_result_reason(result, TS_API_ERR_CONNECTION, "ws_start_failed", esp_err_to_name(err));
@@ -1667,12 +1805,14 @@ static esp_err_t api_automation_proxy_ws_test(const cJSON *params, ts_api_result
     }
 
     // 等待连接建立
-    bool connect_ok = (xSemaphoreTake(ctx.connect_sem, pdMS_TO_TICKS(timeout_ms)) == pdTRUE) && ctx.connected && !ctx.error;
+    bool connect_ok = proxy_test_remaining_ms(deadline) && (xSemaphoreTake(ctx.connect_sem, pdMS_TO_TICKS(proxy_test_remaining_ms(deadline))) == pdTRUE) && ctx.connected && !ctx.failed && proxy_test_remaining_ms(deadline);
 
-    cJSON *data = cJSON_CreateObject();
     cJSON_AddBoolToObject(data, "connected", connect_ok);
 
     if (!connect_ok) {
+        esp_websocket_client_stop(client);
+        esp_websocket_client_destroy(client);
+        ts_api_ws_test_transport_destroy(&transport);
         // 连接失败
         result->code = TS_API_ERR_INTERNAL;
         if (ctx.error) {
@@ -1684,28 +1824,34 @@ static esp_err_t api_automation_proxy_ws_test(const cJSON *params, ts_api_result
         cJSON_AddStringToObject(data, "error", result->message);
         result->data = data;
 
-        esp_websocket_client_stop(client);
-        esp_websocket_client_destroy(client);
         vSemaphoreDelete(ctx.connect_sem);
         vSemaphoreDelete(ctx.data_sem);
-        free(ctx.message);
+        free(ctx.sample.data);
         return ESP_OK;
     }
 
     // 连接成功，发送订阅消息（如果有）
+    bool subscribe_ok = true;
     if (subscribe_msg) {
         TS_LOGI(TAG, "WS test: sending subscribe message");
-        esp_websocket_client_send_text(client, subscribe_msg, strlen(subscribe_msg), pdMS_TO_TICKS(5000));
+        subscribe_ok = proxy_test_send(client, subscribe_msg, deadline);
     }
 
     // 等待数据消息
-    bool data_ok = (xSemaphoreTake(ctx.data_sem, pdMS_TO_TICKS(timeout_ms)) == pdTRUE) && ctx.received && ctx.message;
+    bool data_ok = subscribe_ok && proxy_test_remaining_ms(deadline) && (xSemaphoreTake(ctx.data_sem,
+        pdMS_TO_TICKS(proxy_test_remaining_ms(deadline))) == pdTRUE) &&
+        ctx.received && !ctx.failed && ctx.sample.data && proxy_test_remaining_ms(deadline);
 
-    if (data_ok && ctx.message) {
-        TS_LOGI(TAG, "WS test: message received, len=%d", (int)strlen(ctx.message));
+    esp_websocket_client_stop(client);
+    esp_websocket_client_destroy(client);
+    ts_api_ws_test_transport_destroy(&transport);
+    if (!subscribe_ok && !ctx.error) ctx.error = strdup("ws_send_failed");
+
+    if (data_ok && ctx.sample.data) {
+        TS_LOGI(TAG, "WS test: message received, len=%d", (int)strlen(ctx.sample.data));
 
         // 尝试解析为 JSON
-        cJSON *msg_json = cJSON_Parse(ctx.message);
+        cJSON *msg_json = cJSON_Parse(ctx.sample.data);
 
         if (msg_json) {
             // 如果指定了 json_path，提取值
@@ -1725,7 +1871,7 @@ static esp_err_t api_automation_proxy_ws_test(const cJSON *params, ts_api_result
             }
         } else {
             // 非 JSON 消息，返回原始文本
-            cJSON_AddStringToObject(data, "message", ctx.message);
+            cJSON_AddStringToObject(data, "message", ctx.sample.data);
         }
 
         result->code = TS_API_OK;
@@ -1740,10 +1886,8 @@ static esp_err_t api_automation_proxy_ws_test(const cJSON *params, ts_api_result
 
     result->data = data;
 
-    // 清理
-    esp_websocket_client_stop(client);
-    esp_websocket_client_destroy(client);
-    free(ctx.message);
+    // Callback state is stable after the SDK task has joined.
+    free(ctx.sample.data);
     vSemaphoreDelete(ctx.connect_sem);
     vSemaphoreDelete(ctx.data_sem);
     if (ctx.error) free(ctx.error);
@@ -1768,10 +1912,8 @@ typedef struct {
     SemaphoreHandle_t upgrade_sem;  // 升级完成信号量
     SemaphoreHandle_t data_sem;     // 数据接收信号量
     const char *target_event;       // 目标事件名（可选过滤）
-    // 消息分片缓冲区（大消息可能分多个帧发送）
-    char *fragment_buf;             // 分片缓冲区
-    size_t fragment_len;            // 当前分片长度
-    size_t fragment_cap;            // 缓冲区容量
+    proxy_ws_sample_t sample;       // Complete bounded WS message
+    bool failed;
 } sio_test_ctx_t;
 
 /**
@@ -1791,6 +1933,7 @@ typedef struct {
  */
 static bool sio_try_parse_event(sio_test_ctx_t *ctx, const char *data, size_t len)
 {
+    if (!data || len<3) return false;
     // 查找 JSON 数组开始
     const char *json_start = NULL;
     for (size_t i = 0; i < len - 1; i++) {
@@ -1818,20 +1961,18 @@ static bool sio_try_parse_event(sio_test_ctx_t *ctx, const char *data, size_t le
                       strcmp(ctx->target_event, event_str) == 0);
 
         if (match && !ctx->received) {
-            TS_LOGI(TAG, "Socket.IO event matched: %s", event_str);
+            TS_LOGI(TAG, "Socket.IO event matched");
 
-            if (ctx->event_name) free(ctx->event_name);
-            ctx->event_name = strdup(event_str);
-
-            if (payload) {
-                char *payload_str = cJSON_PrintUnformatted(payload);
-                if (payload_str) {
-                    if (ctx->message) free(ctx->message);
-                    ctx->message = payload_str;
-                    TS_LOGI(TAG, "Socket.IO payload size: %zu bytes", strlen(payload_str));
-                }
+            char *name=strdup(event_str);
+            char *message=payload ? cJSON_PrintUnformatted(payload) : strdup("null");
+            if (!name || !message) {
+                free(name);free(message);ctx->failed=true;
+                if (!ctx->error) ctx->error=strdup("no_memory");
+                if (ctx->data_sem) xSemaphoreGive(ctx->data_sem);
+                cJSON_Delete(arr);return false;
             }
-
+            free(ctx->event_name);free(ctx->message);
+            ctx->event_name=name;ctx->message=message;
             ctx->received = true;
             if (ctx->data_sem) xSemaphoreGive(ctx->data_sem);
         }
@@ -1847,36 +1988,6 @@ static void sio_parse_message(sio_test_ctx_t *ctx, const char *data, int len)
 
     char type = data[0];
 
-    // 检查是否是分片续传（不以协议类型数字开头）
-    bool is_continuation = (type < '0' || type > '9') && ctx->fragment_len > 0;
-
-    if (is_continuation) {
-        // 追加到分片缓冲区
-        size_t new_len = ctx->fragment_len + len;
-        if (new_len + 1 > ctx->fragment_cap) {
-            size_t new_cap = new_len + 1024;
-            char *new_buf = heap_caps_realloc(ctx->fragment_buf, new_cap, MALLOC_CAP_SPIRAM);
-            if (!new_buf) {
-                TS_LOGE(TAG, "Fragment buffer realloc failed");
-                return;
-            }
-            ctx->fragment_buf = new_buf;
-            ctx->fragment_cap = new_cap;
-        }
-        memcpy(ctx->fragment_buf + ctx->fragment_len, data, len);
-        ctx->fragment_len = new_len;
-        ctx->fragment_buf[new_len] = '\0';
-
-        // 尝试解析完整消息
-        if (ctx->fragment_buf[0] == '4' && ctx->fragment_buf[1] == '2') {
-            if (sio_try_parse_event(ctx, ctx->fragment_buf, ctx->fragment_len)) {
-                // 解析成功，清空缓冲区
-                ctx->fragment_len = 0;
-            }
-        }
-        return;
-    }
-
     switch (type) {
         case '0': {
             // Engine.IO open - 解析 sid
@@ -1888,7 +1999,7 @@ static void sio_parse_message(sio_test_ctx_t *ctx, const char *data, int len)
                     if (sid && cJSON_IsString(sid)) {
                         if (ctx->sid) free(ctx->sid);
                         ctx->sid = strdup(sid->valuestring);
-                        TS_LOGI(TAG, "Socket.IO sid: %s", ctx->sid);
+                        TS_LOGI(TAG, "Socket.IO session received");
                     }
                     cJSON_Delete(json);
                 }
@@ -1916,30 +2027,14 @@ static void sio_parse_message(sio_test_ctx_t *ctx, const char *data, int len)
             }
             else if (sio_type == '2') {
                 // Socket.IO event: 42["event_name", data]
-                // 先尝试直接解析
-                if (!sio_try_parse_event(ctx, data, len)) {
-                    // 解析失败，可能是分片消息，存入缓冲区
-                    if (ctx->fragment_cap < (size_t)len + 1) {
-                        size_t new_cap = len + 4096;
-                        char *new_buf = heap_caps_realloc(ctx->fragment_buf, new_cap, MALLOC_CAP_SPIRAM);
-                        if (new_buf) {
-                            ctx->fragment_buf = new_buf;
-                            ctx->fragment_cap = new_cap;
-                        }
-                    }
-                    if (ctx->fragment_buf && ctx->fragment_cap >= (size_t)len + 1) {
-                        memcpy(ctx->fragment_buf, data, len);
-                        ctx->fragment_len = len;
-                        ctx->fragment_buf[len] = '\0';
-                        TS_LOGI(TAG, "Socket.IO event fragmented, buffering %d bytes", len);
-                    }
-                }
+                // SDK chunks and RFC continuations are assembled by the caller.
+                sio_try_parse_event(ctx, data, (size_t)len);
             }
             break;
         }
 
         default:
-            TS_LOGD(TAG, "Socket.IO unknown message type: %c", type);
+            TS_LOGD(TAG, "Socket.IO unknown message type");
             break;
     }
 }
@@ -1965,22 +2060,24 @@ static void sio_ws_handler(void *handler_args, esp_event_base_t base, int32_t ev
             break;
 
         case WEBSOCKET_EVENT_DATA:
-            if (data->data_len > 0) {
-                // 临时 null 终止以便解析
-                char *buf = strndup(data->data_ptr, data->data_len);
-                if (buf) {
-                    // 打印接收到的所有消息（调试用）
-                    TS_LOGI(TAG, "Socket.IO recv [%d]: %.100s%s", data->data_len, buf,
-                            data->data_len > 100 ? "..." : "");
-                    sio_parse_message(ctx, buf, data->data_len);
-                    free(buf);
+            if (!ctx->received && !ctx->failed) {
+                const char *reason=NULL;
+                int state=proxy_ws_sample_append(&ctx->sample,data,&reason);
+                if (state<0) {
+                    ctx->failed=true;ctx->error=strdup(reason);
+                    if (ctx->upgrade_sem) xSemaphoreGive(ctx->upgrade_sem);
+                    if (ctx->data_sem) xSemaphoreGive(ctx->data_sem);
+                } else if (state>0) {
+                    TS_LOGI(TAG, "Socket.IO received %zu bytes", ctx->sample.length);
+                    sio_parse_message(ctx,ctx->sample.data,(int)ctx->sample.length);
                 }
             }
             break;
 
         case WEBSOCKET_EVENT_ERROR:
             TS_LOGE(TAG, "Socket.IO WS error");
-            ctx->error = strdup("Socket.IO WebSocket error");
+            ctx->failed=true;
+            if (!ctx->error) ctx->error = strdup("Socket.IO WebSocket error");
             if (ctx->connect_sem) xSemaphoreGive(ctx->connect_sem);
             if (ctx->upgrade_sem) xSemaphoreGive(ctx->upgrade_sem);
             if (ctx->data_sem) xSemaphoreGive(ctx->data_sem);
@@ -2025,11 +2122,28 @@ static esp_err_t api_automation_proxy_socketio_test(const cJSON *params, ts_api_
 
     const char *base_url = url_json->valuestring;
     const char *target_event = (event_json && cJSON_IsString(event_json)) ? event_json->valuestring : NULL;
-    int timeout_ms = (timeout_json && cJSON_IsNumber(timeout_json)) ? timeout_json->valueint : 15000;
+    unsigned timeout_ms;
+    if (!proxy_test_timeout(timeout_json, 15000, &timeout_ms) ||
+        (event_json && !cJSON_IsNull(event_json) && (!cJSON_IsString(event_json) ||
+            strnlen(event_json->valuestring, 256) > 255)) ||
+        (json_path_json && !cJSON_IsNull(json_path_json) && (!cJSON_IsString(json_path_json) ||
+            strnlen(json_path_json->valuestring, 256) > 255))) {
+        ts_api_result_error(result, TS_API_ERR_INVALID_ARG, "Invalid diagnostic timeout or event");
+        return ESP_OK;
+    }
+    int64_t deadline = esp_timer_get_time() + (int64_t)timeout_ms * 1000;
     const char *json_path = (json_path_json && cJSON_IsString(json_path_json)) ? json_path_json->valuestring : NULL;
 
-    TS_LOGI(TAG, "Socket.IO test: url=%s event=%s timeout=%d",
-            base_url, target_event ? target_event : "(any)", timeout_ms);
+    TS_LOGI(TAG, "Socket.IO test timeout=%u", timeout_ms);
+
+    // Polling and upgrade use exactly the same validated base and path.
+    char polling_url[512];
+    if (!ts_source_sio_url(base_url, NULL, polling_url, sizeof(polling_url))) {
+        ts_api_result_error(result, TS_API_ERR_INVALID_ARG, "Invalid Socket.IO URL");
+        return ESP_OK;
+    }
+
+    ts_api_ws_test_transport_t transport = {0};
 
     // 初始化上下文
     sio_test_ctx_t ctx = {
@@ -2056,70 +2170,36 @@ static esp_err_t api_automation_proxy_socketio_test(const cJSON *params, ts_api_
     }
 
     cJSON *result_data = cJSON_CreateObject();
-
-    // ========== Step 1: HTTP 轮询获取 session ==========
-    char polling_url[256];
-    snprintf(polling_url, sizeof(polling_url), "%s/socket.io/?EIO=4&transport=polling", base_url);
-
-    esp_http_client_config_t http_config = {
-        .url = polling_url,
-        .method = HTTP_METHOD_GET,
-        .timeout_ms = 10000,
-        .buffer_size = 2048,
-        .crt_bundle_attach = esp_crt_bundle_attach,
-    };
-
-    esp_http_client_handle_t http_client = esp_http_client_init(&http_config);
-    if (!http_client) {
-        result->code = TS_API_ERR_INTERNAL;
-        result->message = strdup("proxy_init_failed");
+    if (!result_data) {
+        ts_api_result_error(result, TS_API_ERR_NO_MEM, "no_memory");
         goto cleanup;
     }
+    result->data = result_data;
 
-    esp_err_t err = esp_http_client_open(http_client, 0);
-    if (err != ESP_OK) {
-        esp_http_client_cleanup(http_client);
-        result->code = TS_API_ERR_INTERNAL;
-        result->message = strdup("proxy_connect_failed");
+    unsigned remaining = proxy_test_remaining_ms(deadline);
+    if (!remaining) {
+        ts_api_result_error(result, TS_API_ERR_TIMEOUT, "sio_event_timeout");
+        goto cleanup;
+    }
+    ts_http_fetch_config_t polling_request = {.url = polling_url, .method = HTTP_METHOD_GET,
+        .timeout_ms = remaining, .maximum_body = 2047};
+    ts_http_fetch_result_t polling = {0};
+    esp_err_t err = ts_http_fetch(&polling_request, &polling);
+    if (err != ESP_OK || polling.status != 200) {
+        result->code = err == ESP_ERR_NO_MEM ? TS_API_ERR_NO_MEM : TS_API_ERR_CONNECTION;
+        result->message = strdup(err == ESP_ERR_NO_MEM ? "proxy_init_failed" : "proxy_connect_failed");
         cJSON_AddBoolToObject(result_data, "connected", false);
         cJSON_AddStringToObject(result_data, "error", "HTTP polling failed");
         result->data = result_data;
+        free(polling.body);
         goto cleanup;
     }
-
-    esp_http_client_fetch_headers(http_client);
-
-    // 读取响应
-    char *poll_response = heap_caps_malloc(2048, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (!poll_response) poll_response = malloc(2048);
-
-    int read_len = 0;
-    if (poll_response) {
-        read_len = esp_http_client_read(http_client, poll_response, 2047);
-        if (read_len > 0) {
-            poll_response[read_len] = '\0';
-            TS_LOGD(TAG, "Socket.IO polling response: %s", poll_response);
-
-            // 解析响应获取 sid
-            // 响应格式可能是: 0{"sid":"xxx",...} 或带长度前缀
-            const char *json_start = strchr(poll_response, '{');
-            if (json_start) {
-                cJSON *json = cJSON_Parse(json_start);
-                if (json) {
-                    cJSON *sid = cJSON_GetObjectItem(json, "sid");
-                    if (sid && cJSON_IsString(sid)) {
-                        ctx.sid = strdup(sid->valuestring);
-                        TS_LOGI(TAG, "Socket.IO session: %s", ctx.sid);
-                    }
-                    cJSON_Delete(json);
-                }
-            }
-        }
-        free(poll_response);
-    }
-
-    esp_http_client_cleanup(http_client);
-
+    const char *json_start = polling.body ? strchr(polling.body, '{') : NULL;
+    cJSON *poll_json = json_start ? cJSON_Parse(json_start) : NULL;
+    const cJSON *sid = poll_json ? cJSON_GetObjectItemCaseSensitive(poll_json, "sid") : NULL;
+    if (cJSON_IsString(sid) && sid->valuestring[0]) ctx.sid = strdup(sid->valuestring);
+    cJSON_Delete(poll_json);
+    free(polling.body);
     if (!ctx.sid) {
         result->code = TS_API_ERR_INTERNAL;
         result->message = strdup("sio_no_session");
@@ -2129,17 +2209,35 @@ static esp_err_t api_automation_proxy_socketio_test(const cJSON *params, ts_api_
         goto cleanup;
     }
 
+    remaining = proxy_test_remaining_ms(deadline);
+    if (!remaining) {
+        ts_api_result_error(result, TS_API_ERR_TIMEOUT, "sio_event_timeout");
+        goto cleanup;
+    }
     // ========== Step 2: WebSocket 连接 ==========
-    char ws_url[384];
-    ts_source_sio_websocket_url(base_url, ctx.sid, ws_url, sizeof(ws_url));
+    char ws_url[512];
+    if (!ts_source_sio_url(base_url, ctx.sid, ws_url, sizeof(ws_url))) {
+        ts_api_result_error(result, TS_API_ERR_INVALID_ARG, "Invalid Socket.IO session or target");
+        goto cleanup;
+    }
 
-    TS_LOGI(TAG, "Socket.IO WS URL: %s", ws_url);
+    TS_LOGI(TAG, "Socket.IO WS connection prepared");
+
+    esp_err_t setup = ts_api_ws_test_transport_init(&transport, ws_url, deadline);
+    if (setup != ESP_OK) {
+        result->code = setup == ESP_ERR_NO_MEM ? TS_API_ERR_NO_MEM : TS_API_ERR_CONNECTION;
+        result->message = strdup("proxy_init_failed");
+        cJSON_AddBoolToObject(result_data, "connected", false);
+        goto cleanup;
+    }
 
     esp_websocket_client_config_t ws_cfg = {
         .uri = ws_url,
+        .port = transport.port,
+        .ext_transport = transport.websocket,
         .buffer_size = 4096,
-        .network_timeout_ms = timeout_ms,
-        .reconnect_timeout_ms = timeout_ms * 2,  // 禁用自动重连
+        .network_timeout_ms = remaining,
+        .disable_auto_reconnect = true,
         .crt_bundle_attach = esp_crt_bundle_attach,
     };
 
@@ -2152,9 +2250,9 @@ static esp_err_t api_automation_proxy_socketio_test(const cJSON *params, ts_api_
         goto cleanup;
     }
 
-    esp_websocket_register_events(ws_client, WEBSOCKET_EVENT_ANY, sio_ws_handler, &ctx);
+    err = esp_websocket_register_events(ws_client, WEBSOCKET_EVENT_ANY, sio_ws_handler, &ctx);
 
-    err = esp_websocket_client_start(ws_client);
+    if (err == ESP_OK) err = esp_websocket_client_start(ws_client);
     if (err != ESP_OK) {
         esp_websocket_client_destroy(ws_client);
         result->code = TS_API_ERR_INTERNAL;
@@ -2165,7 +2263,7 @@ static esp_err_t api_automation_proxy_socketio_test(const cJSON *params, ts_api_
     }
 
     // 等待 WebSocket 连接
-    bool ws_connected = (xSemaphoreTake(ctx.connect_sem, pdMS_TO_TICKS(timeout_ms)) == pdTRUE) && ctx.connected;
+    bool ws_connected = proxy_test_remaining_ms(deadline) && (xSemaphoreTake(ctx.connect_sem, pdMS_TO_TICKS(proxy_test_remaining_ms(deadline))) == pdTRUE) && ctx.connected && !ctx.failed && proxy_test_remaining_ms(deadline);
 
     if (!ws_connected) {
         esp_websocket_client_stop(ws_client);
@@ -2180,10 +2278,13 @@ static esp_err_t api_automation_proxy_socketio_test(const cJSON *params, ts_api_
 
     // ========== Step 3: 发送升级探针 ==========
     TS_LOGI(TAG, "Socket.IO sending probe");
-    esp_websocket_client_send_text(ws_client, "2probe", 6, pdMS_TO_TICKS(5000));
+    if (!proxy_test_send(ws_client, "2probe", deadline)) {
+        ts_api_result_error(result, TS_API_ERR_CONNECTION, "ws_send_failed");
+        goto cleanup_ws;
+    }
 
     // 等待 probe 响应
-    bool probe_ok = (xSemaphoreTake(ctx.upgrade_sem, pdMS_TO_TICKS(5000)) == pdTRUE) && ctx.upgraded;
+    bool probe_ok = proxy_test_remaining_ms(deadline) && (xSemaphoreTake(ctx.upgrade_sem, pdMS_TO_TICKS(proxy_test_remaining_ms(deadline) < 5000 ? proxy_test_remaining_ms(deadline) : 5000)) == pdTRUE) && ctx.upgraded && proxy_test_remaining_ms(deadline);
 
     if (!probe_ok) {
         TS_LOGW(TAG, "Socket.IO probe timeout, continuing anyway");
@@ -2192,28 +2293,38 @@ static esp_err_t api_automation_proxy_socketio_test(const cJSON *params, ts_api_
 
     // ========== Step 4: 发送升级确认 ==========
     TS_LOGI(TAG, "Socket.IO sending upgrade");
-    esp_websocket_client_send_text(ws_client, "5", 1, pdMS_TO_TICKS(5000));
+    if (!proxy_test_send(ws_client, "5", deadline)) {
+        ts_api_result_error(result, TS_API_ERR_CONNECTION, "ws_send_failed");
+        goto cleanup_ws;
+    }
 
     // 短暂等待让服务器处理升级
-    vTaskDelay(pdMS_TO_TICKS(100));
+    vTaskDelay(pdMS_TO_TICKS(proxy_test_remaining_ms(deadline) < 100 ? proxy_test_remaining_ms(deadline) : 100));
 
     // ========== Step 5: 发送 Socket.IO CONNECT 到默认 namespace ==========
     // Socket.IO 协议要求发送 40 (Engine.IO message + Socket.IO CONNECT) 来连接 namespace
     TS_LOGI(TAG, "Socket.IO sending CONNECT to default namespace");
-    esp_websocket_client_send_text(ws_client, "40", 2, pdMS_TO_TICKS(5000));
+    if (!proxy_test_send(ws_client, "40", deadline)) {
+        ts_api_result_error(result, TS_API_ERR_CONNECTION, "ws_send_failed");
+        goto cleanup_ws;
+    }
 
     // 短暂等待连接确认
-    vTaskDelay(pdMS_TO_TICKS(200));
+    vTaskDelay(pdMS_TO_TICKS(proxy_test_remaining_ms(deadline) < 200 ? proxy_test_remaining_ms(deadline) : 200));
 
     // ========== Step 6: 等待事件数据 ==========
     TS_LOGI(TAG, "Socket.IO waiting for event data...");
-    bool data_ok = (xSemaphoreTake(ctx.data_sem, pdMS_TO_TICKS(timeout_ms)) == pdTRUE) && ctx.received;
+    bool data_ok = proxy_test_remaining_ms(deadline) && (xSemaphoreTake(ctx.data_sem, pdMS_TO_TICKS(proxy_test_remaining_ms(deadline))) == pdTRUE) && ctx.received && !ctx.failed && proxy_test_remaining_ms(deadline);
+
+    esp_websocket_client_stop(ws_client);
+    esp_websocket_client_destroy(ws_client);
+    ws_client = NULL;
 
     cJSON_AddBoolToObject(result_data, "connected", true);
     cJSON_AddStringToObject(result_data, "sid", ctx.sid);
 
     if (data_ok && ctx.message) {
-        TS_LOGI(TAG, "Socket.IO received event: %s", ctx.event_name ? ctx.event_name : "(unknown)");
+        TS_LOGI(TAG, "Socket.IO event received");
 
         if (ctx.event_name) {
             cJSON_AddStringToObject(result_data, "event", ctx.event_name);
@@ -2250,24 +2361,27 @@ static esp_err_t api_automation_proxy_socketio_test(const cJSON *params, ts_api_
         result->code = TS_API_OK;
         result->message = strdup("Socket.IO test successful");
     } else {
-        result->code = TS_API_ERR_TIMEOUT;
-        result->message = strdup("sio_event_timeout");
+        result->code = ctx.failed ? TS_API_ERR_INTERNAL : TS_API_ERR_TIMEOUT;
+        result->message = strdup(ctx.error ? ctx.error : "sio_event_timeout");
         cJSON_AddStringToObject(result_data, "error",
-            target_event ? "Target event not received" : "No event received");
+            ctx.error ? ctx.error : (target_event ? "Target event not received" : "No event received"));
     }
 
     result->data = result_data;
 
-    // 清理 WebSocket
-    esp_websocket_client_stop(ws_client);
-    esp_websocket_client_destroy(ws_client);
+cleanup_ws:
+    if (ws_client) {
+        esp_websocket_client_stop(ws_client);
+        esp_websocket_client_destroy(ws_client);
+    }
 
 cleanup:
+    ts_api_ws_test_transport_destroy(&transport);
     if (ctx.sid) free(ctx.sid);
     if (ctx.message) free(ctx.message);
     if (ctx.event_name) free(ctx.event_name);
     if (ctx.error) free(ctx.error);
-    if (ctx.fragment_buf) free(ctx.fragment_buf);
+    free(ctx.sample.data);
     if (ctx.connect_sem) vSemaphoreDelete(ctx.connect_sem);
     if (ctx.upgrade_sem) vSemaphoreDelete(ctx.upgrade_sem);
     if (ctx.data_sem) vSemaphoreDelete(ctx.data_sem);
@@ -2688,449 +2802,464 @@ esp_err_t ts_api_automation_register(void)
     TS_LOGI(TAG, "Registering automation APIs");
 
     const ts_api_endpoint_t configuration[]={
-        {.name="automation.config.status",.description="Current automation storage and backup status",.category=TS_API_CAT_CONFIG,.handler=api_config_status,.requires_auth=false},
-        {.name="automation.config.refresh",.description="Check SD card once without changing the user choice",.category=TS_API_CAT_CONFIG,.handler=api_config_refresh,.requires_auth=true},
-        {.name="automation.config.backup",.description="Save the complete emergency configuration",.category=TS_API_CAT_CONFIG,.handler=api_config_backup,.requires_auth=true},
-        {.name="automation.config.preview",.description="Preview a configuration restore or source choice",.category=TS_API_CAT_CONFIG,.handler=api_config_preview,.requires_auth=true},
-        {.name="automation.config.apply",.description="Apply the confirmed restore or source choice",.category=TS_API_CAT_CONFIG,.handler=api_config_apply,.requires_auth=true},
-        {.name="automation.config.enable",.description="Explicitly enable or pause the current configuration",.category=TS_API_CAT_CONFIG,.handler=api_config_enable,.requires_auth=true},
+        {.name="automation.config.status", .external_access=TS_API_ACCESS_READ, .allowed_methods=TS_API_METHOD_READ,.description="Current automation storage and backup status",.category=TS_API_CAT_CONFIG,.handler=api_config_status,.requires_auth=true},
+        {.name="automation.config.refresh", .external_access=TS_API_ACCESS_ROOT, .allowed_methods=TS_API_METHOD_WRITE,.description="Check SD card once without changing the user choice",.category=TS_API_CAT_CONFIG,.handler=api_config_refresh,.requires_auth=true},
+        {.name="automation.config.backup", .external_access=TS_API_ACCESS_ROOT, .allowed_methods=TS_API_METHOD_WRITE,.description="Save the complete emergency configuration",.category=TS_API_CAT_CONFIG,.handler=api_config_backup,.requires_auth=true},
+        {.name="automation.config.preview", .external_access=TS_API_ACCESS_ROOT, .allowed_methods=TS_API_METHOD_POST,.description="Preview a configuration restore or source choice",.category=TS_API_CAT_CONFIG,.handler=api_config_preview,.requires_auth=true},
+        {.name="automation.config.apply", .external_access=TS_API_ACCESS_ROOT, .allowed_methods=TS_API_METHOD_POST,.description="Apply the confirmed restore or source choice",.category=TS_API_CAT_CONFIG,.handler=api_config_apply,.requires_auth=true},
+        {.name="automation.config.enable", .external_access=TS_API_ACCESS_ROOT, .allowed_methods=TS_API_METHOD_WRITE,.description="Explicitly enable or pause the current configuration",.category=TS_API_CAT_CONFIG,.handler=api_config_enable,.requires_auth=true},
     };
     esp_err_t ret=ts_api_register_multiple(configuration,sizeof(configuration)/sizeof(configuration[0]));
     if(ret!=ESP_OK)return ret;
 
     // Status
     ts_api_endpoint_t ep_status = {
-        .name = "automation.status",
+        .name = "automation.status", .external_access=TS_API_ACCESS_READ, .allowed_methods=TS_API_METHOD_READ,
         .description = "Get automation engine status",
         .category = TS_API_CAT_SYSTEM,
         .handler = api_automation_status,
-        .requires_auth = false,
+        .requires_auth=true,
     };
     ts_api_register(&ep_status);
 
     // Control APIs
     ts_api_endpoint_t ep_start = {
-        .name = "automation.start",
+        .name = "automation.start", .external_access=TS_API_ACCESS_ADMIN, .allowed_methods=TS_API_METHOD_WRITE,
         .description = "Start automation engine",
         .category = TS_API_CAT_SYSTEM,
         .handler = api_automation_start,
-        .requires_auth = true,
+        .requires_auth=true,
     };
     ts_api_register(&ep_start);
 
     ts_api_endpoint_t ep_stop = {
-        .name = "automation.stop",
+        .name = "automation.stop", .external_access=TS_API_ACCESS_ADMIN, .allowed_methods=TS_API_METHOD_WRITE,
         .description = "Stop automation engine",
         .category = TS_API_CAT_SYSTEM,
         .handler = api_automation_stop,
-        .requires_auth = true,
+        .requires_auth=true,
     };
     ts_api_register(&ep_stop);
 
     ts_api_endpoint_t ep_pause = {
-        .name = "automation.pause",
+        .name = "automation.pause", .external_access=TS_API_ACCESS_ADMIN, .allowed_methods=TS_API_METHOD_WRITE,
         .description = "Pause automation engine",
         .category = TS_API_CAT_SYSTEM,
         .handler = api_automation_pause,
-        .requires_auth = true,
+        .requires_auth=true,
     };
     ts_api_register(&ep_pause);
 
     ts_api_endpoint_t ep_resume = {
-        .name = "automation.resume",
+        .name = "automation.resume", .external_access=TS_API_ACCESS_ADMIN, .allowed_methods=TS_API_METHOD_WRITE,
         .description = "Resume automation engine",
         .category = TS_API_CAT_SYSTEM,
         .handler = api_automation_resume,
-        .requires_auth = true,
+        .requires_auth=true,
     };
     ts_api_register(&ep_resume);
 
     ts_api_endpoint_t ep_reload = {
-        .name = "automation.reload",
+        .name = "automation.reload", .external_access=TS_API_ACCESS_ROOT, .allowed_methods=TS_API_METHOD_WRITE,
         .description = "Reload configuration",
         .category = TS_API_CAT_SYSTEM,
         .handler = api_automation_reload,
-        .requires_auth = true,
+        .requires_auth=true,
     };
     ts_api_register(&ep_reload);
 
     // Variables APIs
     ts_api_endpoint_t ep_vars_list = {
-        .name = "automation.variables.list",
+        .name = "automation.variables.list", .external_access=TS_API_ACCESS_READ, .allowed_methods=TS_API_METHOD_READ,
         .description = "List all variables",
         .category = TS_API_CAT_SYSTEM,
         .handler = api_automation_variables_list,
-        .requires_auth = false,
+        .requires_auth=true,
     };
     ts_api_register(&ep_vars_list);
 
     ts_api_endpoint_t ep_vars_get = {
-        .name = "automation.variables.get",
+        .name = "automation.variables.get", .external_access=TS_API_ACCESS_READ, .allowed_methods=TS_API_METHOD_READ,
         .description = "Get variable value",
         .category = TS_API_CAT_SYSTEM,
         .handler = api_automation_variables_get,
-        .requires_auth = false,
+        .requires_auth=true,
     };
     ts_api_register(&ep_vars_get);
 
     ts_api_endpoint_t ep_vars_set = {
-        .name = "automation.variables.set",
+        .name = "automation.variables.set", .external_access=TS_API_ACCESS_ROOT, .allowed_methods=TS_API_METHOD_WRITE,
         .description = "Set variable value",
         .category = TS_API_CAT_SYSTEM,
         .handler = api_automation_variables_set,
-        .requires_auth = true,
+        .requires_auth=true,
     };
     ts_api_register(&ep_vars_set);
     ts_api_endpoint_t ep_vars_delete = ep_vars_set;
     ep_vars_delete.name = "automation.variables.delete";
+    ep_vars_delete.external_access=TS_API_ACCESS_ROOT;
+    ep_vars_delete.allowed_methods=TS_API_METHOD_WRITE;
+    ep_vars_delete.requires_auth=true;
     ep_vars_delete.description = "Delete a saved user variable";
     ep_vars_delete.handler = api_automation_variables_delete;
     ts_api_register(&ep_vars_delete);
 
     // Rules APIs
     ts_api_endpoint_t ep_rules_list = {
-        .name = "automation.rules.list",
+        .name = "automation.rules.list", .external_access=TS_API_ACCESS_READ, .allowed_methods=TS_API_METHOD_READ,
         .description = "List all rules",
         .category = TS_API_CAT_SYSTEM,
         .handler = api_automation_rules_list,
-        .requires_auth = false,
+        .requires_auth=true,
     };
     ts_api_register(&ep_rules_list);
 
     ts_api_endpoint_t ep_rules_enable = {
-        .name = "automation.rules.enable",
+        .name = "automation.rules.enable", .external_access=TS_API_ACCESS_ADMIN, .allowed_methods=TS_API_METHOD_WRITE,
         .description = "Enable a rule",
         .category = TS_API_CAT_SYSTEM,
         .handler = api_automation_rules_enable,
-        .requires_auth = true,
+        .requires_auth=true,
     };
     ts_api_register(&ep_rules_enable);
 
     ts_api_endpoint_t ep_rules_disable = {
-        .name = "automation.rules.disable",
+        .name = "automation.rules.disable", .external_access=TS_API_ACCESS_ADMIN, .allowed_methods=TS_API_METHOD_WRITE,
         .description = "Disable a rule",
         .category = TS_API_CAT_SYSTEM,
         .handler = api_automation_rules_disable,
-        .requires_auth = true,
+        .requires_auth=true,
     };
     ts_api_register(&ep_rules_disable);
 
     ts_api_endpoint_t ep_rules_get = {
-        .name = "automation.rules.get",
+        .name = "automation.rules.get", .external_access=TS_API_ACCESS_READ, .allowed_methods=TS_API_METHOD_READ,
         .description = "Get rule details by ID",
         .category = TS_API_CAT_SYSTEM,
         .handler = api_automation_rules_get,
-        .requires_auth = false,
+        .requires_auth=true,
     };
     ts_api_register(&ep_rules_get);
 
-    ts_api_endpoint_t ep_service = {.name = "automation.services.status",
+    ts_api_endpoint_t ep_service = {.name = "automation.services.status", .external_access=TS_API_ACCESS_READ, .allowed_methods=TS_API_METHOD_READ,
                                     .description = "Confirm managed remote process state",
                                     .category = TS_API_CAT_SYSTEM,
                                     .handler = api_service_status,
-                                    .requires_auth = true};
+                                    .requires_auth=true};
     ts_api_register(&ep_service);
     ep_service.name = "automation.services.stop";
+    ep_service.external_access=TS_API_ACCESS_ADMIN;
+    ep_service.allowed_methods=TS_API_METHOD_WRITE;
+    ep_service.requires_auth=true;
     ep_service.handler = api_service_stop;
     ep_service.description = "Stop verified managed remote process";
     ts_api_register(&ep_service);
     ep_service.name = "automation.services.list";
+    ep_service.external_access=TS_API_ACCESS_READ;
+    ep_service.allowed_methods=TS_API_METHOD_READ;
+    ep_service.requires_auth=true;
     ep_service.description = "List independent remote service controls";
     ep_service.handler = api_service_list;
     ts_api_register(&ep_service);
     ts_api_endpoint_t ep_rules_trigger = {
-        .name = "automation.rules.trigger",
+        .name = "automation.rules.trigger", .external_access=TS_API_ACCESS_ADMIN, .allowed_methods=TS_API_METHOD_WRITE,
         .description = "Manually trigger a rule",
         .category = TS_API_CAT_SYSTEM,
         .handler = api_automation_rules_trigger,
-        .requires_auth = true,
+        .requires_auth=true,
     };
     ts_api_register(&ep_rules_trigger);
 
     ts_api_endpoint_t ep_rules_add = {
-        .name = "automation.rules.add",
+        .name = "automation.rules.add", .external_access=TS_API_ACCESS_ROOT, .allowed_methods=TS_API_METHOD_WRITE,
         .description = "Add a new rule",
         .category = TS_API_CAT_SYSTEM,
         .handler = api_automation_rules_add,
-        .requires_auth = true,
+        .requires_auth=true,
     };
     ts_api_register(&ep_rules_add);
     ts_api_endpoint_t ep_rules_update = ep_rules_add;
     ep_rules_update.name = "automation.rules.update";
+    ep_rules_update.external_access=TS_API_ACCESS_ROOT;
+    ep_rules_update.allowed_methods=TS_API_METHOD_WRITE;
+    ep_rules_update.requires_auth=true;
     ep_rules_update.description = "Update rule with expected revision";
     ep_rules_update.handler = api_automation_rules_update;
     ts_api_register(&ep_rules_update);
 
     ts_api_endpoint_t ep_rules_delete = {
-        .name = "automation.rules.delete",
+        .name = "automation.rules.delete", .external_access=TS_API_ACCESS_ROOT, .allowed_methods=TS_API_METHOD_WRITE,
         .description = "Delete a rule",
         .category = TS_API_CAT_SYSTEM,
         .handler = api_automation_rules_delete,
-        .requires_auth = true,
+        .requires_auth=true,
     };
     ts_api_register(&ep_rules_delete);
 
     // Sources API
     ts_api_endpoint_t ep_sources_list = {
-        .name = "automation.sources.list",
+        .name = "automation.sources.list", .external_access=TS_API_ACCESS_READ, .allowed_methods=TS_API_METHOD_READ,
         .description = "List all data sources",
         .category = TS_API_CAT_SYSTEM,
         .handler = api_automation_sources_list,
-        .requires_auth = false,
+        .requires_auth=true,
     };
     ts_api_register(&ep_sources_list);
 
     ts_api_endpoint_t ep_sources_add = {
-        .name = "automation.sources.add",
+        .name = "automation.sources.add", .external_access=TS_API_ACCESS_ROOT, .allowed_methods=TS_API_METHOD_WRITE,
         .description = "Add a new data source",
         .category = TS_API_CAT_SYSTEM,
         .handler = api_automation_sources_add,
-        .requires_auth = true,
+        .requires_auth=true,
     };
     ts_api_register(&ep_sources_add);
     ts_api_endpoint_t ep_sources_update = ep_sources_add;
     ep_sources_update.name = "automation.sources.update";
+    ep_sources_update.external_access=TS_API_ACCESS_ROOT;
+    ep_sources_update.allowed_methods=TS_API_METHOD_WRITE;
+    ep_sources_update.requires_auth=true;
     ep_sources_update.description = "Update an existing data source";
     ep_sources_update.handler = api_automation_sources_update;
     ts_api_register(&ep_sources_update);
 
     ts_api_endpoint_t ep_sources_delete = {
-        .name = "automation.sources.delete",
+        .name = "automation.sources.delete", .external_access=TS_API_ACCESS_ROOT, .allowed_methods=TS_API_METHOD_WRITE,
         .description = "Delete a data source",
         .category = TS_API_CAT_SYSTEM,
         .handler = api_automation_sources_delete,
-        .requires_auth = true,
+        .requires_auth=true,
     };
     ts_api_register(&ep_sources_delete);
 
     ts_api_endpoint_t ep_sources_add_mapping = {
-        .name = "automation.sources.add_mapping",
+        .name = "automation.sources.add_mapping", .external_access=TS_API_ACCESS_ROOT, .allowed_methods=TS_API_METHOD_WRITE,
         .description = "Add a field mapping to an existing data source",
         .category = TS_API_CAT_SYSTEM,
         .handler = api_automation_sources_add_mapping,
-        .requires_auth = true,
+        .requires_auth=true,
     };
     ts_api_register(&ep_sources_add_mapping);
 
     ts_api_endpoint_t ep_sources_remove_mapping = {
-        .name = "automation.sources.remove_mapping",
+        .name = "automation.sources.remove_mapping", .external_access=TS_API_ACCESS_ROOT, .allowed_methods=TS_API_METHOD_WRITE,
         .description = "Remove a field mapping from a data source",
         .category = TS_API_CAT_SYSTEM,
         .handler = api_automation_sources_remove_mapping,
-        .requires_auth = true,
+        .requires_auth=true,
     };
     ts_api_register(&ep_sources_remove_mapping);
 
     ts_api_endpoint_t ep_sources_enable = {
-        .name = "automation.sources.enable",
+        .name = "automation.sources.enable", .external_access=TS_API_ACCESS_ADMIN, .allowed_methods=TS_API_METHOD_WRITE,
         .description = "Enable a data source",
         .category = TS_API_CAT_SYSTEM,
         .handler = api_automation_sources_enable,
-        .requires_auth = true,
+        .requires_auth=true,
     };
     ts_api_register(&ep_sources_enable);
 
     ts_api_endpoint_t ep_sources_disable = {
-        .name = "automation.sources.disable",
+        .name = "automation.sources.disable", .external_access=TS_API_ACCESS_ADMIN, .allowed_methods=TS_API_METHOD_WRITE,
         .description = "Disable a data source",
         .category = TS_API_CAT_SYSTEM,
         .handler = api_automation_sources_disable,
-        .requires_auth = true,
+        .requires_auth=true,
     };
     ts_api_register(&ep_sources_disable);
 
     // Test action APIs
     ts_api_endpoint_t ep_test_led = {
-        .name = "automation.test.led",
+        .name = "automation.test.led", .external_access=TS_API_ACCESS_ADMIN, .allowed_methods=TS_API_METHOD_WRITE,
         .description = "Test LED action",
         .category = TS_API_CAT_SYSTEM,
         .handler = api_automation_test_led,
-        .requires_auth = true,
+        .requires_auth=true,
     };
     ts_api_register(&ep_test_led);
 
     ts_api_endpoint_t ep_test_gpio = {
-        .name = "automation.test.gpio",
+        .name = "automation.test.gpio", .external_access=TS_API_ACCESS_ADMIN, .allowed_methods=TS_API_METHOD_WRITE,
         .description = "Test GPIO action",
         .category = TS_API_CAT_SYSTEM,
         .handler = api_automation_test_gpio,
-        .requires_auth = true,
+        .requires_auth=true,
     };
     ts_api_register(&ep_test_gpio);
 
     ts_api_endpoint_t ep_test_device = {
-        .name = "automation.test.device",
+        .name = "automation.test.device", .external_access=TS_API_ACCESS_ADMIN, .allowed_methods=TS_API_METHOD_WRITE,
         .description = "Test device control action",
         .category = TS_API_CAT_SYSTEM,
         .handler = api_automation_test_device,
-        .requires_auth = true,
+        .requires_auth=true,
     };
     ts_api_register(&ep_test_device);
 
     ts_api_endpoint_t ep_test_ssh = {
-        .name = "automation.test.ssh",
+        .name = "automation.test.ssh", .external_access=TS_API_ACCESS_ROOT, .allowed_methods=TS_API_METHOD_POST,
         .description = "Test SSH command execution",
         .category = TS_API_CAT_SYSTEM,
         .handler = api_automation_test_ssh,
-        .requires_auth = true,
+        .requires_auth=true,
     };
     ts_api_register(&ep_test_ssh);
 
     // Action Template APIs
     ts_api_endpoint_t ep_actions_list = {
-        .name = "automation.actions.list",
+        .name = "automation.actions.list", .external_access=TS_API_ACCESS_READ, .allowed_methods=TS_API_METHOD_READ,
         .description = "List all action templates",
         .category = TS_API_CAT_SYSTEM,
         .handler = api_automation_actions_list,
-        .requires_auth = false,
+        .requires_auth=true,
     };
     ts_api_register(&ep_actions_list);
 
     ts_api_endpoint_t ep_actions_get = {
-        .name = "automation.actions.get",
+        .name = "automation.actions.get", .external_access=TS_API_ACCESS_READ, .allowed_methods=TS_API_METHOD_READ,
         .description = "Get action template by ID",
         .category = TS_API_CAT_SYSTEM,
         .handler = api_automation_actions_get,
-        .requires_auth = false,
+        .requires_auth=true,
     };
     ts_api_register(&ep_actions_get);
 
     ts_api_endpoint_t ep_actions_add = {
-        .name = "automation.actions.add",
+        .name = "automation.actions.add", .external_access=TS_API_ACCESS_ROOT, .allowed_methods=TS_API_METHOD_WRITE,
         .description = "Create a new action template",
         .category = TS_API_CAT_SYSTEM,
         .handler = api_automation_actions_add,
-        .requires_auth = true,
+        .requires_auth=true,
     };
     ts_api_register(&ep_actions_add);
     ts_api_endpoint_t ep_actions_update = {
-        .name = "automation.actions.update",
+        .name = "automation.actions.update", .external_access=TS_API_ACCESS_ROOT, .allowed_methods=TS_API_METHOD_WRITE,
         .description = "Update an existing action template",
         .category = TS_API_CAT_SYSTEM,
         .handler = api_automation_actions_update,
-        .requires_auth = true,
+        .requires_auth=true,
     };
     ts_api_register(&ep_actions_update);
 
     ts_api_endpoint_t ep_actions_delete = {
-        .name = "automation.actions.delete",
+        .name = "automation.actions.delete", .external_access=TS_API_ACCESS_ROOT, .allowed_methods=TS_API_METHOD_WRITE,
         .description = "Delete an action template",
         .category = TS_API_CAT_SYSTEM,
         .handler = api_automation_actions_delete,
-        .requires_auth = true,
+        .requires_auth=true,
     };
     ts_api_register(&ep_actions_delete);
 
     ts_api_endpoint_t ep_actions_execute = {
-        .name = "automation.actions.execute",
+        .name = "automation.actions.execute", .external_access=TS_API_ACCESS_ADMIN, .allowed_methods=TS_API_METHOD_WRITE,
         .description = "Execute an action template",
         .category = TS_API_CAT_SYSTEM,
         .handler = api_automation_actions_execute,
-        .requires_auth = true,
+        .requires_auth=true,
     };
     ts_api_register(&ep_actions_execute);
 
     // Action Statistics APIs
     ts_api_endpoint_t ep_action_stats = {
-        .name = "automation.action.stats",
+        .name = "automation.action.stats", .external_access=TS_API_ACCESS_READ, .allowed_methods=TS_API_METHOD_READ,
         .description = "Get action execution statistics",
         .category = TS_API_CAT_SYSTEM,
         .handler = api_automation_action_stats,
-        .requires_auth = false,
+        .requires_auth=true,
     };
     ts_api_register(&ep_action_stats);
 
     ts_api_endpoint_t ep_action_stats_reset = {
-        .name = "automation.action.stats.reset",
+        .name = "automation.action.stats.reset", .external_access=TS_API_ACCESS_ADMIN, .allowed_methods=TS_API_METHOD_WRITE,
         .description = "Reset action statistics",
         .category = TS_API_CAT_SYSTEM,
         .handler = api_automation_action_stats_reset,
-        .requires_auth = true,
+        .requires_auth=true,
     };
     ts_api_register(&ep_action_stats_reset);
 
     // Proxy APIs for external connection test
     ts_api_endpoint_t ep_proxy_fetch = {
-        .name = "automation.proxy.fetch",
+        .name = "automation.proxy.fetch", .external_access=TS_API_ACCESS_READ, .allowed_methods=TS_API_METHOD_POST, .session_handler=ts_api_automation_proxy_fetch_for_session,
         .description = "Proxy fetch from external REST API",
         .category = TS_API_CAT_SYSTEM,
         .handler = api_automation_proxy_fetch,
-        .requires_auth = false,
+        .requires_auth=true,
     };
     ts_api_register(&ep_proxy_fetch);
 
     ts_api_endpoint_t ep_proxy_ws = {
-        .name = "automation.proxy.websocket_test",
+        .name = "automation.proxy.websocket_test", .external_access=TS_API_ACCESS_ROOT, .allowed_methods=TS_API_METHOD_POST,
         .description = "Test WebSocket connection",
         .category = TS_API_CAT_SYSTEM,
         .handler = api_automation_proxy_ws_test,
-        .requires_auth = false,
+        .requires_auth=true,
     };
     ts_api_register(&ep_proxy_ws);
 
     ts_api_endpoint_t ep_proxy_sio = {
-        .name = "automation.proxy.socketio_test",
+        .name = "automation.proxy.socketio_test", .external_access=TS_API_ACCESS_ROOT, .allowed_methods=TS_API_METHOD_POST,
         .description = "Test Socket.IO connection (v4 protocol)",
         .category = TS_API_CAT_SYSTEM,
         .handler = api_automation_proxy_socketio_test,
-        .requires_auth = false,
+        .requires_auth=true,
     };
     ts_api_register(&ep_proxy_sio);
 
     // Export/Import APIs - Sources
     ts_api_endpoint_t ep_sources_export = {
-        .name = "automation.sources.export",
+        .name = "automation.sources.export", .external_access=TS_API_ACCESS_ROOT, .allowed_methods=TS_API_METHOD_POST,
         .description = "Export data source as config pack (.tscfg)",
         .category = TS_API_CAT_SYSTEM,
         .handler = api_automation_sources_export,
-        .requires_auth = true,
+        .requires_auth=true,
     };
     ts_api_register(&ep_sources_export);
 
     ts_api_endpoint_t ep_sources_import = {
-        .name = "automation.sources.import",
+        .name = "automation.sources.import", .external_access=TS_API_ACCESS_ROOT, .allowed_methods=TS_API_METHOD_POST,
         .description = "Import data source from config pack",
         .category = TS_API_CAT_SYSTEM,
         .handler = api_automation_sources_import,
-        .requires_auth = true,
+        .requires_auth=true,
     };
     ts_api_register(&ep_sources_import);
 
     // Export/Import APIs - Rules
     ts_api_endpoint_t ep_rules_export = {
-        .name = "automation.rules.export",
+        .name = "automation.rules.export", .external_access=TS_API_ACCESS_ROOT, .allowed_methods=TS_API_METHOD_POST,
         .description = "Export rule as config pack (.tscfg)",
         .category = TS_API_CAT_SYSTEM,
         .handler = api_automation_rules_export,
-        .requires_auth = true,
+        .requires_auth=true,
     };
     ts_api_register(&ep_rules_export);
 
     ts_api_endpoint_t ep_rules_import = {
-        .name = "automation.rules.import",
+        .name = "automation.rules.import", .external_access=TS_API_ACCESS_ROOT, .allowed_methods=TS_API_METHOD_POST,
         .description = "Import rule from config pack",
         .category = TS_API_CAT_SYSTEM,
         .handler = api_automation_rules_import,
-        .requires_auth = true,
+        .requires_auth=true,
     };
     ts_api_register(&ep_rules_import);
 
     // Export/Import APIs - Action Templates
     ts_api_endpoint_t ep_actions_export = {
-        .name = "automation.actions.export",
+        .name = "automation.actions.export", .external_access=TS_API_ACCESS_ROOT, .allowed_methods=TS_API_METHOD_POST,
         .description = "Export action template as config pack (.tscfg)",
         .category = TS_API_CAT_SYSTEM,
         .handler = api_automation_actions_export,
-        .requires_auth = true,
+        .requires_auth=true,
     };
     ts_api_register(&ep_actions_export);
 
     ts_api_endpoint_t ep_actions_import = {
-        .name = "automation.actions.import",
+        .name = "automation.actions.import", .external_access=TS_API_ACCESS_ROOT, .allowed_methods=TS_API_METHOD_POST,
         .description = "Import action template from config pack",
         .category = TS_API_CAT_SYSTEM,
         .handler = api_automation_actions_import,
-        .requires_auth = true,
+        .requires_auth=true,
     };
     ts_api_register(&ep_actions_import);
 

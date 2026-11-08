@@ -33,7 +33,7 @@ int main(void){
  for(mode=0;mode<6;mode++){
   setup();memset(lengths,0,sizeof(lengths));sent_hook=capture;remote_hook=produce;
   if(mode==2)send_fail_fd=2;
-  ts_webui_ssh_receipt_t receipt;ts_webui_ssh_options_t options={.receipt=&receipt,.collect_output=true,.extract_pattern=mode==4?"value=(.*)":mode==5?"missing=(.*);":NULL,.max_output_size=mode>=4?1024:65536};uint32_t id;unsigned before=commands_submitted;
+  ts_webui_ssh_receipt_t receipt;ts_webui_ssh_options_t options={.owner_session_id=7,.receipt=&receipt,.collect_output=true,.extract_pattern=mode==4?"value=(.*)":mode==5?"missing=(.*);":NULL,.max_output_size=mode>=4?1024:65536};uint32_t id;unsigned before=commands_submitted;
   assert(ts_webui_ssh_exec_start_ex("fake",22,"u",NULL,"p","cmd",&options,&id)==ESP_OK);
   char *status=ts_webui_ssh_exec_status(id,receipt.boot_id,receipt.result_key,NULL);assert(status&&strstr(status,"ssh_exec_running"));tracked_free(status);
   assert(!ts_webui_ssh_exec_status(id,receipt.boot_id,"00000000000000000000000000000000",NULL));

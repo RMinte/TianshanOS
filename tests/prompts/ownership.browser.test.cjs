@@ -56,7 +56,8 @@ async function sessionPage(language) {
    await route.fulfill({json:{code:0,data:{token:`${params.username}-session-${++sequence}`,username:params.username,level:params.username,expires_in:3600,password_changed:true}}});
   } else if(url.pathname.endsWith('/auth/status')) {
    requests.push({endpoint:'status',params,authorization:request.headers().authorization});
-   await route.fulfill({json:{code:0,data:{valid:true}}});
+   const username=params.token.split('-')[0];
+   await route.fulfill({json:{code:0,data:{valid:true,username,level:username,password_changed:true,expires_in:3600}}});
   } else if(url.pathname.endsWith('/auth/logout')) {
    requests.push({endpoint:'logout',params});await route.fulfill({json:{success:true}});
   } else if(url.pathname.endsWith('/system/reboot')) {
@@ -398,7 +399,7 @@ test('R2: stale finally cannot unlock the new page read',async()=>{
    let finishOld,finishNew;api.call=()=>new Promise(r=>finishOld=r);const old=refreshDataWidgets();
    router.routes['/']=()=>{};await router.navigate();api.call=()=>new Promise(r=>finishNew=r);const newer=refreshDataWidgets();
    const newStarted=typeof finishNew==='function';finishOld({code:0,data:{variables:[]}});await old;
-   const stillLocked=dataWidgetsRefreshing;if(finishNew)finishNew({code:0,data:{variables:[]}});await newer;
+   const stillLocked=!!dataWidgetsRefreshing;if(finishNew)finishNew({code:0,data:{variables:[]}});await newer;
    return {newStarted,stillLocked,released:!dataWidgetsRefreshing};
   });assert(r.newStarted&&r.stillLocked&&r.released);
  }finally{await context.close();}
@@ -487,15 +488,16 @@ for(const language of ['zh-CN','en-US']) {
   const {page,context,errors}=await pageFor(language);try{
    await page.goto(base);await page.waitForFunction(()=>i18n.isReady());
    const result=await page.evaluate(async()=>{
-    closeLoginModal();api.token='admin-token';const calls=[];
+    closeLoginModal();api.token='admin-token';api.level='admin';api.username='admin';const calls=[];
     window.fetch=async(url,options)=>{calls.push({url,headers:options.headers,body:options.body});return {ok:true,status:200,json:async()=>({status:String(url).includes('/file/upload')?'uploaded':'success'})};};
     const file=await api.fileUpload('/sdcard/ordinary file.txt','ordinary');
+    api.token='root-token';api.level='root';api.username='root';
     const firmware=await uploadImageToDevice('/api/v1/ota/firmware?auto_reboot=false','firmware','ota.firmware');
     const www=await uploadImageToDevice('/api/v1/ota/www','www','ota.www');
     return {calls,file,firmware,www};
    });
    assert.equal(result.file.status,'uploaded');assert(result.firmware.success&&result.www.success);
-   assert.deepEqual(result.calls.map(c=>c.headers.Authorization),['Bearer admin-token','Bearer admin-token','Bearer admin-token']);
+   assert.deepEqual(result.calls.map(c=>c.headers.Authorization),['Bearer admin-token','Bearer root-token','Bearer root-token']);
    assert.deepEqual(result.calls.map(c=>c.body),['ordinary','firmware','www']);assert.equal(result.calls[1].headers['Content-Type'],'application/octet-stream');assert.match(result.calls[1].url,/auto_reboot=false$/);assert.deepEqual(errors,[]);
   }finally{await context.close();}
  });
@@ -952,5 +954,30 @@ for(const language of ['zh-CN','en-US']){
    assert.equal(await page.evaluate(()=>exportReads.length),1);assert.equal(await page.locator('#btn-pack-export-generate').isDisabled(),true);
    assert.equal(await page.evaluate(()=>(document.getElementById('toast')?.textContent||'').includes(t('toast.selectedJsonFiles'))),false);assert.deepEqual(f.errors,[]);
   }finally{await f.context.close();}
+ });
+}
+
+// Binary upload replies use the actual API client and upload list, not a copied formatter.
+for (const language of ['zh-CN','en-US']) {
+ test(`R06: uncertain file replacement retains selection and explains recovery ${language}`,async()=>{
+  const {page,context,errors}=await pageFor(language);let attempts=0;
+  try {
+   await page.route('**/api/v1/file/upload?*',async route=>{
+    attempts++;assert.equal(route.request().method(),'POST');
+    assert.equal(route.request().headers().authorization,'Bearer local-root');
+    await route.fulfill(attempts===1?{status:409,json:{code:409,error:'file_replace_uncertain'}}:{status:200,json:{status:'uploaded',path:'/sdcard/replacement.bin',size:3}});
+   });
+   await page.goto(base);await page.waitForFunction(()=>i18n.isReady());
+   const first=await page.evaluate(async()=>{
+    closeLoginModal();api.token='local-root';api.level='root';api.username='root';
+    api.storageStatus=async()=>({code:0,data:{sd:{mounted:true}}});api.storageList=async()=>({code:0,data:{entries:[]}});
+    await loadFilesPage();currentFilePath='/sdcard';showUploadDialog();handleFileSelect({target:{files:[new File([new Uint8Array([1,0,3])],'replacement.bin')]}});
+    const result=await uploadFiles();
+    return {result,text:document.getElementById('upload-list').textContent,selection:filesToUpload.map(f=>f.name),heading:t('failure.ops.file.upload.unknown'),hint:t('failure.reasons.file_replace_uncertain.hint')};
+   });
+   assert.equal(first.result.success,0);assert.equal(first.result.failures.length,1);
+   assert.deepEqual(first.selection,['replacement.bin']);assert(first.text.includes(first.heading));assert(first.text.includes(first.hint));assert(!first.text.includes('file_replace_uncertain'));assert.equal(attempts,1);
+   const second=await page.evaluate(()=>uploadFiles());assert.equal(second.success,1);assert.equal(second.failures.length,0);assert.equal(attempts,2);assert.deepEqual(errors,[]);
+  } finally {await context.close();}
  });
 }

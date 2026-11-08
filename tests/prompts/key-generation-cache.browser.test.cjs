@@ -14,14 +14,15 @@ for(const lang of ['zh-CN','en-US'])test(`${lang}: cached old API, app and langu
   [`/js/lang/${lang}.js`]:`/js/lang/${lang}.js?v=${newVersion}`
  };
  for(const [name,url] of Object.entries(currentUrls))assert.notEqual(url,name+'?v='+oldVersion);
- const oldApi=api.replace(/        const request_id = 'kg-'[\s\S]*?return this.call\('key.generate',[^\n]+/,"        return this.call('key.generate', { id, type, comment, exportable, alias, hidden }, 'POST');");assert.notEqual(oldApi,api);
- const start=app.indexOf('async function generateKey()'),end=app.indexOf('\nfunction formatTimestamp(',start);
- const oldApp=app.slice(0,start)+`async function generateKey() {
+ // Model an older behavior explicitly; whitespace in optimized JS is not a contract.
+ const oldApi=api+`\nTianShanAPI.prototype.keyGenerate = async function(id,type,comment,exportable,alias,hidden) {
+  return this.call('key.generate', {id,type,comment,exportable,alias,hidden}, 'POST');
+ };\n`;
+ const oldApp=app+`\ngenerateKey = async function() {
   const id=document.getElementById('keygen-id').value.trim();
   requireApiSuccess(await api.keyGenerate(id,document.getElementById('keygen-type').value), 'keyGenerate');
   hideGenerateKeyModal();showToast(t('toast.keyGenerated',{name:id}), 'success');await refreshSecurityPage();
- }
- `+app.slice(end);
+ };\n`;
  let upgraded=false;const assets=[],posts=[];let keys=[];
  const server=http.createServer((req,res)=>{
   const url=new URL(req.url,'http://local'),json=data=>{res.setHeader('Content-Type','application/json');res.end(JSON.stringify({code:0,data}));};

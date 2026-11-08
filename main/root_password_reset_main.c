@@ -73,42 +73,6 @@ static void halt_on_error(const char *operation, esp_err_t ret)
     halt_forever();
 }
 
-static esp_err_t compute_password_hash(const char *password,
-                                       const uint8_t salt[TS_AUTH_SALT_LEN],
-                                       uint8_t hash_out[TS_AUTH_HASH_LEN])
-{
-    if (!password || !salt || !hash_out) {
-        return ESP_ERR_INVALID_ARG;
-    }
-
-    size_t password_len = strlen(password);
-    if (password_len < 4 || password_len > 64) {
-        return ESP_ERR_INVALID_ARG;
-    }
-
-    uint8_t material[TS_AUTH_SALT_LEN + 64] = {0};
-    size_t material_len = TS_AUTH_SALT_LEN + password_len;
-
-    memcpy(material, salt, TS_AUTH_SALT_LEN);
-    memcpy(material + TS_AUTH_SALT_LEN, password, password_len);
-
-    int ret = mbedtls_sha256(material, material_len, hash_out, 0);
-    memset(material, 0, sizeof(material));
-
-    return ret == 0 ? ESP_OK : ESP_FAIL;
-}
-
-static bool constant_time_equal(const uint8_t *a, const uint8_t *b, size_t len)
-{
-    uint8_t diff = 0;
-
-    for (size_t i = 0; i < len; ++i) {
-        diff |= a[i] ^ b[i];
-    }
-
-    return diff == 0;
-}
-
 static esp_err_t verify_auth_config_version(nvs_handle_t handle)
 {
     uint8_t stored_version = 0;
@@ -120,7 +84,7 @@ static esp_err_t verify_auth_config_version(nvs_handle_t handle)
         return ret;
     }
 
-    if (stored_version != TS_AUTH_CONFIG_VERSION) {
+    if (stored_version != TS_AUTH_CONFIG_VERSION && stored_version != TS_AUTH_PROTOTYPE_CONFIG_VERSION) {
         ESP_LOGE(TAG, "Auth config version mismatch: expected %u, got %u",
                  (unsigned)TS_AUTH_CONFIG_VERSION, (unsigned)stored_version);
         ESP_LOGE(TAG, "Refusing to proceed because normal firmware may reset all auth users");
@@ -137,21 +101,7 @@ static esp_err_t build_default_credential(const credential_reset_target_t *targe
         return ESP_ERR_INVALID_ARG;
     }
 
-    memset(credential, 0, sizeof(*credential));
-    esp_fill_random(credential->salt, TS_AUTH_SALT_LEN);
-
-    esp_err_t ret = compute_password_hash(target->default_password,
-                                          credential->salt,
-                                          credential->hash);
-    if (ret != ESP_OK) {
-        return ret;
-    }
-
-    credential->password_changed = false;
-    credential->failed_attempts = 0;
-    credential->lockout_until = 0;
-
-    return ESP_OK;
+    return ts_auth_credential_create(target->default_password, false, credential);
 }
 
 static esp_err_t write_default_credential(nvs_handle_t handle,
@@ -166,7 +116,7 @@ static esp_err_t write_default_credential(nvs_handle_t handle,
 
     ESP_LOGI(TAG, "Writing NVS blob %s/%s for %s",
              TS_AUTH_NVS_NAMESPACE, target->credential_key, target->username);
-    ret = nvs_set_blob(handle, target->credential_key, &credential, sizeof(credential));
+    ret = nvs_set_blob(handle, target->credential_key, &credential, TS_AUTH_USER_CREDENTIAL_SIZE);
     memset(&credential, 0, sizeof(credential));
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to write %s credential", target->username);
@@ -184,26 +134,25 @@ static esp_err_t verify_default_credential(nvs_handle_t handle,
         ESP_LOGE(TAG, "Failed to read back %s credential", target->username);
         return ret;
     }
-    if (readback_len != sizeof(readback)) {
+    if (readback_len != TS_AUTH_USER_CREDENTIAL_SIZE) {
         ESP_LOGE(TAG, "%s readback length mismatch: expected %u, got %u",
-                 target->username, (unsigned)sizeof(readback), (unsigned)readback_len);
+                 target->username, (unsigned)TS_AUTH_USER_CREDENTIAL_SIZE, (unsigned)readback_len);
         memset(&readback, 0, sizeof(readback));
         return ESP_ERR_INVALID_SIZE;
     }
 
-    uint8_t expected_hash[TS_AUTH_HASH_LEN] = {0};
-    ret = compute_password_hash(target->default_password, readback.salt, expected_hash);
+    ts_auth_user_credential_t decoded;
+    ret = ts_auth_credential_decode(&readback, readback_len, &decoded);
+    bool hash_ok = false;
+    if (ret == ESP_OK) ret = ts_auth_credential_verify(&decoded, target->default_password, &hash_ok);
+    memset(&decoded, 0, sizeof(decoded));
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to compute expected hash for %s readback", target->username);
         memset(&readback, 0, sizeof(readback));
         return ret;
     }
-
-    bool hash_ok = constant_time_equal(readback.hash, expected_hash, TS_AUTH_HASH_LEN);
     bool state_ok = !readback.password_changed &&
                     readback.failed_attempts == 0 &&
                     readback.lockout_until == 0;
-    memset(expected_hash, 0, sizeof(expected_hash));
     memset(&readback, 0, sizeof(readback));
 
     if (!hash_ok || !state_ok) {

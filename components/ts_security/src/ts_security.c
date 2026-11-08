@@ -17,6 +17,9 @@
 #include "esp_random.h"
 #include "esp_timer.h"
 #include <string.h>
+#include <stdatomic.h>
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 
 #define TAG "ts_security"
 #define NVS_NAMESPACE "ts_security"
@@ -33,10 +36,30 @@ static nvs_handle_t s_nvs;
 static nvs_handle_t s_keys_nvs;
 static session_slot_t s_sessions[MAX_SESSIONS];
 static bool s_initialized = false;
+/* Volatile owners (jobs and WS clients) survive service reinitialization. Never
+ * recycle their identity within this boot; zero is reserved for internal work. */
+static atomic_uint_least32_t s_last_session_id = ATOMIC_VAR_INIT(0);
+/* One owner for slot allocation, token issuance/comparison and revocation.
+ * Keep the gate across service restarts, just like the identity counter. */
+static StaticSemaphore_t s_session_gate_storage;
+static SemaphoreHandle_t s_session_gate;
+static bool session_lock(void)
+{
+    return s_session_gate && xSemaphoreTakeRecursive(s_session_gate, portMAX_DELAY) == pdTRUE;
+}
+static void session_unlock(void)
+{
+    xSemaphoreGiveRecursive(s_session_gate);
+}
+
 
 esp_err_t ts_security_init(void)
 {
     if (s_initialized) return ESP_OK;
+    if (!s_session_gate) {
+        s_session_gate = xSemaphoreCreateRecursiveMutexStatic(&s_session_gate_storage);
+        if (!s_session_gate) return ESP_ERR_NO_MEM;
+    }
     
     esp_err_t ret = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &s_nvs);
     if (ret != ESP_OK) {
@@ -47,7 +70,9 @@ esp_err_t ts_security_init(void)
     ret = nvs_open_from_partition(TS_CONFIG_KEYS_PARTITION, NVS_NAMESPACE, NVS_READWRITE, &s_keys_nvs);
     if (ret != ESP_OK) { nvs_close(s_nvs); return ret; }
 
+    if (!session_lock()) { nvs_close(s_nvs); nvs_close(s_keys_nvs); return ESP_ERR_INVALID_STATE; }
     memset(s_sessions, 0, sizeof(s_sessions));
+    session_unlock();
     
     // 初始化 SSH 主机配置模块
     ret = ts_ssh_hosts_config_init();
@@ -182,25 +207,30 @@ esp_err_t ts_security_store_cert(const char *name, ts_cert_type_t type,
 
 /**
  * @brief 驱逐指定 client_id 的所有会话（释放槽位）
- * @note 仅内部使用，在 create_session 槽位满时按同用户驱逐
+ * @note 密码成功更新时撤销目标账户，也用于槽位满时按同用户驱逐
  */
-static void destroy_sessions_by_client(const char *client_id)
+static void ts_security_destroy_sessions_by_client_locked(const char *client_id)
 {
     if (!client_id || client_id[0] == '\0') return;
     for (int i = 0; i < MAX_SESSIONS; i++) {
         if (s_sessions[i].active &&
             strcmp(s_sessions[i].session.client_id, client_id) == 0) {
             s_sessions[i].active = false;
-            TS_LOGI(TAG, "Evicted session for client: %s", client_id);
         }
     }
 }
 
-esp_err_t ts_security_create_session(const char *client_id, ts_perm_level_t level,
+static esp_err_t ts_security_create_session_locked(const char *client_id, ts_perm_level_t level,
                                       uint32_t *session_id)
 {
     if (!session_id) return ESP_ERR_INVALID_ARG;
     
+    uint_least32_t previous = atomic_load(&s_last_session_id);
+    do {
+        if (previous >= UINT32_MAX) return ESP_ERR_INVALID_STATE;
+    } while (!atomic_compare_exchange_weak(&s_last_session_id, &previous, previous + 1));
+    uint32_t sid = (uint32_t)previous + 1;
+
     // Find free slot
     int slot = -1;
     for (int i = 0; i < MAX_SESSIONS; i++) {
@@ -212,7 +242,7 @@ esp_err_t ts_security_create_session(const char *client_id, ts_perm_level_t leve
     
     if (slot < 0) {
         if (client_id && client_id[0] != '\0') {
-            destroy_sessions_by_client(client_id);
+            ts_security_destroy_sessions_by_client(client_id);
             for (int i = 0; i < MAX_SESSIONS; i++) {
                 if (!s_sessions[i].active) {
                     slot = i;
@@ -221,14 +251,9 @@ esp_err_t ts_security_create_session(const char *client_id, ts_perm_level_t leve
             }
         }
         if (slot < 0) {
-            TS_LOGW(TAG, "No free session slots");
             return ESP_ERR_NO_MEM;
         }
     }
-    
-    // Generate session ID
-    uint32_t sid;
-    ts_security_random(&sid, sizeof(sid));
     
     uint32_t now = esp_timer_get_time() / 1000000;
     
@@ -249,11 +274,10 @@ esp_err_t ts_security_create_session(const char *client_id, ts_perm_level_t leve
     }
     
     *session_id = sid;
-    TS_LOGI(TAG, "Session created");
     return ESP_OK;
 }
 
-esp_err_t ts_security_validate_session(uint32_t session_id, ts_session_t *session)
+static esp_err_t ts_security_validate_session_locked(uint32_t session_id, ts_session_t *session)
 {
     uint32_t now = esp_timer_get_time() / 1000000;
     
@@ -273,12 +297,11 @@ esp_err_t ts_security_validate_session(uint32_t session_id, ts_session_t *sessio
     return ESP_ERR_NOT_FOUND;
 }
 
-esp_err_t ts_security_destroy_session(uint32_t session_id)
+static esp_err_t ts_security_destroy_session_locked(uint32_t session_id)
 {
     for (int i = 0; i < MAX_SESSIONS; i++) {
         if (s_sessions[i].active && s_sessions[i].session.session_id == session_id) {
             s_sessions[i].active = false;
-            TS_LOGI(TAG, "Session destroyed");
             return ESP_OK;
         }
     }
@@ -294,7 +317,7 @@ bool ts_security_check_permission(uint32_t session_id, ts_perm_level_t required)
     return session.level >= required;
 }
 
-esp_err_t ts_security_generate_token(uint32_t session_id, char *token, size_t max_len)
+static esp_err_t ts_security_generate_token_locked(uint32_t session_id, char *token, size_t max_len)
 {
     if (!token || max_len < 64) return ESP_ERR_INVALID_ARG;
     
@@ -303,12 +326,11 @@ esp_err_t ts_security_generate_token(uint32_t session_id, char *token, size_t ma
 
     for (int i = 0; i < MAX_SESSIONS; i++) {
         if (s_sessions[i].active && s_sessions[i].session.session_id == session_id) {
-            // Keep the existing wire format and bind it to the issued credential.
+            // Keep the 16-byte Base64 wire length, with all bytes random.
+            // The session identity and uptime are metadata, never bearer entropy.
             uint8_t data[16];
-            memcpy(data, &session_id, 4);
-            ts_security_random(data + 4, 8);
-            uint32_t ts = esp_timer_get_time() / 1000;
-            memcpy(data + 12, &ts, 4);
+            ret = ts_security_random(data, sizeof(data));
+            if (ret != ESP_OK) return ret;
 
             size_t out_len = max_len;
             ret = ts_crypto_base64_encode(data, sizeof(data), token, &out_len);
@@ -322,7 +344,7 @@ esp_err_t ts_security_generate_token(uint32_t session_id, char *token, size_t ma
     return ESP_ERR_NOT_FOUND;
 }
 
-esp_err_t ts_security_validate_token(const char *token, uint32_t *session_id)
+static esp_err_t ts_security_validate_token_locked(const char *token, uint32_t *session_id)
 {
     if (!token || !session_id) return ESP_ERR_INVALID_ARG;
     
@@ -332,23 +354,70 @@ esp_err_t ts_security_validate_token(const char *token, uint32_t *session_id)
     esp_err_t ret = ts_crypto_base64_decode(token, strlen(token), data, &data_len);
     if (ret != ESP_OK || data_len != sizeof(data)) return ESP_ERR_INVALID_ARG;
     
-    uint32_t sid;
-    memcpy(&sid, data, 4);
-    
-    ret = ts_security_validate_session(sid, NULL);
-    if (ret != ESP_OK) return ret;
-
     for (int i = 0; i < MAX_SESSIONS; i++) {
-        if (s_sessions[i].active && s_sessions[i].session.session_id == sid &&
-            s_sessions[i].token_issued) {
+        if (s_sessions[i].active && s_sessions[i].token_issued) {
             uint8_t diff = 0;
             for (size_t j = 0; j < sizeof(data); j++) {
                 diff |= data[j] ^ s_sessions[i].token_data[j];
             }
-            if (diff != 0) return ESP_ERR_INVALID_ARG;
+            if (diff != 0) continue;
+            uint32_t sid = s_sessions[i].session.session_id;
+            ret = ts_security_validate_session(sid, NULL);
+            if (ret != ESP_OK) return ret;
             *session_id = sid;
             return ESP_OK;
         }
     }
     return ESP_ERR_NOT_FOUND;
+}
+
+/* Public entry points serialize every access to the shared session slots. */
+void ts_security_destroy_sessions_by_client(const char *client_id)
+{
+    if (!session_lock()) return;
+    ts_security_destroy_sessions_by_client_locked(client_id);
+    session_unlock();
+}
+
+esp_err_t ts_security_create_session(const char *client_id, ts_perm_level_t level, uint32_t *session_id)
+{
+    if (!session_lock()) return ESP_ERR_INVALID_STATE;
+    esp_err_t ret = ts_security_create_session_locked(client_id, level, session_id);
+    session_unlock();
+    if (ret == ESP_OK) TS_LOGI(TAG, "Session created");
+    if (ret == ESP_ERR_NO_MEM) TS_LOGW(TAG, "No free session slots");
+    return ret;
+}
+
+esp_err_t ts_security_validate_session(uint32_t session_id, ts_session_t *session)
+{
+    if (!session_lock()) return ESP_ERR_INVALID_STATE;
+    esp_err_t ret = ts_security_validate_session_locked(session_id, session);
+    session_unlock();
+    return ret;
+}
+
+esp_err_t ts_security_destroy_session(uint32_t session_id)
+{
+    if (!session_lock()) return ESP_ERR_INVALID_STATE;
+    esp_err_t ret = ts_security_destroy_session_locked(session_id);
+    session_unlock();
+    if (ret == ESP_OK) TS_LOGI(TAG, "Session destroyed");
+    return ret;
+}
+
+esp_err_t ts_security_generate_token(uint32_t session_id, char *token, size_t max_len)
+{
+    if (!session_lock()) return ESP_ERR_INVALID_STATE;
+    esp_err_t ret = ts_security_generate_token_locked(session_id, token, max_len);
+    session_unlock();
+    return ret;
+}
+
+esp_err_t ts_security_validate_token(const char *token, uint32_t *session_id)
+{
+    if (!session_lock()) return ESP_ERR_INVALID_STATE;
+    esp_err_t ret = ts_security_validate_token_locked(token, session_id);
+    session_unlock();
+    return ret;
 }

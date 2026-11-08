@@ -532,6 +532,8 @@ static esp_err_t api_power_debug(const cJSON *params, ts_api_result_t *result)
 static const ts_api_endpoint_t s_power_endpoints[] = {
     {
         .name = "power.status",
+        .external_access = TS_API_ACCESS_PUBLIC,
+        .allowed_methods = TS_API_METHOD_READ,
         .description = "Get power monitoring status",
         .category = TS_API_CAT_POWER,
         .handler = api_power_status,
@@ -539,6 +541,8 @@ static const ts_api_endpoint_t s_power_endpoints[] = {
     },
     {
         .name = "power.voltage",
+        .external_access = TS_API_ACCESS_PUBLIC,
+        .allowed_methods = TS_API_METHOD_READ,
         .description = "Read current voltage",
         .category = TS_API_CAT_POWER,
         .handler = api_power_voltage,
@@ -546,6 +550,8 @@ static const ts_api_endpoint_t s_power_endpoints[] = {
     },
     {
         .name = "power.chip",
+        .external_access = TS_API_ACCESS_PUBLIC,
+        .allowed_methods = TS_API_METHOD_READ,
         .description = "Get power chip data",
         .category = TS_API_CAT_POWER,
         .handler = api_power_chip,
@@ -553,13 +559,17 @@ static const ts_api_endpoint_t s_power_endpoints[] = {
     },
     {
         .name = "power.stats",
+        .external_access = TS_API_ACCESS_READ,
+        .allowed_methods = TS_API_METHOD_READ,
         .description = "Get monitoring statistics",
         .category = TS_API_CAT_POWER,
         .handler = api_power_stats,
-        .requires_auth = false,
+        .requires_auth = true,
     },
     {
         .name = "power.stats.reset",
+        .external_access = TS_API_ACCESS_ADMIN,
+        .allowed_methods = TS_API_METHOD_WRITE,
         .description = "Reset monitoring statistics",
         .category = TS_API_CAT_POWER,
         .handler = api_power_stats_reset,
@@ -567,6 +577,8 @@ static const ts_api_endpoint_t s_power_endpoints[] = {
     },
     {
         .name = "power.threshold.set",
+        .external_access = TS_API_ACCESS_ADMIN,
+        .allowed_methods = TS_API_METHOD_WRITE,
         .description = "Set voltage thresholds",
         .category = TS_API_CAT_POWER,
         .handler = api_power_threshold_set,
@@ -574,6 +586,8 @@ static const ts_api_endpoint_t s_power_endpoints[] = {
     },
     {
         .name = "power.interval.set",
+        .external_access = TS_API_ACCESS_ADMIN,
+        .allowed_methods = TS_API_METHOD_WRITE,
         .description = "Set sampling interval",
         .category = TS_API_CAT_POWER,
         .handler = api_power_interval_set,
@@ -581,6 +595,8 @@ static const ts_api_endpoint_t s_power_endpoints[] = {
     },
     {
         .name = "power.debug",
+        .external_access = TS_API_ACCESS_ADMIN,
+        .allowed_methods = TS_API_METHOD_WRITE,
         .description = "Set debug mode",
         .category = TS_API_CAT_POWER,
         .handler = api_power_debug,
@@ -588,6 +604,8 @@ static const ts_api_endpoint_t s_power_endpoints[] = {
     },
     {
         .name = "power.protection.set",
+        .external_access = TS_API_ACCESS_ADMIN,
+        .allowed_methods = TS_API_METHOD_WRITE,
         .description = "Configure voltage protection",
         .category = TS_API_CAT_POWER,
         .handler = api_power_protection_set,
@@ -595,13 +613,17 @@ static const ts_api_endpoint_t s_power_endpoints[] = {
     },
     {
         .name = "power.protection.config",
+        .external_access = TS_API_ACCESS_READ,
+        .allowed_methods = TS_API_METHOD_READ,
         .description = "Get voltage protection configuration",
         .category = TS_API_CAT_POWER,
         .handler = api_power_protection_config,
-        .requires_auth = false,
+        .requires_auth = true,
     },
     {
         .name = "power.protection.status",
+        .external_access = TS_API_ACCESS_PUBLIC,
+        .allowed_methods = TS_API_METHOD_READ,
         .description = "Get voltage protection status",
         .category = TS_API_CAT_POWER,
         .handler = api_power_protection_status,
@@ -609,6 +631,8 @@ static const ts_api_endpoint_t s_power_endpoints[] = {
     },
     {
         .name = "power.monitor.start",
+        .external_access = TS_API_ACCESS_ADMIN,
+        .allowed_methods = TS_API_METHOD_WRITE,
         .description = "Start power monitoring",
         .category = TS_API_CAT_POWER,
         .handler = api_power_monitor_start,
@@ -616,6 +640,8 @@ static const ts_api_endpoint_t s_power_endpoints[] = {
     },
     {
         .name = "power.monitor.stop",
+        .external_access = TS_API_ACCESS_ADMIN,
+        .allowed_methods = TS_API_METHOD_WRITE,
         .description = "Stop power monitoring",
         .category = TS_API_CAT_POWER,
         .handler = api_power_monitor_stop,

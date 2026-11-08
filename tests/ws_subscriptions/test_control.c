@@ -15,7 +15,7 @@ static bool ownership_case(void){
  ssh_cleanup();shell_task.fn(shell_task.arg);finish_all();return ok;
 }
 static bool early_cancel_case(void){
- setup();uint32_t id;assert(ts_webui_ssh_exec_start("fake",22,"u",NULL,"p","cmd",&id)==0);
+ setup();uint32_t id;assert(observed_exec_start("fake",22,"u",NULL,"p","cmd",&id)==0);
  unsigned before=commands_submitted;assert(ts_webui_ssh_exec_cancel(id)==ESP_OK);exec_task.fn(exec_task.arg);finish_all();return commands_submitted==before;
 }
 static uint32_t target_id;
@@ -73,17 +73,17 @@ static void cancellation_phases(void){
  const char *phases[]={"key","create","connect","auth","submit","C02","C03","C04"};
  for(unsigned i=0;i<sizeof(phases)/sizeof(*phases);i++){
   setup();unsigned before=commands_submitted,c=cancelled_frames,t=timeout_frames;
-  assert(ts_webui_ssh_exec_start("fake",22,"u",i==0?"key":NULL,i==0?NULL:"p","cmd",&target_id)==0);
+  assert(observed_exec_start("fake",22,"u",i==0?"key":NULL,i==0?NULL:"p","cmd",&target_id)==0);
   if(i<5){cancel_stage=phases[i];stage_hook=cancel_at;}else{barrier_name=phases[i];barrier_action=cancel_now;}
   exec_task.fn(exec_task.arg);stage_hook=NULL;assert(!cancel_stage && !barrier_action);drive_all();
   assert(cancelled_frames==c+2 && timeout_frames==t);
   assert(commands_submitted==before+(i==7)); // C04 happens after simulated remote completion, before local freeze
   assert(ts_webui_ssh_exec_cancel(target_id)==ESP_ERR_INVALID_STATE);finish_all();
  }
- setup();unsigned c=cancelled_frames;assert(ts_webui_ssh_exec_start("fake",22,"u",NULL,"p","cmd",&target_id)==0);
+ setup();unsigned c=cancelled_frames;assert(observed_exec_start("fake",22,"u",NULL,"p","cmd",&target_id)==0);
  barrier_name="C05";barrier_action=ended_rejects;exec_task.fn(exec_task.arg);finish_all();assert(cancelled_frames==c && !barrier_action);
  uint32_t old=target_id;
- setup();assert(ts_webui_ssh_exec_start("fake",22,"u",NULL,"p","cmd",&target_id)==0);assert(target_id!=old);
+ setup();assert(observed_exec_start("fake",22,"u",NULL,"p","cmd",&target_id)==0);assert(target_id!=old);
  assert(ts_webui_ssh_exec_cancel(old)==ESP_ERR_INVALID_STATE);assert(ts_webui_ssh_exec_cancel(0)==ESP_ERR_INVALID_STATE);
  exec_task.fn(exec_task.arg);finish_all();
  puts("PASS accepted cancellation persists through task/key/create/connect/auth; cancel/submit claim both orders and result freeze tested; duplicate/old/zero IDs isolated");
@@ -95,7 +95,7 @@ static void stop_busy_cancel(void){
 }
 static void reason_tests(void){
  immediate=true;
- ts_webui_ssh_options_t opts={.timeout_ms=1000,.collect_output=true,.extract_pattern="value=(.*)",.stop_on_match=true};
+ ts_webui_ssh_options_t opts={.owner_session_id=7,.timeout_ms=1000,.collect_output=true,.extract_pattern="value=(.*)",.stop_on_match=true};
  setup();unsigned c=cancelled_frames,t=timeout_frames,m=match_frames;
  assert(ts_webui_ssh_exec_start_ex("fake",22,"u",NULL,"p","cmd",&opts,&target_id)==0);
  remote_hook=cancel_now;exec_task.fn(exec_task.arg);remote_hook=NULL;finish_all();assert(cancelled_frames==c+2 && match_frames==m && timeout_frames==t);
@@ -104,7 +104,7 @@ static void reason_tests(void){
  setup();opts.stop_on_match=false;opts.extract_pattern=NULL;t=timeout_frames;c=cancelled_frames;
  assert(ts_webui_ssh_exec_start_ex("fake",22,"u",NULL,"p","cmd",&opts,&target_id)==0);
  remote_timeout=true;exec_task.fn(exec_task.arg);remote_timeout=false;finish_all();assert(timeout_frames==t+2 && cancelled_frames==c);
- immediate=false;setup();assert(ts_webui_ssh_exec_start("fake",22,"u",NULL,"p","cmd",&target_id)==0);
+ immediate=false;setup();assert(observed_exec_start("fake",22,"u",NULL,"p","cmd",&target_id)==0);
  remote_hook=stop_busy_cancel;exec_task.fn(exec_task.arg);remote_hook=NULL;
  drive_all();finish_ws();
  puts("PASS USER/TIMEOUT/MATCH keep distinct results; service stop busy does not cancel business, accepted user intent survives stop retry and all resource ledgers drain");
@@ -115,11 +115,11 @@ static void observe_then_cancel(void){
 static void timeout_then_cancel(void){host_timer->fn(host_timer);cancel_now();}
 static void intersecting_failures(void){
  setup();unsigned c=cancelled_frames;
- assert(ts_webui_ssh_exec_start("fake",22,"u",NULL,"p","cmd",&target_id)==0);
+ assert(observed_exec_start("fake",22,"u",NULL,"p","cmd",&target_id)==0);
  remote_hook=observe_then_cancel;exec_task.fn(exec_task.arg);remote_hook=NULL;
  finish_all();assert(cancelled_frames==c+2); /* delivery failure cannot hide the real cancellation result */
  setup();unsigned t=timeout_frames;c=cancelled_frames;
- ts_webui_ssh_options_t opts={.timeout_ms=1000,.collect_output=true};
+ ts_webui_ssh_options_t opts={.owner_session_id=7,.timeout_ms=1000,.collect_output=true};
  assert(ts_webui_ssh_exec_start_ex("fake",22,"u",NULL,"p","cmd",&opts,&target_id)==0);
  remote_hook=timeout_then_cancel;exec_task.fn(exec_task.arg);remote_hook=NULL;finish_all();
  assert(timeout_frames==t+2 && cancelled_frames==c);
@@ -127,13 +127,22 @@ static void intersecting_failures(void){
 }
 static void api_controls(void){
  s_op_sequence=0x80000000u; /* valid public uint32 IDs must not pass through signed valueint */
- setup();assert(ts_webui_ssh_exec_start("fake",22,"u",NULL,"p","cmd",&target_id)==0);
+ setup();ts_webui_ssh_receipt_t receipt;ts_webui_ssh_options_t options={.owner_session_id=7,.receipt=&receipt,.collect_output=true};
+ assert(ts_webui_ssh_exec_start_ex("fake",22,"u",NULL,"p","cmd",&options,&target_id)==0);
  const char *bad[]={"{}","{\"session_id\":0}","{\"session_id\":-1}","{\"session_id\":1.5}","{\"session_id\":4294967296}","{\"session_id\":\"1\"}"};
  for(unsigned i=0;i<sizeof(bad)/sizeof(*bad);i++){cJSON *j=cJSON_Parse(bad[i]);ts_api_result_t r={0};assert(api_ssh_cancel(j,&r)!=0 && r.code);cJSON_Delete(j);assert(!ts_ws_op_cancelled(((ssh_exec_task_params_t*)exec_task.arg)->op));}
  cJSON *j=cJSON_CreateObject();cJSON_AddNumberToObject(j,"session_id",target_id);
+ ts_api_result_t denied={0};assert(api_ssh_cancel(j,&denied)!=0);assert(!ts_ws_op_cancelled(((ssh_exec_task_params_t*)exec_task.arg)->op));
+ cJSON_AddStringToObject(j,"boot_id",receipt.boot_id);cJSON_AddStringToObject(j,"result_key",receipt.result_key);
+ for(unsigned byte=0;byte<32;byte++){
+  cJSON *key=cJSON_GetObjectItem(j,"result_key");key->valuestring[byte]^=1;denied=(ts_api_result_t){0};assert(api_ssh_cancel(j,&denied)!=0);key->valuestring[byte]^=1;
+  cJSON *boot=cJSON_GetObjectItem(j,"boot_id");boot->valuestring[byte]^=1;denied=(ts_api_result_t){0};assert(api_ssh_cancel(j,&denied)!=0);boot->valuestring[byte]^=1;
+  assert(!ts_ws_op_cancelled(((ssh_exec_task_params_t*)exec_task.arg)->op));
+ }
+
  ts_api_result_t r={0};assert(api_ssh_cancel(j,&r)==0 && cJSON_IsTrue(cJSON_GetObjectItem(r.data,"cancelled")));cJSON_Delete(r.data);
  exec_task.fn(exec_task.arg);drive_all();r=(ts_api_result_t){0};assert(api_ssh_cancel(j,&r)!=0);cJSON_Delete(j);finish_all();
- puts("PASS actual ssh.cancel API exact-ID validation and accepted-intent response; ended operations reject without wildcard control");
+ puts("PASS actual ssh.cancel API exact unsigned ID + private boot/result receipt; missing/64 mutated receipt bytes cause no cancellation; owner retry accepts intent, completed jobs reject");
 }
 int main(int argc,char **argv){
  cJSON_Hooks h={tracked_malloc,tracked_free};cJSON_InitHooks(&h);sent_hook=result_observe;

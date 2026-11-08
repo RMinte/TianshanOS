@@ -30,6 +30,7 @@
 #include "ts_variable.h"
 #include "esp_http_server.h"
 #include "cJSON.h"
+#include "ts_api_params.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
@@ -41,6 +42,7 @@
 #include <math.h>
 
 #define TAG "webui_ws"
+#define TS_WS_INPUT_MAX_BYTES (64 * 1024)
 
 #ifdef CONFIG_TS_WEBUI_WS_MAX_CLIENTS
 #define MAX_WS_CLIENTS CONFIG_TS_WEBUI_WS_MAX_CLIENTS
@@ -458,12 +460,15 @@ static void terminal_job_destroy(void *data)
 static bool terminal_job_maintain(void *data)
 {
     terminal_job_t *job = data;
-    bool pending;
+    bool pending, finished;
     xSemaphoreTake(s_output_mutex, portMAX_DELAY);
+    /* Pair completion with this buffer snapshot; the producer can append and
+     * finish as soon as the lock is released. A stale empty view cannot close it. */
+    finished = job->finished;
     if (job->detached) s_terminal_output_len = 0;
     size_t n = s_terminal_output_len < 4096 ? s_terminal_output_len : 4096;
     n = terminal_utf8_prefix(s_terminal_output_buf, n);
-    if (!n && s_terminal_output_len && job->finished) {
+    if (!n && s_terminal_output_len && finished) {
         s_terminal_output_len = 0; job->truncated = true;
     }
     if (n) {
@@ -487,7 +492,8 @@ static bool terminal_job_maintain(void *data)
     }
     pending = s_terminal_output_len != 0;
     xSemaphoreGive(s_output_mutex);
-    if (!pending && job->finished && ts_ws_op_close_begin(job->op)) {
+    TS_WS_TEST_POINT("terminal_output_snapshot");
+    if (!pending && finished && ts_ws_op_close_begin(job->op)) {
         char done[128]; ts_ws_op_stats_t stats; ts_ws_op_stats(TS_WS_OP_TERMINAL,&stats);
         snprintf(done,sizeof(done),"{\"type\":\"done\",\"code\":%d,\"output_incomplete\":%s,\"stopped\":%s}",
             job->code, job->truncated || stats.failed ? "true":"false",job->cancel?"true":"false");
@@ -726,6 +732,17 @@ static void peer_closed(ts_ws_peer_t peer)
     cleanup_disconnected_client(peer);
 }
 
+/* A rejected frame has not been consumed. Close instead of leaving its payload
+ * to be interpreted as the next frame on this connection. */
+static esp_err_t reject_input_frame(httpd_req_t *req, ts_ws_peer_t peer, uint16_t code)
+{
+    uint8_t reason[] = {(uint8_t)(code >> 8), (uint8_t)code};
+    httpd_ws_frame_t frame = {.type=HTTPD_WS_TYPE_CLOSE, .payload=reason, .len=sizeof(reason)};
+    httpd_ws_send_frame(req, &frame);
+    cleanup_disconnected_client(peer);
+    return ESP_FAIL;
+}
+
 static esp_err_t ws_handler(httpd_req_t *req)
 {
     if (req->method == HTTP_GET) {
@@ -752,17 +769,33 @@ static esp_err_t ws_handler(httpd_req_t *req)
         return ret;
     }
     
-    // 处理关闭帧
-    if (ws_pkt.type == HTTPD_WS_TYPE_CLOSE) {
-        TS_LOGD(TAG, "WebSocket close frame received");
-        cleanup_disconnected_client(peer);
+    /* This protocol consumes complete JSON text messages, not partial messages.
+     * The WebUI chunks large SSH input into complete independent messages. */
+    if (!ws_pkt.final) return reject_input_frame(req, peer, 1002);
+    if (ws_pkt.type == HTTPD_WS_TYPE_CLOSE || ws_pkt.type == HTTPD_WS_TYPE_PING || ws_pkt.type == HTTPD_WS_TYPE_PONG) {
+        if (ws_pkt.len > 125 || (ws_pkt.type == HTTPD_WS_TYPE_CLOSE && ws_pkt.len == 1))
+            return reject_input_frame(req, peer, 1002);
+        uint8_t control[125];
+        ws_pkt.payload = control;
+        if (ws_pkt.len && httpd_ws_recv_frame(req, &ws_pkt, sizeof(control)) != ESP_OK) {
+            cleanup_disconnected_client(peer);
+            return ESP_FAIL;
+        }
+        if (ws_pkt.type == HTTPD_WS_TYPE_CLOSE) {
+            ws_pkt.len = 0;
+            cleanup_disconnected_client(peer);
+            return httpd_ws_send_frame(req, &ws_pkt);
+        }
+        if (ws_pkt.type == HTTPD_WS_TYPE_PING) {
+            ws_pkt.type = HTTPD_WS_TYPE_PONG;
+            return httpd_ws_send_frame(req, &ws_pkt);
+        }
         return ESP_OK;
     }
-    
-    if (ws_pkt.len == 0) {
-        return ESP_OK;
-    }
-    
+    if (ws_pkt.type != HTTPD_WS_TYPE_TEXT) return reject_input_frame(req, peer, 1003);
+    if (ws_pkt.len > TS_WS_INPUT_MAX_BYTES) return reject_input_frame(req, peer, 1009);
+    if (ws_pkt.len == 0) return ESP_OK;
+
     // Allocate buffer for payload (PSRAM first)
     uint8_t *buf = heap_caps_malloc(ws_pkt.len + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (!buf) {
@@ -782,8 +815,13 @@ static esp_err_t ws_handler(httpd_req_t *req)
     buf[ws_pkt.len] = '\0';
     
     // Parse message
-    cJSON *msg = cJSON_Parse((char *)buf);
+    cJSON *msg = ts_api_params_parse_object((char *)buf, ws_pkt.len);
     free(buf);
+    if (!msg) {
+        const char *error = "{\"type\":\"error\",\"message\":\"Invalid JSON message\"}";
+        httpd_ws_frame_t frame = {.type=HTTPD_WS_TYPE_TEXT, .payload=(uint8_t *)error, .len=strlen(error)};
+        return httpd_ws_send_frame(req, &frame);
+    }
     
     if (msg) {
         cJSON *type = cJSON_GetObjectItem(msg, "type");
@@ -799,8 +837,19 @@ static esp_err_t ws_handler(httpd_req_t *req)
                 return result;
             }
 
-            TS_LOGD(TAG, "WS msg type=%s from fd=%d", type->valuestring, httpd_req_to_sockfd(req));
+            TS_LOGD(TAG, "WS message received from fd=%d", httpd_req_to_sockfd(req));
             
+            if ((!strcmp(type->valuestring, "log_subscribe") ||
+                 !strcmp(type->valuestring, "log_set_level") ||
+                 !strcmp(type->valuestring, "log_get_history")) &&
+                !ts_ws_peer_authorized(peer, TS_PERM_ADMIN)) {
+                const char *error = "{\"type\":\"auth_error\",\"message\":\"Permission denied\"}";
+                httpd_ws_frame_t frame = {.type=HTTPD_WS_TYPE_TEXT, .payload=(uint8_t *)error, .len=strlen(error)};
+                esp_err_t sent = httpd_ws_send_frame(req, &frame);
+                cJSON_Delete(msg);
+                return sent;
+            }
+
             if (strcmp(type->valuestring, "auth") == 0) {
                 handle_auth(req, msg);
             }
@@ -1051,7 +1100,8 @@ static esp_err_t ws_handler(httpd_req_t *req)
                     if (resp_str) {
                         ws_pkt.payload = (uint8_t *)resp_str;
                         ws_pkt.len = strlen(resp_str);
-                        httpd_ws_send_frame(req, &ws_pkt);
+                        if (ts_ws_peer_authorized(peer, TS_PERM_ADMIN))
+                            httpd_ws_send_frame(req, &ws_pkt);
                         free(resp_str);
                     }
                 }
@@ -1350,7 +1400,7 @@ static void update_log_stream_state(void)
  * credentials or log history. Records are pinned while parsed, never freed or
  * allocated under the critical section. Published final JSON is immutable. */
 typedef struct exec_record {
-    unsigned refs; uint32_t id; bool done;
+    unsigned refs; uint32_t id, owner_session_id; bool done;
     ts_webui_ssh_receipt_t receipt;
     char json[TS_WS_LEGACY_BYTES];
 } exec_record_t;
@@ -1377,12 +1427,26 @@ static void exec_cache_clear(void) {
     portENTER_CRITICAL(&s_exec_cache_lock);exec_record_t *old=s_exec_latest;s_exec_latest=NULL;portEXIT_CRITICAL(&s_exec_cache_lock);
     exec_record_release(old);
 }
-char *ts_webui_ssh_exec_status(uint32_t id,const char *boot,const char *key,esp_err_t *error) {
+static bool exec_receipt_matches(const exec_record_t *record, uint32_t id,
+                                 const char *boot, const char *key)
+{
+    if (!record || record->id != id)
+        return false;
+    unsigned char different = 0;
+    for (unsigned i = 0; i < 32; i++) {
+        different |= (unsigned char)record->receipt.boot_id[i] ^ (unsigned char)boot[i];
+        different |= (unsigned char)record->receipt.result_key[i] ^ (unsigned char)key[i];
+    }
+    return different == 0;
+}
+static char *exec_status_lookup(uint32_t id,const char *boot,const char *key,
+                                const uint32_t *caller_session_id,esp_err_t *error) {
     if(error)*error=ESP_ERR_NOT_FOUND;
     if(!id || !boot || !key || strlen(boot)!=32 || strlen(key)!=32)return NULL;
     portENTER_CRITICAL(&s_exec_cache_lock);
     exec_record_t *r=s_exec_active && s_exec_active->id==id?s_exec_active:s_exec_latest;
-    if(r && (r->id!=id || strcmp(r->receipt.boot_id,boot) || strcmp(r->receipt.result_key,key)))r=NULL;
+    if(!exec_receipt_matches(r,id,boot,key) ||
+       (caller_session_id && r->owner_session_id != *caller_session_id))r=NULL;
     bool done=r && r->done;if(r)r->refs++;
     portEXIT_CRITICAL(&s_exec_cache_lock);
     if(!r)return NULL;
@@ -1391,6 +1455,14 @@ char *ts_webui_ssh_exec_status(uint32_t id,const char *boot,const char *key,esp_
     if(error)*error=json?ESP_OK:ESP_ERR_NO_MEM;
     exec_record_release(r);return json;
 }
+char *ts_webui_ssh_exec_status(uint32_t id,const char *boot,const char *key,esp_err_t *error) {
+    return exec_status_lookup(id,boot,key,NULL,error);
+}
+char *ts_webui_ssh_exec_status_for_session(uint32_t id,const char *boot,const char *key,
+                                        uint32_t caller_session_id,esp_err_t *error) {
+    return exec_status_lookup(id,boot,key,&caller_session_id,error);
+}
+
 
 /* SSH Exec 任务参数 */
 typedef struct {
@@ -1556,7 +1628,8 @@ static void ssh_exec_output_callback(const char *data, size_t len, bool is_stder
                     }
                     params->extracted_value = extracted;
                     should_send_match = true;
-                    TS_LOGI(TAG, "Realtime extract: %s (first=%d)", extracted ? extracted : "(null)", is_first_extract);
+                    TS_LOGI(TAG, "Realtime extraction complete (bytes=%u, first=%d)",
+                            (unsigned)(extracted ? strlen(extracted) : 0), is_first_extract);
                 } else {
                     /* 值相同，释放本次提取的 */
                     free(extracted);
@@ -1610,13 +1683,7 @@ static void ssh_exec_output_callback(const char *data, size_t len, bool is_stder
                                       !params->fail_pattern &&
                                       !params->stop_on_match;
             
-            TS_LOGI(TAG, "Variable update check: var_name='%s', continuous=%d, extract=%p, expect=%p, fail=%p, stop=%d",
-                    params->var_name,
-                    is_continuous_mode,
-                    params->extract_pattern,
-                    params->expect_pattern,
-                    params->fail_pattern,
-                    params->stop_on_match);
+            TS_LOGD(TAG, "SSH variable update: continuous=%d, has_extract=%d, has_expect=%d, has_fail=%d, stop=%d", is_continuous_mode, params->extract_pattern != NULL, params->expect_pattern != NULL, params->fail_pattern != NULL, params->stop_on_match);
             
             if (is_continuous_mode && params->var_name[0] && exec_variables_begin(params)) {
                 /* 持续监控模式：实时更新变量 */
@@ -1632,7 +1699,7 @@ static void ssh_exec_output_callback(const char *data, size_t len, bool is_stder
                     var.value.type = TS_AUTO_VAL_STRING;
                     strncpy(var.value.str_val, params->extracted_value, sizeof(var.value.str_val) - 1);
                     esp_err_t ret = ts_variable_upsert(&var);
-                    TS_LOGI(TAG, "Registered %s = %s (ret=%d)", full_var_name, params->extracted_value, ret);
+                    TS_LOGD(TAG, "Extraction variable registered (bytes=%u, ret=%d)", (unsigned)strlen(params->extracted_value), ret);
                 }
                 
                 /* 更新 status 为 running */
@@ -1656,7 +1723,7 @@ static void ssh_exec_output_callback(const char *data, size_t len, bool is_stder
                 var.value.int_val = (int32_t)(esp_timer_get_time() / 1000000);
                 ts_variable_upsert(&var);
                 
-                TS_LOGD(TAG, "Continuous mode: realtime update %s", params->var_name);
+                TS_LOGD(TAG, "Continuous extraction variable updated");
                 exec_variables_end();
             }
             /* 结果导向模式：变量在命令完成时更新（见下方 ssh_exec_task 完成处理） */
@@ -1812,8 +1879,8 @@ static void ssh_exec_task(void *arg)
     ts_ws_stop_reason_t stop_reason=OP_STOP_NONE;
     if(ts_ws_op_cancelled(params->op)){ret=ESP_ERR_TIMEOUT;goto execution_finished;}
     
-    TS_LOGI(TAG, "SSH exec task started: session_id=%lu, cmd=%s", 
-            (unsigned long)session_id, params->command);
+    TS_LOGI(TAG, "SSH exec task started: session_id=%lu, command_bytes=%u",
+            (unsigned long)session_id, (unsigned)strlen(params->command));
     
     /* 如果使用密钥认证，加载私钥 */
     if (params->keyid[0] != '\0') {
@@ -1827,7 +1894,7 @@ static void ssh_exec_task(void *arg)
         } else {
             stop_reason=ts_ws_op_business_end(params->op,false);
             if(stop_reason){ret=ESP_ERR_TIMEOUT;goto execution_finished;}
-            TS_LOGE(TAG, "Failed to load key '%s': %s", params->keyid, esp_err_to_name(ret));
+            TS_LOGE(TAG, "Failed to load SSH key: %s", esp_err_to_name(ret));
             /* 发送错误消息 */
             if(!params->pending_final) {
         cJSON *msg = cJSON_CreateObject();
@@ -2029,12 +2096,7 @@ execution_finished:
         (params->expect_pattern || params->fail_pattern || params->extract_pattern) &&
         !params->match_found && !extracted_value;
     /* 诊断日志：检查变量写入条件 */
-    TS_LOGI(TAG, "SSH exec finished: var_name='%s' (has_var=%d), status=%d (is_cancelled=%d), exit_code=%d",
-            params->var_name,
-            params->var_name[0] ? 1 : 0,
-            status,
-            status == TS_WEBUI_SSH_STATUS_CANCELLED ? 1 : 0,
-            exit_code);
+    TS_LOGI(TAG, "SSH exec finished: has_var=%d, status=%d, is_cancelled=%d, exit_code=%d", params->var_name[0] != 0, status, status == TS_WEBUI_SSH_STATUS_CANCELLED, exit_code);
     
     /* 存储结果到变量系统 - 包括取消状态也要更新 */
     if (params->var_name[0] && exec_variables_begin(params)) {
@@ -2055,8 +2117,7 @@ execution_finished:
         
         /* 同步更新到 ts_automation 变量系统 - 使用 register 确保变量存在并更新 */
         if(params->conditions_incomplete)status_str="unknown";
-        TS_LOGI(TAG, "Writing SSH result to automation variables: var_name=%s, status=%s, exit_code=%d",
-                params->var_name, status_str, exit_code);
+        TS_LOGI(TAG, "Writing SSH result to variables (exit_code=%d)", exit_code);
         
         char full_var_name[96];  /* 足够容纳 source_id + suffix */
         ts_auto_variable_t var = {0};
@@ -2112,7 +2173,7 @@ execution_finished:
         var.value.int_val = (int32_t)(esp_timer_get_time() / 1000000);  /* 秒级时间戳 */
         ts_variable_upsert(&var);
         
-        TS_LOGI(TAG, "Synced SSH result to automation variables: %s (7 vars)", params->var_name);
+        TS_LOGI(TAG, "SSH result variables synchronized (count=7)");
         exec_variables_end();
     }
     
@@ -2229,6 +2290,8 @@ static esp_err_t ts_webui_ssh_exec_start_ex_impl(ts_ws_operation_t *op, const ch
     if(params->record)params->record->refs=1;
     if(!params->output_lock || !params->stream || !params->send_bytes || !params->send_base64 || !params->record)return ESP_ERR_NO_MEM;
     exec_record_t *record=params->record;record->id=params->session_id;
+    record->owner_session_id = options ? options->owner_session_id : 0;
+    ts_ws_op_set_exec_owner(op,record->owner_session_id);
     if(!s_exec_boot[0])exec_hex_random(s_exec_boot); /* only one exec creator admitted */
     strcpy(record->receipt.boot_id,s_exec_boot);exec_hex_random(record->receipt.result_key);
     if(options && options->receipt)*options->receipt=record->receipt;
@@ -2290,11 +2353,11 @@ static esp_err_t ts_webui_ssh_exec_start_ex_impl(ts_ws_operation_t *op, const ch
         params->max_output_size = options->max_output_size > 0 ? options->max_output_size : 64 * 1024;
         params->stop_on_match = options->stop_on_match;
         
-        TS_LOGI(TAG, "SSH exec options: timeout_ms=%lu, expect=%s, fail=%s, extract=%s, stop_on_match=%d, var=%s",
+        TS_LOGI(TAG, "SSH exec options: timeout_ms=%lu, has_expect=%d, has_fail=%d, has_extract=%d, stop_on_match=%d, var=%s",
                 (unsigned long)params->timeout_ms,
-                params->expect_pattern ? params->expect_pattern : "(null)",
-                params->fail_pattern ? params->fail_pattern : "(null)",
-                params->extract_pattern ? params->extract_pattern : "(null)",
+                params->expect_pattern != NULL,
+                params->fail_pattern != NULL,
+                params->extract_pattern != NULL,
                 params->stop_on_match,
                 params->var_name[0] ? params->var_name : "(none)");
     } else {
@@ -2351,8 +2414,7 @@ static esp_err_t ts_webui_ssh_exec_start_ex_impl(ts_ws_operation_t *op, const ch
         return ESP_ERR_NOT_FOUND;
     }
     /* 命令开始时初始化所有变量（重置旧值） */
-    TS_LOGI(TAG, "Checking var_name for init: '%s' (len=%d)", 
-            params->var_name, (int)strlen(params->var_name));
+    TS_LOGD(TAG, "Checking SSH variable initialization (enabled=%d)", params->var_name[0] != 0);
     if (params->var_name[0]) {
         ts_auto_variable_t var = {0};
         char full_var_name[96];
@@ -2361,7 +2423,7 @@ static esp_err_t ts_webui_ssh_exec_start_ex_impl(ts_ws_operation_t *op, const ch
         strncpy(var.source_id, params->var_name, sizeof(var.source_id) - 1);
         var.flags = 0;
         
-        TS_LOGI(TAG, "Initializing 7 variables for source: %s", params->var_name);
+        TS_LOGD(TAG, "Initializing SSH variables (count=7)");
         
         /* 初始化 status 为 "running" */
         snprintf(full_var_name, sizeof(full_var_name), "%s.status", params->var_name);
@@ -2412,7 +2474,7 @@ static esp_err_t ts_webui_ssh_exec_start_ex_impl(ts_ws_operation_t *op, const ch
         var.value.int_val = (int32_t)(esp_timer_get_time() / 1000000);  /* 秒级时间戳 */
         ts_variable_upsert(&var);
         
-        TS_LOGI(TAG, "Initialized variables for %s (status=running)", params->var_name);
+        TS_LOGD(TAG, "SSH variables initialized (status=running)");
         for (unsigned i = 0; i < sizeof(exec_variable_suffixes) / sizeof(exec_variable_suffixes[0]); ++i) {
             snprintf(full_var_name, sizeof(full_var_name), "%s.%s", params->var_name, exec_variable_suffixes[i]);
             params->variable_instances[i] = ts_variable_instance(full_var_name);
@@ -2442,9 +2504,9 @@ static esp_err_t ts_webui_ssh_exec_start_ex_impl(ts_ws_operation_t *op, const ch
         *session_id = params->session_id;
     }
     
-    TS_LOGI(TAG, "SSH exec started (extended): session_id=%lu, host=%s, cmd=%s, expect=%s", 
-            (unsigned long)params->session_id, host, command,
-            params->expect_pattern ? params->expect_pattern : "(none)");
+    TS_LOGI(TAG, "SSH exec started (extended): session_id=%lu, host=%s, command_bytes=%u, has_expect=%d",
+            (unsigned long)params->session_id, host, (unsigned)strlen(command),
+            params->expect_pattern != NULL);
     
     return ESP_OK;
 }
@@ -2489,6 +2551,33 @@ esp_err_t ts_webui_ssh_exec_cancel(uint32_t session_id)
     ts_ws_op_release(op);
     return ESP_OK; /* accepted request, not remote termination confirmation */
 }
+
+static esp_err_t exec_cancel_lookup(uint32_t id, const char *boot, const char *key,
+                                    const uint32_t *caller_session_id)
+{
+    bool has_receipt = boot || key;
+    if (!id || (caller_session_id && !*caller_session_id) ||
+        (!caller_session_id && !has_receipt) ||
+        (has_receipt && (!boot || !key || strlen(boot) != 32 || strlen(key) != 32)))
+        return ESP_ERR_INVALID_STATE;
+    portENTER_CRITICAL(&s_exec_cache_lock);
+    bool owned = s_exec_active && s_exec_active->id == id &&
+        (!caller_session_id || s_exec_active->owner_session_id == *caller_session_id) &&
+        (!has_receipt || exec_receipt_matches(s_exec_active, id, boot, key));
+    portEXIT_CRITICAL(&s_exec_cache_lock);
+    if (!owned) return ESP_ERR_INVALID_STATE;
+    /* IDs are monotonic within this boot. Completion between verification and
+     * cancellation may reject, but cannot target a replacement operation. */
+    return ts_webui_ssh_exec_cancel(id);
+}
+esp_err_t ts_webui_ssh_exec_cancel_with_receipt(uint32_t id, const char *boot, const char *key) {
+    return exec_cancel_lookup(id,boot,key,NULL);
+}
+esp_err_t ts_webui_ssh_exec_cancel_for_session(uint32_t id, const char *boot, const char *key,
+                                             uint32_t caller_session_id) {
+    return exec_cancel_lookup(id,boot,key,&caller_session_id);
+}
+
 
 bool ts_webui_ssh_exec_is_running(uint32_t session_id)
 {

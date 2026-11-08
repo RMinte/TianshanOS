@@ -27,7 +27,7 @@ for(const lang of ['zh-CN','en-US']){
  for(const failure of ['timeout','network','http','body','json','string-code','missing','wrong-id','response-allocation','response-no-message'])test(`${lang}: ${failure} is unknown, one POST and at most one record check, no automatic retry`,async()=>{
   const h=await setup(lang);let posts=0,checks=0;
   h.ctx.fetch=async(url,opts)=>{
-   if(opts.method==='GET'){checks++;return reply({code:0,data:{id:'fixture'}});}
+   if(new URL(url, 'http://fixture').pathname === '/api/v1/key/info'){checks++;return reply({code:0,data:{id:'fixture'}});}
    posts++;
    if(failure==='timeout')return new Promise((r,j)=>opts.signal.addEventListener('abort',()=>j(new Error('aborted'))));
    if(failure==='network')throw new Error('offline');
