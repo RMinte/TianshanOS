@@ -5033,12 +5033,15 @@ async function showServiceRunLog(runId, follow = false) {
     modal.innerHTML = sheet(720,escapeHtml(run.name || run.command_id),`<p class="t-note">${escapeHtml(run.username)}@${escapeHtml(run.host)}:${run.port} · ${serviceRunText('logHint')}</p><pre class="term" data-run-log style="height:320px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere"></pre><div data-run-log-error class="t-note" role="status"></div>`,
         `<button type="button" class="btn lg" data-log-close>${t('common.close')}</button><button type="button" class="btn lg" data-log-refresh>${t('common.refresh')}</button><button type="button" class="btn lg primary" data-log-follow>${serviceRunText('follow')}</button>`);
     document.body.appendChild(modal);
-    let timer=null, fetching=false;
+    let timer=null, fetching=false, scrollToEndRequested=false;
     const current = () => modal.isConnected && document.getElementById(modal.id)===modal;
     const stop = () => {clearInterval(timer);timer=null;modal.querySelector('[data-log-follow]').textContent=serviceRunText('follow');};
     modal._close = () => {stop();modal.remove();if (parent?.isConnected) parent.classList.remove('hidden');};
-    const load = async () => {
-        if (!current() || fetching || document.hidden) return;
+    const logOutput = modal.querySelector('[data-run-log]');
+    const load = async (scrollToEnd = false) => {
+        if (!current() || document.hidden) return;
+        scrollToEndRequested ||= scrollToEnd;
+        if (fetching) return;
         fetching=true;
         try {
             const file="'"+run.log_file.replace(/'/g,"'\\''")+"'";
@@ -5050,17 +5053,21 @@ async function showServiceRunLog(runId, follow = false) {
                 modal.querySelector('[data-run-log-error]').textContent='';return;
             }
             if (result.data?.exit_code !== 0) throw pageFailure('service_log_unavailable');
-            modal.querySelector('[data-run-log]').textContent=result.data.stdout || serviceRunText('logEmpty');
+            const wasAtEnd = logOutput.scrollHeight - logOutput.clientHeight - logOutput.scrollTop <= 4;
+            const previousTop = logOutput.scrollTop;
+            logOutput.textContent=result.data.stdout || serviceRunText('logEmpty');
+            logOutput.scrollTop = scrollToEndRequested || wasAtEnd ? logOutput.scrollHeight : previousTop;
+            scrollToEndRequested = false;
             modal.querySelector('[data-run-log-error]').textContent='';
         } catch (error) {
             if (current()) {stop();modal.querySelector('[data-run-log-error]').innerHTML=failureNote({op:'home.quicklog',params:{user:run.username},error,endpoint:'ssh.exec',write:false});}
         } finally {fetching=false;}
     };
-    const toggle = () => {if (timer) stop();else {modal.querySelector('[data-log-follow]').textContent=serviceRunText('stopFollow');timer=setInterval(load,2000);load();}};
+    const toggle = () => {if (timer) stop();else {modal.querySelector('[data-log-follow]').textContent=serviceRunText('stopFollow');timer=setInterval(load,2000);load(true);}};
     modal.querySelector('[data-log-close]').focus();
-    modal.querySelector('[data-log-close]').onclick=modal._close;modal.querySelector('[data-log-refresh]').onclick=load;modal.querySelector('[data-log-follow]').onclick=toggle;
+    modal.querySelector('[data-log-close]').onclick=modal._close;modal.querySelector('[data-log-refresh]').onclick=()=>load(true);modal.querySelector('[data-log-follow]').onclick=toggle;
     modal.onkeydown=event=>{if(event.key==='Escape'){event.stopPropagation();modal._close();}};router.navigation?.onDispose(modal._close);
-    if (follow) toggle();else await load();
+    if (follow) toggle();else await load(true);
 }
 
 // 触发快捷操作后的冷却时间（毫秒），避免连续触发导致后端只执行最后一个
@@ -6902,6 +6909,7 @@ function showNetworkLpmuAccessResult(info) {
         `<details class="grp lpmu-log"><summary class="row lpmu-log-toggle"><span class="rl">${t('networkPage.lpmuAccessLog')}</span><svg class="i"><use href="#ri-arrow-down-line"/></svg></summary><div class="term logv lpmu-log-output" role="region" aria-label="${t('networkPage.lpmuAccessLog')}"><pre></pre></div></details>`,
         `<button type="button" class="btn lg primary">${t('networkPage.lpmuAccessResultDone')}</button>`);
     const details = modal.querySelector('details');
+    const logContainer = modal.querySelector('.lpmu-log-output');
     let finished = false, loading = false, offset = 0, text = '';
     const technicalLines = [
         info.failureStage ? t('networkPage.lpmuAccessFailureStage', {stage: getNetworkLpmuAccessStageLabel(info.failureStage)}) : '',
@@ -6911,7 +6919,11 @@ function showNetworkLpmuAccessResult(info) {
     details.ontoggle = async () => {
         if (!modal.isConnected) return;
         modal.querySelector('.sheet').style.width = details.open ? '720px' : '480px';
-        if (!details.open || finished || loading) return;
+        if (!details.open || loading) return;
+        if (finished) {
+            logContainer.scrollTop = logContainer.scrollHeight;
+            return;
+        }
         loading = true;
         const output = modal.querySelector('pre');
         output.textContent = technicalDetail + t('common.loading');
@@ -6938,7 +6950,10 @@ function showNetworkLpmuAccessResult(info) {
             if (modal.isConnected) output.textContent = technicalDetail +
                 failureText({ op: 'network.lpmulog', error, endpoint: 'lpmu.access.log', write: false }) +
                 (info.outputTail ? '\n\n' + t('networkPage.lpmuAccessLastOutput', {output: info.outputTail}) : '');
-        } finally { loading = false; }
+        } finally {
+            loading = false;
+            if (modal.isConnected && details.open) logContainer.scrollTop = logContainer.scrollHeight;
+        }
     };
     modal.querySelector('button').onclick = close;
     modal.onclick = e => { if (e.target === modal) close(); };
