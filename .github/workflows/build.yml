@@ -356,7 +356,25 @@ jobs:
           args.write_text(json.dumps(data, indent=2) + '\n')
           PYTHON
 
-      - name: Create or upload the release assets
+      - name: Update existing release assets
+        if: steps.preflight.outputs.existing_release == 'true'
+        run: |
+          python3 - <<'PYTHON'
+          import os, subprocess
+          from pathlib import Path
+          groups = [sorted(Path('firmware').glob(pattern)) for pattern in ('**/*.bin', '**/flasher_args.json', '**/*.zip')]
+          if any(not files for files in groups):
+              raise SystemExit('A required release asset pattern matched no files')
+          subprocess.run(['gh', 'release', 'upload', os.environ['RELEASE_TAG'],
+                          *[str(path) for files in groups for path in files],
+                          '--clobber', '--repo', os.environ['GITHUB_REPOSITORY']], check=True)
+          PYTHON
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.preflight.outputs.tag }}
+
+      - name: Create the first release for a new version
+        if: steps.preflight.outputs.existing_release == 'false'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.preflight.outputs.tag }}

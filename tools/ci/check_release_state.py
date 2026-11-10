@@ -50,8 +50,8 @@ def prepare_release(repository, mode, tag, build_commit, get=query):
             comparison = get(f'repos/{repository}/compare/{obj["sha"]}...{build_commit}')
             if comparison is None or comparison.get('status') != 'ahead':
                 raise ValueError('Existing release tag must be an ancestor of this build; refusing rollback or divergent history')
-            return True, 'Advance the existing release tag to this verified descendant build'
-    return False, 'Release preflight passed for this build'
+            return True, 'Advance the existing release tag to this verified descendant build', True
+    return False, 'Release preflight passed for this build', release is not None
 
 
 def advance_tag(repository, tag, commit):
@@ -88,11 +88,12 @@ def main():
     commit = os.environ['BUILD_COMMIT']
     if subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip() != commit:
         raise ValueError('Release checkout is not the build commit')
-    advance, message = prepare_release(os.environ['GITHUB_REPOSITORY'], mode, tag, commit)
+    advance, message, existing_release = prepare_release(os.environ['GITHUB_REPOSITORY'], mode, tag, commit)
     if advance:
         advance_tag(os.environ['GITHUB_REPOSITORY'], tag, commit)
     with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
         output.write(f'tag={tag}\n')
+        output.write(f'existing_release={str(existing_release).lower()}\n')
     print(message)
 
 

@@ -124,7 +124,9 @@ class PolicyTests(unittest.TestCase):
                 if '/releases/' in path:return {'tag_name':'v0.6.3'}
                 if '/compare/' in path:return {'status':status} if status else None
                 return {'object':{'type':'commit','sha':'old'}}
-            if status=='ahead':self.assertTrue(release.prepare_release(profile.UPSTREAM,'main','v0.6.3','new',get)[0])
+            if status=='ahead':
+                state=release.prepare_release(profile.UPSTREAM,'main','v0.6.3','new',get)
+                self.assertTrue(state[0]);self.assertTrue(state[2])
             else:
                 with self.assertRaises(ValueError):release.prepare_release(profile.UPSTREAM,'main','v0.6.3','new',get)
             for mode in ('tag','published'):
@@ -138,8 +140,23 @@ class PolicyTests(unittest.TestCase):
             request=call.call_args.args[0]
             self.assertEqual(request.method,'PATCH');self.assertEqual(json.loads(request.data),{'sha':'new','force':False})
 
+    def test_preflight_outputs_existing_release_for_the_upload_route(self):
+        from unittest.mock import patch
+        for existing in (True,False):
+            with self.subTest(existing=existing),tempfile.TemporaryDirectory() as folder:
+                output=Path(folder)/'outputs'
+                env={'GITHUB_EVENT_NAME':'push','GITHUB_REF':'refs/heads/main',
+                     'BUILD_VERSION':'0.6.5+fixture','BUILD_COMMIT':'new',
+                     'GITHUB_REPOSITORY':profile.UPSTREAM,'GITHUB_OUTPUT':str(output)}
+                with patch.dict(os.environ,env),patch.object(release,'validate_security_artifacts',return_value={'version':env['BUILD_VERSION']}),patch.object(release.subprocess,'check_output',return_value='new\n'),patch.object(release,'prepare_release',return_value=(existing,'fixture',existing)),patch.object(release,'advance_tag') as advance:
+                    release.main()
+                self.assertEqual(output.read_text(),f'tag=v0.6.5\nexisting_release={str(existing).lower()}\n')
+                if existing:advance.assert_called_once_with(profile.UPSTREAM,'v0.6.5','new')
+                else:advance.assert_not_called()
+
     def test_main_new_release_allows_absent_tag_but_refuses_wrong_commit(self):
-        self.assertFalse(release.prepare_release(profile.UPSTREAM,'main','v0.6.1','new',lambda path:None)[0])
+        state=release.prepare_release(profile.UPSTREAM,'main','v0.6.1','new',lambda path:None)
+        self.assertFalse(state[0]);self.assertFalse(state[2])
         for commit in ('new','old'):
             def get(path):return None if '/releases/' in path else {'object':{'type':'commit','sha':commit}}
             if commit=='new':self.assertFalse(release.prepare_release(profile.UPSTREAM,'main','v0.6.1','new',get)[0])

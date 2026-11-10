@@ -1,7 +1,11 @@
 import sys
 import importlib.util
+import json
+import os
 import re
+import subprocess
 import tempfile
+import textwrap
 import unittest
 from pathlib import Path
 
@@ -87,6 +91,8 @@ class ReleaseTests(unittest.TestCase):
         self.assertIn('firmware/**/*.bin', release)
         self.assertIn('name: TianshanOS ${{ steps.preflight.outputs.tag }}', release)
         self.assertIn('firmware/**/flasher_args.json', release)
+        self.assertIn("if: steps.preflight.outputs.existing_release == 'true'", release)
+        self.assertIn("if: steps.preflight.outputs.existing_release == 'false'", release)
         self.assertIn('python3 tools/serial_upgrade.py package --build-dir build', job('build'))
         self.assertNotIn("steps.signed_package", job('build'))
         self.assertIn('python3 tools/ci/check_profile.py', job('changes'))
@@ -98,6 +104,32 @@ class ReleaseTests(unittest.TestCase):
         self.assertIn('if: ${{ always() && cancelled() }}', gate)
         self.assertIn('CI Gate failed: workflow cancelled at the final decision', gate)
         self.assertNotIn('paths-ignore:', workflow)
+
+    def test_existing_release_upload_only_replaces_matching_assets(self):
+        workflow=(ROOT/'.github/workflows/build.yml').read_text()
+        step=workflow.split('      - name: Update existing release assets\n',1)[1].split('\n      - name:',1)[0]
+        script=textwrap.dedent(re.search(r"python3 - <<'PYTHON'\n(.*?)\n          PYTHON",step,re.S).group(1))
+        assets=['TianshanOS.bin','www.bin','ota_data_initial.bin','bootloader/bootloader.bin',
+                'partition_table/partition-table.bin','flasher_args.json','tianshanos-serial-v0.6.5.zip']
+        for missing in (None,'.bin','.json','.zip'):
+            with self.subTest(missing=missing),tempfile.TemporaryDirectory() as folder:
+                root=Path(folder);binary=root/'bin';binary.mkdir();capture=root/'gh-args.json'
+                gh=binary/'gh';gh.write_text(f'#!{sys.executable}\nimport json,os,sys\nfrom pathlib import Path\nPath(os.environ["CAPTURE"]).write_text(json.dumps(sys.argv[1:]))\n');gh.chmod(0o755)
+                for name in assets:
+                    if missing and name.endswith(missing):continue
+                    target=root/'firmware'/name;target.parent.mkdir(parents=True,exist_ok=True);target.write_bytes(b'fixture')
+                (root/'firmware'/'security-artifact.json').write_text('{}')
+                env={**os.environ,'PATH':str(binary)+os.pathsep+os.environ['PATH'],'CAPTURE':str(capture),
+                     'RELEASE_TAG':'v0.6.5','GITHUB_REPOSITORY':'RMinte/TianshanOS'}
+                result=subprocess.run([sys.executable,'-c',script],cwd=root,env=env,capture_output=True,text=True)
+                if missing:
+                    self.assertNotEqual(result.returncode,0);self.assertFalse(capture.exists())
+                else:
+                    self.assertEqual(result.returncode,0,result.stderr)
+                    args=json.loads(capture.read_text())
+                    self.assertEqual(args[:3],['release','upload','v0.6.5'])
+                    self.assertEqual(set(args[3:-3]),{'firmware/'+name for name in assets})
+                    self.assertEqual(args[-3:],['--clobber','--repo','RMinte/TianshanOS'])
 
     def test_public_asset_name_and_flash_mapping_match(self):
         import json, subprocess

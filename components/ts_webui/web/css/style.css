@@ -265,13 +265,14 @@ input[type=number]::-webkit-inner-spin-button,input[type=number]::-webkit-outer-
 
 /* ===== 页面：系统（设备面板 / 风扇 / LED） ===== */
 .acts{align-items:center}
+.page-system{container:system-page / inline-size}
 .sys-mid{display:grid;grid-template-columns:minmax(0,1fr) clamp(340px,24vw,420px);gap:16px;align-items:stretch;flex:none}
 .sys-mid>.card{display:flex;flex-direction:column}
 .card.in{background:rgba(255,255,255,.62);border-radius:var(--r-inner)}
 .empty{padding:20px 0;text-align:center;color:var(--ink-3)}
-.device-panel{container:device-panel / inline-size}
-/* Shared tracks: a model and a one-cell widget always have the same width. */
-.qa-grid,.dw-grid{--device-columns:1;--widget-medium-span:1;--widget-large-span:1;display:grid;grid-template-columns:repeat(var(--device-columns),minmax(0,1fr));gap:12px}
+/* Controls need 289px; round to 292px and keep cells stable as column count changes. */
+.qa-grid,.dw-grid{--device-columns:1;--widget-medium-span:1;--widget-large-span:1;display:grid;grid-template-columns:repeat(var(--device-columns),minmax(0,292px));gap:12px}
+.dw-grid{container-type:inline-size}
 .qa-grid>.empty{grid-column:1/-1}
 .quick-action-card{display:flex;flex-direction:column;justify-content:flex-start;gap:6px;background:rgba(255,255,255,.62);border-radius:var(--r-inner);padding:16px;min-width:0;cursor:default}
 .quick-action-card[data-allowed=true]:hover{background:rgba(255,255,255,.8)}
@@ -286,10 +287,12 @@ input[type=number]::-webkit-inner-spin-button,input[type=number]::-webkit-outer-
 .dw-card>.t-label>.i{flex:none}
 .dw-card[data-type=log][data-layout=auto],.dw-layout-medium{grid-column:span var(--widget-medium-span)}
 .dw-layout-large{grid-column:span var(--widget-large-span)}
-.dw-layout-full{grid-column:1/-1}
-/* The labelled controls need 289px including padding; round to the 4px grid. */
-@container device-panel (min-width:596px){.qa-grid,.dw-grid{--device-columns:2;--widget-medium-span:2;--widget-large-span:2}}
-@container device-panel (min-width:900px){.qa-grid,.dw-grid{--device-columns:3;--widget-large-span:3}}
+.dw-layout-full{grid-column:1/-1;width:100cqi}
+/* One shared container avoids adding columns again when the fan moves below.
+   Two cells need 596px + 40px panel padding; three beside the fan need
+   900px + 40px panel padding + 16px gap + 340px fan = 1296px. */
+@container system-page (min-width:636px){.qa-grid,.dw-grid{--device-columns:2;--widget-medium-span:2;--widget-large-span:2}}
+@container system-page (min-width:1296px){.qa-grid,.dw-grid{--device-columns:3;--widget-large-span:3}}
 .dw-ring{display:grid;place-items:center;width:100%;min-height:64px;margin:8px 0 2px}
 .dw-ring>svg,.dw-ring-value{grid-area:1/1}
 .dw-ring>svg{max-width:100%}
@@ -590,7 +593,8 @@ input[type=color].swi::-webkit-color-swatch{border:0;border-radius:50%}
 .led-grid,.net-tiles{grid-template-columns:repeat(2,minmax(0,1fr))}
 .led-grid>:last-child:nth-child(odd),.net-tiles>:last-child:nth-child(odd){grid-column:1/-1}
 }
-@media (max-width:1389px){
+/* Two device cells (596px), panel padding (40px), gap (16px), fan (340px). */
+@container system-page (width < 992px){
 .sys-mid{grid-template-columns:minmax(0,1fr)}
 .fan-body{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr);grid-template-areas:"fan status" "fan test";gap:16px 32px;align-content:start}
 .fan-body>.fans-grid{grid-area:fan;max-width:560px}

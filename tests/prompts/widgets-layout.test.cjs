@@ -14,7 +14,7 @@ before(async()=>{browser=await chromium.launch({channel:'chrome',headless:true})
 after(async()=>{await browser?.close();});
 async function fixture(width,language='en-US'){
  const page=await browser.newPage({viewport:{width,height:1000}});
- await page.setContent(`<style>${css}</style><main style="padding:16px"><section class="device-panel"><div class="dw-grid" id="grid"></div></section></main>`);
+ await page.setContent(`<style>${css}</style><main class="page-system" style="padding:16px"><section class="card device-panel"><div class="dw-grid" id="grid"></div></section></main>`);
  await page.addScriptTag({content:iconHelpers+'\n'+functions+`;window.i18n={registerLanguage:(id,data)=>window.language=data};window.escapeHtml=s=>s;window.sanitizeWidgetIcon=()=>'';`});
  await page.addScriptTag({content:fs.readFileSync(path.join(root,'js/lang',language+'.js'),'utf8')});
  await page.evaluate(()=>{window.t=key=>key.split('.').reduce((o,k)=>o?.[k],window.language)||key;});
@@ -137,8 +137,8 @@ for(const width of [375,600,601,768,900,901,1200,1201,1440]){
  test(`${width}px: mixed layout sizes never create implicit grid columns`,async()=>{
   const page=await fixture(width);
   try{
-   const panelWidth=await page.locator('.device-panel').evaluate(el=>el.clientWidth);
-   const expectedColumns=panelWidth>=900?3:panelWidth>=596?2:1;
+   const pageWidth=width-32;
+   const expectedColumns=pageWidth>=1296?3:pageWidth>=636?2:1;
    await page.evaluate(()=>{
     widgets=['large','medium','small','auto','full'].map(layout=>({id:layout,type:'ring',label:'GPU',layout,unit:'MB',decimals:1}));
     document.getElementById('grid').innerHTML=widgets.map(renderWidgetHtml).join('');
@@ -150,7 +150,7 @@ for(const width of [375,600,601,768,900,901,1200,1201,1440]){
    });
    const m=await measure();assert.equal(m.columns.length,expectedColumns);
    assert(m.columns.every(n=>Math.abs(n-m.columns[0])<1));
-   for(const c of m.cards){const span=Math.min(expectedColumns,{large:3,medium:2,small:1,auto:1,full:expectedColumns}[c.layout]);assert(Math.abs(c.width-(m.columns[0]*span+12*(span-1)))<1,JSON.stringify(c));}
+   for(const c of m.cards){const span=Math.min(expectedColumns,{large:3,medium:2,small:1,auto:1,full:expectedColumns}[c.layout]);const expectedWidth=c.layout==='full'?m.gridWidth:m.columns[0]*span+12*(span-1);assert(Math.abs(c.width-expectedWidth)<1,JSON.stringify(c));}
    assert.deepEqual(await violations(page),[]);
    await page.setViewportSize({width:375,height:1000});assert.equal((await measure()).columns.length,1);
    await page.setViewportSize({width:1440,height:1000});assert.equal((await measure()).columns.length,3);
@@ -178,32 +178,54 @@ for(const language of ['zh-CN','en-US']){
  });
 }
 
-test('model and widget tracks stay equal throughout resizing, including the fan breakpoint',async()=>{
+test('card widths and column counts stay stable while widening and narrowing',async()=>{
  const page=await browser.newPage();
  try{
-  await page.setContent(`<style>${css}</style><main style="padding:24px"><div class="sys-mid"><section class="card device-panel"><div class="qa-grid"><div class="quick-action-card">Qwen3.6-35B-A3B</div></div><hr><div class="dw-grid"><div class="w-tile dw-card">GPU</div><div class="w-tile dw-card">Temperature</div><div class="w-tile dw-card dw-layout-medium">Medium</div><div class="w-tile dw-card dw-layout-large">Large</div><div class="w-tile dw-card dw-layout-full">Full</div></div></section><section class="card">Fan</section></div></main>`);
-  const widths=[...new Set([...Array.from({length:98},(_,i)=>360+i*16),600,601,1388,1389,1390,1391,1920,2560])].sort((a,b)=>a-b);
-  for(const width of widths){
+  await page.setContent(`<style>${css}</style><main class="page-system" style="padding:24px"><div class="sys-mid"><section class="card device-panel"><div class="qa-grid"><div class="quick-action-card">Qwen3.6-35B-A3B</div></div><hr><div class="dw-grid"><div class="w-tile dw-card">GPU</div><div class="w-tile dw-card">Temperature</div><div class="w-tile dw-card dw-layout-medium">Medium</div><div class="w-tile dw-card dw-layout-large">Large</div><div class="w-tile dw-card dw-layout-full">Full</div></div></section><section class="card fan-panel">Fan</section></div></main>`);
+  const widths=Array.from({length:2560-320+1},(_,i)=>320+i);
+  let previousColumns=1,previousFanBeside=false;
+  const measurements=new Map();
+  for(const [index,width] of [...widths,...widths.toReversed()].entries()){
+   const widening=index<widths.length;
    await page.setViewportSize({width,height:1000});
    const result=await page.evaluate(()=>{
     const model=document.querySelector('.qa-grid'),widgets=document.querySelector('.dw-grid');
     const box=el=>{const {x,width}=el.getBoundingClientRect();return {x,width};};
-    return {modelTracks:getComputedStyle(model).gridTemplateColumns,widgetTracks:getComputedStyle(widgets).gridTemplateColumns,model:box(model.firstElementChild),widget:box(widgets.firstElementChild),overflow:document.documentElement.scrollWidth>innerWidth,cards:[...widgets.children].map(box),grid:box(widgets)};
+    const fanBeside=Math.abs(document.querySelector('.fan-panel').getBoundingClientRect().y-document.querySelector('.device-panel').getBoundingClientRect().y)<1;
+    return {modelTracks:getComputedStyle(model).gridTemplateColumns,widgetTracks:getComputedStyle(widgets).gridTemplateColumns,model:box(model.firstElementChild),widget:box(widgets.firstElementChild),fanBeside,overflow:document.documentElement.scrollWidth>innerWidth,cards:[...widgets.children].map(box),grid:box(widgets)};
    });
    const modelTracks=result.modelTracks.split(' ').map(Number.parseFloat),widgetTracks=result.widgetTracks.split(' ').map(Number.parseFloat);
    assert.equal(modelTracks.length,widgetTracks.length,`${width}px column counts differ`);
    assert(modelTracks.every((track,index)=>Math.abs(track-widgetTracks[index])<1),`${width}px tracks differ`);
    assert(modelTracks.length<=3);
-   if(width>=1374)assert.equal(modelTracks.length,3,`${width}px keeps three columns across the fan breakpoint`);
+   assert(widening?modelTracks.length>=previousColumns:modelTracks.length<=previousColumns,`${width}px reverses column count while resizing`);
+   assert(widening?Number(result.fanBeside)>=Number(previousFanBeside):Number(result.fanBeside)<=Number(previousFanBeside),`${width}px reverses the fan arrangement while resizing`);
+   previousColumns=modelTracks.length;
+   previousFanBeside=result.fanBeside;
+   const summary={model:result.model,tracks:result.modelTracks,fanBeside:result.fanBeside};
+   if(widening)measurements.set(width,summary);else assert.deepEqual(summary,measurements.get(width),`${width}px depends on resize direction`);
+   assert(Math.abs(result.model.width-Math.min(292,result.grid.width))<1,`${width}px stretches a single-cell card`);
+   if(width>=1440)assert.equal(modelTracks.length,3,`${width}px desktop keeps three columns`);
    assert(Math.abs(result.model.width-result.widget.width)<1,`${width}px widths differ`);
    assert(Math.abs(result.model.x-result.widget.x)<1,`${width}px starts differ`);
    for(const card of result.cards)assert(card.x+card.width<=result.grid.x+result.grid.width+1,`${width}px spanning widget escapes`);
+   assert(Math.abs(result.cards.at(-1).width-result.grid.width)<1,`${width}px full-width widget does not fill its grid`);
    assert.equal(result.overflow,false,`${width}px overflows`);
    if(width===1440||width===2560){
     const before=result.model.width;
     await page.locator('.qa-grid').evaluate(grid=>{grid.innerHTML+=Array.from({length:4},()=>'<div class="quick-action-card">Another model</div>').join('');});
     assert(Math.abs(await page.locator('.quick-action-card').first().evaluate(el=>el.getBoundingClientRect().width)-before)<1,'model count does not change cell width');
    }
+  }
+  await page.setViewportSize({width:1390,height:1000});
+  for(const width of [991,991.25,991.5,991.75,992]){
+   await page.locator('.page-system').evaluate((el,width)=>{el.style.width=(width+48)+'px';},width);
+   const result=await page.evaluate(()=>({
+    cardWidth:document.querySelector('.quick-action-card').getBoundingClientRect().width,
+    fanBeside:Math.abs(document.querySelector('.fan-panel').getBoundingClientRect().y-document.querySelector('.device-panel').getBoundingClientRect().y)<1
+   }));
+   assert(Math.abs(result.cardWidth-292)<.01,`${width}px fractional boundary compresses cards`);
+   assert.equal(result.fanBeside,width>=992,`${width}px switches the fan before both panels fit`);
   }
  }finally{await page.close();}
 });
