@@ -57,8 +57,8 @@ test('stylesheet retains migrated bounds, overlay, wrapping and responsive span 
         '.dw-card[data-type=log][data-layout=auto],.dw-layout-medium{grid-column:span var(--widget-medium-span)}',
         '.dw-log-line{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
         '.dw-log-tools>.btn,.dw-log-tools>.state{flex-shrink:0;max-width:100%;white-space:normal;overflow-wrap:anywhere}',
-        'grid-template-columns:repeat(var(--device-columns),minmax(0,1fr))'
+        'grid-template-columns:repeat(var(--device-columns),minmax(0,292px))'
     ]) assert(css.includes(rule), rule);
-    assert(css.includes('.device-panel{container:device-panel / inline-size}'));
+    assert(css.includes('.page-system{container:system-page / inline-size}'));
     assert(css.includes('.dw-ring-value{z-index:1;width:100%;'));
 });

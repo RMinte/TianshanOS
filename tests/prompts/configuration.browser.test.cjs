@@ -266,7 +266,11 @@ test('empty, loading and unavailable states retain the dashboard widget and appr
   await kit.withPage(lang,call=>call.endpoint==='automation/rules/list'?{code:0,data:{...d.status(),rules:[],loaded:mode==='empty',load_error:mode==='unavailable'?'configuration_unavailable':''}}:d.respond(call),async({page})=>{
    await page.evaluate(async role=>{api.level=role;await loadSystemPage();await refreshQuickActions();},role);
    const grid=page.locator('#quick-actions-grid');assert.equal(await grid.isVisible(),true);
-   assert(await grid.evaluate(e=>Math.abs(e.firstElementChild.getBoundingClientRect().width-e.getBoundingClientRect().width)<1),'notice spans the widget width');
+   for(const width of [390,1049,1050,1389,1440,2560]){
+    await page.setViewportSize({width,height:900});
+    assert(await grid.evaluate(e=>Math.abs(e.firstElementChild.getBoundingClientRect().width-e.getBoundingClientRect().width)<1),`notice spans the widget width at ${width}px`);
+    assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),`notice does not overflow at ${width}px`);
+   }
    assert.equal(await grid.locator('button').count(),role==='root'?1:0);
    if(mode==='unavailable'){
     assert.match(await grid.innerText(),lang==='zh-CN'?/配置无法读取/:/could not be read/);
