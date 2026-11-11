@@ -8,7 +8,7 @@
  * 会话结构和缓冲区优先分配到 PSRAM
  */
 
-#include "ts_ssh_client.h"
+#include "ts_ssh_transport.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -64,14 +64,18 @@ static bool s_initialized = false;
 /**
  * @brief 等待 socket 可读/可写
  */
-static bool operation_expired(ts_ssh_session_t s) {
+void ts_ssh_operation_begin(ts_ssh_session_t s) {
+    s->deadline_us = esp_timer_get_time() + (int64_t)s->config.timeout_ms * 1000;
+}
+
+bool ts_ssh_operation_expired(ts_ssh_session_t s) {
     return atomic_load(&s->abort_flag) ||
            (s->config.cancelled && s->config.cancelled(s->config.cancel_context)) ||
            esp_timer_get_time() >= s->deadline_us;
 }
 
-static int wait_socket(ts_ssh_session_t s) {
-    if (operation_expired(s))
+int ts_ssh_wait_socket(ts_ssh_session_t s) {
+    if (ts_ssh_operation_expired(s))
         return -1;
     int64_t left = s->deadline_us - esp_timer_get_time();
     if (left > 100000)
@@ -91,7 +95,7 @@ static int wait_socket(ts_ssh_session_t s) {
     if (dir & LIBSSH2_SESSION_BLOCK_OUTBOUND)
         FD_SET(s->sock, &wr);
     int rc = select(s->sock + 1, &rd, &wr, NULL, &timeout);
-    return (rc < 0 && errno != EINTR) || operation_expired(s) ? -1 : rc;
+    return (rc < 0 && errno != EINTR) || ts_ssh_operation_expired(s) ? -1 : rc;
 }
 
 /* Teardown cannot wait for a remote peer. These callbacks make all remaining
@@ -263,7 +267,7 @@ esp_err_t ts_ssh_connect_with_verifier(ts_ssh_session_t s, ts_ssh_verify_cb_t ve
         return ESP_OK;
     if (s->session || s->sock >= 0)
         ts_ssh_disconnect(s);
-    s->deadline_us = esp_timer_get_time() + (int64_t)s->config.timeout_ms * 1000;
+    ts_ssh_operation_begin(s);
     s->state = TS_SSH_STATE_CONNECTING;
     s->fail = TS_SSH_FAIL_NONE;
     esp_err_t ret = ESP_FAIL;
@@ -278,7 +282,7 @@ esp_err_t ts_ssh_connect_with_verifier(ts_ssh_session_t s, ts_ssh_verify_cb_t ve
         }
         memcpy(&addr.sin_addr, host->h_addr, sizeof(addr.sin_addr));
     }
-    if (operation_expired(s))
+    if (ts_ssh_operation_expired(s))
         goto timeout;
     s->sock = socket(AF_INET, SOCK_STREAM, 0);
     if (s->sock < 0 || fcntl(s->sock, F_SETFL, O_NONBLOCK) < 0) {
@@ -291,7 +295,7 @@ esp_err_t ts_ssh_connect_with_verifier(ts_ssh_session_t s, ts_ssh_verify_cb_t ve
         goto failed;
     }
     while (rc) {
-        int ready = wait_socket(s);
+        int ready = ts_ssh_wait_socket(s);
         if (ready < 0)
             goto timeout;
         if (!ready)
@@ -311,7 +315,7 @@ esp_err_t ts_ssh_connect_with_verifier(ts_ssh_session_t s, ts_ssh_verify_cb_t ve
     }
     libssh2_session_set_blocking(s->session, 0);
     while ((rc = libssh2_session_handshake(s->session, s->sock)) == LIBSSH2_ERROR_EAGAIN)
-        if (wait_socket(s) < 0)
+        if (ts_ssh_wait_socket(s) < 0)
             goto timeout;
     if (rc) {
         s->fail = TS_SSH_FAIL_HANDSHAKE;
@@ -331,7 +335,7 @@ esp_err_t ts_ssh_connect_with_verifier(ts_ssh_session_t s, ts_ssh_verify_cb_t ve
         s->fail = TS_SSH_FAIL_HOST_KEY;
         goto failed;
     }
-    if (operation_expired(s))
+    if (ts_ssh_operation_expired(s))
         goto timeout;
     s->state = TS_SSH_STATE_AUTHENTICATING;
     do {
@@ -354,7 +358,7 @@ esp_err_t ts_ssh_connect_with_verifier(ts_ssh_session_t s, ts_ssh_verify_cb_t ve
             ret = ESP_ERR_INVALID_ARG;
             goto failed;
         }
-        if (rc == LIBSSH2_ERROR_EAGAIN && wait_socket(s) < 0)
+        if (rc == LIBSSH2_ERROR_EAGAIN && ts_ssh_wait_socket(s) < 0)
             goto timeout;
     } while (rc == LIBSSH2_ERROR_EAGAIN);
     if (rc) {
@@ -362,7 +366,7 @@ esp_err_t ts_ssh_connect_with_verifier(ts_ssh_session_t s, ts_ssh_verify_cb_t ve
         s->fail = TS_SSH_FAIL_AUTH;
         goto failed;
     }
-    if (operation_expired(s))
+    if (ts_ssh_operation_expired(s))
         goto timeout;
     s->state = TS_SSH_STATE_CONNECTED;
     return ESP_OK;
@@ -433,34 +437,34 @@ static esp_err_t exec_command(ts_ssh_session_t s, const char *command, ts_ssh_ou
     }
     if (exit_code)
         *exit_code = -1;
-    s->deadline_us = esp_timer_get_time() + (int64_t)s->config.timeout_ms * 1000;
+    ts_ssh_operation_begin(s);
     esp_err_t ret = ESP_FAIL;
     LIBSSH2_CHANNEL *channel = NULL;
     int rc;
-    while (!operation_expired(s)) {
+    while (!ts_ssh_operation_expired(s)) {
         channel = libssh2_channel_open_session(s->session);
         if (channel)
             break;
         if (libssh2_session_last_errno(s->session) != LIBSSH2_ERROR_EAGAIN)
             goto failed;
-        if (wait_socket(s) < 0)
+        if (ts_ssh_wait_socket(s) < 0)
             goto timeout;
     }
-    if (!channel || operation_expired(s))
+    if (!channel || ts_ssh_operation_expired(s))
         goto timeout;
     while ((rc = libssh2_channel_exec(channel, command)) == LIBSSH2_ERROR_EAGAIN)
-        if (wait_socket(s) < 0)
+        if (ts_ssh_wait_socket(s) < 0)
             goto timeout;
     if (rc)
         goto failed;
     if (input) {
         size_t sent = 0;
         while (sent < input_len) {
-            if (operation_expired(s))
+            if (ts_ssh_operation_expired(s))
                 goto timeout;
             ssize_t written = libssh2_channel_write(channel, input + sent, input_len - sent);
             if (written == LIBSSH2_ERROR_EAGAIN || written == 0) {
-                if (wait_socket(s) < 0)
+                if (ts_ssh_wait_socket(s) < 0)
                     goto timeout;
             } else if (written < 0) {
                 set_error(s, "Failed to send command input");
@@ -470,7 +474,7 @@ static esp_err_t exec_command(ts_ssh_session_t s, const char *command, ts_ssh_ou
             }
         }
         while ((rc = libssh2_channel_send_eof(channel)) == LIBSSH2_ERROR_EAGAIN)
-            if (wait_socket(s) < 0)
+            if (ts_ssh_wait_socket(s) < 0)
                 goto timeout;
         if (rc) {
             set_error(s, "Failed to close command input");
@@ -483,7 +487,7 @@ static esp_err_t exec_command(ts_ssh_session_t s, const char *command, ts_ssh_ou
         bool got_data = false;
         for (int stream = 0; stream < 2; stream++) {
             /* One bounded chunk per stream prevents stdout starving stderr/cancel. */
-            if (operation_expired(s))
+            if (ts_ssh_operation_expired(s))
                 goto timeout;
             char buffer[512];
             rc = libssh2_channel_read_ex(channel, stream ? SSH_EXTENDED_DATA_STDERR : 0, buffer,
@@ -522,11 +526,11 @@ static esp_err_t exec_command(ts_ssh_session_t s, const char *command, ts_ssh_ou
         /* Drain buffered bytes even when EOF arrived with the last packet. */
         if (!got_data && libssh2_channel_eof(channel))
             break;
-        if (!got_data && wait_socket(s) < 0)
+        if (!got_data && ts_ssh_wait_socket(s) < 0)
             goto timeout;
     }
     while ((rc = libssh2_channel_close(channel)) == LIBSSH2_ERROR_EAGAIN)
-        if (wait_socket(s) < 0)
+        if (ts_ssh_wait_socket(s) < 0)
             goto timeout;
     if (rc)
         goto failed;

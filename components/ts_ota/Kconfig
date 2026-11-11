@@ -72,7 +72,7 @@ menu "TianShanOS OTA Configuration"
 
     config TS_OTA_DEFAULT_URL
         string "Default OTA server URL"
-        default "https://ota.example.com/tianshanos"
+        default "https://ota.rminte.com"
         depends on TS_OTA_HTTPS_ENABLED
         help
             Default URL for checking and downloading OTA updates.

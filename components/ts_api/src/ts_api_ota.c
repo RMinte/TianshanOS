@@ -19,6 +19,7 @@
 #include "ts_security.h"
 #include "nvs_flash.h"
 #include "nvs.h"
+#include "sdkconfig.h"
 
 static const char *TAG = "ts_api_ota";
 static atomic_flag s_ota_probe_busy = ATOMIC_FLAG_INIT;
@@ -26,9 +27,24 @@ static atomic_flag s_ota_probe_busy = ATOMIC_FLAG_INIT;
 // NVS 存储键
 #define NVS_NAMESPACE_OTA "ota_config"
 #define NVS_KEY_SERVER_URL "server_url"
+#define LEGACY_OTA_SERVER_URL "http://a6000nvlink.aoseo.com:15207"
 
-// 服务器 URL 缓存
+// 用户配置的服务器 URL，空字符串表示使用固件默认地址。
 static char s_ota_server_url[256] = {0};
+
+static const char *ota_server_url(void)
+{
+#ifdef CONFIG_TS_OTA_DEFAULT_URL
+    if (!s_ota_server_url[0]) return CONFIG_TS_OTA_DEFAULT_URL;
+#endif
+    return s_ota_server_url;
+}
+
+static bool ota_server_is_legacy(const char *url)
+{
+    return strcmp(url, LEGACY_OTA_SERVER_URL) == 0 ||
+           strcmp(url, LEGACY_OTA_SERVER_URL "/") == 0;
+}
 
 // ============================================================================
 //                           OTA Server Config
@@ -65,7 +81,7 @@ static esp_err_t load_ota_server_config(void)
 /**
  * @brief 保存 OTA 服务器配置到 NVS
  */
-static esp_err_t save_ota_server_config(void)
+static esp_err_t save_ota_server_config(const char *url)
 {
     nvs_handle_t handle;
     esp_err_t ret = nvs_open(NVS_NAMESPACE_OTA, NVS_READWRITE, &handle);
@@ -74,8 +90,8 @@ static esp_err_t save_ota_server_config(void)
         return ret;
     }
 
-    if (s_ota_server_url[0]) {
-        ret = nvs_set_str(handle, NVS_KEY_SERVER_URL, s_ota_server_url);
+    if (url[0]) {
+        ret = nvs_set_str(handle, NVS_KEY_SERVER_URL, url);
     } else {
         ret = nvs_erase_key(handle, NVS_KEY_SERVER_URL);
         if (ret == ESP_ERR_NVS_NOT_FOUND) {
@@ -91,6 +107,17 @@ static esp_err_t save_ota_server_config(void)
     return ret;
 }
 
+static void init_ota_server_config(void)
+{
+    if (load_ota_server_config() == ESP_OK && ota_server_is_legacy(s_ota_server_url)) {
+        s_ota_server_url[0] = '\0';
+        if (save_ota_server_config("") != ESP_OK) {
+            ESP_LOGW(TAG, "Could not clear legacy OTA server URL from NVS");
+        }
+    }
+    ESP_LOGI(TAG, "OTA server URL: %s", ota_server_url());
+}
+
 /**
  * @brief API: ota.server.get - 获取 OTA 服务器地址
  */
@@ -98,9 +125,10 @@ static esp_err_t api_ota_server_get(const cJSON *params, ts_api_result_t *result
 {
     (void)params;
 
+    const char *url = ota_server_url();
     cJSON *json = cJSON_CreateObject();
-    if (!json || !cJSON_AddStringToObject(json, "url", s_ota_server_url) ||
-        !cJSON_AddBoolToObject(json, "configured", s_ota_server_url[0] != '\0')) {
+    if (!json || !cJSON_AddStringToObject(json, "url", url) ||
+        !cJSON_AddBoolToObject(json, "configured", url[0] != '\0')) {
         cJSON_Delete(json);
         ts_api_result_error(result, TS_API_ERR_NO_MEM, "内存不足");
         return ESP_ERR_NO_MEM;
@@ -130,6 +158,7 @@ static esp_err_t api_ota_server_set(const cJSON *params, ts_api_result_t *result
 
     // URL 可以是空字符串（表示清除）
     const char *url = cJSON_IsString(url_item) ? url_item->valuestring : "";
+    if (ota_server_is_legacy(url)) url = "";
 
     // 验证 URL 长度
     if (strlen(url) >= sizeof(s_ota_server_url)) {
@@ -137,18 +166,12 @@ static esp_err_t api_ota_server_set(const cJSON *params, ts_api_result_t *result
         return ESP_ERR_INVALID_ARG;
     }
 
-    // 更新缓存
-    strncpy(s_ota_server_url, url, sizeof(s_ota_server_url) - 1);
-    s_ota_server_url[sizeof(s_ota_server_url) - 1] = '\0';
-
-    ESP_LOGI(TAG, "OTA server configuration updated (configured=%d)", s_ota_server_url[0] != 0);
-
     // 检查是否需要持久化
     cJSON *save_item = cJSON_GetObjectItem(params, "save");
     bool do_save = save_item && cJSON_IsTrue(save_item);
 
     if (do_save) {
-        esp_err_t ret = save_ota_server_config();
+        esp_err_t ret = save_ota_server_config(url);
         if (ret != ESP_OK) {
             ts_api_result_error(result, TS_API_ERR_INTERNAL, "保存到 NVS 失败");
             return ret;
@@ -156,8 +179,11 @@ static esp_err_t api_ota_server_set(const cJSON *params, ts_api_result_t *result
         ESP_LOGI(TAG, "OTA server URL saved to NVS");
     }
 
+    strcpy(s_ota_server_url, url);
+    ESP_LOGI(TAG, "OTA server configuration updated (configured=%d)", s_ota_server_url[0] != 0);
+
     cJSON *json = cJSON_CreateObject();
-    cJSON_AddStringToObject(json, "url", s_ota_server_url);
+    cJSON_AddStringToObject(json, "url", ota_server_url());
     cJSON_AddBoolToObject(json, "saved", do_save);
 
     ts_api_result_ok(result, json);
@@ -688,6 +714,7 @@ static esp_err_t api_ota_www_start(const cJSON *params, ts_api_result_t *result)
     // Get URL - either from params or use server URL with www.bin suffix
     cJSON *url_item = cJSON_GetObjectItem(params, "url");
     char url[300] = {0};
+    const char *server = ota_server_url();
     
     if (url_item && cJSON_IsString(url_item) && strlen(url_item->valuestring) >= sizeof(url)) {
         ts_api_result_error(result, TS_API_ERR_INVALID_ARG, "URL too long");
@@ -695,9 +722,9 @@ static esp_err_t api_ota_www_start(const cJSON *params, ts_api_result_t *result)
     }
     if (url_item && cJSON_IsString(url_item) && url_item->valuestring[0]) {
         strncpy(url, url_item->valuestring, sizeof(url) - 1);
-    } else if (s_ota_server_url[0]) {
+    } else if (server[0]) {
         // Use server URL and replace firmware.bin with www.bin
-        strncpy(url, s_ota_server_url, sizeof(url) - 1);
+        strncpy(url, server, sizeof(url) - 1);
         // Try to replace common firmware names
         char *bin_pos = strstr(url, "firmware.bin");
         if (bin_pos) {
@@ -1131,8 +1158,7 @@ esp_err_t ts_api_ota_register(void)
     size_t num_endpoints = sizeof(endpoints) / sizeof(endpoints[0]);
     
     // 加载保存的配置
-    load_ota_server_config();
-    ESP_LOGI(TAG, "Loaded OTA server URL: %s", s_ota_server_url[0] ? s_ota_server_url : "(not set)");
+    init_ota_server_config();
     
     for (size_t i = 0; i < num_endpoints; i++) {
         esp_err_t ret = ts_api_register(&endpoints[i]);

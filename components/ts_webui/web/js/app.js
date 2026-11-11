@@ -6535,16 +6535,16 @@ async function loadNetworkPage() {
                 <!-- 左侧：接口配置 -->
                 <div>
                     <div class="sec-h">
-                        <span class="t-section sec-t">${t('network.interfaceConfig')}</span>
-                        <div class="seg">
-                            <button class="panel-tab on" onclick="switchNetTab('eth')">${t('network.ethernet')}</button>
-                            <button class="panel-tab" onclick="switchNetTab('wifi')">${t('network.wifi')}</button>
-                        </div>
+                        <span class="t-section sec-t" id="net-interface-title">${t('network.interfaceConfig')}</span>
                     </div>
-                    
-                    <!-- 以太网配置面板 -->
-                    <div id="net-tab-eth">
-                        <div class="card">
+                    <div class="card net-interface">
+                        <div class="seg" role="group" aria-labelledby="net-interface-title">
+                            <button class="panel-tab on" aria-pressed="true" aria-controls="net-tab-eth" onclick="switchNetTab('eth')">${t('network.ethernet')}</button>
+                            <button class="panel-tab" aria-pressed="false" aria-controls="net-tab-wifi" onclick="switchNetTab('wifi')">${t('network.wifi')}</button>
+                        </div>
+
+                        <!-- 以太网配置面板 -->
+                        <div id="net-tab-eth">
                             <div class="kv"><span>${t('network.linkStatus')}</span><span><span class="state" id="net-eth-link">-</span></span></div>
                             ${kvRow(t('network.ipAddress'), '-', 'net-eth-ip')}
                             ${kvRow(t('network.subnetMask'), '-', 'net-eth-netmask')}
@@ -6552,11 +6552,9 @@ async function loadNetworkPage() {
                             ${kvRow(t('network.dns'), '-', 'net-eth-dns')}
                             <div class="kv"><span>${t('network.mac')}</span><span><span class="mono" id="net-eth-mac">-</span></span></div>
                         </div>
-                    </div>
-                    
-                    <!-- WiFi 配置面板 -->
-                    <div class="hidden" id="net-tab-wifi">
-                        <div class="card net-wifi">
+
+                        <!-- WiFi 配置面板 -->
+                        <div class="net-wifi hidden" id="net-tab-wifi">
                             <div class="between">
                                 <span class="t-label">${t('network.mode')}</span>
                                 <select id="wifi-mode-select" class="field" style="width:120px" onchange="setWifiMode()">
@@ -6647,7 +6645,7 @@ async function loadNetworkPage() {
                     <div id="network-lpmu-access-summary" class="t-note" style="word-break:break-word"></div>
                     <button type="button" class="btn sm" id="network-lpmu-result-btn" style="margin-top:8px" hidden onclick="showNetworkLpmuAccessResult(networkLpmuAccessLastInfo)">${t('networkPage.lpmuAccessViewResult')}</button>
                 </div>
-                <button class="btn sm lpmu-access-btn" id="network-lpmu-access-btn" onclick="startNetworkLpmuAccess()">${t('networkPage.lpmuAccessBtn')}</button>
+                <button class="btn sm" id="network-lpmu-access-btn" onclick="startNetworkLpmuAccess()">${t('networkPage.lpmuAccessBtn')}</button>
             </div>
 
             <!-- WiFi 扫描 -->
@@ -6687,11 +6685,13 @@ async function loadNetworkPage() {
 
 // 网络页面 Tab 切换
 function switchNetTab(tab) {
-    document.querySelectorAll('.panel-tab').forEach(t => t.classList.remove('on'));
-    ['eth', 'wifi'].forEach(k => document.getElementById('net-tab-' + k).classList.add('hidden'));
-    
-    event.target.classList.add('on');
-    document.getElementById('net-tab-' + tab).classList.remove('hidden');
+    document.querySelectorAll('.net-interface .panel-tab').forEach(button => {
+        const panelId = button.getAttribute('aria-controls');
+        const selected = panelId === 'net-tab-' + tab;
+        button.classList.toggle('on', selected);
+        button.setAttribute('aria-pressed', String(selected));
+        document.getElementById(panelId).classList.toggle('hidden', !selected);
+    });
 }
 
 async function refreshNetworkPage() {
@@ -14078,7 +14078,8 @@ function compareSemVer(v1, v2) {
 
 // OTA 服务器相关函数
 async function saveOtaServer() {
-    const serverUrl = document.getElementById('ota-server-input').value.trim();
+    const input = document.getElementById('ota-server-input');
+    const serverUrl = input.value.trim();
     
     try {
         const result = await api.call('ota.server.set', {
@@ -14087,7 +14088,12 @@ async function saveOtaServer() {
         }, 'POST');
         
         if (result.code === 0) {
-            if (serverUrl) {
+            const effectiveUrl = result.data?.url;
+            if (typeof effectiveUrl === 'string' &&
+                document.getElementById('ota-server-input') === input && input.value.trim() === serverUrl) {
+                input.value = effectiveUrl;
+            }
+            if (effectiveUrl ?? serverUrl) {
                 showToast(typeof t === 'function' ? t('toast.otaServerSaved') : 'OTA 服务器地址已保存', 'success');
             } else {
                 showToast(typeof t === 'function' ? t('toast.otaServerCleared') : 'OTA 服务器地址已清除', 'info');
