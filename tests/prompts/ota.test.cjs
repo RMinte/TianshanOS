@@ -64,6 +64,7 @@ async function device(language = 'zh-CN', includeWww = true) {
         if (endpoint === 'storage.info') return {code: 0, data: {type: 'file'}};
         if (endpoint === 'ota.abort' || endpoint === 'ota.www.abort') return {code: 0, data: {}};
         if (endpoint === 'ota.server.get') return {code: 0, data: {url: 'https://ota.fixture.invalid'}};
+        if (endpoint === 'ota.server.set') return {code: 0, data: {url: params.url || 'https://ota.rminte.com'}};
         throw new Error(`Unexpected API ${endpoint}`);
     };
     h.ctx.apiCall = apiCall;
@@ -106,6 +107,15 @@ async function device(language = 'zh-CN', includeWww = true) {
         count: endpoint => calls.filter(call => call.endpoint === endpoint).length,
         boot: () => { state.running = {...state.next}; }};
 }
+
+test('clearing an OTA server override shows the effective default immediately', async () => {
+    const d = await device();
+    const input = d.h.el('ota-server-input');
+    input.value = '';
+    await d.h.run('saveOtaServer()');
+    assert.equal(d.count('ota.server.set'), 1);
+    assert.equal(input.value, 'https://ota.rminte.com');
+});
 
 test('proxy owns both images while normal progress polling remains active', async () => {
     const d = await device();

@@ -1,6 +1,6 @@
 repo: RMinte/lpmu-agx-network-setup
-ref: main
-commit: 9ee3c51de5c9612e6e2c68d271ae329bd67b66ce
+ref: fix/detect-lpmu-internal-interface
+commit: 3faa1ef4bc144843f5c8b136c095dc2dc79b6f2b
 archive: lpmu-agx-network-setup.tar.gz
-sha256: 77ac9410a62eea50b2a5079d3a7adb1012deee1188c03e0a5cfb4609e4e5f636
-size: 12874
+sha256: b53c20ffd4651a58246a6f06e1ce3f275d0768c1627e80acdcdae7bdc823faf5
+size: 7454

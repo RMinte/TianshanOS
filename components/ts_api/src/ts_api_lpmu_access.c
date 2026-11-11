@@ -32,6 +32,7 @@
 #define LPMU_HOST              "10.10.99.99"
 #define LPMU_PORT              22
 #define LPMU_REMOTE_TARBALL    "lpmu-agx-network-setup.tar.gz"
+#define LPMU_REMOTE_MISMATCH   1
 #define LPMU_STACK_SIZE        8192
 #define LPMU_OUTPUT_TAIL_MAX   1024
 #define LPMU_LOG_PATH          "/sdcard/logs/lpmu-access.log"
@@ -39,6 +40,8 @@
 
 extern const uint8_t lpmu_archive_start[] asm("_binary_lpmu_agx_network_setup_tar_gz_start");
 extern const uint8_t lpmu_archive_end[] asm("_binary_lpmu_agx_network_setup_tar_gz_end");
+extern const char lpmu_checksums_start[] asm("_binary_lpmu_agx_network_setup_sha256_start");
+extern const char lpmu_checksums_end[] asm("_binary_lpmu_agx_network_setup_sha256_end");
 
 typedef enum {
     LPMU_STAGE_IDLE = 0,
@@ -50,7 +53,6 @@ typedef enum {
     LPMU_STAGE_CHECKING_REMOTE,
     LPMU_STAGE_UPLOADING,
     LPMU_STAGE_EXTRACTING,
-    LPMU_STAGE_CHMOD,
     LPMU_STAGE_RUNNING_SCRIPT,
     LPMU_STAGE_SUCCESS,
     LPMU_STAGE_FAILED,
@@ -122,7 +124,6 @@ static const char *lpmu_stage_str(lpmu_stage_t stage)
         case LPMU_STAGE_CHECKING_REMOTE: return "checking_remote";
         case LPMU_STAGE_UPLOADING: return "uploading";
         case LPMU_STAGE_EXTRACTING: return "extracting";
-        case LPMU_STAGE_CHMOD: return "chmod";
         case LPMU_STAGE_RUNNING_SCRIPT: return "running_script";
         case LPMU_STAGE_SUCCESS: return "success";
         case LPMU_STAGE_FAILED: return "failed";
@@ -244,6 +245,21 @@ static void lpmu_append_tail_locked(const char *data, size_t len)
     s_status.output_tail[s_status.output_len] = '\0';
 }
 
+static bool lpmu_utf8_continuation(char byte)
+{
+    return ((unsigned char)byte & 0xc0) == 0x80;
+}
+
+static size_t lpmu_complete_utf8_prefix(const char *text, size_t len)
+{
+    size_t start = len;
+    while (start && lpmu_utf8_continuation(text[start - 1])) start--;
+    if (!start) return 0;
+    unsigned char lead = (unsigned char)text[start - 1];
+    size_t width = lead >= 0xf0 ? 4 : lead >= 0xe0 ? 3 : lead >= 0xc0 ? 2 : 1;
+    return len - (start - 1) < width ? start - 1 : len;
+}
+
 static void lpmu_append_log(const char *data, size_t len)
 {
     // Only the running task owns this descriptor; another start is excluded.
@@ -310,6 +326,18 @@ static esp_err_t lpmu_run_command(ts_ssh_session_t session, const char *command,
         *exit_code = code;
     }
     return ret;
+}
+
+static esp_err_t lpmu_check_remote(ts_ssh_session_t session, int *exit_code)
+{
+    // Compare the actual files, then check that the entry point and its NAT dependency can run.
+    const char *command = "cd \"$HOME\" || exit 2; sha256sum --check --status - && "
+                          "test -x lpmu-agx-network-setup/lpmu/setup-smart-route.sh && "
+                          "test -x lpmu-agx-network-setup/lpmu/setup-nat.sh";
+    lpmu_record_command(command);
+    return ts_ssh_exec_stream_input(session, command,
+                                    lpmu_checksums_start, lpmu_checksums_end - lpmu_checksums_start,
+                                    lpmu_output_cb, NULL, exit_code);
 }
 
 static const char *lpmu_verify_known_host(ts_ssh_session_t session, char *err, size_t err_size)
@@ -415,15 +443,17 @@ static void lpmu_task(void *arg)
     }
 
     lpmu_set_stage(LPMU_STAGE_CHECKING_REMOTE);
-    ret = lpmu_run_command(session,
-                           "test -f \"$HOME/lpmu-agx-network-setup/lpmu/setup-smart-route.sh\"",
-                           &exit_code);
+    ret = lpmu_check_remote(session, &exit_code);
     if (ret != ESP_OK) {
         lpmu_fail(ret, exit_code, "access_remote_check_failed", "remote check failed: %s", ts_ssh_get_error(session));
         goto cleanup;
     }
+    if (exit_code != 0 && exit_code != LPMU_REMOTE_MISMATCH) {
+        lpmu_fail(ESP_FAIL, exit_code, "access_remote_check_failed", "remote checksum command failed (exit=%d)", exit_code);
+        goto cleanup;
+    }
 
-    if (exit_code != 0) {
+    if (exit_code == LPMU_REMOTE_MISMATCH) {
         lpmu_set_stage(LPMU_STAGE_UPLOADING);
         lpmu_lock();
         s_status.bytes_transferred = 0;
@@ -444,7 +474,7 @@ static void lpmu_task(void *arg)
         lpmu_set_stage(LPMU_STAGE_EXTRACTING);
         ret = lpmu_run_command(session,
                                "mkdir -p \"$HOME/lpmu-agx-network-setup\" && "
-                               "tar -xzf \"$HOME/lpmu-agx-network-setup.tar.gz\" "
+                               "tar -xpzf \"$HOME/lpmu-agx-network-setup.tar.gz\" "
                                "-C \"$HOME/lpmu-agx-network-setup\" --strip-components=1",
                                &exit_code);
         if (ret != ESP_OK || exit_code != 0) {
@@ -453,17 +483,14 @@ static void lpmu_task(void *arg)
                       ret != ESP_OK ? ts_ssh_get_error(session) : "tar command failed");
             goto cleanup;
         }
-    }
 
-    lpmu_set_stage(LPMU_STAGE_CHMOD);
-    ret = lpmu_run_command(session,
-                           "chmod +x \"$HOME/lpmu-agx-network-setup/lpmu/\"*.sh",
-                           &exit_code);
-    if (ret != ESP_OK || exit_code != 0) {
-        lpmu_fail(ret != ESP_OK ? ret : ESP_FAIL, exit_code,
-                  "access_chmod_failed", "remote chmod failed (exit=%d): %s", exit_code,
-                  ret != ESP_OK ? ts_ssh_get_error(session) : "chmod command failed");
-        goto cleanup;
+        ret = lpmu_check_remote(session, &exit_code);
+        if (ret != ESP_OK || exit_code != 0) {
+            lpmu_fail(ret != ESP_OK ? ret : ESP_FAIL, exit_code,
+                      "access_unpack_failed", "remote checksum verification after extract failed (exit=%d): %s",
+                      exit_code, ret != ESP_OK ? ts_ssh_get_error(session) : "installed files did not pass verification");
+            goto cleanup;
+        }
     }
 
     lpmu_set_stage(LPMU_STAGE_RUNNING_SCRIPT);
@@ -608,6 +635,13 @@ static esp_err_t api_lpmu_access_status(const cJSON *params, ts_api_result_t *re
     lpmu_status_t snap = s_status;
     lpmu_unlock();
 
+    // The byte cap can split the first character, and a live SSH chunk
+    // can end before the last character is complete.
+    size_t start = 0;
+    while (start < snap.output_len && lpmu_utf8_continuation(snap.output_tail[start])) start++;
+    char *output_tail = snap.output_tail + start;
+    output_tail[lpmu_complete_utf8_prefix(output_tail, snap.output_len - start)] = '\0';
+
     cJSON *data = cJSON_CreateObject();
     cJSON_AddNumberToObject(data, "run_id", snap.run_id);
     cJSON_AddBoolToObject(data, "running", snap.running);
@@ -623,7 +657,7 @@ static esp_err_t api_lpmu_access_status(const cJSON *params, ts_api_result_t *re
     cJSON_AddStringToObject(data, "reason", snap.reason ? snap.reason : "");
     cJSON_AddStringToObject(data, "failure_stage", snap.reason ? lpmu_stage_str(snap.failure_stage) : "");
     cJSON_AddStringToObject(data, "last_error", snap.last_error);
-    cJSON_AddStringToObject(data, "output_tail", snap.output_tail);
+    cJSON_AddStringToObject(data, "output_tail", output_tail);
     cJSON_AddStringToObject(data, "host", LPMU_HOST);
     cJSON_AddNumberToObject(data, "port", LPMU_PORT);
 
@@ -705,16 +739,9 @@ static esp_err_t api_lpmu_access_log(const cJSON *params, ts_api_result_t *resul
     size_t count = received > 0 ? (size_t)received : 0;
     // Keep a UTF-8 character intact across JSON pages.
     if (!read_failed && count) {
-        size_t start = count;
-        while (start && ((unsigned char)chunk[start - 1] & 0xc0) == 0x80) start--;
-        if (start) {
-            unsigned char lead = (unsigned char)chunk[start - 1];
-            size_t width = lead >= 0xf0 ? 4 : lead >= 0xe0 ? 3 : lead >= 0xc0 ? 2 : 1;
-            if (count - (start - 1) < width) {
-                if (position + count == log_len) read_failed = true;
-                else count = start - 1;
-            }
-        } else read_failed = true;
+        size_t complete = lpmu_complete_utf8_prefix(chunk, count);
+        if (complete != count && position + count == log_len) read_failed = true;
+        count = complete;
     }
     if (!count && position < log_len) read_failed = true;
 

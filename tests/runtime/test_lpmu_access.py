@@ -1,13 +1,35 @@
 #!/usr/bin/env python3
 """Exercise production LPMU API/task with synthetic SSH, no device writes."""
 from pathlib import Path
+from hashlib import sha256
+import json
 import os
 import re
 import subprocess
+import tarfile
 import tempfile
 
 root = Path(__file__).resolve().parents[2]
 idf = Path(os.environ.get('IDF_PATH', '/Users/massif/esp/v5.5.2/esp-idf'))
+assets = root / 'components/ts_api/assets'
+archive = assets / 'lpmu-agx-network-setup.tar.gz'
+checksums = (assets / 'lpmu-agx-network-setup.sha256').read_text()
+
+with tarfile.open(archive) as bundle:
+    expected_checksums = {}
+    for member in bundle.getmembers():
+        parts = Path(member.name).parts
+        assert len(parts) >= 2 and parts[1] == 'lpmu', member.name
+        if member.isdir():
+            assert member.mode == 0o755, member.name
+            continue
+        assert member.isfile() and member.mode in (0o644, 0o755), member.name
+        if parts[-1] in ('setup-smart-route.sh', 'setup-nat.sh'):
+            assert member.mode == 0o755, member.name
+        path = 'lpmu-agx-network-setup/' + '/'.join(parts[1:])
+        expected_checksums[path] = sha256(bundle.extractfile(member).read()).hexdigest()
+    assert {'lpmu-agx-network-setup/lpmu/' + name for name in ('setup-smart-route.sh', 'setup-nat.sh')} <= expected_checksums.keys()
+    assert checksums == ''.join(f'{digest}  {path}\n' for path, digest in sorted(expected_checksums.items()))
 
 def extract(path, name):
     source = (root / path).read_text()
@@ -31,6 +53,7 @@ code = r'''
 #define LPMU_HOST "10.10.99.99"
 #define LPMU_PORT 22
 #define LPMU_REMOTE_TARBALL "lpmu-agx-network-setup.tar.gz"
+#define LPMU_REMOTE_MISMATCH 1
 #define LPMU_STACK_SIZE 8192
 #define LPMU_OUTPUT_TAIL_MAX 1024
 #define LPMU_LOG_PATH "TEST_LOG_PATH"
@@ -40,8 +63,10 @@ code = r'''
 #define TS_USB_MUX_LPMU 1
 typedef int BaseType_t;
 typedef void *TaskHandle_t;
-static uint8_t lpmu_archive_start[12874];
+static uint8_t lpmu_archive_start[TEST_ARCHIVE_SIZE];
 #define lpmu_archive_end (lpmu_archive_start + sizeof(lpmu_archive_start))
+static const char lpmu_checksums_start[] = TEST_CHECKSUMS;
+#define lpmu_checksums_end (lpmu_checksums_start + sizeof(lpmu_checksums_start) - 1)
 static StaticSemaphore_t mutex;
 static SemaphoreHandle_t xSemaphoreCreateMutex(void) { return xSemaphoreCreateMutexStatic(&mutex); }
 static void (*pending_task)(void *);
@@ -50,14 +75,15 @@ static size_t secret_size;
 static int64_t monotonic_us;
 static int64_t esp_timer_get_time(void) {monotonic_us+=7;return monotonic_us;}
 static int task_starts, secret_wipes, script_runs, uploads, active_sessions;
-static bool allocation_failure, task_failure, configured = true, missing_project;
+static bool allocation_failure, task_failure, configured = true;
 static bool sd_failure, log_read_allocation_failure;
 static bool log_close_failure;
 static bool task_executing, log_write_failure, log_short_write;
 static unsigned uxTaskGetStackHighWaterMark(TaskHandle_t task) {assert(!task && task_executing);return 1536;}
 static bool log_open_failure, log_read_failure, log_short_read, log_seek_failure;
 static bool replace_run_during_read;
-static int remote_extract_exit, remote_chmod_exit, upload_error;
+static int remote_extract_exit, upload_error;
+static int remote_checksum_exit, installed_checksum_exit, remote_checksum_error;
 static int io_observations, log_read_calls;
 static void observe_io(void);
 static int test_open(const char *path, int flags, ...);
@@ -114,19 +140,30 @@ esp_err_t ts_known_hosts_verify(ts_ssh_session_t s,ts_host_verify_result_t *out,
 }
 esp_err_t ts_ssh_exec_stream(ts_ssh_session_t s,const char *cmd,ts_ssh_output_cb_t cb,void *ctx,int *exit) {
     assert(!strstr(cmd,secret));*exit=0;
-    if(strstr(cmd,"test -f")){assert(strstr(cmd,"$HOME/lpmu-agx-network-setup/lpmu/setup-smart-route.sh"));*exit=missing_project?1:0;}
-    if(strstr(cmd,"tar -xzf")){assert(strstr(cmd,"-C \"$HOME/lpmu-agx-network-setup\" --strip-components=1"));*exit=remote_extract_exit;}
-    if(strstr(cmd,"chmod")){assert(strstr(cmd,"$HOME/lpmu-agx-network-setup/lpmu/"));*exit=remote_chmod_exit;}
+    assert(strstr(cmd,"tar -xpzf \"$HOME/lpmu-agx-network-setup.tar.gz\""));
+    assert(strstr(cmd,"-C \"$HOME/lpmu-agx-network-setup\" --strip-components=1"));
+    *exit=remote_extract_exit;
+    if(!remote_extract_exit) remote_checksum_exit=installed_checksum_exit;
     return ESP_OK;
 }
 esp_err_t ts_scp_send_buffer(ts_ssh_session_t s,const uint8_t *data,size_t len,const char *path,int mode) {
-    assert(len==12874 && !strcmp(path,LPMU_REMOTE_TARBALL));++uploads;return upload_error;
+    assert(data==lpmu_archive_start && len==sizeof(lpmu_archive_start) && !strcmp(path,LPMU_REMOTE_TARBALL));
+    assert(remote_checksum_exit==LPMU_REMOTE_MISMATCH);
+    ++uploads;return upload_error;
 }
 static void emit(ts_ssh_output_cb_t cb,void *ctx,const char *text,bool stderr_stream) {
     if(!text)return;size_t len=strlen(text);
     while(len){size_t n=len<output_chunk?len:output_chunk;cb(text,n,stderr_stream,ctx);text+=n;len-=n;}
 }
 esp_err_t ts_ssh_exec_stream_input(ts_ssh_session_t s,const char *cmd,const char *input,size_t len,ts_ssh_output_cb_t cb,void *ctx,int *exit) {
+    if(strstr(cmd,"sha256sum")){
+        assert(strstr(cmd,"cd \"$HOME\" || exit 2; sha256sum --check --status - && "));
+        assert(strstr(cmd,"test -x lpmu-agx-network-setup/lpmu/setup-smart-route.sh"));
+        assert(strstr(cmd,"test -x lpmu-agx-network-setup/lpmu/setup-nat.sh"));
+        assert(input==lpmu_checksums_start && len==sizeof(lpmu_checksums_start)-1);
+        *exit=remote_checksum_exit;
+        return remote_checksum_error;
+    }
     ++script_runs;assert(host_status==TS_HOST_VERIFY_OK);
     assert(strstr(cmd,"cd \"$HOME/lpmu-agx-network-setup/lpmu\" && sudo -S -k -p '' -- ./setup-smart-route.sh"));
     assert(!strstr(cmd,secret));assert(len==strlen(secret)+1 && !memcmp(input,secret,len-1) && input[len-1]=='\n');
@@ -247,7 +284,7 @@ int main(void) {
     assert(!strcmp(r.message,"Failed to create LPMU access task"));
     ts_api_result_free(&r);cJSON_Delete(p);task_failure=false;
     check_case(both,NULL,0,ESP_OK,true,1); // split every UTF-8 byte
-    assert(uploads==0); // Existing project must not be replaced.
+    assert(uploads==0); // Matching scripts execute directly.
     check_case("=== 配置完成 ===\n",NULL,0,ESP_OK,false,512);
     check_case("✓ 互联网连接正常！\n",NULL,0,ESP_OK,false,512);
     check_case("ordinary successful exit\n",NULL,0,ESP_OK,false,512);
@@ -269,16 +306,30 @@ int main(void) {
     check_case(huge,NULL,0,ESP_OK,false,4096);free(huge);
     assert(s_status.log_len>100*1024);
     r=(ts_api_result_t){0};assert(api_lpmu_access_log(old,&r)==ESP_ERR_NOT_FOUND);ts_api_result_free(&r);cJSON_Delete(old);
-    missing_project=true;check_case(both,NULL,0,ESP_OK,true,512);assert(uploads==1);missing_project=false;
-    for(int failure=0;failure<3;failure++) {
-        missing_project=failure!=2;upload_error=failure==0?ESP_FAIL:0;remote_extract_exit=failure==1?1:0;remote_chmod_exit=failure==2?1:0;
+    remote_checksum_exit=LPMU_REMOTE_MISMATCH;
+    check_case(both,NULL,0,ESP_OK,true,512);assert(uploads==1);
+    check_case(both,NULL,0,ESP_OK,true,512);assert(uploads==1);
+    int runs_before_check=script_runs;
+    remote_checksum_exit=127;
+    check_case(NULL,NULL,0,ESP_OK,false,512);
+    assert(script_runs==runs_before_check && uploads==1 && !strcmp(s_status.reason,"access_remote_check_failed"));
+    remote_checksum_exit=LPMU_REMOTE_MISMATCH;remote_checksum_error=ESP_ERR_TIMEOUT;
+    check_case(NULL,NULL,0,ESP_OK,false,512);
+    assert(script_runs==runs_before_check && uploads==1 && !strcmp(s_status.reason,"access_remote_check_failed"));
+    remote_checksum_error=0;installed_checksum_exit=LPMU_REMOTE_MISMATCH;
+    check_case(NULL,NULL,0,ESP_OK,false,512);
+    assert(script_runs==runs_before_check && uploads==2 && !strcmp(s_status.reason,"access_unpack_failed"));
+    installed_checksum_exit=0;
+    for(int failure=0;failure<2;failure++) {
+        remote_checksum_exit=LPMU_REMOTE_MISMATCH;
+        upload_error=failure==0?ESP_FAIL:0;remote_extract_exit=failure==1?1:0;
         int runs=script_runs;
         script_stdout=both;script_stderr=NULL;script_exit=script_error=0;start_run();finish_run();
         assert(s_status.stage==LPMU_STAGE_FAILED && script_runs==runs);
-        assert(strstr(s_status.last_error,failure==0?"SCP upload":failure==1?"remote extract":"remote chmod"));
-        assert(!strcmp(s_status.reason,failure==0?"access_upload_failed":failure==1?"access_unpack_failed":"access_chmod_failed"));
-        assert(s_status.failure_stage==(failure==0?LPMU_STAGE_UPLOADING:failure==1?LPMU_STAGE_EXTRACTING:LPMU_STAGE_CHMOD));
-        missing_project=false;upload_error=remote_extract_exit=remote_chmod_exit=0;
+        assert(strstr(s_status.last_error,failure==0?"SCP upload":"remote extract"));
+        assert(!strcmp(s_status.reason,failure==0?"access_upload_failed":"access_unpack_failed"));
+        assert(s_status.failure_stage==(failure==0?LPMU_STAGE_UPLOADING:LPMU_STAGE_EXTRACTING));
+        remote_checksum_exit=upload_error=remote_extract_exit=0;
     }
     connection_error=ESP_FAIL;int runs=script_runs;check_case(NULL,NULL,-1,ESP_OK,false,512);assert(script_runs==runs);assert(!strcmp(s_status.reason,"access_ssh_connect_failed"));connection_error=0;
     host_status=TS_HOST_VERIFY_MISMATCH;check_case(NULL,NULL,-1,ESP_OK,false,512);assert(script_runs==runs);host_status=TS_HOST_VERIFY_OK;
@@ -341,12 +392,27 @@ int main(void) {
     assert(cJSON_GetObjectItem(diag,"log_write_us")->valuedouble>=cJSON_GetObjectItem(diag,"log_write_max_us")->valuedouble);
     assert(cJSON_GetObjectItem(diag,"log_read_us")->valuedouble>=cJSON_GetObjectItem(diag,"log_read_max_us")->valuedouble);
     ts_api_result_free(&r);cJSON_Delete(p);
+    // A live SSH chunk can split a character at both edges of the status tail.
+    start_run();
+    char split_tail[LPMU_OUTPUT_TAIL_MAX];
+    memcpy(split_tail, "测", 3);
+    memset(split_tail + 3, 'x', sizeof(split_tail) - 5);
+    memcpy(split_tail + sizeof(split_tail) - 2, "试", 2);
+    lpmu_output_cb(split_tail, sizeof(split_tail), false, NULL);
+    r=(ts_api_result_t){0};assert(api_lpmu_access_status(NULL,&r)==ESP_OK);
+    const char *safe_tail=cJSON_GetObjectItem(r.data,"output_tail")->valuestring;
+    assert(strlen(safe_tail)==sizeof(split_tail)-5 && strspn(safe_tail,"x")==strlen(safe_tail));
+    assert(cJSON_GetObjectItem(r.data,"output_bytes")->valuedouble==sizeof(split_tail));
+    ts_api_result_free(&r);
+    finish_run();
     pthread_mutex_destroy(&mutex);
     puts("PASS actual LPMU task/API: task-owned SD initialization, lock-free file I/O, 1 KiB POSIX reads, truncation/incomplete UTF-8/read/seek/write/close failures, replaced-run rejection, cleanup-before-terminal publication, password stdin/wipe, upload, host gate, split markers, zero-exit unconfirmed, 100 KiB exact reconstruction and PSRAM-only read allocation failure");
 }
 '''
 with tempfile.TemporaryDirectory(prefix='ts-lpmu-test-') as tmp:
     path = Path(tmp)
+    code = code.replace('TEST_ARCHIVE_SIZE', str(archive.stat().st_size))
+    code = code.replace('TEST_CHECKSUMS', json.dumps(checksums))
     (path / 'test.c').write_text(code.replace('TEST_LOG_PATH',str(path / 'execution.log')))
     command = ['cc', '-std=c11', '-D_DEFAULT_SOURCE', '-g', '-fsanitize=address,undefined', '-Wno-deprecated-declarations',
                '-I' + str(root / 'tests/certificate/stubs'),

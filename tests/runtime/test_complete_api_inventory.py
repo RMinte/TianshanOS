@@ -26,7 +26,7 @@ finally:sys.argv=argv
 ns['source']=source;exec(compile(text[a:b],str(f),'exec'),ns);code=ns['code'];code=code[:code.index('static esp_err_t mutation(')]
 capacity=int(re.search(r'^CONFIG_TS_API_MAX_ENDPOINTS=(\d+)$', source('sdkconfig'), re.M)[1])
 code=f'#define CONFIG_TS_API_MAX_ENDPOINTS {capacity}\n'+code
-code+='#define ESP_LOGI(...) ((void)0)\n#define ESP_LOGW(...) ((void)0)\n#define ESP_LOGE(...) ((void)0)\nstatic esp_err_t ts_config_pack_init(void){return ESP_OK;}\nstatic esp_err_t ts_ota_init(void){return ESP_OK;}\nstatic void load_ota_server_config(void){}\n'
+code+='#define ESP_LOGI(...) ((void)0)\n#define ESP_LOGW(...) ((void)0)\n#define ESP_LOGE(...) ((void)0)\nstatic esp_err_t ts_config_pack_init(void){return ESP_OK;}\nstatic esp_err_t ts_ota_init(void){return ESP_OK;}\nstatic void load_ota_server_config(void){}\nstatic void init_ota_server_config(void){}\n'
 code+='static esp_err_t lpmu_ensure_mutex(void){return ESP_OK;}\nesp_err_t ts_auth_init(void){return ESP_OK;}\n'
 # Expected values are fixed test data, never derived from ts_api_get_access().
 policy = json.loads((ROOT/'tests/runtime/api-policy-contract.json').read_text())

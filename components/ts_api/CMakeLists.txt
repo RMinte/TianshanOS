@@ -36,6 +36,7 @@ set(TS_API_SRCS
 
 set(TS_API_EMBED_FILES
     "assets/lpmu-agx-network-setup.tar.gz"
+    "assets/lpmu-agx-network-setup.sha256"
 )
 
 idf_component_register(

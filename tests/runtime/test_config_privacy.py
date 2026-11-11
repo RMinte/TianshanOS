@@ -82,7 +82,9 @@ for name in ["ts_api_result_init","ts_api_result_ok","ts_api_result_error","ts_a
 for name in ["parse_module_name","module_to_name","add_module_config_to_json","api_config_module_show","api_config_get","api_config_module_set"]:
     code+=function("components/ts_api/src/ts_api_config.c",name)
 code+='static char s_ota_server_url[256]=\"https://synthetic-user:synthetic-pass@example.invalid/?token=PRIVATE-CANARY\";\n'
-code+=function('components/ts_api/src/ts_api_ota.c','api_ota_server_get')
+code+='#define CONFIG_TS_OTA_DEFAULT_URL "https://ota.rminte.com"\n'
+for name in ('ota_server_url', 'api_ota_server_get'):
+    code+=function('components/ts_api/src/ts_api_ota.c',name)
 code+=r'''
 esp_err_t ts_api_call(const char *name,const cJSON *p,ts_api_result_t *result){
  calls++;
@@ -222,7 +224,7 @@ int main(void){
 
  ts_api_result_t ota={0};
  check(api_ota_server_get(NULL,&ota)==ESP_OK&&cJSON_IsTrue(cJSON_GetObjectItem(ota.data,"configured"))&&!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(ota.data,"url")),s_ota_server_url),"actual trusted getter keeps exact configured URL");ts_api_result_free(&ota);
- s_ota_server_url[0]=0;check(api_ota_server_get(NULL,&ota)==ESP_OK&&cJSON_IsFalse(cJSON_GetObjectItem(ota.data,"configured"))&&!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(ota.data,"url")),""),"actual empty configuration distinguishable from redaction");ts_api_result_free(&ota);
+ s_ota_server_url[0]=0;check(api_ota_server_get(NULL,&ota)==ESP_OK&&cJSON_IsTrue(cJSON_GetObjectItem(ota.data,"configured"))&&!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(ota.data,"url")),CONFIG_TS_OTA_DEFAULT_URL),"cleared override returns the trusted default URL");ts_api_result_free(&ota);
 
  for(uint32_t sid=0;sid<=3;sid++){
   module(sid,"wifi",sid==1||sid==2);module(sid,"WiFi",sid==1||sid==2);module(sid,"all",sid==1||sid==2);

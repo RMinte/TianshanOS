@@ -62,6 +62,7 @@ python3 tests/runtime/test_https_startup.py
 python3 tests/runtime/test_pki_http.py
 python3 tests/runtime/test_ota_upload_handlers.py
 python3 tests/runtime/test_ota_lifecycle.py
+python3 tests/runtime/test_ota_server.py
 python3 tests/runtime/test_source_sampling.py
 python3 tests/runtime/test_dhcp_bindings.py
 python3 tests/runtime/test_led_lifetimes.py
@@ -71,6 +72,7 @@ python3 tests/runtime/test_power_settings.py
 python3 tests/runtime/test_power_chip_crc.py
 python3 tests/runtime/test_ui_widgets.py
 python3 tests/runtime/test_scp_recv.py
+python3 tests/runtime/test_scp_send_buffer.py
 python3 tests/runtime/test_condition_roundtrip.py
 python3 tests/runtime/test_expansion.py
 python3 tests/runtime/test_ssh_copyid.py

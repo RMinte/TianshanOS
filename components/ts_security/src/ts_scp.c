@@ -10,7 +10,7 @@
 
 #include "ts_storage.h"
 #include "ts_scp.h"
-#include "ts_ssh_client.h"
+#include "ts_ssh_transport.h"
 #include "ts_core.h"  /* TS_MALLOC_PSRAM */
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
@@ -347,6 +347,25 @@ cleanup:
     return ret;
 }
 
+static bool scp_write_buffer(ts_ssh_session_t ssh_session, LIBSSH2_CHANNEL *channel,
+                             const char *data, size_t size)
+{
+    while (size > 0) {
+        if (ts_ssh_operation_expired(ssh_session)) return false;
+        ssize_t written = libssh2_channel_write(channel, data, size);
+        if (written == LIBSSH2_ERROR_EAGAIN || written == 0) {
+            if (ts_ssh_wait_socket(ssh_session) < 0) return false;
+        } else if (written < 0) {
+            ESP_LOGE(TAG, "SCP write error: %zd", written);
+            return false;
+        } else {
+            data += written;
+            size -= written;
+        }
+    }
+    return true;
+}
+
 esp_err_t ts_scp_send_buffer(ts_ssh_session_t ssh_session, const uint8_t *buffer,
                               size_t size, const char *remote_path, int mode)
 {
@@ -372,9 +391,10 @@ esp_err_t ts_scp_send_buffer(ts_ssh_session_t ssh_session, const uint8_t *buffer
     }
     
     ESP_LOGI(TAG, "SCP send buffer: %zu bytes -> %s", size, remote_path);
+    ts_ssh_operation_begin(ssh_session);
     
     /* 启动 SCP 发送 */
-    while (1) {
+    while (!ts_ssh_operation_expired(ssh_session)) {
         channel = libssh2_scp_send(session, remote_path, mode, size);
         if (channel) {
             break;
@@ -382,52 +402,57 @@ esp_err_t ts_scp_send_buffer(ts_ssh_session_t ssh_session, const uint8_t *buffer
         
         int err = libssh2_session_last_errno(session);
         if (err == LIBSSH2_ERROR_EAGAIN) {
-            scp_wait_socket(ssh_session, 100);
+            if (ts_ssh_wait_socket(ssh_session) < 0) goto failed;
             continue;
         }
         
         char *errmsg;
         libssh2_session_last_error(session, &errmsg, NULL, 0);
         ESP_LOGE(TAG, "Failed to initiate SCP send: %s", errmsg);
-        return ESP_FAIL;
+        goto failed;
     }
+    if (!channel) goto failed;
     
-    /* 写入数据 */
-    const char *ptr = (const char *)buffer;
-    size_t remaining = size;
-    
-    while (remaining > 0) {
-        ssize_t rc = libssh2_channel_write(channel, ptr, remaining);
-        
-        if (rc > 0) {
-            ptr += rc;
-            remaining -= rc;
-        } else if (rc == LIBSSH2_ERROR_EAGAIN) {
-            scp_wait_socket(ssh_session, 100);
-            continue;
-        } else {
-            ESP_LOGE(TAG, "SCP write error: %zd", rc);
-            goto cleanup;
-        }
+    // The SCP protocol uses a zero byte after the file and a zero reply from
+    // the receiver before either side closes the SSH channel.
+    if (!scp_write_buffer(ssh_session, channel, (const char *)buffer, size) ||
+        !scp_write_buffer(ssh_session, channel, "", 1)) goto failed;
+    char ack;
+    ssize_t received;
+    for (;;) {
+        if (ts_ssh_operation_expired(ssh_session)) goto failed;
+        received = libssh2_channel_read(channel, &ack, 1);
+        if (received != LIBSSH2_ERROR_EAGAIN &&
+            (received != 0 || libssh2_channel_eof(channel))) break;
+        if (ts_ssh_wait_socket(ssh_session) < 0) goto failed;
     }
+    if (received != 1 || ack != '\0') goto failed;
     
     /* 发送 EOF */
-    while (libssh2_channel_send_eof(channel) == LIBSSH2_ERROR_EAGAIN) {
-        scp_wait_socket(ssh_session, 100);
+    int (*const finish[])(LIBSSH2_CHANNEL *) = {
+        libssh2_channel_send_eof,
+        libssh2_channel_wait_eof,
+        libssh2_channel_close,
+    };
+    for (size_t i = 0; i < sizeof(finish) / sizeof(finish[0]); i++) {
+        int rc;
+        do {
+            if (ts_ssh_operation_expired(ssh_session)) goto failed;
+            rc = finish[i](channel);
+            if (rc == LIBSSH2_ERROR_EAGAIN && ts_ssh_wait_socket(ssh_session) < 0) goto failed;
+        } while (rc == LIBSSH2_ERROR_EAGAIN);
+        if (rc != 0) goto failed;
     }
-    
-    while (libssh2_channel_wait_eof(channel) == LIBSSH2_ERROR_EAGAIN) {
-        scp_wait_socket(ssh_session, 100);
-    }
-    
+
+    int exit_status = libssh2_channel_get_exit_status(channel);
+    if (libssh2_channel_free(channel) != 0 || exit_status != 0) goto failed;
     ESP_LOGI(TAG, "SCP send buffer complete");
-    ret = ESP_OK;
-    
-cleanup:
-    if (channel) {
-        libssh2_channel_free(channel);
-    }
-    
+    return ESP_OK;
+
+failed:
+    if (ts_ssh_operation_expired(ssh_session)) ret = ESP_ERR_TIMEOUT;
+    // Close the transport as a unit when channel teardown cannot be trusted.
+    ts_ssh_disconnect(ssh_session);
     return ret;
 }
 
