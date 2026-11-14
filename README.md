@@ -1,62 +1,66 @@
 ![TianshanOS](assets/tianshanos-banner-en.png)
 
-[English](README_EN.md) | [中文](README.md)
-
 # TianshanOS · 天山OS
 
-TianshanOS 是 RM-01 的设备管理系统，运行在 ESP32 带外管理控制芯片上。你可以通过浏览器查看设备状态，管理电源、风扇和灯光，配置网络，也可以设置 SSH 指令和自动化规则。
+**RM-01 的开源带外管理系统**
 
-## 主要功能
+推理计算机无响应，SSH 也连不上？只要 RM-01 的管理控制器仍有供电、管理网络仍可达，你就能打开浏览器查看电源状态，必要时从控制台或 API 执行硬件复位。平时，同一套系统也让你查看温度和功耗、管理风扇，并按自己的规则自动执行操作。
 
-| 功能 | 你可以做什么 |
-|---|---|
-| 设备状态与电源 | 查看温度、电压、功率和系统状态，控制推理计算机与应用计算机的电源。 |
-| 风扇与灯光 | 调整风扇转速，设置自动控制和温度曲线，管理灯光、特效和显示内容。 |
-| 网络与文件 | 配置 Wi-Fi 和以太网，浏览、上传和下载设备文件。 |
-| SSH 指令 | 管理远程主机和指令，执行命令，查看服务状态并启动或停止服务。 |
-| 自动化与快捷操作 | 设置数据源、条件和动作，将规则显示为首页快捷操作。 |
-| 安全与更新 | 管理账号、SSH 密钥和证书，查看版本并更新固件。 |
+[用户指南](https://www.rminte.com/) · [下载固件](https://github.com/RMinte/TianshanOS/releases/latest) · [English](README_EN.md)
 
-## 开始使用
+![RM-01 的 TianshanOS 首页，显示控制器状态、供电数据、两台计算机的电源入口和快捷操作](assets/webui-dashboard-zh.png)
 
-1. 为 RM-01 接通电源，并将设备接入网络。
-2. 在同一网络中的电脑上打开浏览器，输入设备的 IP 地址。
-3. 使用设备账号登录，在首页查看状态并打开需要的功能页面。
+*RM-01 实机 Web 界面，已隐去内网地址。*
 
-终端、指令和自动化页面需要 root 权限。配置保存、SD 卡备份和固件更新的操作步骤，请参阅用户说明。更新 0.6.2 固件时，应用固件和 Web 界面资源应使用同一版本。
+## 主机无响应时，你还能管理硬件
 
-## 用户说明
-
-详细用户说明请前往 [RMinte 官网 www.rminte.com](https://www.rminte.com/) 下载，包括日常操作、账号权限、配置保存和故障处理。
-
-## 架构
-
-系统基于 ESP-IDF。当前仓库提供 RM-01（ESP32-S3）的板级配置。
+TianshanOS 运行在 RM-01 内独立的 ESP32-S3 控制器上。浏览器连接的是这颗控制器，它通过硬件信号控制推理计算机和应用计算机的电源与复位。即使主机系统没有响应，控制器仍可以发出这些信号。
 
 ```mermaid
-flowchart TB
-    UI["Web 界面 / 控制台 / API"] --> API["统一接口 · ts_api"]
-    API --> Services["设备管理 / 网络 / SSH / 自动化"]
-    Services --> Config["配置与存储 · SD 卡 / NVS"]
-    Services --> HAL["设备驱动与硬件抽象层"]
-    HAL --> MCU["ESP32 带外管理控制芯片"]
+flowchart TD
+    Browser["浏览器"] --> Controller["ESP32-S3 · TianshanOS"]
+    Controller -->|电源与复位| Inference["推理计算机"]
+    Controller -->|电源与复位| Application["应用计算机"]
 ```
 
-## 主要目录
+这颗控制器也负责日常散热。风扇的智能模式以温度曲线为基础，参考升温趋势调整输出。温度数据失效时，风扇会按预设的调速值运行，页面会显示「温度失效」，方便你检查数据源。
 
-```text
-TianshanOS/
-├── boards/             # 板级配置：引脚、设备和服务
-├── components/         # 系统服务、设备驱动和 Web 界面
-├── main/               # 系统启动入口
-├── docs/               # 技术文档与版本说明
-├── tools/              # 构建、版本管理及服务工具
-├── sdcard/             # SD 卡资源
-├── partitions.csv     # Flash 分区表
-├── sdkconfig.defaults # 默认构建配置
-└── version.txt        # 版本号
+## 设一条规则，让设备自己动手
+
+假设你希望推理计算机温度过高时，站在机器旁就能看见告警，事后也能查到记录。可以在「自动化」里设一条规则。
+
+1. **选数据。** 接入提供主机温度的 REST 或 WebSocket 数据源，选择要监测的温度字段。
+2. **定条件。** 设定高温阈值，用规则的冷却时间限制重复告警的频率。
+3. **加动作。** 让机身 LED 矩阵显示告警，同时写一条日志。
+
+规则也能调用已配置的 SSH 指令。比如，给「启动推理服务」这条规则打开「显示在面板」和「允许手动触发」，就能从首页运行它，并查看运行记录。[了解自动化引擎](docs/AUTOMATION_ENGINE.md)
+
+## 日常使用、备份和升级
+
+把 RM-01 接入网络，在同一管理网络中用浏览器打开设备 IP，再用设备账号登录。首页集中显示供电、网络和散热状态，以及已配置的快捷操作。
+
+- **日常操作用 admin，需要管理账号、网页终端或编辑自动化时用 root。** 配置 SSH 主机时核对主机指纹，确认连接的是预期设备。[账号、SSH 与证书指南](docs/guides/security/guide.zh.md)
+- **给自动化留一份应急副本。** 可以把 SD 卡上的规则、数据源和 SSH 配置保存到控制器内部。SD 卡不可用时，系统可以使用有效的内部配置。卡上的图片、字体和日志需要另行备份。[配置保存与恢复](docs/AUTOMATION_STORAGE.md)
+- **升级前先备份，并按当前分区布局选择升级方式。** 固件与 Web 界面资源请使用同一 Release 的配套文件。旧分区布局的设备按发布说明使用 USB／串口升级包。[固件下载与升级说明](https://github.com/RMinte/TianshanOS/releases/latest)
+
+## 给开发者，从一次状态查询读懂框架
+
+TianshanOS 也是一套配置驱动的嵌入式框架。RM-01 的板级目录集中描述引脚、设备和服务，硬件操作由独立的驱动实现。想顺着代码看一遍，可以从查询推理计算机的状态开始。
+
+- **查什么。** Web 界面读取推理计算机的状态。你也可以在串口输入 `device --agx --status`。两者调用同一个 `device.status` 处理函数。[串口命令](components/ts_console/commands/ts_cmd_device.c) · [API 实现](components/ts_api/src/ts_api_device.c)
+- **怎么取到。** 处理函数向设备控制驱动读取状态。要看 RM-01 如何定义逻辑设备，以及电源和复位信号如何对应引脚，可以从板级目录里的 `devices.json` 和 `pins.json` 开始。[设备控制驱动](components/ts_drivers/src/ts_device_ctrl.c) · [RM-01 板级配置](boards/rm01_esp32s3/)
+
+源码构建使用与 CI 一致的 **ESP-IDF v5.5.2** 和 **ESP32-S3** 目标。启用 ESP-IDF 环境后即可构建：
+
+```bash
+git clone https://github.com/RMinte/TianshanOS.git
+cd TianshanOS
+idf.py -B build/local set-target esp32s3
+idf.py -B build/local build
 ```
+
+[API 参考](docs/API_REFERENCE.md) · [架构设计](docs/ARCHITECTURE_DESIGN.md) · [运行时回归测试](tests/runtime/README.md) · [CI 构建流程](.github/workflows/build.yml)
 
 ## 许可证
 
-本项目采用 [GPL-3.0 许可证](LICENSE)。
+TianshanOS 采用 [GPL-3.0 许可证](LICENSE)。
