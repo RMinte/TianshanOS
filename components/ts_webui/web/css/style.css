@@ -14,12 +14,13 @@
 --ok:#187030;--ok-dot:#34c759;--warn:#944b00;--warn-dot:#ff9500;--bad:#ad1b21;--bad-dot:#ff3b30;
 --hair:rgba(0,0,0,.10);--hair-strong:rgba(0,0,0,.16);--fill:rgba(0,0,0,.045);--fill-2:rgba(0,0,0,.07);
 --r-panel:32px;--r-card:16px;--r-inner:12px;--r-menu:16px;--r-item:10px;--r-ctl-sm:8px;--r-ctl:10px;--r-track:10px;--r-thumb:8px;
+--page-bg:#cddbe7;
 --wall:radial-gradient(ellipse at 12% 0%,#f8d9a4 0%,transparent 48%),radial-gradient(ellipse at 90% 12%,#c4dfef 0%,transparent 45%),linear-gradient(140deg,#b9cddc 0%,#e1d5bd 42%,#bbd7ef 73%,#9ec0e0 100%);
 }
 *{box-sizing:border-box}
 html{-webkit-text-size-adjust:100%}
-body{margin:0;background:#cddbe7;color:var(--ink);font:400 14px/20px var(--font);-webkit-font-smoothing:antialiased}
-body::before{content:"";position:fixed;inset:0;z-index:-1;background-color:#cddbe7;background-image:var(--wall)}
+body{margin:0;background:var(--page-bg);color:var(--ink);font:400 14px/20px var(--font);-webkit-font-smoothing:antialiased}
+body::before{content:"";position:fixed;inset:0;z-index:-1;background-color:var(--page-bg);background-image:var(--wall)}
 h1,h2,h3,h4,p{margin:0}
 a{color:var(--accent-text);text-decoration:none;cursor:pointer}
 button,input,select,textarea{font:inherit;color:inherit}
@@ -70,6 +71,8 @@ footer.foot{padding:19px 0 18px}
 .main{margin:12px 12px 0;border-radius:28px}
 }
 @media (max-width:600px){
+/* Match the solid background that Safari extends outside the page viewport. */
+body::before{background-image:linear-gradient(to bottom,var(--page-bg),transparent min(64px,12%),transparent max(calc(100% - 64px),88%),var(--page-bg)),var(--wall)}
 #ws-status{font-size:0;gap:0}
 #user-name{display:none}
 .brand{min-width:0;max-width:100%;align-items:center;gap:8px}
@@ -377,6 +380,8 @@ input[type=number]::-webkit-inner-spin-button,input[type=number]::-webkit-outer-
 .svc{display:grid;grid-template-columns:minmax(0,1fr);align-content:start;gap:0}
 .nat-row{display:flex;align-items:center;gap:16px;margin-top:12px}
 .net-lpmu{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px 16px;padding:16px 20px}
+.net-lpmu-status{flex:1 1 240px;min-width:0;overflow-wrap:anywhere}
+.net-lpmu-actions{max-width:100%}
 .dhcp-iface-row{display:flex;align-items:center;gap:8px}
 select.field{-webkit-appearance:none;appearance:none;padding-right:30px;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M.7 1.35 6 6.65l5.3-5.3' fill='none' stroke='%235f6670' stroke-width='1.5'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 9.3px top calc(50% + 1.05px)}
 .sel{position:relative;padding-right:30px}
@@ -468,13 +473,13 @@ input[type=radio]:checked{border:5px solid var(--accent-text)}
 .pwt{position:absolute;right:4px;top:4px;width:28px;height:28px;padding:0;border:0;background:none;color:var(--ink-3);display:flex;align-items:center;justify-content:center;cursor:default}
 .pwt:hover{color:var(--ink-2)}
 .pwt.active{background:none;box-shadow:none;color:var(--ink)}
-.cert-lines{margin-top:8px;display:grid;gap:2px;font-size:13px;color:var(--ink-2)}
+.cert-lines{margin-top:8px;display:grid;gap:2px;font-size:13px;color:var(--ink-2);overflow-wrap:anywhere}
 .cert-lines>:empty{display:none}
+#cert-info-details .kv>span:first-child{flex:none}
 .kv-grid{display:grid;gap:0 24px;margin-top:8px}
 .kv-grid.k4{grid-template-columns:repeat(4,1fr)}
-.kv-grid.k2{grid-template-columns:repeat(2,1fr);margin-top:12px}
-.kv-grid .kv>span:last-child{min-width:0;overflow-wrap:break-word}
-.kv-grid .kv>span.mono:last-child{overflow-wrap:anywhere}
+.kv-grid.k2{grid-template-columns:repeat(2,minmax(0,1fr));margin-top:12px}
+.kv-grid .kv>span:last-child{min-width:0;overflow-wrap:anywhere}
 .form-error{color:var(--bad);font-size:12px;line-height:16px;margin-top:8px}
 .row .rl small.form-error{color:var(--bad)}
 .field.err{border-color:var(--bad);box-shadow:0 0 0 1px var(--bad)}
@@ -482,6 +487,7 @@ input[type=radio]:checked{border:5px solid var(--accent-text)}
 /* ===== 弹窗（分组表单，见 Audit 十七 / NativeDialogs）===== */
 .modal>.sheet{position:relative;display:flex;flex-direction:column;max-width:calc(100% - 32px);max-height:calc(100% - 32px)}
 .sheet>.sb{min-height:0;overflow-y:auto;margin:0 -24px;padding:0 24px}
+#services-modal .sb{overscroll-behavior:contain}
 .sheet>.sb>.gt:first-child{margin-top:2px}
 .gw>.gt:first-child{margin-top:18px}
 .xbtn{border-color:transparent;background:var(--fill-2)}
@@ -615,6 +621,9 @@ input[type=color].swi::-webkit-color-swatch{border:0;border-radius:50%}
 @media (max-width:819px){
 .sys-top,.led-grid,.net-tiles{grid-template-columns:minmax(0,1fr)}
 }
+@media (max-width:760px){
+.net-grid{grid-template-columns:minmax(0,1fr)}
+}
 @media (max-width:600px){
 .modal>.sheet::before{content:"";display:block;flex:none;width:36px;height:5px;border-radius:3px;background:rgba(60,60,67,.3);margin:-8px auto 14px}
 .sheet .sh{margin-bottom:12px}
@@ -642,17 +651,21 @@ input[type=color].swi::-webkit-color-swatch{border:0;border-radius:50%}
 .card-h{flex-wrap:wrap}
 .stat{grid-template-columns:repeat(2,1fr);row-gap:12px}
 .stat>div:nth-child(odd){border-left:0;padding-left:0}
-.net-grid{grid-template-columns:minmax(0,1fr)}
 .nat-row{flex-wrap:wrap;gap:8px}
+.net-lpmu{gap:12px}
+.net-lpmu-status{flex-basis:100%}
 .led-f{flex-wrap:wrap}
-.seg.full:has(>button:nth-child(4)){display:grid;grid-template-columns:repeat(2,minmax(0,1fr));grid-auto-rows:1fr}
-.seg.full:has(>button:nth-child(4)) button{min-height:34px;padding:5px 8px}
+.seg.full:not(.fan-modes):has(>button:nth-child(4)){display:grid;grid-template-columns:repeat(2,minmax(0,1fr));grid-auto-rows:1fr}
+.seg.full:not(.fan-modes):has(>button:nth-child(4)) button{min-height:34px;padding:5px 8px}
 .seg button{height:auto;min-height:28px;line-height:18px;padding:5px 8px;white-space:normal}
+.fans-grid>.fan-card:not(:only-child){padding-inline:12px}
+.seg.fan-modes button{padding-inline:2px;white-space:nowrap}
+.seg.fan-modes button:focus-visible{outline:2px solid var(--accent-text);outline-offset:1px}
 .memory-gauges{grid-template-columns:minmax(0,1fr)}
 .ota-server{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}
 .ota-server>.t-label,.ota-server>.field{grid-column:1/-1}
-.sys-top,.sys-mid,.fans-grid,.led-grid,.ota-partitions,.kv-grid.k2,.match-grid{grid-template-columns:1fr}
-.kv-grid.k4{grid-template-columns:minmax(0,1fr)}
+.sys-top,.sys-mid,.fans-grid,.led-grid,.ota-partitions,.match-grid{grid-template-columns:1fr}
+.kv-grid.k2,.kv-grid.k4{grid-template-columns:minmax(0,1fr)}
 }
 
 /* Approved command list: one surface, centered header, full-width disclosure. */

@@ -1182,7 +1182,7 @@ async function loadSystemPage() {
                 <div class="card">
                     <div class="card-h">
                         <span class="t-section">${t('system.resourceMonitorOob')}</span>
-                        <button class="btn sm" onclick="showServicesModal()"><span>${t('system.services')} <span id="services-running">-</span> / <span id="services-total">-</span></span></button>
+                        <button class="btn sm" id="services-trigger" aria-haspopup="dialog" onclick="showServicesModal()"><span>${t('system.services')} <span id="services-running">-</span> / <span id="services-total">-</span></span></button>
                     </div>
                     <div class="cols g20">
                         <div>
@@ -1319,9 +1319,10 @@ async function loadSystemPage() {
             </div>
         </div>
 
-        <!-- 服务详情模态框 - 复刻全局色彩校正，关闭按钮右上角 -->
-        <div id="services-modal" class="modal hidden">${sheet(520, t('system.serviceStatusTitle'), '<div class="grp" id="services-body"></div>', `<button class="btn lg primary" onclick="hideServicesModal()">${t('common.close')}</button>`, 'hideServicesModal()')}</div>
+        <div id="services-modal" class="modal hidden" role="dialog" aria-modal="true" aria-label="${escapeHtml(t('system.serviceStatusTitle'))}">${sheet(520, t('system.serviceStatusTitle'), '<div class="grp" id="services-body"></div>', `<button class="btn lg primary" onclick="hideServicesModal()">${t('common.close')}</button>`, 'hideServicesModal()')}</div>
     `;
+
+    mountPageModals(content);
 
     // 初始加载（不含快捷操作，避免 ssh.commands.list 慢响应阻塞）
     await refreshSystemPageOnce();
@@ -2049,7 +2050,7 @@ function updateFanInfo(data) {
                 (typeof fan.guard_temperature === 'number' ? stat(t('fanPage.guardTempBrief'), `${fan.guard_temperature.toFixed(1)} °C`) : '') +
                 (typeof fan.predicted_temperature === 'number' ? stat(t('fanPage.predictedTempBrief'), `${fan.predicted_temperature.toFixed(1)} °C`) : '') +
                 (typeof fan.slope_c_per_min === 'number' ? stat(t('fanPage.slopeTempShort'), `${fan.slope_c_per_min.toFixed(2)} ${t('fanPage.slopeTempUnit')}`) : '')) : '') + '</div>';
-            const tab = (m, label) => `<button class="${mode === m ? 'on' : ''}" onclick="setFanMode(${fan.id}, '${m}')">${label}</button>`;
+            const tab = (m, label) => `<button type="button" class="${mode === m ? 'on' : ''}" aria-pressed="${mode === m}" onclick="setFanMode(${fan.id}, '${m}')">${label}</button>`;
 
             return `
             <div class="card in fan-card ${isOff ? 'is-off' : ''}">
@@ -2058,7 +2059,7 @@ function updateFanInfo(data) {
                     <span class="inl"><span class="state${stateCls}">${stateText}</span>${mode === 'auto' ? `<button type="button" class="tti" onclick="showFanAutoHelpModal()" title="${autoHelpTitle}" aria-label="${autoHelpTitle}">TTI</button>` : ''}</span>
                 </div>
                 <div class="fan-readout"><div class="bigrow fan-big"><span class="t-big fan-speed-num">${displayDuty}</span><span class="t-unit">%</span></div><div class="t-label num fan-rpm">${rpm > 0 ? rpm + ' RPM' : '&nbsp;'}</div></div>
-                <div class="seg full">${tab('off', _off)}${tab('manual', _manual)}${tab('curve', _curve)}${tab('auto', _smart)}</div>
+                <div class="seg full fan-modes">${tab('off', _off)}${tab('manual', _manual)}${tab('curve', _curve)}${tab('auto', _smart)}</div>
                 <div class="slrow ${isManual ? '' : 'disabled'}">
                     <span class="t-label">${t('fanPage.speedAdjust')}</span>
                     <div class="sl" style="--p:${duty}%"><i></i><b></b><input type="range" class="fan-slider" min="0" max="100" value="${duty}" id="fan-slider-${fan.id}" onchange="setFanSpeed(${fan.id}, this.value)" oninput="updateFanSliderUI(${fan.id}, this.value)" ${!isManual || !known ? 'disabled title="' + t('fanPage.manualModeHint') + '"' : ''}></div>
@@ -2139,7 +2140,24 @@ function updateServiceList(data) {
 // 显示/隐藏服务模态框
 function showServicesModal() {
     const modal = document.getElementById('services-modal');
-    if (modal) modal.classList.remove('hidden');
+    if (!modal) return;
+    const first = modal.querySelector('.xbtn');
+    const last = modal.querySelector('.sf button');
+    modal.onclick = event => {
+        if (event.target === modal) hideServicesModal();
+    };
+    modal.onkeydown = event => {
+        if (event.key === 'Escape') {
+            event.preventDefault();
+            event.stopPropagation();
+            hideServicesModal();
+        } else if (event.key === 'Tab' && event.target === (event.shiftKey ? first : last)) {
+            event.preventDefault();
+            (event.shiftKey ? last : first).focus();
+        }
+    };
+    modal.classList.remove('hidden');
+    first.focus();
 }
 
 /**
@@ -2195,7 +2213,9 @@ async function clearTestTemp() {
 
 function hideServicesModal() {
     const modal = document.getElementById('services-modal');
-    if (modal) modal.classList.add('hidden');
+    if (!modal) return;
+    modal.classList.add('hidden');
+    document.getElementById('services-trigger')?.focus({ preventScroll: true });
 }
 
 async function setFanSpeed(id, speed) {
@@ -6639,13 +6659,15 @@ async function loadNetworkPage() {
             
             <!-- 接入上层网络 -->
             <div class="card net-lpmu" id="lpmu-access-section">
-                <div>
+                <div class="net-lpmu-status">
                     <div class="t-section">${t('networkPage.lpmuAccessTitle')}</div>
                     <div id="network-lpmu-access-current" style="margin-top:4px"><span class="state">${t('networkPage.lpmuAccessIdle')}</span></div>
-                    <div id="network-lpmu-access-summary" class="t-note" style="word-break:break-word"></div>
-                    <button type="button" class="btn sm" id="network-lpmu-result-btn" style="margin-top:8px" hidden onclick="showNetworkLpmuAccessResult(networkLpmuAccessLastInfo)">${t('networkPage.lpmuAccessViewResult')}</button>
+                    <div id="network-lpmu-access-summary" class="t-note"></div>
                 </div>
-                <button class="btn sm" id="network-lpmu-access-btn" onclick="startNetworkLpmuAccess()">${t('networkPage.lpmuAccessBtn')}</button>
+                <div class="acts net-lpmu-actions">
+                    <button type="button" class="btn sm" id="network-lpmu-result-btn" hidden onclick="showNetworkLpmuAccessResult(networkLpmuAccessLastInfo)">${t('networkPage.lpmuAccessViewResult')}</button>
+                    <button type="button" class="btn sm" id="network-lpmu-access-btn" onclick="startNetworkLpmuAccess()">${t('networkPage.lpmuAccessBtn')}</button>
+                </div>
             </div>
 
             <!-- WiFi 扫描 -->

@@ -2,7 +2,7 @@
 const {test, before, after} = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('node:path'), fs = require('node:fs');
-const {chromium} = require('playwright');
+const {chromium} = require('../prompts/node_modules/playwright');
 const L = require('../macos27-r2/lib.cjs');
 const out = path.join(L.REPO, 'output/playwright/ui-correction');
 let browser, fixture;
@@ -135,4 +135,73 @@ for(const language of ['zh-CN','en-US']) test(language+': all eight pages at des
         }
         assert.deepEqual(errors,[]);
     } finally {await page.close();}
+});
+
+test('phone: certificate text, fan mode controls, service sheet and network error fit the viewport', async () => {
+    const page = await browser.newPage({ viewport: { width: 393, height: 694 } });
+    page.setDefaultTimeout(5000);
+    const go = route => page.goto(L.pageUrl(fixture.origin, route));
+    const fitsViewport = () => page.evaluate(() => document.documentElement.scrollWidth === innerWidth);
+    try {
+        await page.route('**/api/v1/cert/status*', route => route.fulfill({ json: { code: 0, data: {
+            has_certificate: true,
+            validity: 'valid',
+            https: { running: true, loaded_certificate_sha256: 'A'.repeat(64) },
+            cert_info: { serial: 'B'.repeat(64), validity: 'valid' }
+        } } }));
+        await go('/security');
+        await page.locator('#cert-active-fingerprint:not(:empty)').waitFor();
+        assert(await fitsViewport(), 'certificate text stays inside the document');
+        assert(await page.locator('#cert-status-card').evaluate(card => card.scrollWidth <= card.clientWidth));
+
+        await page.route('**/api/v1/service/list*', route => route.fulfill({ json: { code: 0, data: {
+            services: Array.from({ length: 16 }, (_, index) => ({ name: `service-${index}`, state: 'RUNNING', healthy: true }))
+        } } }));
+        await go('/');
+        const modes = page.locator('.fan-modes').first().locator('button');
+        await modes.first().waitFor();
+        const headerGap = await page.evaluate(() => {
+            const header = document.querySelector('.header');
+            const main = document.querySelector('.main');
+            return main.getBoundingClientRect().top - header.getBoundingClientRect().bottom;
+        });
+        assert.equal(headerGap, 12, 'the main panel starts below the two-row header with a gap');
+        const tops = await modes.evaluateAll(buttons => buttons.map(button => button.getBoundingClientRect().top));
+        assert.equal(tops.length, 4);
+        assert.equal(new Set(tops).size, 1);
+        assert(await modes.first().evaluate(button => {
+            const style = getComputedStyle(button);
+            const track = getComputedStyle(button.parentElement);
+            return style.borderTopWidth === '0px' && style.backgroundColor === 'rgba(0, 0, 0, 0)' &&
+                track.backgroundColor !== 'rgba(0, 0, 0, 0)';
+        }), 'fan modes share the desktop segment track');
+
+        await page.locator('#services-trigger').click();
+        const services = page.locator('#services-modal');
+        await services.getByText('service-15', { exact: true }).waitFor();
+        assert(await services.evaluate(modal => {
+            const title = modal.querySelector('.st').getBoundingClientRect();
+            return modal.parentElement === document.body && modal.contains(document.elementFromPoint(title.x + 4, title.y + 4));
+        }), 'the service sheet is above the header');
+        await page.keyboard.press('Escape');
+        await services.waitFor({ state: 'hidden' });
+        assert(await page.locator('#services-trigger').evaluate(button => button === document.activeElement));
+
+        await page.route('**/api/v1/network/lpmu_access/status*', route => route.fulfill({ json: { code: 0, data: {
+            run_id: 501, stage: 'failed', running: false, reason: 'access_script_failed',
+            output_tail: '✗ 错误: 没有找到可用的互联网连接'
+        } } }));
+        await go('/network');
+        const summary = page.locator('#network-lpmu-access-summary:not(:empty)');
+        await summary.waitFor();
+        assert.match(await summary.textContent(), /没有找到可用的互联网连接/);
+        assert(await summary.evaluate(text => {
+            const message = text.getBoundingClientRect();
+            const button = document.getElementById('network-lpmu-access-btn').getBoundingClientRect();
+            return text.offsetWidth === text.parentElement.clientWidth && message.bottom < button.top;
+        }), 'the error has the full status row above the actions');
+        assert(await fitsViewport());
+    } finally {
+        await page.close();
+    }
 });
