@@ -424,6 +424,8 @@ bool ts_ota_https_is_running(void);
 //                           WWW Partition OTA API
 // ============================================================================
 
+#define TS_OTA_WWW_URL_MAX_LEN 255
+
 /**
  * @brief Canonical recovery image paths
  */
@@ -443,7 +445,7 @@ esp_err_t ts_ota_www_init(void);
  * Downloads www.bin and writes to the www (SPIFFS) partition.
  * This is typically the second step after app OTA completes.
  *
- * @param url URL to download www.bin from
+ * @param url URL to download www.bin from (up to TS_OTA_WWW_URL_MAX_LEN bytes)
  * @param skip_cert_verify Skip SSL certificate verification
  * @param progress_cb Progress callback (optional)
  * @param user_data User data for callback

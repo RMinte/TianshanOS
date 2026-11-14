@@ -35,7 +35,7 @@ static bool s_www_ota_abort_requested = false;
 
 // Configuration for current www OTA
 typedef struct {
-    char url[256];           // URL or file path
+    char url[TS_OTA_WWW_URL_MAX_LEN + 1];  // URL or file path
     bool skip_cert_verify;
     bool from_sdcard;        // true = SD card file, false = HTTP URL
     ts_ota_progress_cb_t progress_cb;
@@ -120,7 +120,7 @@ esp_err_t ts_ota_www_get_progress(ts_ota_progress_t *progress)
 esp_err_t ts_ota_www_start(const char *url, bool skip_cert_verify,
                             ts_ota_progress_cb_t progress_cb, void *user_data)
 {
-    if (!url || strlen(url) == 0) {
+    if (!url || !url[0] || strlen(url) > TS_OTA_WWW_URL_MAX_LEN) {
         return ESP_ERR_INVALID_ARG;
     }
     
@@ -141,8 +141,7 @@ esp_err_t ts_ota_www_start(const char *url, bool skip_cert_verify,
     s_www_ota_abort_requested = false;
     
     // Store config
-    strncpy(s_www_config.url, url, sizeof(s_www_config.url) - 1);
-    s_www_config.url[sizeof(s_www_config.url) - 1] = '\0';
+    strcpy(s_www_config.url, url);
     s_www_config.skip_cert_verify = skip_cert_verify;
     s_www_config.progress_cb = progress_cb;
     s_www_config.user_data = user_data;
