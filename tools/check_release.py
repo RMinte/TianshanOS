@@ -58,7 +58,8 @@ def seal_security_artifact(build_dir):
 def validate_security_artifacts(build_dir, *, recovery=False):
     build_dir = Path(build_dir)
     artifact = json.loads((build_dir/'security-artifact.json').read_text())
-    if type(artifact.get('schema')) is not int or artifact.get('schema') != 1 or artifact.get('binary') != 'TianShanOS.bin':
+    binary = artifact.get('binary')
+    if type(artifact.get('schema')) is not int or artifact.get('schema') != 1 or binary not in ('TianShanOS.bin', 'TianshanOS.bin'):
         raise ValueError('Only standard firmware is eligible for release')
     profile = artifact.get('profile', {})
     wanted = {'schema': 2, 'development': False, 'recovery': False,
@@ -67,7 +68,7 @@ def validate_security_artifacts(build_dir, *, recovery=False):
         wanted.update(recovery=True, webui_enabled=False, auth_required=False, security_enabled=False, webui_tls=False)
     if set(profile) != set(wanted) or any(type(profile[k]) is not type(v) or profile[k] != v for k, v in wanted.items()):
         raise ValueError('Release requires standard WebUI authentication/security with the supported HTTP transport; dedicated recovery policy is separate')
-    identity = firmware_identity(build_dir/'TianShanOS.bin')
+    identity = firmware_identity(build_dir / binary)
     if identity['project_name'] != 'TianShanOS' or any(artifact.get(k) != v for k, v in identity.items()):
         raise ValueError('Release security evidence does not match the actual firmware')
     return identity

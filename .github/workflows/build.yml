@@ -246,6 +246,26 @@ jobs:
       - name: Package USB / serial partition upgrade
         run: python3 tools/serial_upgrade.py package --build-dir build --output "build/tianshanos-serial-v$(cat version.txt)"
 
+      - name: Normalize public firmware filename
+        run: |
+          python3 - <<'PYTHON'
+          import json
+          from pathlib import Path
+          root = Path('build')
+          (root / 'TianShanOS.bin').rename(root / 'TianshanOS.bin')
+          args = root / 'flasher_args.json'
+          data = json.loads(args.read_text())
+          data['app']['file'] = 'TianshanOS.bin'
+          data['flash_files'] = {address: 'TianshanOS.bin' if name == 'TianShanOS.bin' else name for address, name in data['flash_files'].items()}
+          args.write_text(json.dumps(data, indent=2) + '\n')
+          evidence = root / 'security-artifact.json'
+          artifact = json.loads(evidence.read_text())
+          if artifact['binary'] != 'TianShanOS.bin':
+              raise ValueError('Unexpected sealed firmware filename')
+          artifact['binary'] = 'TianshanOS.bin'
+          evidence.write_text(json.dumps(artifact, indent=2) + '\n')
+          PYTHON
+
       - name: Upload firmware artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -342,20 +362,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           BUILD_VERSION: ${{ needs.build.outputs.version }}
           BUILD_COMMIT: ${{ needs.build.outputs.commit }}
-      - name: Normalize public firmware filename
-        run: |
-          python3 - <<'PYTHON'
-          import json
-          from pathlib import Path
-          root = Path('firmware')
-          (root / 'TianShanOS.bin').rename(root / 'TianshanOS.bin')
-          args = root / 'flasher_args.json'
-          data = json.loads(args.read_text())
-          data['app']['file'] = 'TianshanOS.bin'
-          data['flash_files'] = {address: 'TianshanOS.bin' if name == 'TianShanOS.bin' else name for address, name in data['flash_files'].items()}
-          args.write_text(json.dumps(data, indent=2) + '\n')
-          PYTHON
-
       - name: Update existing release assets
         if: steps.preflight.outputs.existing_release == 'true'
         run: |

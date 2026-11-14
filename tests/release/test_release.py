@@ -132,22 +132,41 @@ class ReleaseTests(unittest.TestCase):
                     self.assertEqual(args[-3:],['--clobber','--repo','RMinte/TianshanOS'])
 
     def test_public_asset_name_and_flash_mapping_match(self):
-        import json, subprocess
+        import json, struct, subprocess
         workflow = (ROOT / '.github/workflows/build.yml').read_text()
         step = workflow.split('      - name: Normalize public firmware filename\n', 1)[1].split('      - name:', 1)[0]
         body = step.split("python3 - <<'PYTHON'\n", 1)[1].split('          PYTHON', 1)[0]
         code = '\n'.join(line[10:] for line in body.splitlines())
         with tempfile.TemporaryDirectory() as folder:
-            root = Path(folder) / 'firmware'; root.mkdir()
-            original = b'synthetic firmware bytes'
+            root = Path(folder) / 'build'; root.mkdir()
+            original = bytearray(512)
+            original[0] = 0xE9
+            struct.pack_into('<I', original, 32, 0xABCD5432)
+            original[48:53] = b'0.6.5'
+            original[80:90] = b'TianShanOS'
+            (root / 'security-build.json').write_text(json.dumps(dict(
+                schema=2, development=False, recovery=False, webui_enabled=True,
+                auth_required=True, security_enabled=True, webui_tls=False)))
+            validator = ROOT / 'tools/check_release.py'
             (root / 'TianShanOS.bin').write_bytes(original)
             (root / 'www.bin').write_bytes(b'synthetic web')
             args = {'app': {'file': 'TianShanOS.bin'}, 'flash_files': {'0x20000': 'TianShanOS.bin', '0x6a0000': 'www.bin'}}
             (root / 'flasher_args.json').write_text(json.dumps(args))
+            subprocess.run([sys.executable, validator, '--seal-build', root], check=True, capture_output=True)
             subprocess.run([sys.executable, '-c', code], cwd=folder, check=True)
+            result = subprocess.run([sys.executable, validator, '--check-security', root],
+                                    check=True, capture_output=True, text=True)
+            self.assertIn('TianShanOS', result.stdout)
             self.assertNotIn('TianShanOS.bin', {p.name for p in root.iterdir()})
             self.assertIn('TianshanOS.bin', {p.name for p in root.iterdir()})
             self.assertEqual((root / 'TianshanOS.bin').read_bytes(), original)
+            evidence = json.loads((root / 'security-artifact.json').read_text())
+            self.assertEqual(evidence['binary'], 'TianshanOS.bin')
+            (root / 'TianshanOS.bin').write_bytes(original + b'changed')
+            tampered = subprocess.run([sys.executable, validator, '--check-security', root],
+                                      capture_output=True, text=True)
+            self.assertNotEqual(tampered.returncode, 0)
+            self.assertIn('does not match the actual firmware', tampered.stderr)
             actual = json.loads((root / 'flasher_args.json').read_text())
             self.assertEqual(actual['app']['file'], 'TianshanOS.bin')
             self.assertEqual(actual['flash_files'], {'0x20000': 'TianshanOS.bin', '0x6a0000': 'www.bin'})
