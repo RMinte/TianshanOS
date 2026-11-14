@@ -702,7 +702,7 @@ static esp_err_t api_ota_upload_abort(const cJSON *params, ts_api_result_t *resu
 /**
  * @brief Start WWW partition OTA from URL
  * API: ota.www.start
- * Params: url (required), skip_verify (optional)
+ * Params: url (optional if the OTA server is configured), skip_verify (optional)
  */
 static esp_err_t api_ota_www_start(const cJSON *params, ts_api_result_t *result)
 {
@@ -711,44 +711,51 @@ static esp_err_t api_ota_www_start(const cJSON *params, ts_api_result_t *result)
         return ESP_ERR_INVALID_ARG;
     }
 
-    // Get URL - either from params or use server URL with www.bin suffix
-    cJSON *url_item = cJSON_GetObjectItem(params, "url");
-    char url[300] = {0};
-    const char *server = ota_server_url();
-    
-    if (url_item && cJSON_IsString(url_item) && strlen(url_item->valuestring) >= sizeof(url)) {
-        ts_api_result_error(result, TS_API_ERR_INVALID_ARG, "URL too long");
-        return ESP_ERR_INVALID_ARG;
-    }
-    if (url_item && cJSON_IsString(url_item) && url_item->valuestring[0]) {
-        strncpy(url, url_item->valuestring, sizeof(url) - 1);
-    } else if (server[0]) {
-        // Use server URL and replace firmware.bin with www.bin
-        strncpy(url, server, sizeof(url) - 1);
-        // Try to replace common firmware names
-        char *bin_pos = strstr(url, "firmware.bin");
-        if (bin_pos) {
-            strcpy(bin_pos, "www.bin");
-        } else {
-            bin_pos = strstr(url, "TianShanOS.bin");
-            if (bin_pos) {
-                strcpy(bin_pos, "www.bin");
-            } else {
-                // URL doesn't contain known .bin name
-                size_t len = strlen(url);
-                if (len > 0 && url[len-1] == '/') {
-                    // URL ends with /, append www.bin
-                    strncat(url, "www.bin", sizeof(url) - len - 1);
-                } else {
-                    // URL doesn't end with /, append /www.bin
-                    strncat(url, "/www.bin", sizeof(url) - len - 1);
+    const cJSON *url_item = cJSON_GetObjectItem(params, "url");
+    const char *prefix = cJSON_IsString(url_item) ? url_item->valuestring : "";
+    char url[TS_OTA_WWW_URL_MAX_LEN + 1];
+    size_t prefix_len = strlen(prefix);
+    const char *suffix = "";
+    if (prefix_len == 0) {
+        prefix = ota_server_url();
+        if (prefix == s_ota_server_url) {
+            // Parse and substitute using one copy of the mutable server setting.
+            _Static_assert(sizeof(s_ota_server_url) <= sizeof(url), "OTA server URL must fit the local copy");
+            memcpy(url, s_ota_server_url, sizeof(s_ota_server_url));
+            prefix = url;
+        }
+        prefix_len = strlen(prefix);
+        if (prefix_len == 0) {
+            ts_api_result_error(result, TS_API_ERR_INVALID_ARG, "缺少 url 参数且未设置 OTA 服务器");
+            return ESP_ERR_INVALID_ARG;
+        }
+        suffix = prefix[prefix_len - 1] == '/' ? "www.bin" : "/www.bin";
+        struct http_parser_url parsed;
+        if (ts_http_url_parse(prefix, &parsed) && (parsed.field_set & (1U << UF_PATH))) {
+            static const char *const firmware_names[] = {
+                "/TianshanOS.bin", "/TianShanOS.bin", "/firmware.bin",
+            };
+            size_t path_len = parsed.field_data[UF_PATH].len;
+            size_t path_end = parsed.field_data[UF_PATH].off + path_len;
+            for (size_t i = 0; i < sizeof(firmware_names) / sizeof(firmware_names[0]); ++i) {
+                size_t name_len = strlen(firmware_names[i]);
+                if (path_len >= name_len &&
+                    memcmp(prefix + path_end - name_len, firmware_names[i], name_len) == 0) {
+                    // Drop the firmware URL's query and fragment for its companion image.
+                    prefix_len = path_end - name_len;
+                    suffix = "/www.bin";
+                    break;
                 }
             }
         }
-    } else {
-        ts_api_result_error(result, TS_API_ERR_INVALID_ARG, "缺少 url 参数且未设置 OTA 服务器");
+    }
+    size_t suffix_len = strlen(suffix);
+    if (prefix_len + suffix_len > TS_OTA_WWW_URL_MAX_LEN) {
+        ts_api_result_error(result, TS_API_ERR_INVALID_ARG, "URL too long");
         return ESP_ERR_INVALID_ARG;
     }
+    memmove(url, prefix, prefix_len);
+    memcpy(url + prefix_len, suffix, suffix_len + 1);
 
     // Get skip_verify option
     bool skip_verify = false;
