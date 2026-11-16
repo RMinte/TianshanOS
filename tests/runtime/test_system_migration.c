@@ -259,11 +259,14 @@ static void xSemaphoreGive(SemaphoreHandle_t s) {(void)s;}
 #define TS_LOGW(...) ((void)0)
 #define TS_LOGE(...) ((void)0)
 static unsigned available_variables;
-static bool read_fresh_variable_float(const char *name,int64_t now,double *value,int64_t *updated,bool try_lock)
+static esp_err_t read_fresh_variable_float(const char *name, double *value, int64_t *updated, bool try_lock)
 {
-    (void)try_lock;unsigned i=!strcmp(name,"second");
-    if(!(available_variables & (1u<<i)))return false;
-    *value=i?50:40;*updated=now-10;return true;
+    (void)try_lock;
+    unsigned i = !strcmp(name, "second");
+    if (!(available_variables & (1u << i))) return ESP_ERR_NOT_FOUND;
+    *value = i ? 50 : 40;
+    *updated = 990;
+    return ESP_OK;
 }
 #include "system_driver_persistence.inc"
 static void driver_storage(void)
@@ -300,10 +303,10 @@ static void driver_storage(void)
     assert(fabsf(s_state.bound_vars[0].weight-0.7f)<0.001f && fabsf(s_state.bound_vars[1].weight-0.3f)<0.001f);
     assert(!system_record("ts_temp","preferred"));
     variable_temp_snapshot_t snapshot;
-    available_variables=0;assert(!read_variable_temp_snapshot(&snapshot,1000,false)&&snapshot.valid_count==0);
-    available_variables=3;assert(read_variable_temp_snapshot(&snapshot,1000,false)&&snapshot.temp==430&&snapshot.guard_temp==500&&snapshot.valid_count==2);
-    available_variables=1;assert(!read_variable_temp_snapshot(&snapshot,1000,false)&&snapshot.partial_stale&&snapshot.guard_temp==400);
-    available_variables=3;assert(read_variable_temp_snapshot(&snapshot,1000,false)&&snapshot.temp==430);
+    available_variables=0;assert(!read_variable_temp_snapshot(&snapshot,false)&&snapshot.valid_count==0);
+    available_variables=3;assert(read_variable_temp_snapshot(&snapshot,false)&&snapshot.temp==430&&snapshot.guard_temp==500&&snapshot.valid_count==2);
+    available_variables=1;assert(!read_variable_temp_snapshot(&snapshot,false)&&snapshot.partial_stale&&snapshot.guard_temp==400);
+    available_variables=3;assert(read_variable_temp_snapshot(&snapshot,false)&&snapshot.temp==430);
     assert(s_state.preferred_source==TS_TEMP_SOURCE_DEFAULT);
     assert(save_preferred_source_to_nvs(TS_TEMP_SOURCE_VARIABLE)==ESP_OK);
     memset(&s_state,0,sizeof(s_state));s_state.mutex=(void *)1;
