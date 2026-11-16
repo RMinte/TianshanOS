@@ -17,6 +17,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "nvs.h"
+#include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -84,6 +85,9 @@ typedef struct {
 /*===========================================================================*/
 
 static temp_source_state_t s_state = {0};
+/* Binding identity is independent of whichever source the general reader selects. */
+static atomic_uint s_auto_binding_revision = 1;
+static portMUX_TYPE s_auto_binding_commit_lock = portMUX_INITIALIZER_UNLOCKED;
 
 /*===========================================================================*/
 /*                          Forward Declarations                              */
@@ -100,10 +104,9 @@ static esp_err_t load_preferred_source_from_nvs(void);
 static esp_err_t save_preferred_source_to_nvs(ts_temp_source_type_t type);
 static float sanitize_bound_weight(float weight);
 static bool has_positive_bound_weight(const ts_temp_bound_var_t *vars, uint8_t count);
-static bool read_fresh_variable_float(const char *name, int64_t now, double *value,
-                                      int64_t *last_update_ms, bool try_lock);
-static bool read_variable_temp_snapshot(variable_temp_snapshot_t *snapshot, int64_t now,
-                                        bool try_lock);
+static esp_err_t read_fresh_variable_float(const char *name, double *value,
+                                           int64_t *last_update_ms, bool try_lock);
+static bool read_variable_temp_snapshot(variable_temp_snapshot_t *snapshot, bool try_lock);
 
 /*===========================================================================*/
 /*                          Utility Functions                                 */
@@ -112,6 +115,13 @@ static bool read_variable_temp_snapshot(variable_temp_snapshot_t *snapshot, int6
 static int64_t get_current_ms(void)
 {
     return esp_timer_get_time() / 1000;
+}
+
+static void advance_auto_binding_revision(void)
+{
+    portENTER_CRITICAL(&s_auto_binding_commit_lock);
+    atomic_fetch_add(&s_auto_binding_revision, 1);
+    portEXIT_CRITICAL(&s_auto_binding_commit_lock);
 }
 
 static float sanitize_bound_weight(float weight)
@@ -162,57 +172,37 @@ static void store_variable_snapshot(const variable_temp_snapshot_t *snapshot)
     s_state.variable_total_weight = snapshot->total_weight;
 }
 
-static bool read_fresh_variable_float(const char *name, int64_t now, double *value,
-                                      int64_t *last_update_ms, bool try_lock)
+static esp_err_t read_fresh_variable_float(const char *name, double *value,
+                                           int64_t *last_update_ms, bool try_lock)
 {
     ts_variable_info_t var = {0};
-    double temp_c = 0.0;
-    esp_err_t ret;
+    esp_err_t ret = try_lock ? ts_variable_get_info_try(name, &var)
+                             : ts_variable_get_info(name, &var);
+    if (ret != ESP_OK) return ret;
 
-    if (!name || !value) {
-        return false;
+    /* The writer stamps the variable under its lock. Take the clock after copying it. */
+    int64_t now = get_current_ms();
+    if (var.last_update_ms <= 0 || var.last_update_ms > now ||
+        now - var.last_update_ms > TS_TEMP_DATA_TIMEOUT_MS) {
+        return ESP_ERR_INVALID_STATE;
     }
 
-    ret = try_lock ? ts_variable_get_info_try(name, &var)
-                   : ts_variable_get_info(name, &var);
-    if (ret != ESP_OK) {
-        return false;
-    }
-
-    if (var.last_update_ms <= 0) {
-        return false;
-    }
-
-    int64_t age = now - var.last_update_ms;
-    if (age < 0 || age > TS_TEMP_DATA_TIMEOUT_MS) {
-        return false;
-    }
-    if (last_update_ms) {
-        *last_update_ms = var.last_update_ms;
-    }
-
+    double temp_c;
     switch (var.value.type) {
-        case TS_AUTO_VAL_FLOAT:
-            temp_c = var.value.float_val;
-            break;
-        case TS_AUTO_VAL_INT:
-            temp_c = (double)var.value.int_val;
-            break;
-        default:
-            return false;
+        case TS_AUTO_VAL_FLOAT: temp_c = var.value.float_val; break;
+        case TS_AUTO_VAL_INT: temp_c = (double)var.value.int_val; break;
+        default: return ESP_ERR_INVALID_STATE;
+    }
+    if (!(temp_c >= TS_TEMP_MIN_VALID / 10.0 && temp_c <= TS_TEMP_MAX_VALID / 10.0)) {
+        return ESP_ERR_INVALID_STATE;
     }
 
-    if (temp_c < (TS_TEMP_MIN_VALID / 10.0) ||
-        temp_c > (TS_TEMP_MAX_VALID / 10.0)) {
-        return false;
-    }
-
+    *last_update_ms = var.last_update_ms;
     *value = temp_c;
-    return true;
+    return ESP_OK;
 }
 
-static bool read_variable_temp_snapshot(variable_temp_snapshot_t *snapshot, int64_t now,
-                                        bool try_lock)
+static bool read_variable_temp_snapshot(variable_temp_snapshot_t *snapshot, bool try_lock)
 {
     double weighted_sum = 0.0;
     int16_t max_bound = TS_TEMP_MIN_VALID;
@@ -238,8 +228,8 @@ static bool read_variable_temp_snapshot(variable_temp_snapshot_t *snapshot, int6
 
         double value = 0.0;
         int64_t last_update_ms = 0;
-        if (!read_fresh_variable_float(s_state.bound_vars[i].name, now, &value,
-                                       &last_update_ms, try_lock)) {
+        if (read_fresh_variable_float(s_state.bound_vars[i].name, &value,
+                                      &last_update_ms, try_lock) != ESP_OK) {
             TS_LOGD(TAG, "Variable '%s' unavailable or stale",
                     s_state.bound_vars[i].name);
             continue;
@@ -306,7 +296,7 @@ static bool is_provider_valid(ts_temp_source_type_t type, int64_t now, bool try_
     
     if (type == TS_TEMP_SOURCE_VARIABLE) {
         variable_temp_snapshot_t snapshot = {0};
-        bool valid = read_variable_temp_snapshot(&snapshot, now, try_variable_lock);
+        bool valid = read_variable_temp_snapshot(&snapshot, try_variable_lock);
         store_variable_snapshot(&snapshot);
         return valid;
     }
@@ -345,12 +335,11 @@ static void sync_bound_variable_compat(void)
  */
 static void evaluate_active_source_with_lock_mode(bool try_variable_lock)
 {
-    int64_t now = get_current_ms();
     ts_temp_source_type_t best_source = TS_TEMP_SOURCE_DEFAULT;
     int16_t best_temp = TS_TEMP_DEFAULT_VALUE;
     variable_temp_snapshot_t variable_snapshot = {0};
-    bool variable_snapshot_valid = read_variable_temp_snapshot(&variable_snapshot, now,
-                                                               try_variable_lock);
+    bool variable_snapshot_valid = read_variable_temp_snapshot(&variable_snapshot, try_variable_lock);
+    int64_t now = get_current_ms();
     store_variable_snapshot(&variable_snapshot);
     
     // 1. 手动模式最高优先级
@@ -514,6 +503,7 @@ esp_err_t ts_temp_source_init(void)
     esp_err_t load_ret = load_preferred_source_from_nvs();
     if (load_ret != ESP_OK) { vSemaphoreDelete(s_state.mutex); s_state.mutex = NULL; return load_ret; }
     
+    advance_auto_binding_revision();
     s_state.initialized = true;
     
     TS_LOGI(TAG, "Temperature source manager initialized (v%s), preferred: %s", 
@@ -529,6 +519,7 @@ esp_err_t ts_temp_source_deinit(void)
         return ESP_OK;
     }
     
+    advance_auto_binding_revision();
     if (s_state.mutex) {
         vSemaphoreDelete(s_state.mutex);
         s_state.mutex = NULL;
@@ -695,6 +686,48 @@ int16_t ts_temp_get_effective_nonblocking(ts_temp_data_t *data)
     return ts_temp_get_effective_impl(data, true);
 }
 
+uint32_t ts_temp_auto_binding_revision(void)
+{
+    return atomic_load(&s_auto_binding_revision);
+}
+
+bool ts_temp_auto_binding_begin_commit(uint32_t revision)
+{
+    portENTER_CRITICAL(&s_auto_binding_commit_lock);
+    if (ts_temp_auto_binding_revision() == revision) return true;
+    portEXIT_CRITICAL(&s_auto_binding_commit_lock);
+    return false;
+}
+
+void ts_temp_auto_binding_end_commit(void)
+{
+    portEXIT_CRITICAL(&s_auto_binding_commit_lock);
+}
+
+void ts_temp_read_auto_binding(ts_temp_auto_sample_t *sample)
+{
+    *sample = (ts_temp_auto_sample_t){0};
+    if (!s_state.initialized) return;
+    if (xSemaphoreTake(s_state.mutex, 0) != pdTRUE) {
+        sample->result = TS_TEMP_AUTO_SOURCE_BUSY;
+        return;
+    }
+
+    sample->binding_revision = ts_temp_auto_binding_revision();
+    if (s_state.bound_var_count == 1) {
+        double value;
+        esp_err_t ret = read_fresh_variable_float(s_state.bound_vars[0].name, &value,
+                                                  &sample->timestamp_ms, true);
+        if (ret == ESP_OK) {
+            sample->value = (int16_t)(value * 10.0);
+            sample->result = TS_TEMP_AUTO_VALID;
+        } else if (ret == ESP_ERR_TIMEOUT) {
+            sample->result = TS_TEMP_AUTO_VARIABLE_BUSY;
+        }
+    }
+    xSemaphoreGive(s_state.mutex);
+}
+
 esp_err_t ts_temp_get_by_source(ts_temp_source_type_t type, ts_temp_data_t *data)
 {
     if (!s_state.initialized) return ESP_ERR_INVALID_STATE;
@@ -704,7 +737,7 @@ esp_err_t ts_temp_get_by_source(ts_temp_source_type_t type, ts_temp_data_t *data
 
     if (type == TS_TEMP_SOURCE_VARIABLE) {
         variable_temp_snapshot_t snapshot = {0};
-        bool valid = read_variable_temp_snapshot(&snapshot, get_current_ms(), false);
+        bool valid = read_variable_temp_snapshot(&snapshot, false);
         store_variable_snapshot(&snapshot);
         data->value = valid ? snapshot.temp : TS_TEMP_DEFAULT_VALUE;
         data->source = TS_TEMP_SOURCE_VARIABLE;
@@ -1235,6 +1268,11 @@ esp_err_t ts_temp_bind_variables(const ts_temp_bound_var_t *vars, uint8_t count)
                   s_state.bound_vars[i].weight != validated_vars[i].weight;
     }
     if (changed) s_state.identity_revision++;
+    if ((count == 1 || s_state.bound_var_count == 1) &&
+        (count != s_state.bound_var_count ||
+         strcmp(s_state.bound_vars[0].name, validated_vars[0].name) != 0)) {
+        advance_auto_binding_revision();
+    }
     s_state.bound_var_count = count;
     memcpy(s_state.bound_vars, validated_vars, count * sizeof(ts_temp_bound_var_t));
     sync_bound_variable_compat();
@@ -1299,7 +1337,10 @@ esp_err_t ts_temp_unbind_variable(void)
     xSemaphoreTake(s_state.mutex, portMAX_DELAY);
     
     bool was_bound = (s_state.bound_var_count > 0);
-    if (was_bound) s_state.identity_revision++;
+    if (was_bound) {
+        s_state.identity_revision++;
+        advance_auto_binding_revision();
+    }
     s_state.bound_var_count = 0;
     memset(s_state.bound_vars, 0, sizeof(s_state.bound_vars));
     s_state.bound_variable[0] = '\0';

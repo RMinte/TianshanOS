@@ -7,8 +7,6 @@ const {harness} = require('../prompts/harness.cjs');
         await h.ready();
         h.load();
         h.el('fans-grid');
-        h.el('fan-global-temp');
-        h.el('fan-global-duty');
         for (const mode of ['auto', 'curve', 'manual', 'off']) {
             for (const [duty, target] of [[87, 85], [37, 70], [0, 0]]) {
                 h.ctx.fixture = {fans: [{id: 0, mode, duty, target_duty: target, fault: duty !== target,
@@ -17,15 +15,18 @@ const {harness} = require('../prompts/harness.cjs');
                 h.run('updateFanInfo(fixture)');
                 const html = h.el('fans-grid').innerHTML;
                 assert(html.includes(`fan-speed-num">${duty}</span>`), mode);
-                assert(html.includes(`fan-slider-value">${duty}%</span>`), mode);
-                assert.equal(h.el('fan-global-duty').textContent, `${duty}%`);
+                assert.equal(html.includes(`fan-slider-value">${duty}%</span>`), mode === 'manual', mode);
+                assert.equal(html.includes('class="fan-slider"'), mode === 'manual', mode);
+                assert.equal(html.includes('class="t-note fan-meta"'), mode === 'auto', mode);
+                assert(html.includes('fan-temperature') && html.includes('48.8 °C'));
+                assert(!html.includes('fan-global-duty'));
                 assert(!html.includes('fanPage.'), language);
             }
         }
         h.ctx.fixture = {fans: [{id: 0, mode: 'auto', target_duty: 87}]};
         h.run('updateFanInfo(fixture)');
         assert(h.el('fans-grid').innerHTML.includes('fan-speed-num">--</span>'));
-        assert.equal(h.el('fan-global-duty').textContent, '--%');
+        assert(h.el('fans-grid').innerHTML.includes('-- °C'));
         console.log(`PASS ${language}: production renderer shows applied PWM, not requested PWM; missing applied value stays unknown`);
     }
 })().catch(error => { console.error(error); process.exitCode = 1; });

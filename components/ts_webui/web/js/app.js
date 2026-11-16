@@ -1286,10 +1286,6 @@ async function loadSystemPage() {
                         </div>
                     </div>
                     <div class="fan-body">
-                        <div class="fan-status" id="fan-temp-status-bar">
-                            <span class="t-label">${t('fan.effectiveTemp')} <b class="t-value" id="fan-global-temp">--</b></span>
-                            <span class="t-label">${t('fan.currentOutput')} <b class="t-value" id="fan-global-duty">--</b></span>
-                        </div>
                         <div class="fans-grid" id="fans-grid">
                             <div class="loading">${t('common.loading')}</div>
                         </div>
@@ -1354,7 +1350,7 @@ async function loadSystemPage() {
             if (data.cpu) updateCpuInfo(data.cpu);
             if (data.network) updateNetworkInfo(data.network);
             if (data.power) updatePowerInfo(data.power);
-            if (data.fan) updateFanInfo(data.fan);
+            updateFanInfo(data.fan, true);
             if (data.services) updateServiceList(data.services);
         };
         const manager = subscriptionManager;
@@ -1469,14 +1465,8 @@ async function refreshSystemPageOnce() {
     }
 
     // 风扇
-    try {
-        const fans = await api.fanStatus();
-        if (!pageCurrent()) return;
-        updateFanInfo(fans.data);
-    } catch (e) {
-        if (!pageCurrent()) return;
-        document.getElementById('fans-grid').innerHTML = '<p class="text-muted">' + t('fan.statusUnavailable') + '</p>';
-    }
+    if (!pageCurrent()) return;
+    await refreshFans();
 
     // 服务列表
     try {
@@ -1985,95 +1975,173 @@ function fanOutputKnown(fan) {
     return fan.duty_valid !== false && Number.isFinite(fan.duty) && fan.duty >= 0 && fan.duty <= 100;
 }
 
-function updateFanInfo(data) {
+const FAN_TEMPERATURE_UNKNOWN = '-- °C';
+const fanModeChanges = new Map();
+const fanSpeedWrites = new Map();
+let fanStatusRead = null;
+
+function fanModeBusy(id) {
+    const phase = fanModeChanges.get(id);
+    return phase === 'writing' || phase === 'confirming';
+}
+
+function setFanModeButtonsBusy(card, busy) {
+    for (const button of card.querySelectorAll('.fan-modes button')) {
+        if (busy) button.setAttribute('aria-disabled', 'true');
+        else button.removeAttribute('aria-disabled');
+    }
+}
+
+function fanCardTemperature(data) {
+    return data.temp_valid === true && Number.isFinite(data.temperature)
+        ? `${data.temperature.toFixed(1)} °C` : FAN_TEMPERATURE_UNKNOWN;
+}
+
+function updateFanInfo(data, dashboard = false, skipFans = null) {
     const container = document.getElementById('fans-grid');
-
-    // 更新全局温度状态栏（从 data.temperature 获取绑定变量的温度）
-    const globalTempEl = document.getElementById('fan-global-temp');
-    const globalDutyEl = document.getElementById('fan-global-duty');
-    if (globalTempEl && data?.temperature !== undefined) {
-        globalTempEl.textContent = `${typeof data.temperature === 'number' ? data.temperature.toFixed(1) : '--'} °C`;
-        globalTempEl.classList.toggle('warn', !data.temp_valid);
+    if (!container) return;
+    if (!Array.isArray(data?.fans)) {
+        markFanOutputsUnknown();
+        return;
     }
-    if (globalDutyEl) {
-        const fans = data?.fans || [];
-        const curveFan = fans.find(f => f.mode === 'curve' || f.mode === 'auto');
-        const shown = curveFan ? [curveFan] : fans;
-        const known = shown.length > 0 && shown.every(fanOutputKnown);
-        globalDutyEl.textContent = known ? `${Math.round(shown.reduce((sum, f) => sum + f.duty, 0) / shown.length)}%` : '--%';
-    }
+    container.classList.toggle('has-multiple-fans', data.fans.length > 1);
 
-    // Polling must not replace a range input under the user's pointer.
-    const activeSlider = document.activeElement;
-    const activeFan = data?.fans?.find(f => activeSlider?.id === `fan-slider-${f.id}`);
-    if (activeFan?.mode === 'manual' && fanOutputKnown(activeFan) && fanSpeedDrafts.has(activeFan.id)) {
-        const card = activeSlider.closest('.fan-card');
-        card.querySelector('.fan-speed-num').textContent = activeFan.duty;
-        const state = card.querySelector('.state');
-        state.textContent = activeFan.fault ? t('fan.adjustmentFailed') : t('fanPage.modeManual');
-        state.className = activeFan.fault ? 'state bad' : 'state ok';
+    const oldCards = new Map(Array.from(container.querySelectorAll('.fan-card'),
+        card => [Number(card.dataset.fanId), card]));
+    const temperature = fanCardTemperature(data);
+    const html = data.fans.map((fan, index) => renderFanCard(fan, index === 0, temperature)).join('');
+    if (!html || !oldCards.size) {
+        container.innerHTML = html || `<p class="t-note">${t('fanPage.noFans')}</p>`;
         return;
     }
 
-    if (data?.fans && data.fans.length > 0) {
-        container.innerHTML = data.fans.map(fan => {
-            const mode = fan.mode || 'auto';
-            // 所有模式的大读数都与已成功下发的 PWM 一致。
-            const known = fanOutputKnown(fan);
-            const displayDuty = known ? fan.duty : '--';
-            if (mode !== 'manual' || !known) fanSpeedDrafts.delete(fan.id);
-            const draft = fanSpeedDrafts.get(fan.id);
-            const duty = draft?.value ?? (known ? fan.duty : 0);
-            const sliderText = `${draft?.value ?? displayDuty}%`;
-            const rpm = fan.rpm || 0;
-            const isManual = mode === 'manual';
-            const isOff = mode === 'off';
-            const hasAutoTelemetry = mode === 'auto' && (
-                fan.auto_state ||
-                typeof fan.guard_temperature === 'number' ||
-                typeof fan.predicted_temperature === 'number' ||
-                fan.temp_stale === true ||
-                fan.guard_active === true
-            );
+    const next = document.createElement('template');
+    next.innerHTML = html;
+    const active = document.activeElement;
+    let needsModeRead = false;
+    const cards = data.fans.map((fan, index) => {
+        const old = oldCards.get(fan.id);
+        const card = next.content.children[index];
+        if (!old) return card;
+        // A queued dashboard message has no mode revision. Confirm a change
+        // before it can re-enable a manual control that a newer read hid.
+        const pending = fanModeChanges.get(fan.id);
+        const changedByDashboard = dashboard && old.dataset.mode !== card.dataset.mode;
+        if (pending || changedByDashboard || skipFans?.has(fan.id)) {
+            if (changedByDashboard && !pending) {
+                const slider = old.querySelector('.fan-slider');
+                if (slider) slider.disabled = true;
+                fanSpeedDrafts.delete(fan.id);
+                fanModeChanges.set(fan.id, 'confirming');
+                needsModeRead = true;
+            } else if (dashboard && pending === 'unconfirmed') {
+                fanModeChanges.set(fan.id, 'confirming');
+                needsModeRead = true;
+            }
+            setFanModeButtonsBusy(old, fanModeBusy(fan.id));
+            const oldTemperature = old.querySelector('.fan-temperature');
+            const newTemperature = card.querySelector('.fan-temperature');
+            oldTemperature?.remove();
+            if (newTemperature) old.querySelector('.fan-head').append(newTemperature);
+            return old;
+        }
+        const slider = old.querySelector('.fan-slider');
+        const nextSlider = card.querySelector('.fan-slider');
+        if (slider && nextSlider && !nextSlider.disabled &&
+            (active === slider || fanSpeedDrafts.has(fan.id))) {
+            for (const selector of ['.fan-head', '.fan-readout', '.fan-request']) {
+                old.querySelector(selector).replaceWith(card.querySelector(selector));
+            }
+            if (!fanSpeedDrafts.has(fan.id)) {
+                slider.value = nextSlider.value;
+                slider.parentElement.style.setProperty('--p', `${nextSlider.value}%`);
+                old.querySelector('.fan-slider-value').textContent = `${nextSlider.value}%`;
+                old.querySelector('.fan-draft').textContent = '';
+            }
+            slider.disabled = false;
+            setFanModeButtonsBusy(old, false);
+            return old;
+        }
+        return old.outerHTML === card.outerHTML ? old : card;
+    });
 
-            const _off = t('fanPage.modeOff'), _manual = t('fanPage.modeManual'), _smart = t('fanPage.modeSmart'), _curve = t('fanPage.modeCurve');
-            const autoHelpTitle = escapeHtml(t('fanPage.smartHelpTitle'));
-            const autoStateLabels = {
-                idle: t('fanPage.autoStateIdle'), baseline: t('fanPage.autoStateBaseline'), active: t('fanPage.autoStateSmart'),
-                guard: t('fanPage.autoStateGuard'), stale: t('fanPage.autoStateStale'), unknown: t('fanPage.autoStateUnknown')
-            };
-            const autoState = fan.auto_state || 'unknown';
-            const stateText = !known ? t('fan.outputUnknown') : fan.fault ? t('fan.adjustmentFailed') : mode === 'auto' ? (autoStateLabels[autoState] || autoState) : ({ off: _off, manual: _manual, curve: _curve }[mode] || mode);
-            const stateCls = !known || fan.fault ? ' bad' : isOff ? '' : fan.guard_active ? ' warn' : fan.temp_stale ? ' bad' : ' ok';
-            const stat = (label, value) => `<span class="fan-stat"><i>${label}</i><b>${value}</b></span>`;
-            const meta = '<div class="t-note fan-meta">' + (hasAutoTelemetry ? (
-                (typeof fan.guard_temperature === 'number' ? stat(t('fanPage.guardTempBrief'), `${fan.guard_temperature.toFixed(1)} °C`) : '') +
-                (typeof fan.predicted_temperature === 'number' ? stat(t('fanPage.predictedTempBrief'), `${fan.predicted_temperature.toFixed(1)} °C`) : '') +
-                (typeof fan.slope_c_per_min === 'number' ? stat(t('fanPage.slopeTempShort'), `${fan.slope_c_per_min.toFixed(2)} ${t('fanPage.slopeTempUnit')}`) : '')) : '') + '</div>';
-            const tab = (m, label) => `<button type="button" class="${mode === m ? 'on' : ''}" aria-pressed="${mode === m}" onclick="setFanMode(${fan.id}, '${m}')">${label}</button>`;
-
-            return `
-            <div class="card in fan-card ${isOff ? 'is-off' : ''}">
-                <div class="card-h fan-head">
-                    <span class="t-section">${t('fanPage.fanN', { id: fan.id })}</span>
-                    <span class="inl"><span class="state${stateCls}">${stateText}</span>${mode === 'auto' ? `<button type="button" class="tti" onclick="showFanAutoHelpModal()" title="${autoHelpTitle}" aria-label="${autoHelpTitle}">TTI</button>` : ''}</span>
-                </div>
-                <div class="fan-readout"><div class="bigrow fan-big"><span class="t-big fan-speed-num">${displayDuty}</span><span class="t-unit">%</span></div><div class="t-label num fan-rpm">${rpm > 0 ? rpm + ' RPM' : '&nbsp;'}</div></div>
-                <div class="seg full fan-modes">${tab('off', _off)}${tab('manual', _manual)}${tab('curve', _curve)}${tab('auto', _smart)}</div>
-                <div class="slrow ${isManual ? '' : 'disabled'}">
-                    <span class="t-label">${t('fanPage.speedAdjust')}</span>
-                    <div class="sl" style="--p:${duty}%"><i></i><b></b><input type="range" class="fan-slider" min="0" max="100" value="${duty}" id="fan-slider-${fan.id}" onchange="setFanSpeed(${fan.id}, this.value)" oninput="updateFanSliderUI(${fan.id}, this.value)" ${!isManual || !known ? 'disabled title="' + t('fanPage.manualModeHint') + '"' : ''}></div>
-                    <span class="t-value fan-slider-value">${sliderText}</span>
-                </div>
-                <div class="t-note fan-draft">${draft ? t('fan.draftSetting', {speed: draft.value}) : ''}</div>
-                ${known && Number.isFinite(fan.target_duty) && fan.target_duty !== fan.duty ? `<div class="t-note fan-request">${t('fan.requestedSetting', {speed: fan.target_duty})}</div>` : ''}
-                ${meta}
-            </div>
-        `;
-        }).join('');
-    } else {
-        container.innerHTML = '<p class="t-note">' + (typeof t === 'function' ? t('fanPage.noFans') : '无可用风扇') + '</p>';
+    const focusMode = active?.closest?.('.fan-modes') ? active.dataset.mode : null;
+    const focusId = active?.closest?.('.fan-card')?.dataset.fanId;
+    const kept = new Set(cards);
+    for (const old of oldCards.values()) {
+        if (!kept.has(old)) old.remove();
     }
+    let position = container.firstElementChild;
+    for (const card of cards) {
+        if (card !== position) container.insertBefore(card, position);
+        position = card.nextElementSibling;
+    }
+    if (focusMode && !active.isConnected) {
+        cards.find(card => card.dataset.fanId === focusId)
+            ?.querySelector(`.fan-modes [data-mode="${focusMode}"]`)?.focus({preventScroll: true});
+    }
+    if (needsModeRead) void refreshFans();
+}
+
+function renderFanCard(fan, showTemperature, temperatureText) {
+    const mode = fan.mode || 'auto';
+    // 所有模式的大读数都与已成功下发的 PWM 一致。
+    const known = fanOutputKnown(fan);
+    const displayDuty = known ? fan.duty : '--';
+    if (mode !== 'manual' || !known || fan.enabled === false) fanSpeedDrafts.delete(fan.id);
+    const draft = fanSpeedDrafts.get(fan.id);
+    const duty = draft?.value ?? (known ? fan.duty : 0);
+    const sliderText = `${draft?.value ?? displayDuty}%`;
+    const rpm = fan.rpm || 0;
+    const isManual = mode === 'manual' && fan.enabled !== false;
+    const isOff = mode === 'off';
+    const hasAutoTelemetry = mode === 'auto' && (
+        fan.auto_state ||
+        typeof fan.guard_temperature === 'number' ||
+        typeof fan.predicted_temperature === 'number' ||
+        fan.temp_stale === true ||
+        fan.guard_active === true
+    );
+
+    const _off = t('fanPage.modeOff'), _manual = t('fanPage.modeManual'), _smart = t('fanPage.modeSmart'), _curve = t('fanPage.modeCurve');
+    const autoHelpTitle = escapeHtml(t('fanPage.smartHelpTitle'));
+    const autoStateLabels = {
+        idle: t('fanPage.autoStateIdle'), baseline: t('fanPage.autoStateBaseline'), active: t('fanPage.autoStateSmart'),
+        guard: t('fanPage.autoStateGuard'), stale: t('fanPage.autoStateStale'), unknown: t('fanPage.autoStateUnknown')
+    };
+    const autoState = fan.auto_state || 'unknown';
+    const disabled = fan.enabled === false;
+    const modeStatus = mode === 'auto' ? (autoStateLabels[autoState] || autoState) : ({off: _off, manual: _manual, curve: _curve}[mode] || mode);
+    const stateText = !known ? t('fan.outputUnknown') : fan.fault ? t('fan.adjustmentFailed') : disabled && !isOff ? t('common.disabled') : modeStatus;
+    const stateCls = !known || fan.fault ? ' bad' : isOff || disabled ? '' : fan.guard_active ? ' warn' : fan.temp_stale ? ' bad' : ' ok';
+    const stat = (label, value) => `<span class="fan-stat"><i>${label}</i><b>${value}</b></span>`;
+    const meta = hasAutoTelemetry ? '<div class="t-note fan-meta">' + (
+        (typeof fan.guard_temperature === 'number' ? stat(t('fanPage.guardTempBrief'), `${fan.guard_temperature.toFixed(1)} °C`) : '') +
+        (typeof fan.predicted_temperature === 'number' ? stat(t('fanPage.predictedTempBrief'), `${fan.predicted_temperature.toFixed(1)} °C`) : '') +
+        (typeof fan.slope_c_per_min === 'number' ? stat(t('fanPage.slopeTempShort'), `${fan.slope_c_per_min.toFixed(2)} ${t('fanPage.slopeTempUnit')}`) : '')) + '</div>' : '';
+    const modeBusy = fanModeBusy(fan.id);
+    const tab = (m, label) => `<button type="button" class="${mode === m ? 'on' : ''}" data-mode="${m}" aria-pressed="${mode === m}" ${modeBusy ? 'aria-disabled="true"' : ''} onclick="setFanMode(${fan.id}, '${m}')">${label}</button>`;
+
+    const temperature = showTemperature ? `<span class="t-label fan-temperature">${t('fan.effectiveTemp')} <b class="t-value${temperatureText === FAN_TEMPERATURE_UNKNOWN ? ' warn' : ''}">${temperatureText}</b></span>` : '';
+    return `
+    <div class="card in fan-card ${isOff ? 'is-off' : ''}" data-fan-id="${fan.id}" data-mode="${mode}">
+        <div class="card-h fan-head">
+            <span class="t-section">${t('fanPage.fanN', { id: fan.id })}</span>
+            <span class="inl"><span class="state${stateCls}">${stateText}</span>${mode === 'auto' ? `<button type="button" class="tti" onclick="showFanAutoHelpModal()" title="${autoHelpTitle}" aria-label="${autoHelpTitle}">TTI</button>` : ''}</span>
+            ${temperature}
+        </div>
+        <div class="fan-readout"><div class="bigrow fan-big"><span class="t-big fan-speed-num">${displayDuty}</span><span class="t-unit">%</span></div><div class="t-label num fan-rpm">${rpm > 0 ? rpm + ' RPM' : '&nbsp;'}</div></div>
+        <div class="seg full fan-modes">${tab('off', _off)}${tab('manual', _manual)}${tab('curve', _curve)}${tab('auto', _smart)}</div>
+        ${isManual ? `<div class="slrow">
+            <span class="t-label">${t('fanPage.speedAdjust')}</span>
+            <div class="sl" style="--p:${duty}%"><i></i><b></b><input type="range" class="fan-slider" min="0" max="100" value="${duty}" id="fan-slider-${fan.id}" onchange="setFanSpeed(${fan.id}, this.value)" oninput="updateFanSliderUI(${fan.id}, this.value)" aria-label="${t('fanPage.speedAdjust')}" ${!known || fanModeChanges.has(fan.id) ? 'disabled' : ''}></div>
+            <span class="t-value fan-slider-value">${sliderText}</span>
+        </div>
+        <div class="t-note fan-draft">${draft ? t('fan.draftSetting', {speed: draft.value}) : ''}</div>` : ''}
+        <div class="t-note fan-request">${known && Number.isFinite(fan.target_duty) && fan.target_duty !== fan.duty ? t('fan.requestedSetting', {speed: fan.target_duty}) : ''}</div>
+        ${meta}
+    </div>
+`;
 }
 
 function showFanAutoHelpModal() {
@@ -2099,7 +2167,7 @@ function closeFanAutoHelpModal() {
 // 更新滑块 UI（实时反馈）
 function updateFanSliderUI(fanId, value) {
     const slider = document.getElementById(`fan-slider-${fanId}`);
-    if (!slider) return;
+    if (!slider || slider.disabled || fanModeChanges.has(fanId)) return;
 
     fanSpeedDrafts.set(fanId, {value: Number(value)});
     const card = slider.closest('.fan-card');
@@ -2219,10 +2287,18 @@ function hideServicesModal() {
 }
 
 async function setFanSpeed(id, speed) {
+    const slider = document.getElementById(`fan-slider-${id}`);
+    if (!slider || slider.disabled || fanModeChanges.has(id)) return;
     const draft = fanSpeedDrafts.get(id);
     const requested = Number(speed);
     try {
-        const result = await api.fanSet(id, requested);
+        const write = api.fanSet(id, requested);
+        const outstanding = Promise.allSettled([fanSpeedWrites.get(id), write]);
+        fanSpeedWrites.set(id, outstanding);
+        void outstanding.then(() => {
+            if (fanSpeedWrites.get(id) === outstanding) fanSpeedWrites.delete(id);
+        });
+        const result = await write;
         if (!result || result.code !== 0 || (result.httpStatus && result.httpStatus >= 400)) {
             console.error('fan.set rejected', result);
             reportFailure({ op: 'fan.setspeed', params: { id }, result, endpoint: 'fan.set', write: true });
@@ -2230,56 +2306,127 @@ async function setFanSpeed(id, speed) {
             showToast(t(result.data?.enabled === false ? 'fan.settingDisabled' : 'fan.speedSet', {id, speed: requested}), 'success');
         }
         if (fanSpeedDrafts.get(id) === draft) fanSpeedDrafts.delete(id);
-        await refreshFans();
+        if (!fanModeChanges.has(id)) await refreshFans();
     } catch (e) {
         console.error('fan.set result unavailable', e);
         if (fanSpeedDrafts.get(id) === draft) fanSpeedDrafts.delete(id);
         if (e instanceof ApiOperationError && e.code !== undefined && !e.uncertain) {
             reportFailure({ op: 'fan.setspeed', params: { id }, error: e, endpoint: 'fan.set', write: true });
-            await refreshFans();
+            if (!fanModeChanges.has(id)) await refreshFans();
             return;
         }
         reportFailure({ op: 'fan.setspeed', params: { id }, error: e, endpoint: 'fan.set', write: true }, { type: 'warning' });
         // Do not repeat a command whose outcome is unknown. A later status poll
         // supplies a current snapshot; it cannot prove the outcome of this command.
-        markFanOutputsUnknown(id);
+        if (!fanModeChanges.has(id)) {
+            fanStatusRead?.skipFans.add(id);
+            markFanOutputsUnknown(id);
+        }
     }
 }
 
 async function setFanMode(id, mode) {
+    if (fanModeBusy(id)) return;
     try {
-        requireApiSuccess(await api.call('fan.mode', { id: id, mode: mode }, 'POST'), 'call');
+        await writeFanMode(id, mode);
         showToast(typeof t === 'function' ? t('fan.modeSwitch', { id, mode: t({off:'common.disabled', manual:'common.manual', auto:'fanPage.modeSmart', curve:'fan.curve'}[mode] || 'common.unknown') }) : `风扇 ${id} 模式已切换为 ${mode}`, 'success');
-        await refreshFans();
-    } catch (e) { reportFailure({ op: 'fan.setmode', error: e, write: true }); }
+    } catch (e) { reportFanModeFailure(e); }
+}
+
+async function writeFanMode(id, mode) {
+    if (fanModeBusy(id)) throw pageFailure('busy');
+    const pageCurrent = capturePageValidity();
+    const container = document.getElementById('fans-grid');
+    fanModeChanges.set(id, 'writing');
+    fanStatusRead?.skipFans.add(id);
+    fanSpeedDrafts.delete(id);
+    const card = container?.querySelector(`.fan-card[data-fan-id="${id}"]`);
+    if (card) setFanModeButtonsBusy(card, true);
+    const slider = document.getElementById(`fan-slider-${id}`);
+    if (slider) {
+        slider.disabled = true;
+        slider.closest('.fan-card').querySelector('.fan-draft').textContent = '';
+    }
+    try {
+        // A speed write forces manual mode. Let any earlier write finish
+        // before sending this fan's mode change.
+        await fanSpeedWrites.get(id);
+        return requireApiSuccess(await api.call('fan.mode', {id, mode}, 'POST'), 'fan.mode');
+    } finally {
+        if (container && pageCurrent() && document.getElementById('fans-grid') === container) {
+            fanModeChanges.set(id, 'confirming');
+            await refreshFans();
+        } else {
+            fanModeChanges.delete(id);
+        }
+    }
+}
+
+function reportFanModeFailure(error, op = 'fan.setmode') {
+    if (error.data?.applied === true && error.data.persisted === false) {
+        console.warn('fan.mode applied without saving', error);
+        showToast(t('fan.modeAppliedNotSaved'), 'warning');
+    } else {
+        reportFailure({op, error, write: true});
+    }
 }
 
 function markFanOutputsUnknown(id = null) {
+    const container = document.getElementById('fans-grid');
+    if (!container) return;
     if (id === null) fanSpeedDrafts.clear();
     else fanSpeedDrafts.delete(id);
-    for (const slider of document.querySelectorAll('.fan-slider')) {
-        if (id !== null && slider.id !== `fan-slider-${id}`) continue;
-        const card = slider.closest('.fan-card');
+    const cards = container.querySelectorAll('.fan-card');
+    if (!cards.length && id === null) {
+        container.innerHTML = `<p class="t-note">${t('fan.statusUnavailable')}</p>`;
+    }
+    for (const card of cards) {
+        const fanId = Number(card.dataset.fanId);
+        if (id !== null && fanId !== id) continue;
+        setFanModeButtonsBusy(card, fanModeBusy(fanId));
         card.querySelector('.fan-speed-num').textContent = '--';
-        card.querySelector('.fan-slider-value').textContent = '--%';
-        card.querySelector('.fan-draft').textContent = '';
         card.querySelector('.state').textContent = t('fan.outputUnknown');
         card.querySelector('.state').className = 'state bad';
-        slider.disabled = true;
+        card.querySelector('.fan-request').textContent = '';
+        const slider = card.querySelector('.fan-slider');
+        if (slider) {
+            card.querySelector('.fan-slider-value').textContent = '--%';
+            card.querySelector('.fan-draft').textContent = '';
+            slider.disabled = true;
+        }
+        if (id === null) {
+            const temperature = card.querySelector('.fan-temperature b');
+            if (temperature) {
+                temperature.textContent = FAN_TEMPERATURE_UNKNOWN;
+                temperature.classList.add('warn');
+            }
+            card.querySelector('.fan-rpm').textContent = '\u00a0';
+            for (const value of card.querySelectorAll('.fan-stat b')) value.textContent = '--';
+        }
     }
-    const global = document.getElementById('fan-global-duty');
-    if (global) global.textContent = '--%';
 }
 
 async function refreshFans() {
+    const pageCurrent = capturePageValidity();
+    const container = document.getElementById('fans-grid');
+    if (!container) return;
+    // A write only invalidates the older snapshot for the fan it touched.
+    const read = {skipFans: new Set()};
+    fanStatusRead = read;
+    let data;
     try {
-        const result = requireApiSuccess(await api.call('fan.status', null, 'GET'), 'fan.status');
-        if (result.data) updateFanInfo(result.data);
-        else markFanOutputsUnknown();
+        data = requireApiSuccess(await api.fanStatus(), 'fan.status').data;
     } catch (e) {
         console.error('fan.status unavailable:', e);
-        markFanOutputsUnknown();
     }
+    if (fanStatusRead !== read) return;
+    fanStatusRead = null;
+    for (const [id, phase] of fanModeChanges) {
+        if (phase === 'writing' || read.skipFans.has(id)) continue;
+        if (Array.isArray(data?.fans)) fanModeChanges.delete(id);
+        else fanModeChanges.set(id, 'unconfirmed');
+    }
+    if (pageCurrent() && document.getElementById('fans-grid') === container) updateFanInfo(data, false, read.skipFans);
 }
 
 /*===========================================================================*/
@@ -3067,22 +3214,15 @@ async function applyFanCurve() {
         requireApiSuccess(curveResult, 'fan.curve');
 
         // 3. 切换到曲线模式
-        const modeResult = await api.call('fan.mode', {
-            id: fanId,
-            mode: 'curve'
-        }, 'POST');
-
-        requireApiSuccess(modeResult, 'fan.mode');
+        await writeFanMode(fanId, 'curve');
 
         showToast(typeof t === 'function' ? t('fanPage.curveApplied', { id: fanId }) : `风扇 ${fanId} 曲线已应用并保存`, 'success');
         if (fanCurveModalCurrent(owner)) closeFanCurveModal(owner);
 
-        // 刷新风扇状态
-        if (owner.pageCurrent()) await refreshFans();
-
     } catch (e) {
         console.error('应用曲线失败:', e);
-        reportFailure({ op: 'fanpage.applycurve', error: e, write: true });
+        if (e.operation === 'fan.mode') reportFanModeFailure(e, 'fanpage.applycurve');
+        else reportFailure({ op: 'fanpage.applycurve', error: e, write: true });
     } finally {
         if (fanCurveModalCurrent(owner)) {
             owner.phase = 'ready';

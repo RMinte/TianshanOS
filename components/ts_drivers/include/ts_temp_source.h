@@ -89,6 +89,21 @@ typedef struct {
     float bound_total_weight;       /**< 正权重和 */
 } ts_temp_data_t;
 
+typedef enum {
+    TS_TEMP_AUTO_UNAVAILABLE = 0,
+    TS_TEMP_AUTO_VALID,
+    TS_TEMP_AUTO_SOURCE_BUSY,
+    TS_TEMP_AUTO_VARIABLE_BUSY,
+} ts_temp_auto_read_t;
+
+/* Snapshot of the sole bound variable; independent of effective-source selection. */
+typedef struct {
+    int64_t timestamp_ms;
+    uint32_t binding_revision;
+    int16_t value;
+    ts_temp_auto_read_t result;
+} ts_temp_auto_sample_t;
+
 /**
  * @brief 温度更新事件数据（通过 TS_EVT_TEMP_UPDATED 发布）
  */
@@ -227,6 +242,15 @@ int16_t ts_temp_get_effective(ts_temp_data_t *data);
  * @return 当前温度（0.1°C 单位）
  */
 int16_t ts_temp_get_effective_nonblocking(ts_temp_data_t *data);
+
+/* Both calls are nonblocking. The revision can be checked under the fan lock. */
+void ts_temp_read_auto_binding(ts_temp_auto_sample_t *sample);
+uint32_t ts_temp_auto_binding_revision(void);
+
+/* On success, keep the binding current through a short state commit. Pair
+ * with end_commit before doing any I/O, logging, or taking another lock. */
+bool ts_temp_auto_binding_begin_commit(uint32_t revision);
+void ts_temp_auto_binding_end_commit(void);
 
 /**
  * @brief 获取指定源的温度

@@ -676,7 +676,6 @@ if (typeof i18n !== 'undefined') i18n.registerLanguage('en-US', {
         status: 'Fan Status',
         speed: 'Speed',
         targetSpeed: 'Target Speed',
-        currentOutput: 'Current output',
         draftSetting: 'Ready to set {speed}%',
         requestedSetting: 'Requested setting: {speed}%',
         outputUnknown: 'Current output unconfirmed',
@@ -709,6 +708,7 @@ if (typeof i18n !== 'undefined') i18n.registerLanguage('en-US', {
         testTempSet: 'Test temperature set to {temp}°C',
         speedSet: 'Fan {id} set to {speed}%.',
         modeSwitch: 'Fan {id} mode switched to {mode}',
+        modeAppliedNotSaved: 'The fan mode changed, but could not be saved. It may revert after a restart.',
         setFanFailed: 'Failed to set fan: {msg}',
     },
     
@@ -3112,7 +3112,6 @@ if (typeof i18n !== 'undefined') i18n.registerLanguage('en-US', {
         modeCurve: 'Curve',
         speedAdjust: 'Speed Adjust',
         editTempCurve: 'Edit Temperature Curve',
-        manualModeHint: 'Switch to manual mode to adjust',
         autoStateIdle: 'Idle',
         autoStateBaseline: 'Following curve',
         autoStateActive: 'Adaptive speed',

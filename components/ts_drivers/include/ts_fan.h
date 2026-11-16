@@ -98,7 +98,7 @@ typedef struct {
     float cooling_response;      /**< AUTO 最近散热响应 °C/min */
     ts_fan_auto_state_t auto_state; /**< AUTO 控制状态 */
     bool guard_active;           /**< AUTO 硬保护是否激活 */
-    bool temp_stale;             /**< AUTO 温度输入是否失效/过期 */
+    bool temp_stale;             /**< 本拍 AUTO 无可用温度；不等于已下发 25% */
 } ts_fan_status_t;
 
 /*===========================================================================*/

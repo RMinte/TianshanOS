@@ -98,6 +98,21 @@ int16_t ts_temp_get_effective_nonblocking(ts_temp_data_t *data) {
     if(ret==EBUSY){*data=(ts_temp_data_t){0};return 0;}
     assert(!ret);*data=input;pthread_mutex_unlock(&temperature_mutex);return data->value;
 }
+#if BOUND_AUTO
+uint32_t ts_temp_auto_binding_revision(void) {return 1+input.identity_revision;}
+bool ts_temp_auto_binding_begin_commit(uint32_t revision) {return revision==ts_temp_auto_binding_revision();}
+void ts_temp_auto_binding_end_commit(void) {}
+void ts_temp_read_auto_binding(ts_temp_auto_sample_t *sample) {
+    assert(!host_locks_held && "temperature read under fan mutex");
+    ts_temp_data_t snapshot;
+    ts_temp_get_effective_nonblocking(&snapshot);
+    *sample=(ts_temp_auto_sample_t){
+        .timestamp_ms=snapshot.timestamp_ms,.binding_revision=1+snapshot.identity_revision,.value=snapshot.value,
+        .result=snapshot.valid && snapshot.source==TS_TEMP_SOURCE_VARIABLE && !snapshot.partial_stale
+              ? TS_TEMP_AUTO_VALID : TS_TEMP_AUTO_UNAVAILABLE,
+    };
+}
+#endif
 static esp_err_t ts_pwm_set_duty(ts_pwm_handle_t pwm,float duty) {
     if(check_pwm_lifetime)assert(pwm_alive);
     pause_auto(2);
@@ -366,6 +381,40 @@ static void check_temperature_contention(void){
         char name[64];snprintf(name,sizeof(name),"P2_temperature_busy_entry%u_timer_emergency_complete",entry);record(name,0);
     }
 }
+#if BOUND_AUTO
+static void check_auto_reenable(void)
+{
+    for (int fail_first_write = 0; fail_first_write < 2; fail_first_write++) {
+        setup(37);
+        tick(100000,488,true);
+        assert(ts_fan_enable(0,false)==ESP_OK && output[0]==0);
+        assert(ts_fan_enable(0,true)==ESP_OK);
+        unsigned history = s_fans[0].temp_history_count;
+        if (fail_first_write) {
+            hal_result=ESP_ERR_INVALID_STATE;
+            tick(101000,488,false);
+            assert(output[0]==0 && s_fans[0].fault && !s_fans[0].temp_stale);
+            hal_result=ESP_OK;
+        }
+        tick(fail_first_write?102000:101000,488,false);
+        assert(output[0]==12 && s_fans[0].current_duty==12 && !s_fans[0].fault);
+        assert(s_fans[0].auto_report_ms==100000 && s_fans[0].temp_history_count==history);
+        record(fail_first_write?"AUTO_reenable_retries_failed_PWM":"AUTO_reenable_uses_valid_cached_report",0);
+        assert(ts_fan_enable(0,true)==ESP_OK); /* Redundant enable does not reapply. */
+        tick(103000,488,false);
+        assert(output[0]==12 && s_fans[0].temp_history_count==history);
+        tick(104000,488,true);
+        assert(output[0]==14 && s_fans[0].temp_history_count==history+1);
+    }
+    setup(37);
+    tick(100000,488,true);
+    assert(ts_fan_enable(0,false)==ESP_OK && output[0]==0);
+    assert(ts_fan_enable(0,true)==ESP_OK);
+    tick(106000,488,false);
+    assert(output[0]==25 && s_fans[0].temp_stale && s_fans[0].auto_report_ms==100000);
+    record("AUTO_reenable_does_not_use_expired_report",0);
+}
+#endif
 static void *deinitialize_fan(void *arg){assert(ts_fan_deinit()==ESP_OK);return NULL;}
 static void *control_after_deinit(void *arg){caller_thread=true;assert(ts_fan_set_duty(0,60)==ESP_ERR_INVALID_STATE);return NULL;}
 static void check_driver_lifecycle(void){
@@ -387,28 +436,31 @@ static void check_driver_lifecycle(void){
 }
 int main(int argc,char **argv) {
     if(argc>1&&!strcmp(argv[1],"cadence")) {
-        check=true;setup(37);input.source=TS_TEMP_SOURCE_MANUAL;tick(100000,950,true);tick(101000,890,true);
+        check=true;setup(37);if(!BOUND_AUTO)input.source=TS_TEMP_SOURCE_MANUAL;tick(100000,950,true);tick(101000,890,true);
         int period=CONFIG_TS_DRIVERS_FAN_TEMP_UPDATE_MS;
         if(period<=10000) {
             for(int elapsed=period;elapsed<=30000;elapsed+=period) {
-                tick(101000+elapsed,890,elapsed%5000==0||period>=5000);
+                tick(101000+elapsed,890,elapsed%(BOUND_AUTO&&period<=1000?1000:5000)==0||period>=5000);
                 if(elapsed<30000)assert(s_fans[0].guard_active);
             }
-            assert(!s_fans[0].guard_active);
+            assert(s_fans[0].guard_active==(BOUND_AUTO&&period>=6000));
         } else {
             tick(101000+period,890,false);
-            assert(s_fans[0].guard_active&&s_fans[0].guard_release_since_ms==101000+period);
+            assert(s_fans[0].guard_active&&s_fans[0].guard_release_since_ms==(BOUND_AUTO?0:101000+period));
         }
         record("R1_configured_cadence",0);return 0;
     }
     check=argc>1&&!strcmp(argv[1],"check");
     if(check){check_save_results();check_handoffs();check_temperature_contention();check_driver_lifecycle();}
+#if BOUND_AUTO
+    if(check)check_auto_reenable();
+#endif
     setup(37);tick(100000,950,true);tick(101000,890,true);tick(161000,890,true);
     record("R1_gap60",0);if(check)assert(s_fans[0].guard_active&&output[0]==100);
     /* Cached reads are valid observations, not fictitious new sensor reports. */
     setup(37);tick(100000,950,true);tick(101000,890,true);
     for(int t=102;t<=131;t++) {tick(t*1000,890,t%5==1);if(check&&t<131)assert(s_fans[0].guard_active);}
-    record("R1_cached5s_release30",0);if(check)assert(!s_fans[0].guard_active);
+    record("R1_cached5s_release30",0);if(check)assert(s_fans[0].guard_active==!!BOUND_AUTO);
     for(int kind=0;kind<5;kind++) {
         setup(37);tick(100000,950,true);tick(101000,890,true);
         for(int t=102;t<=120;t++)tick(t*1000,890,true);
@@ -420,15 +472,29 @@ int main(int argc,char **argv) {
         tick(resume,890,true);
         record(kind==0?"R1_source_change":kind==1?"R1_binding_change":kind==2?"R1_clock_rollback":kind==3?"R1_duplicate_clock":"R1_missed_tick",0);
 #if REPAIRED
-        if(check)assert(s_fans[0].guard_active&&s_fans[0].guard_release_since_ms==resume);
+        if(check)assert(s_fans[0].guard_active&&s_fans[0].guard_release_since_ms==(BOUND_AUTO&&(kind==0||kind==2||kind==3)?0:resume));
 #endif
-        for(int t=1;t<=30;t++){tick(resume+t*1000,890,t%5==0);if(check&&t<30)assert(s_fans[0].guard_active);}
+        input.source=TS_TEMP_SOURCE_VARIABLE;
+        int end=BOUND_AUTO&&(kind==0||kind==2||kind==3)?33:30;
+        for(int t=1;t<=end;t++){
+            tick(resume+t*1000,890,BOUND_AUTO||t%5==0);
+            if(check&&t<30)assert(s_fans[0].guard_active);
+        }
         if(check)assert(!s_fans[0].guard_active);
     }
     setup(37);tick(100000,950,true);tick(101000,890,true);input.valid=false;
-    tick(120000,890,false);record("R1_stale25",0);if(check)assert(output[0]==25&&s_fans[0].temp_stale);
+    tick(120000,890,false);record(BOUND_AUTO?"R1_guard_retained_on_loss":"R1_stale25",0);if(check)assert(output[0]==(BOUND_AUTO?100:25)&&s_fans[0].temp_stale);
     input.valid=true;tick(121000,950,true);record("R1_stale_reheat_guard100",0);
     if(check)assert(output[0]==100&&s_fans[0].guard_active);
+#if BOUND_AUTO
+    setup(37);tick(100000,950,true);tick(101000,890,true);
+    assert(ts_fan_save_full_config(0)==ESP_OK);
+    assert(!pthread_mutex_lock(&temperature_mutex));
+    assert(ts_fan_load_config()==ESP_OK);
+    assert(s_fans[0].guard_active && s_fans[0].guard_release_since_ms==0 && output[0]==100);
+    assert(!pthread_mutex_unlock(&temperature_mutex));
+    record("AUTO_guard_retained_reload_with_busy_source",0);
+#endif
     setup(37);s_fans[0].mode=TS_FAN_MODE_MANUAL;assert(ts_fan_set_duty(0,37)==ESP_OK);
     hal_result=ESP_ERR_INVALID_STATE;int ret=ts_fan_set_duty(0,70);record("R2_manual_fail",ret);
     if(check)assert(s_fans[0].current_duty==37&&s_fans[0].target_duty==70&&output[0]==37);
