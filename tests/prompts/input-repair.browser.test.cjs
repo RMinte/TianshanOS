@@ -287,6 +287,7 @@ async function prepareFanCurveFixture(page, failedEndpoint = null) {
         const original = api.call;
         api.call = async (endpoint, params) => {
             if (endpoint === 'fan.config') return {code:0,data:structuredClone(savedFan)};
+            if (endpoint === 'fan.status') return {code:0,data:{fans:[{id:0,mode:fanMode,enabled:true,duty:37,duty_valid:true}]}};
             if (['fan.limits','fan.curve','fan.mode'].includes(endpoint)) {
                 fanWrites.push({endpoint,params:structuredClone(params)});
                 if (endpoint === 'fan.mode') fanMode = params.mode;
@@ -296,6 +297,7 @@ async function prepareFanCurveFixture(page, failedEndpoint = null) {
             }
             return original(endpoint, params);
         };
+        await loadSystemPage();
         await showFanCurveModal(0);
     }, failedEndpoint);
 }
@@ -340,12 +342,20 @@ for (const language of ['zh-CN', 'en-US']) {
                 await prepareFanCurveFixture(f.page, failed);
                 await f.page.evaluate(() => applyFanCurve());
                 assert.equal(await f.page.locator('#fan-curve-modal').count(), 1);
-                assert.equal(await f.page.locator('#toast.toast-error.show').count(), 1);
-                const why = await f.page.evaluate(() => t('failure.reasons.fan_config_save_failed.why'));
-                assert((await f.page.locator('#toast .toast-msg').innerText()).includes(why));
+                if (failed === 'fan.mode') {
+                    const warning = f.page.locator('#toast.toast-warning.show');
+                    const message = language === 'zh-CN' ? '风扇模式已切换，但未保存。重启后可能恢复之前的模式。'
+                        : 'The fan mode changed, but could not be saved. It may revert after a restart.';
+                    assert.equal(await warning.textContent(), message);
+                } else {
+                    assert.equal(await f.page.locator('#toast.toast-error.show').count(), 1);
+                    const why = await f.page.evaluate(() => t('failure.reasons.fan_config_save_failed.why'));
+                    assert((await f.page.locator('#toast .toast-msg').innerText()).includes(why));
+                }
                 const writes = await f.page.evaluate(() => fanWrites.map(write => write.endpoint));
                 assert.equal(writes.at(-1), failed);
                 assert.equal(await f.page.evaluate(() => fanMode), failed === 'fan.mode' ? 'curve' : 'auto');
+                assert.equal(await f.page.locator('.fan-card').getAttribute('data-mode'), failed === 'fan.mode' ? 'curve' : 'auto');
                 assert.deepEqual(f.errors, []);
             } finally { await f.context.close(); }
         });

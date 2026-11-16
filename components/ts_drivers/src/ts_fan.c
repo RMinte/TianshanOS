@@ -42,6 +42,8 @@
 #define FAN_AUTO_RISE_RATE_PER_SEC     12.0f
 #define FAN_AUTO_FALL_RATE_PER_SEC     0.30f
 #define FAN_AUTO_STALE_DUTY            25
+#define FAN_AUTO_STALE_MS              6000
+#define FAN_AUTO_REPORT_GAP_MS         2000   /* Bound variable reports about once a second. */
 #define FAN_AUTO_HISTORY_SIZE          32
 
 /*===========================================================================*/
@@ -82,9 +84,9 @@ typedef struct {
     bool temp_stale;
     int64_t guard_release_since_ms;
     int64_t guard_last_observation_ms;
-    int64_t guard_last_report_ms;
-    ts_temp_source_type_t guard_last_source;
-    uint32_t guard_last_identity;
+    int64_t auto_report_ms;
+    uint32_t auto_binding_revision;
+    bool auto_resume_pending;
     bool response_observing;
     int64_t response_until_ms;
     float response_slope_before;
@@ -130,7 +132,7 @@ static void tach_isr_callback(ts_gpio_handle_t handle, void *arg);
 static void fan_update_callback(void *arg);
 static uint8_t calc_duty_from_curve(fan_instance_t *fan, int16_t temp);
 static esp_err_t apply_curve_with_hysteresis(fan_instance_t *fan, uint8_t fan_id);
-static esp_err_t apply_adaptive_auto(fan_instance_t *fan, const ts_temp_data_t *temp_data);
+static esp_err_t apply_adaptive_auto(fan_instance_t *fan, const ts_temp_auto_sample_t *sample);
 static esp_err_t update_pwm(fan_instance_t *fan, uint8_t duty);
 static void temp_event_handler(const ts_event_t *event, void *user_data);
 
@@ -253,20 +255,6 @@ static bool is_temp_data_basic_valid(const ts_temp_data_t *data)
     return true;
 }
 
-static bool is_auto_temp_data_usable(const ts_temp_data_t *data)
-{
-    if (!is_temp_data_basic_valid(data)) {
-        return false;
-    }
-
-    if (data->bound_total_count > 0 &&
-        (data->partial_stale || data->bound_valid_count < data->bound_total_count)) {
-        return false;
-    }
-
-    return true;
-}
-
 static void reset_adaptive_auto_state(fan_instance_t *fan)
 {
     fan->target_duty = fan->current_duty;
@@ -281,7 +269,9 @@ static void reset_adaptive_auto_state(fan_instance_t *fan)
     fan->temp_stale = false;
     fan->guard_release_since_ms = 0;
     fan->guard_last_observation_ms = 0;
-    fan->guard_last_report_ms = 0;
+    fan->auto_report_ms = 0;
+    fan->auto_binding_revision = 0;
+    fan->auto_resume_pending = false;
     fan->response_observing = false;
     fan->response_until_ms = 0;
     fan->response_slope_before = 0.0f;
@@ -290,26 +280,6 @@ static void reset_adaptive_auto_state(fan_instance_t *fan)
     fan->temp_history_count = 0;
     fan->last_auto_update_ms = 0;
     fan->auto_fall_credit = 0.0f;
-}
-
-static bool get_adaptive_temperatures(const ts_temp_data_t *temp_data,
-                                      int16_t *control_temp,
-                                      int16_t *guard_temp)
-{
-    if (!control_temp || !guard_temp || !is_auto_temp_data_usable(temp_data)) {
-        return false;
-    }
-
-    *control_temp = temp_data->value;
-    if (temp_data->guard_valid &&
-        temp_data->guard_value >= TS_TEMP_MIN_VALID &&
-        temp_data->guard_value <= TS_TEMP_MAX_VALID) {
-        *guard_temp = temp_data->guard_value;
-    } else {
-        *guard_temp = temp_data->value;
-    }
-
-    return true;
 }
 
 static void record_auto_temp_sample(fan_instance_t *fan, int16_t temp, int64_t now_ms)
@@ -435,90 +405,140 @@ static void update_response_learning(fan_instance_t *fan, bool slope_valid,
                                        FAN_AUTO_GAIN_MAX);
 }
 
-static void update_guard_observation(fan_instance_t *fan, const ts_temp_data_t *data,
-                                     int64_t now_ms)
+static void update_guard_observation(fan_instance_t *fan, const ts_temp_auto_sample_t *sample,
+                                     bool valid, bool new_report, int64_t now_ms,
+                                     int64_t max_poll_gap_ms, int64_t max_report_gap_ms)
 {
-    /* Valid cached readings count; a missed evaluation or changed source does not.
-     * Two timer periods allow normal scheduling jitter, capped by input validity. */
-    int64_t max_gap_ms = 2LL * CONFIG_TS_DRIVERS_FAN_TEMP_UPDATE_MS;
-    if (max_gap_ms > TS_TEMP_DATA_TIMEOUT_MS) max_gap_ms = TS_TEMP_DATA_TIMEOUT_MS;
-    bool broken = fan->guard_last_observation_ms == 0 ||
-                  now_ms <= fan->guard_last_observation_ms ||
-                  now_ms - fan->guard_last_observation_ms > max_gap_ms ||
-                  data->source != fan->guard_last_source ||
-                  data->identity_revision != fan->guard_last_identity ||
-                  data->timestamp_ms < fan->guard_last_report_ms ||
-                  data->timestamp_ms - fan->guard_last_report_ms > TS_TEMP_DATA_TIMEOUT_MS ||
-                  data->timestamp_ms <= 0 || data->timestamp_ms > now_ms;
-    if (broken) fan->guard_release_since_ms = 0;
-    fan->guard_last_observation_ms = now_ms;
-    fan->guard_last_report_ms = data->timestamp_ms;
-    fan->guard_last_source = data->source;
-    fan->guard_last_identity = data->identity_revision;
-}
+    if (valid && sample->value >= FAN_AUTO_GUARD_TEMP) {
+        fan->guard_active = true;
+    }
+    if (!fan->guard_active) return;
 
-static esp_err_t apply_adaptive_auto(fan_instance_t *fan, const ts_temp_data_t *temp_data)
-{
-    int64_t now_ms = esp_timer_get_time() / 1000;
-    int16_t control_temp = TS_TEMP_DEFAULT_VALUE;
-    int16_t guard_temp = TS_TEMP_DEFAULT_VALUE;
-    uint8_t old_duty = fan->current_duty;
-    bool recovered_from_stale = fan->temp_stale;
-
-    if (!get_adaptive_temperatures(temp_data, &control_temp, &guard_temp)) {
-        fan->temp_stale = true;
-        fan->auto_state = TS_FAN_AUTO_STATE_STALE;
-        fan->response_observing = false;
-        fan->auto_fall_credit = 0.0f;
-        fan->guard_active = false;
+    if (!valid || sample->value > FAN_AUTO_GUARD_RELEASE_TEMP ||
+        now_ms - sample->timestamp_ms > max_report_gap_ms) {
         fan->guard_release_since_ms = 0;
         fan->guard_last_observation_ms = 0;
-        fan->target_duty = FAN_AUTO_STALE_DUTY;
-        fan->predicted_temperature = fan->control_temperature;
-        fan->last_auto_update_ms = now_ms;
-        return update_pwm(fan, FAN_AUTO_STALE_DUTY);
+        return;
     }
 
-    fan->temp_stale = false;
-    fan->temperature = control_temp;
-    fan->control_temperature = control_temp;
-    fan->guard_temperature = guard_temp;
-    record_auto_temp_sample(fan, control_temp, now_ms);
-
-    update_guard_observation(fan, temp_data, now_ms);
-    if (guard_temp >= FAN_AUTO_GUARD_TEMP) {
-        fan->guard_active = true;
+    if (fan->guard_last_observation_ms == 0 ||
+        now_ms <= fan->guard_last_observation_ms ||
+        now_ms - fan->guard_last_observation_ms > max_poll_gap_ms ||
+        (fan->auto_report_ms > 0 && sample->timestamp_ms - fan->auto_report_ms > max_report_gap_ms)) {
         fan->guard_release_since_ms = 0;
-    } else if (fan->guard_active) {
-        if (guard_temp <= FAN_AUTO_GUARD_RELEASE_TEMP) {
-            if (fan->guard_release_since_ms == 0) {
-                fan->guard_release_since_ms = now_ms;
-            } else if ((now_ms - fan->guard_release_since_ms) >= FAN_AUTO_GUARD_RELEASE_MS) {
-                fan->guard_active = false;
-                fan->guard_release_since_ms = 0;
-            }
-        } else {
-            fan->guard_release_since_ms = 0;
+    }
+    fan->guard_last_observation_ms = now_ms;
+    if (!new_report) return;
+
+    if (fan->guard_release_since_ms == 0) {
+        fan->guard_release_since_ms = now_ms;
+    } else if (sample->timestamp_ms - fan->guard_release_since_ms >= FAN_AUTO_GUARD_RELEASE_MS) {
+        /* Commit the latch change in order with binding replacement. The
+         * earlier snapshot check alone cannot cover a rebind on another core. */
+        if (ts_temp_auto_binding_begin_commit(sample->binding_revision)) {
+            fan->guard_active = false;
+            ts_temp_auto_binding_end_commit();
         }
+        fan->guard_release_since_ms = 0;
+        fan->guard_last_observation_ms = 0;
+    }
+}
+
+static esp_err_t apply_adaptive_auto(fan_instance_t *fan, const ts_temp_auto_sample_t *sample)
+{
+    int64_t now_ms = esp_timer_get_time() / 1000;
+    /* Resolve a rebind after sampling, without acquiring a temperature lock here. */
+    uint32_t binding_revision = ts_temp_auto_binding_revision();
+    if (fan->auto_binding_revision != 0 && fan->auto_binding_revision != binding_revision) {
+        bool guard_active = fan->guard_active;
+        reset_adaptive_auto_state(fan);
+        fan->guard_active = guard_active;
+    }
+    fan->auto_binding_revision = binding_revision;
+
+    int64_t sample_age_ms = now_ms - sample->timestamp_ms;
+    bool valid = s_auto_temp_enabled && sample->result == TS_TEMP_AUTO_VALID &&
+                 sample->binding_revision == binding_revision && sample->timestamp_ms > 0 &&
+                 sample_age_ms >= 0 && sample_age_ms < FAN_AUTO_STALE_MS &&
+                 sample->timestamp_ms >= fan->auto_report_ms;
+    bool new_report = valid && sample->timestamp_ms > fan->auto_report_ms;
+    bool was_stale = fan->temp_stale;
+    bool was_guard = fan->guard_active;
+    bool recovered_from_stale = fan->auto_state == TS_FAN_AUTO_STATE_STALE;
+    uint8_t old_duty = fan->current_duty;
+    int64_t max_poll_gap_ms = 2LL * CONFIG_TS_DRIVERS_FAN_TEMP_UPDATE_MS;
+    if (max_poll_gap_ms > FAN_AUTO_STALE_MS) max_poll_gap_ms = FAN_AUTO_STALE_MS;
+    /* Faster polling must not turn a normal producer interval into a missing report. */
+    int64_t max_report_gap_ms = max_poll_gap_ms > FAN_AUTO_REPORT_GAP_MS
+                              ? max_poll_gap_ms : FAN_AUTO_REPORT_GAP_MS;
+    update_guard_observation(fan, sample, valid, new_report, now_ms, max_poll_gap_ms, max_report_gap_ms);
+
+    fan->temp_stale = !valid;
+    bool slope_valid = false;
+    if (new_report) {
+        fan->auto_report_ms = sample->timestamp_ms;
+        fan->temperature = sample->value;
+        fan->control_temperature = sample->value;
+        fan->guard_temperature = sample->value;
+        record_auto_temp_sample(fan, sample->value, now_ms);
+        slope_valid = calculate_auto_slope(fan, sample->value, now_ms,
+                                           FAN_AUTO_MIN_SAMPLE_MS, &fan->slope_c_per_min);
+        if (!slope_valid) fan->slope_c_per_min = 0.0f;
     }
 
-    bool slope_valid = calculate_auto_slope(fan, control_temp, now_ms,
-                                            FAN_AUTO_MIN_SAMPLE_MS,
-                                            &fan->slope_c_per_min);
-    if (!slope_valid) {
-        fan->slope_c_per_min = 0.0f;
+    if (was_stale != fan->temp_stale || was_guard != fan->guard_active) {
+        TS_LOGI(TAG, "AUTO input t=%lld binding=%lu read=%d report=%lld age=%lld stale=%d guard=%d duty=%u",
+                (long long)now_ms, (unsigned long)binding_revision, sample->result,
+                (long long)sample->timestamp_ms, sample->timestamp_ms > 0 ? (long long)sample_age_ms : -1LL,
+                fan->temp_stale, fan->guard_active, old_duty);
     }
-    update_response_learning(fan, slope_valid, fan->slope_c_per_min, now_ms);
-
     if (fan->guard_active) {
         fan->auto_state = TS_FAN_AUTO_STATE_GUARD;
+        fan->auto_resume_pending = false;
         fan->response_observing = false;
         fan->auto_fall_credit = 0.0f;
         fan->target_duty = 100;
-        fan->predicted_temperature = guard_temp;
+        fan->predicted_temperature = fan->guard_temperature;
         fan->last_auto_update_ms = now_ms;
         return update_pwm(fan, 100);
     }
+
+    if (!valid) {
+        int64_t last_age_ms = now_ms - fan->auto_report_ms;
+        /* A missed read gives no new rate or temperature evidence. A genuine
+         * loss or a different binding must never extend the original deadline. */
+        fan->last_auto_update_ms = now_ms;
+        fan->response_observing = false;
+        if (s_auto_temp_enabled && fan->duty_valid && !recovered_from_stale &&
+            fan->auto_report_ms > 0 && last_age_ms >= 0 && last_age_ms < FAN_AUTO_STALE_MS) {
+            return ESP_OK;
+        }
+        if (!recovered_from_stale) {
+            TS_LOGI(TAG, "AUTO fallback t=%lld binding=%lu read=%d last_report=%lld last_age=%lld duty=%u target=%u",
+                    (long long)now_ms, (unsigned long)binding_revision, sample->result,
+                    (long long)fan->auto_report_ms, fan->auto_report_ms > 0 ? (long long)last_age_ms : -1LL,
+                    old_duty, FAN_AUTO_STALE_DUTY);
+        }
+        fan->auto_state = TS_FAN_AUTO_STATE_STALE;
+        fan->auto_fall_credit = 0.0f;
+        fan->target_duty = FAN_AUTO_STALE_DUTY;
+        fan->predicted_temperature = fan->control_temperature;
+        return update_pwm(fan, FAN_AUTO_STALE_DUTY);
+    }
+
+    if (!new_report && !fan->auto_resume_pending) {
+        /* Normal asynchronous polling neither creates a sample nor erases
+         * fractional fall credit. Don't bank time across a report gap. */
+        if (sample_age_ms > max_report_gap_ms) fan->last_auto_update_ms = now_ms;
+        return ESP_OK;
+    }
+
+    int16_t control_temp = sample->value;
+    int16_t guard_temp = sample->value;
+    if (new_report) update_response_learning(fan, slope_valid, fan->slope_c_per_min, now_ms);
+    /* Explicit re-enable can use the same valid report once, without counting
+     * it as a new sample or accruing slew time while the fan was off. */
+    if (fan->auto_resume_pending) fan->last_auto_update_ms = 0;
 
     uint8_t baseline = apply_duty_limits(fan, calc_duty_from_curve(fan, control_temp));
     uint8_t target = baseline;
@@ -569,6 +589,7 @@ static esp_err_t apply_adaptive_auto(fan_instance_t *fan, const ts_temp_data_t *
     }
     fan->target_duty = target;
     esp_err_t ret = update_pwm(fan, target);
+    if (ret == ESP_OK) fan->auto_resume_pending = false;
 
     if (ret == ESP_OK && !fan->response_observing && slope_valid &&
         target >= old_duty + FAN_AUTO_RESPONSE_DUTY_DELTA) {
@@ -580,11 +601,10 @@ static esp_err_t apply_adaptive_auto(fan_instance_t *fan, const ts_temp_data_t *
     return ret;
 }
 
-static esp_err_t apply_auto_immediate(fan_instance_t *fan, const ts_temp_data_t *temp_data)
+static esp_err_t apply_auto_immediate(fan_instance_t *fan, const ts_temp_auto_sample_t *sample)
 {
-    if (is_temp_data_basic_valid(temp_data)) fan->temperature = temp_data->value;
     reset_adaptive_auto_state(fan);
-    return apply_adaptive_auto(fan, temp_data);
+    return apply_adaptive_auto(fan, sample);
 }
 
 /**
@@ -654,9 +674,14 @@ static esp_err_t update_pwm(fan_instance_t *fan, uint8_t duty)
         fan->duty_valid = true;
         fan->fault = false;
     } else {
+        if (fan->mode == TS_FAN_MODE_AUTO && !fan->fault) {
+            TS_LOGW(TAG, "AUTO PWM t=%lld target=%u previous=%u valid=%d guard=%d err=%d",
+                    (long long)(esp_timer_get_time() / 1000), duty, fan->current_duty,
+                    fan->duty_valid, fan->guard_active, (int)ret);
+        }
         fan->fault = true;
     }
-    
+
     return ret;
 }
 
@@ -669,13 +694,13 @@ static void fan_update_callback(void *arg)
     int64_t now = esp_timer_get_time();
     static uint32_t s_log_counter = 0;
     ts_temp_data_t temp_data = {0};
-    bool have_temp_data = false;
+    ts_temp_auto_sample_t auto_sample = {0};
     bool basic_temp_data_valid = false;
     
     /* 温度监控独立于风扇模式，手动/关闭模式下也保持有效温度快照更新。 */
     if (s_auto_temp_enabled) {
+        ts_temp_read_auto_binding(&auto_sample);
         ts_temp_get_effective_nonblocking(&temp_data);
-        have_temp_data = true;
         basic_temp_data_valid = is_temp_data_basic_valid(&temp_data);
         
         /* 每 10 秒输出一次调试日志 */
@@ -694,7 +719,7 @@ static void fan_update_callback(void *arg)
             fan_unlock(i);
             continue;
         }
-        if (basic_temp_data_valid) fan->temperature = temp_data.value;
+        if (fan->mode != TS_FAN_MODE_AUTO && basic_temp_data_valid) fan->temperature = temp_data.value;
         
         // 计算 RPM
         if (fan->tach_gpio) {
@@ -720,10 +745,7 @@ static void fan_update_callback(void *arg)
             break;
             
         case TS_FAN_MODE_AUTO:
-            {
-                const ts_temp_data_t *auto_temp = have_temp_data ? &temp_data : NULL;
-                apply_adaptive_auto(fan, auto_temp);
-            }
+            apply_adaptive_auto(fan, &auto_sample);
             break;
             
         case TS_FAN_MODE_CURVE:
@@ -961,7 +983,10 @@ esp_err_t ts_fan_set_mode(ts_fan_id_t fan, ts_fan_mode_t mode)
 {
     if (fan >= TS_FAN_MAX) return ESP_ERR_INVALID_ARG;
     ts_temp_data_t temp_data = {0};
-    if (s_auto_temp_enabled && (mode == TS_FAN_MODE_AUTO || mode == TS_FAN_MODE_CURVE)) {
+    ts_temp_auto_sample_t auto_sample = {0};
+    if (s_auto_temp_enabled && mode == TS_FAN_MODE_AUTO) {
+        ts_temp_read_auto_binding(&auto_sample);
+    } else if (s_auto_temp_enabled && mode == TS_FAN_MODE_CURVE) {
         ts_temp_get_effective_nonblocking(&temp_data);
     }
     if (!fan_lock(fan)) return ESP_ERR_INVALID_STATE;
@@ -989,7 +1014,7 @@ esp_err_t ts_fan_set_mode(ts_fan_id_t fan, ts_fan_mode_t mode)
         s_fans[fan].last_speed_change_time = 0;  /* 允许立即调速 */
         
         if (mode == TS_FAN_MODE_AUTO) {
-            ret = apply_auto_immediate(&s_fans[fan], &temp_data);
+            ret = apply_auto_immediate(&s_fans[fan], &auto_sample);
         } else if (is_temp_data_basic_valid(&temp_data)) {
             s_fans[fan].temperature = temp_data.value;
         }
@@ -1047,10 +1072,14 @@ esp_err_t ts_fan_enable(ts_fan_id_t fan, bool enable)
         return ESP_ERR_INVALID_STATE;
     }
     
-    s_fans[fan].enabled = enable;
+    fan_instance_t *f = &s_fans[fan];
+    if (f->enabled != enable) {
+        f->auto_resume_pending = enable && f->mode == TS_FAN_MODE_AUTO;
+    }
+    f->enabled = enable;
     
     if (!enable) {
-        esp_err_t ret = update_pwm(&s_fans[fan], 0);
+        esp_err_t ret = update_pwm(f, 0);
         fan_unlock(fan);
         return ret;
     }
@@ -1391,9 +1420,9 @@ esp_err_t ts_fan_load_config(void)
             TS_LOGW(TAG, "Fan %d config version mismatch, skipping", i);
             continue;
         }
-        ts_temp_data_t temp_data = {0};
+        ts_temp_auto_sample_t auto_sample = {0};
         if (s_auto_temp_enabled && cfg.mode == TS_FAN_MODE_AUTO) {
-            ts_temp_get_effective_nonblocking(&temp_data);
+            ts_temp_read_auto_binding(&auto_sample);
         }
         if (!fan_lock(i)) continue;
         if (!s_fans[i].initialized) {
@@ -1401,9 +1430,13 @@ esp_err_t ts_fan_load_config(void)
             continue;
         }
         // 恢复配置
+        bool keep_auto = s_fans[i].mode == TS_FAN_MODE_AUTO && cfg.mode == TS_FAN_MODE_AUTO &&
+                         s_fans[i].enabled && cfg.enabled;
         s_fans[i].mode = cfg.mode;
-        reset_adaptive_auto_state(&s_fans[i]);
-        s_fans[i].target_duty = cfg.mode == TS_FAN_MODE_OFF ? 0 : cfg.duty;
+        if (!keep_auto) {
+            reset_adaptive_auto_state(&s_fans[i]);
+            s_fans[i].target_duty = cfg.mode == TS_FAN_MODE_OFF ? 0 : cfg.duty;
+        }
         s_fans[i].enabled = cfg.enabled;
         s_fans[i].config.curve_points = cfg.curve_points;
         s_fans[i].config.hysteresis = cfg.hysteresis;
@@ -1415,7 +1448,7 @@ esp_err_t ts_fan_load_config(void)
                cfg.curve_points * sizeof(ts_fan_curve_point_t));
         
         if (s_fans[i].mode == TS_FAN_MODE_AUTO && s_fans[i].pwm) {
-            ret = apply_auto_immediate(&s_fans[i], &temp_data);
+            ret = apply_adaptive_auto(&s_fans[i], &auto_sample);
         } else if (s_fans[i].mode == TS_FAN_MODE_MANUAL && s_fans[i].pwm) {
             ret = update_pwm(&s_fans[i], cfg.duty);
         } else if (s_fans[i].mode == TS_FAN_MODE_OFF && s_fans[i].pwm) {

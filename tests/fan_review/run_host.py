@@ -43,6 +43,9 @@ with tempfile.TemporaryDirectory(prefix='fan-review-') as tmp:
              'ts_fan_enable', 'ts_fan_get_status', 'ts_fan_emergency_full',
              'ts_fan_save_config', 'ts_fan_save_full_config', 'ts_fan_load_config',
              'ts_fan_get_config', 'ts_fan_set_temperature', 'temp_event_handler', 'ts_fan_set_limits', 'ts_fan_set_curve', 'ts_fan_set_hysteresis']
+    bound_auto = 'ts_temp_read_auto_binding(' in source
+    if bound_auto:
+        names = [n for n in names if n not in ('is_auto_temp_data_usable', 'get_adaptive_temperatures')]
     if 'static bool fan_lock(' in source:
         names[:0] = ['fan_lock', 'fan_unlock']
     if 'static void update_guard_observation(' in source:
@@ -58,7 +61,7 @@ with tempfile.TemporaryDirectory(prefix='fan-review-') as tmp:
     if args.cjson_dir: cjson = args.cjson_dir
     exe = out / 'review'
     command = ['cc', '-std=c11', '-pthread', '-g', '-Wall', '-Wextra', '-Wno-unused-function', '-Wno-unused-parameter', '-Wno-deprecated-declarations',
-               '-fsanitize=address,undefined', '-DCONFIG_TS_DRIVERS_FAN_TEMP_UPDATE_MS=' + str(args.period_ms), '-DREPAIRED=' + str(int('guard_last_observation_ms' in source)),
+               '-fsanitize=address,undefined', '-DBOUND_AUTO=' + str(int(bound_auto)), '-DCONFIG_TS_DRIVERS_FAN_TEMP_UPDATE_MS=' + str(args.period_ms), '-DREPAIRED=' + str(int('guard_last_observation_ms' in source)),
                '-I' + str(ROOT / 'tests/fan_monitor/stubs'), '-I' + str(ROOT / 'components/ts_drivers/include'),
                '-I' + str(cjson), '-I' + tmp, str(ROOT / 'tests/fan_review/test_review.c'), str(cjson / 'cJSON.c'),
                '-lm', '-o', str(exe)]

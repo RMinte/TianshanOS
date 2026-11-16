@@ -676,7 +676,6 @@ if (typeof i18n !== 'undefined') i18n.registerLanguage('zh-CN', {
         status: '风扇状态',
         speed: '转速',
         targetSpeed: '目标转速',
-        currentOutput: '当前输出',
         draftSetting: '准备设置为 {speed}%',
         requestedSetting: '请求设置：{speed}%',
         outputUnknown: '当前输出尚未确认',
@@ -709,6 +708,7 @@ if (typeof i18n !== 'undefined') i18n.registerLanguage('zh-CN', {
         testTempSet: '测试温度已设置为 {temp}°C',
         speedSet: '风扇{id}已设为{speed}%。',
         modeSwitch: '风扇 {id} 模式已切换为 {mode}',
+        modeAppliedNotSaved: '风扇模式已切换，但未保存。重启后可能恢复之前的模式。',
         setFanFailed: '设置风扇失败: {msg}',
     },
     
@@ -3073,7 +3073,6 @@ if (typeof i18n !== 'undefined') i18n.registerLanguage('zh-CN', {
         modeCurve: '曲线',
         speedAdjust: '转速调节',
         editTempCurve: '编辑温度曲线',
-        manualModeHint: '切换到手动模式后可调节',
         autoStateIdle: '待机',
         autoStateBaseline: '按曲线运行',
         autoStateActive: '自适应调速',

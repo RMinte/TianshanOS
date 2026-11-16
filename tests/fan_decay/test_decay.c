@@ -11,6 +11,7 @@ typedef void *ts_pwm_handle_t;
 typedef void *ts_gpio_handle_t;
 #define TS_LOGD(...) ((void)0)
 #define TS_LOGI(...) ((void)0)
+#define TS_LOGW(...) ((void)0)
 #define portTICK_PERIOD_MS 1
 #define CONFIG_TS_DRIVERS_FAN_TEMP_UPDATE_MS 1000
 #include "../fan_review/mutex_host.h"
@@ -28,6 +29,17 @@ static int64_t esp_timer_get_time(void) { return now_ms * 1000; }
 static uint32_t xTaskGetTickCount(void) { return (uint32_t)now_ms; }
 int16_t ts_temp_get_effective(ts_temp_data_t *data) { *data = input; return data->value; }
 int16_t ts_temp_get_effective_nonblocking(ts_temp_data_t *data) { return ts_temp_get_effective(data); }
+#if BOUND_AUTO
+uint32_t ts_temp_auto_binding_revision(void) { return 1; }
+bool ts_temp_auto_binding_begin_commit(uint32_t revision) { return revision == 1; }
+void ts_temp_auto_binding_end_commit(void) {}
+void ts_temp_read_auto_binding(ts_temp_auto_sample_t *sample) {
+    *sample = (ts_temp_auto_sample_t){
+        .timestamp_ms = input.timestamp_ms, .binding_revision = 1, .value = input.value,
+        .result = input.valid && !input.partial_stale ? TS_TEMP_AUTO_VALID : TS_TEMP_AUTO_UNAVAILABLE,
+    };
+}
+#endif
 static esp_err_t ts_pwm_set_duty(ts_pwm_handle_t pwm, float duty) {
     ++hal_calls;
     if (hal_result == ESP_OK) pwm_output = duty;
@@ -156,7 +168,7 @@ int main(void) {
     for (int s = 0; s <= 80; s++) {
         input.valid = s < 20 || s >= 30;
         tick("stale_and_recovery", s, 488);
-        if (s >= 20 && s < 30) assert(s_fans[0].current_duty == 25);
+        if (s >= (BOUND_AUTO ? 25 : 20) && s < 30) assert(s_fans[0].current_duty == 25);
     }
     setup(87, true);
     for (int s = 0; s <= 100; s++) {

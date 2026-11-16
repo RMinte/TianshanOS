@@ -324,29 +324,44 @@ input[type=number]::-webkit-inner-spin-button,input[type=number]::-webkit-outer-
 .fan-panel{min-width:0}
 .fan-body{flex:1;display:flex;flex-direction:column;gap:10px}
 .fan-body>.fan-test{margin-top:auto}
-.fan-status{display:flex;align-items:center;flex-wrap:wrap;gap:6px 20px}
-.fan-status .t-value{color:var(--ink)}
-.fan-status .t-value.warn{color:var(--warn)}
 .fan-test{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding-top:12px;border-top:1px solid var(--hair)}
 .fan-test .t-label{white-space:nowrap}
-.fans-grid{display:grid;grid-template-columns:minmax(0,1fr);gap:16px}
-.fan-meta{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0 12px;height:32px;margin-top:8px}
+/* Keep room for the original control area while the rows change by mode. */
+.fans-grid{display:grid;grid-template-columns:minmax(0,1fr);align-content:start;gap:16px;min-block-size:240px}
+.fans-grid.has-multiple-fans{padding-block-end:30px}
+.fans-grid.has-multiple-fans>.fan-card{min-block-size:256px;padding-block:8px}
+.fan-modes button[aria-disabled=true]{opacity:.55}
+.fan-card>.slrow,.fan-meta{margin-top:20px}
+.fan-meta{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0 12px;min-height:32px}
 .fan-stat{display:flex;flex-direction:column;min-width:0}
 .fan-stat i{font-style:normal;font-size:12px;line-height:16px;color:var(--ink-3);white-space:normal;overflow:visible;text-overflow:clip}
 .fan-stat b{font-weight:500;font-size:13px;line-height:18px;color:var(--ink-2);font-variant-numeric:tabular-nums;white-space:nowrap}
 .fan-big{gap:6px;margin:14px 0 0}
-.fan-head{margin-bottom:10px}
+.fan-card>.fan-head{margin-bottom:10px;flex-wrap:nowrap}
+.fan-head>.inl,.fan-head .state{min-width:0}
+.fan-head .tti,.fan-temperature{flex:none}
+.fan-temperature{margin-inline-start:auto;white-space:nowrap;text-align:right}
+.fan-temperature .t-value{color:var(--ink)}
+.fan-temperature .t-value.warn{color:var(--warn)}
 .tti{display:inline-flex;align-items:center;height:28px;padding:0 6px;border:1px solid rgba(0,102,214,.28);border-radius:6px;background:rgba(0,122,255,.08);color:var(--accent-text);font:700 12px/1 var(--font);letter-spacing:.5px;cursor:default}
 .tti:hover{background:rgba(0,122,255,.16)}
 .tti:active{background:rgba(0,122,255,.24)}
 .tti:focus-visible{outline:none;box-shadow:0 0 0 3px rgba(0,122,255,.38)}
-.fan-readout{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;margin-bottom:12px}
+.fan-readout{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;margin:4px 0 16px}
 .fan-rpm{padding-bottom:6px;white-space:nowrap}
 .fans-grid>.fan-card:only-child{background:none;border-radius:0;padding:0}
 .fans-grid>.fan-card:only-child .fan-head .t-section{display:none}
 .fans-grid>.fan-card:only-child .fan-head{margin-bottom:0}
 .fans-grid>.fan-card:only-child .t-big{font-size:52px;line-height:56px}
-.fans-grid>.fan-card:only-child .fan-big{margin-top:6px}
+.fans-grid>.fan-card:only-child .fan-big,.has-multiple-fans .fan-big{margin-top:6px}
+/* Multiple cards also need room for their fan number. Keep the temperature
+   beside the state by putting the number and TTI in the preceding row. */
+.has-multiple-fans .fan-card>.fan-head{display:grid;grid-template-columns:minmax(80px,1fr) minmax(0,auto);gap:0 8px;margin-bottom:0}
+.has-multiple-fans .fan-head>.inl{display:contents}
+.has-multiple-fans .fan-head .state{grid-area:2/1;justify-self:start;max-width:100%;overflow-wrap:anywhere}
+.has-multiple-fans .fan-head .tti{grid-area:1/2;justify-self:end}
+.has-multiple-fans .fan-temperature{grid-area:2/2;white-space:normal}
+.has-multiple-fans .fan-temperature b{white-space:nowrap;line-height:18px}
 .slrow{display:flex;align-items:center;gap:12px;margin-top:16px}
 .slrow>.t-value{width:36px;text-align:right}
 .sl>i{width:var(--p,0)}
@@ -605,14 +620,16 @@ input[type=color].swi::-webkit-color-swatch{border:0;border-radius:50%}
 /* Two device cells (596px), panel padding (40px), gap (16px), fan (340px). */
 @container system-page (width < 992px){
 .sys-mid{grid-template-columns:minmax(0,1fr)}
-.fan-body{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr);grid-template-areas:"fan status" "fan test";gap:16px 32px;align-content:start}
-.fan-body>.fans-grid{grid-area:fan;max-width:560px}
-.fan-body>.fan-status{grid-area:status;align-self:start}
+.fan-body{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr);grid-template-areas:"fan test";gap:16px 32px;align-content:start}
+.fan-body>.fans-grid{grid-area:fan;max-width:560px;min-block-size:210px}
+.fan-body>.fans-grid.has-multiple-fans{padding-block-end:0}
 .fan-body>.fan-test{grid-area:test;border-top:0;padding-top:0;align-self:end}
 }
 @media (max-width:700px){
-.fan-body{display:flex;flex-direction:column}
-.fan-test{border-top:1px solid var(--hair);padding-top:14px}
+.fan-panel>.fan-body{grid-template-columns:minmax(0,1fr);grid-template-areas:"fan" "test"}
+.fan-panel>.fan-body>.fans-grid{min-block-size:246px}
+.fan-panel>.fan-body>.fans-grid.has-multiple-fans{padding-block-end:36px}
+.fan-panel>.fan-body>.fan-test{justify-self:end;max-width:100%}
 }
 @media (min-width:601px) and (max-width:819px){
 .stat{grid-template-columns:repeat(3,minmax(0,1fr));row-gap:12px}
