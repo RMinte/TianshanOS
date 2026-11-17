@@ -54,6 +54,10 @@ extern "C" {
 
 /** 数据超时（毫秒）- 超过此时间认为数据过期 */
 #define TS_TEMP_DATA_TIMEOUT_MS     10000
+#define TS_TEMP_AUTO_STALE_MS         6000
+
+/** 最大加权绑定变量数量 */
+#define TS_TEMP_MAX_BOUND_VARS      8
 
 /*===========================================================================*/
 /*                              Types                                         */
@@ -96,11 +100,14 @@ typedef enum {
     TS_TEMP_AUTO_VARIABLE_BUSY,
 } ts_temp_auto_read_t;
 
-/* Snapshot of the sole bound variable; independent of effective-source selection. */
+/* Bound variables only, independent of effective-source selection. */
 typedef struct {
-    int64_t timestamp_ms;
+    int64_t timestamp_ms;        /**< Oldest report in the complete weighted reading. */
+    int64_t reports_ms[TS_TEMP_MAX_BOUND_VARS]; /**< Report time by binding slot. */
+    int64_t guard_timestamp_ms;  /**< Report time of the hottest fresh member, zero if none. */
     uint32_t binding_revision;
-    int16_t value;
+    int16_t value;               /**< Weighted temperature, valid when result is AUTO_VALID. */
+    int16_t guard_value;         /**< Hottest fresh member, even if the weighted reading is incomplete. */
     ts_temp_auto_read_t result;
 } ts_temp_auto_sample_t;
 
@@ -128,9 +135,6 @@ typedef struct {
 
 /** 最大绑定变量名长度 */
 #define TS_TEMP_MAX_VARNAME_LEN     64
-
-/** 最大加权绑定变量数量 */
-#define TS_TEMP_MAX_BOUND_VARS      8
 
 /**
  * @brief 加权绑定变量条目

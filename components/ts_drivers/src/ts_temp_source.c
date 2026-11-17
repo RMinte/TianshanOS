@@ -72,7 +72,10 @@ typedef struct {
     int16_t temp;
     int64_t timestamp_ms;
     int16_t guard_temp;
+    int64_t guard_timestamp_ms;
+    int64_t reports_ms[TS_TEMP_MAX_BOUND_VARS];
     bool guard_valid;
+    bool variable_busy;
     bool partial_stale;
     uint8_t valid_count;
     uint8_t total_count;
@@ -105,8 +108,9 @@ static esp_err_t save_preferred_source_to_nvs(ts_temp_source_type_t type);
 static float sanitize_bound_weight(float weight);
 static bool has_positive_bound_weight(const ts_temp_bound_var_t *vars, uint8_t count);
 static esp_err_t read_fresh_variable_float(const char *name, double *value,
-                                           int64_t *last_update_ms, bool try_lock);
-static bool read_variable_temp_snapshot(variable_temp_snapshot_t *snapshot, bool try_lock);
+                                           int64_t *last_update_ms, int64_t max_age_ms, bool try_lock);
+static bool read_variable_temp_snapshot(variable_temp_snapshot_t *snapshot,
+                                        int64_t max_age_ms, bool try_lock);
 
 /*===========================================================================*/
 /*                          Utility Functions                                 */
@@ -173,7 +177,7 @@ static void store_variable_snapshot(const variable_temp_snapshot_t *snapshot)
 }
 
 static esp_err_t read_fresh_variable_float(const char *name, double *value,
-                                           int64_t *last_update_ms, bool try_lock)
+                                           int64_t *last_update_ms, int64_t max_age_ms, bool try_lock)
 {
     ts_variable_info_t var = {0};
     esp_err_t ret = try_lock ? ts_variable_get_info_try(name, &var)
@@ -183,7 +187,7 @@ static esp_err_t read_fresh_variable_float(const char *name, double *value,
     /* The writer stamps the variable under its lock. Take the clock after copying it. */
     int64_t now = get_current_ms();
     if (var.last_update_ms <= 0 || var.last_update_ms > now ||
-        now - var.last_update_ms > TS_TEMP_DATA_TIMEOUT_MS) {
+        now - var.last_update_ms > max_age_ms) {
         return ESP_ERR_INVALID_STATE;
     }
 
@@ -202,7 +206,8 @@ static esp_err_t read_fresh_variable_float(const char *name, double *value,
     return ESP_OK;
 }
 
-static bool read_variable_temp_snapshot(variable_temp_snapshot_t *snapshot, bool try_lock)
+static bool read_variable_temp_snapshot(variable_temp_snapshot_t *snapshot,
+                                        int64_t max_age_ms, bool try_lock)
 {
     double weighted_sum = 0.0;
     int16_t max_bound = TS_TEMP_MIN_VALID;
@@ -228,19 +233,24 @@ static bool read_variable_temp_snapshot(variable_temp_snapshot_t *snapshot, bool
 
         double value = 0.0;
         int64_t last_update_ms = 0;
-        if (read_fresh_variable_float(s_state.bound_vars[i].name, &value,
-                                      &last_update_ms, try_lock) != ESP_OK) {
+        esp_err_t ret = read_fresh_variable_float(s_state.bound_vars[i].name, &value,
+                                                  &last_update_ms, max_age_ms, try_lock);
+        if (ret != ESP_OK) {
+            snapshot->variable_busy |= ret == ESP_ERR_TIMEOUT;
             TS_LOGD(TAG, "Variable '%s' unavailable or stale",
                     s_state.bound_vars[i].name);
             continue;
         }
 
+        snapshot->reports_ms[i] = last_update_ms;
         weighted_sum += value * w;
         snapshot->valid_weight += w;
         snapshot->valid_count++;
         int16_t temp_01c = (int16_t)(value * 10.0);
-        if (temp_01c > max_bound) {
+        if (temp_01c > max_bound ||
+            (temp_01c == max_bound && last_update_ms > snapshot->guard_timestamp_ms)) {
             max_bound = temp_01c;
+            snapshot->guard_timestamp_ms = last_update_ms;
         }
         if (snapshot->timestamp_ms == 0 || last_update_ms < snapshot->timestamp_ms) {
             snapshot->timestamp_ms = last_update_ms;
@@ -260,7 +270,8 @@ static bool read_variable_temp_snapshot(variable_temp_snapshot_t *snapshot, bool
     }
 
     double effective_temp = weighted_sum / snapshot->valid_weight;
-    int16_t temp_01c = (int16_t)(effective_temp * 10.0);
+    /* A single contributor already has the exact reading in tenths of a degree. */
+    int16_t temp_01c = snapshot->valid_count == 1 ? max_bound : (int16_t)(effective_temp * 10.0);
     if (temp_01c < TS_TEMP_MIN_VALID || temp_01c > TS_TEMP_MAX_VALID) {
         TS_LOGW(TAG, "Weighted temp out of range: %.1f°C", effective_temp);
         return false;
@@ -296,7 +307,7 @@ static bool is_provider_valid(ts_temp_source_type_t type, int64_t now, bool try_
     
     if (type == TS_TEMP_SOURCE_VARIABLE) {
         variable_temp_snapshot_t snapshot = {0};
-        bool valid = read_variable_temp_snapshot(&snapshot, try_variable_lock);
+        bool valid = read_variable_temp_snapshot(&snapshot, TS_TEMP_DATA_TIMEOUT_MS, try_variable_lock);
         store_variable_snapshot(&snapshot);
         return valid;
     }
@@ -338,7 +349,8 @@ static void evaluate_active_source_with_lock_mode(bool try_variable_lock)
     ts_temp_source_type_t best_source = TS_TEMP_SOURCE_DEFAULT;
     int16_t best_temp = TS_TEMP_DEFAULT_VALUE;
     variable_temp_snapshot_t variable_snapshot = {0};
-    bool variable_snapshot_valid = read_variable_temp_snapshot(&variable_snapshot, try_variable_lock);
+    bool variable_snapshot_valid = read_variable_temp_snapshot(&variable_snapshot,
+                                                               TS_TEMP_DATA_TIMEOUT_MS, try_variable_lock);
     int64_t now = get_current_ms();
     store_variable_snapshot(&variable_snapshot);
     
@@ -714,17 +726,17 @@ void ts_temp_read_auto_binding(ts_temp_auto_sample_t *sample)
     }
 
     sample->binding_revision = ts_temp_auto_binding_revision();
-    if (s_state.bound_var_count == 1) {
-        double value;
-        esp_err_t ret = read_fresh_variable_float(s_state.bound_vars[0].name, &value,
-                                                  &sample->timestamp_ms, true);
-        if (ret == ESP_OK) {
-            sample->value = (int16_t)(value * 10.0);
-            sample->result = TS_TEMP_AUTO_VALID;
-        } else if (ret == ESP_ERR_TIMEOUT) {
-            sample->result = TS_TEMP_AUTO_VARIABLE_BUSY;
-        }
+    variable_temp_snapshot_t snapshot;
+    if (read_variable_temp_snapshot(&snapshot, TS_TEMP_AUTO_STALE_MS - 1, true)) {
+        sample->value = snapshot.temp;
+        sample->timestamp_ms = snapshot.timestamp_ms;
+        memcpy(sample->reports_ms, snapshot.reports_ms, sizeof(sample->reports_ms));
+        sample->result = TS_TEMP_AUTO_VALID;
+    } else if (snapshot.variable_busy) {
+        sample->result = TS_TEMP_AUTO_VARIABLE_BUSY;
     }
+    sample->guard_value = snapshot.guard_temp;
+    sample->guard_timestamp_ms = snapshot.guard_timestamp_ms;
     xSemaphoreGive(s_state.mutex);
 }
 
@@ -737,7 +749,7 @@ esp_err_t ts_temp_get_by_source(ts_temp_source_type_t type, ts_temp_data_t *data
 
     if (type == TS_TEMP_SOURCE_VARIABLE) {
         variable_temp_snapshot_t snapshot = {0};
-        bool valid = read_variable_temp_snapshot(&snapshot, false);
+        bool valid = read_variable_temp_snapshot(&snapshot, TS_TEMP_DATA_TIMEOUT_MS, false);
         store_variable_snapshot(&snapshot);
         data->value = valid ? snapshot.temp : TS_TEMP_DEFAULT_VALUE;
         data->source = TS_TEMP_SOURCE_VARIABLE;
@@ -1241,8 +1253,6 @@ esp_err_t ts_temp_bind_variables(const ts_temp_bound_var_t *vars, uint8_t count)
     if (!vars || count == 0 || count > TS_TEMP_MAX_BOUND_VARS) return ESP_ERR_INVALID_ARG;
 
     ts_temp_bound_var_t validated_vars[TS_TEMP_MAX_BOUND_VARS] = {0};
-    double total_weight = 0.0;
-
     for (uint8_t i = 0; i < count; i++) {
         if (vars[i].name[0] == '\0') return ESP_ERR_INVALID_ARG;
         if (strlen(vars[i].name) >= TS_TEMP_MAX_VARNAME_LEN) return ESP_ERR_INVALID_SIZE;
@@ -1252,10 +1262,9 @@ esp_err_t ts_temp_bind_variables(const ts_temp_bound_var_t *vars, uint8_t count)
 
         validated_vars[i] = vars[i];
         validated_vars[i].weight = sanitize_bound_weight(vars[i].weight);
-        total_weight += validated_vars[i].weight;
     }
 
-    if (total_weight <= 0.001) {
+    if (!has_positive_bound_weight(validated_vars, count)) {
         TS_LOGW(TAG, "Rejected weighted binding with non-positive total weight");
         return ESP_ERR_INVALID_ARG;
     }
@@ -1267,11 +1276,13 @@ esp_err_t ts_temp_bind_variables(const ts_temp_bound_var_t *vars, uint8_t count)
         changed = strcmp(s_state.bound_vars[i].name, validated_vars[i].name) != 0 ||
                   s_state.bound_vars[i].weight != validated_vars[i].weight;
     }
-    if (changed) s_state.identity_revision++;
-    if ((count == 1 || s_state.bound_var_count == 1) &&
-        (count != s_state.bound_var_count ||
-         strcmp(s_state.bound_vars[0].name, validated_vars[0].name) != 0)) {
-        advance_auto_binding_revision();
+    if (changed) {
+        s_state.identity_revision++;
+        /* Changing only the weight of a single member leaves its reading unchanged. */
+        if (count != 1 || s_state.bound_var_count != 1 ||
+            strcmp(s_state.bound_vars[0].name, validated_vars[0].name) != 0) {
+            advance_auto_binding_revision();
+        }
     }
     s_state.bound_var_count = count;
     memcpy(s_state.bound_vars, validated_vars, count * sizeof(ts_temp_bound_var_t));

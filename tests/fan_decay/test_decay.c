@@ -34,9 +34,12 @@ uint32_t ts_temp_auto_binding_revision(void) { return 1; }
 bool ts_temp_auto_binding_begin_commit(uint32_t revision) { return revision == 1; }
 void ts_temp_auto_binding_end_commit(void) {}
 void ts_temp_read_auto_binding(ts_temp_auto_sample_t *sample) {
+    bool valid = input.valid && !input.partial_stale;
     *sample = (ts_temp_auto_sample_t){
-        .timestamp_ms = input.timestamp_ms, .binding_revision = 1, .value = input.value,
-        .result = input.valid && !input.partial_stale ? TS_TEMP_AUTO_VALID : TS_TEMP_AUTO_UNAVAILABLE,
+        .timestamp_ms = input.timestamp_ms, .guard_timestamp_ms = valid ? input.timestamp_ms : 0,
+        .binding_revision = 1, .value = input.value, .guard_value = input.value,
+        .reports_ms = {valid ? input.timestamp_ms : 0},
+        .result = valid ? TS_TEMP_AUTO_VALID : TS_TEMP_AUTO_UNAVAILABLE,
     };
 }
 #endif

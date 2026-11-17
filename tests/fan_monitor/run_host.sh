@@ -34,7 +34,7 @@ out.joinpath('fan_types.inc').write_text(
     fan[start:fan.index('/*===========================================================================*/', start)] + structs(fan))
 out.joinpath('temp_types.inc').write_text(structs(temp))
 out.joinpath('temp_core.inc').write_text(functions(temp, [
-    'get_current_ms', 'advance_auto_binding_revision', 'sanitize_bound_weight', 'store_variable_snapshot',
+    'get_current_ms', 'advance_auto_binding_revision', 'sanitize_bound_weight', 'has_positive_bound_weight', 'store_variable_snapshot',
     'read_fresh_variable_float', 'read_variable_temp_snapshot', 'is_provider_valid',
     'evaluate_active_source_with_lock_mode', 'evaluate_active_source', 'sync_bound_variable_compat',
     'ts_temp_bind_variables', 'ts_temp_unbind_variable', 'is_cached_active_source_valid_locked',

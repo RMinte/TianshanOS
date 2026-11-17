@@ -43,7 +43,7 @@ typedef struct {
     int64_t last_update_ms;
     struct { int type; double float_val; int int_val; } value;
 } ts_variable_info_t;
-static ts_variable_info_t variable;
+static ts_variable_info_t variable, second_variable;
 
 static int64_t esp_timer_get_time(void) { return now_ms * 1000; }
 static uint32_t xTaskGetTickCount(void) { return (uint32_t)now_ms; }
@@ -54,7 +54,7 @@ static int temp_mutex_take(SemaphoreHandle_t mutex, int ticks) {
 static void temp_mutex_give(SemaphoreHandle_t mutex) {}
 static esp_err_t ts_variable_get_info(const char *name, ts_variable_info_t *info) {
     assert(!inside_timer&&!variable_mutex_busy); /* Never wait on a busy variable leaf. */
-    *info = variable;
+    *info = strcmp(name, "gpu.hotspot") == 0 ? second_variable : variable;
     return ESP_OK;
 }
 static esp_err_t ts_variable_get_info_try(const char *name, ts_variable_info_t *info) {
@@ -64,7 +64,7 @@ static esp_err_t ts_variable_get_info_try(const char *name, ts_variable_info_t *
         now_ms = variable.last_update_ms = publish_during_read_ms;
         publish_during_read_ms = 0;
     }
-    *info = variable;
+    *info = strcmp(name, "gpu.hotspot") == 0 ? second_variable : variable;
     return ESP_OK;
 }
 static void publish_temp_event(int16_t temp, ts_temp_source_type_t source,
@@ -123,6 +123,7 @@ static void setup(ts_fan_mode_t mode) {
         .last_update_ms = now_ms,
         .value = {.type = TS_AUTO_VAL_FLOAT, .float_val = 51.2}
     };
+    second_variable = variable;
     fan_instance_t *f = &s_fans[0];
     f->initialized = true;
     f->enabled = true;
@@ -373,7 +374,67 @@ static void check_auto_guard_continuity(void) {
 
 }
 
+static void check_weighted_auto_binding(void)
+{
+    const ts_temp_bound_var_t bindings[] = {
+        {.name = "cpu.temperature", .weight = 0.75f},
+        {.name = "gpu.hotspot", .weight = 0.25f},
+    };
+    setup(TS_FAN_MODE_AUTO);
+    assert(ts_temp_bind_variables(bindings, 2) == ESP_OK);
+    second_variable.last_update_ms = 2000;
+    second_variable.value.float_val = 98;
+    tick(2000, 98, true);
+    ts_temp_status_t global;
+    assert(ts_temp_get_status(&global) == ESP_OK && global.current_valid && global.current_temp == 980);
+    assert_output(100, true, false);
+
+    setup(TS_FAN_MODE_AUTO);
+    assert(ts_temp_bind_variables(bindings, 2) == ESP_OK);
+    second_variable.value.float_val = 80;
+    second_variable.last_update_ms = 2000;
+    tick(2000, 40, true);
+    assert_output(40, false, false);
+    assert(s_fans[0].control_temperature == 500 && s_fans[0].guard_temperature == 800);
+
+    /* A new hot report must act even before the other producer reports again. */
+    second_variable.value.float_val = 94;
+    second_variable.last_update_ms = 3000;
+    tick(3000, 40, false);
+    assert(s_fans[0].control_temperature == 535 && s_fans[0].target_duty > 40);
+    second_variable.value.float_val = 95;
+    second_variable.last_update_ms = 4000;
+    tick(4000, 40, false);
+    assert_output(100, true, false);
+
+    setup(TS_FAN_MODE_AUTO);
+    assert(ts_temp_bind_variables(bindings, 2) == ESP_OK);
+    second_variable.value.float_val = 98;
+    tick(7000, 40, false); /* Both old reports are at the 6s cutoff. */
+    assert_output(25, false, true);
+    second_variable.last_update_ms = 8000;
+    tick(8000, 40, false); /* One fresh hot member, one stale member. */
+    assert_output(100, true, true);
+
+    second_variable.value.float_val = 90;
+    for (int t = 9000; t <= 70000; t += 1000) {
+        /* At 40s the oldest report advances by 2s, but CPU reports 3s apart. */
+        if (t != 40000) second_variable.last_update_ms = t;
+        tick(t, 40, t != 38000 && t != 39000);
+        if (t < 70000) assert(s_fans[0].guard_active);
+    }
+    assert(!s_fans[0].guard_active);
+
+    const ts_temp_bound_var_t ignored[] = {
+        {.name = "cpu.temperature", .weight = 0.0006f},
+        {.name = "gpu.hotspot", .weight = 0.0006f},
+    };
+    assert(ts_temp_bind_variables(ignored, 2) == ESP_ERR_INVALID_ARG);
+    puts("PASS weighted AUTO: weighted duty, asynchronous hot member, stale cutoff and continuous low release");
+}
+
 int main(void) {
+    check_weighted_auto_binding();
     setup(TS_FAN_MODE_MANUAL);
     for (int second = 2; second <= 25; second++) {
         tick(second * 1000LL, 49.5, true);
