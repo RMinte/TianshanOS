@@ -42,7 +42,6 @@
 #define FAN_AUTO_RISE_RATE_PER_SEC     12.0f
 #define FAN_AUTO_FALL_RATE_PER_SEC     0.30f
 #define FAN_AUTO_STALE_DUTY            25
-#define FAN_AUTO_STALE_MS              6000
 #define FAN_AUTO_REPORT_GAP_MS         2000   /* Bound variable reports about once a second. */
 #define FAN_AUTO_HISTORY_SIZE          32
 
@@ -85,6 +84,7 @@ typedef struct {
     int64_t guard_release_since_ms;
     int64_t guard_last_observation_ms;
     int64_t auto_report_ms;
+    int64_t auto_reports_ms[TS_TEMP_MAX_BOUND_VARS];
     uint32_t auto_binding_revision;
     bool auto_resume_pending;
     bool response_observing;
@@ -270,6 +270,7 @@ static void reset_adaptive_auto_state(fan_instance_t *fan)
     fan->guard_release_since_ms = 0;
     fan->guard_last_observation_ms = 0;
     fan->auto_report_ms = 0;
+    memset(fan->auto_reports_ms, 0, sizeof(fan->auto_reports_ms));
     fan->auto_binding_revision = 0;
     fan->auto_resume_pending = false;
     fan->response_observing = false;
@@ -406,15 +407,17 @@ static void update_response_learning(fan_instance_t *fan, bool slope_valid,
 }
 
 static void update_guard_observation(fan_instance_t *fan, const ts_temp_auto_sample_t *sample,
-                                     bool valid, bool new_report, int64_t now_ms,
-                                     int64_t max_poll_gap_ms, int64_t max_report_gap_ms)
+                                     bool guard_valid, bool valid, bool new_report, bool report_gap,
+                                     int64_t now_ms, int64_t max_poll_gap_ms, int64_t max_report_gap_ms)
 {
-    if (valid && sample->value >= FAN_AUTO_GUARD_TEMP) {
-        fan->guard_active = true;
+    /* A hot member is enough to engage protection; release needs the complete binding. */
+    if (guard_valid) {
+        fan->guard_temperature = sample->guard_value;
+        if (sample->guard_value >= FAN_AUTO_GUARD_TEMP) fan->guard_active = true;
     }
     if (!fan->guard_active) return;
 
-    if (!valid || sample->value > FAN_AUTO_GUARD_RELEASE_TEMP ||
+    if (!valid || sample->guard_value > FAN_AUTO_GUARD_RELEASE_TEMP ||
         now_ms - sample->timestamp_ms > max_report_gap_ms) {
         fan->guard_release_since_ms = 0;
         fan->guard_last_observation_ms = 0;
@@ -423,8 +426,7 @@ static void update_guard_observation(fan_instance_t *fan, const ts_temp_auto_sam
 
     if (fan->guard_last_observation_ms == 0 ||
         now_ms <= fan->guard_last_observation_ms ||
-        now_ms - fan->guard_last_observation_ms > max_poll_gap_ms ||
-        (fan->auto_report_ms > 0 && sample->timestamp_ms - fan->auto_report_ms > max_report_gap_ms)) {
+        now_ms - fan->guard_last_observation_ms > max_poll_gap_ms || report_gap) {
         fan->guard_release_since_ms = 0;
     }
     fan->guard_last_observation_ms = now_ms;
@@ -457,29 +459,49 @@ static esp_err_t apply_adaptive_auto(fan_instance_t *fan, const ts_temp_auto_sam
     fan->auto_binding_revision = binding_revision;
 
     int64_t sample_age_ms = now_ms - sample->timestamp_ms;
-    bool valid = s_auto_temp_enabled && sample->result == TS_TEMP_AUTO_VALID &&
-                 sample->binding_revision == binding_revision && sample->timestamp_ms > 0 &&
-                 sample_age_ms >= 0 && sample_age_ms < FAN_AUTO_STALE_MS &&
+    bool current_binding = s_auto_temp_enabled && sample->binding_revision == binding_revision;
+    int64_t guard_age_ms = now_ms - sample->guard_timestamp_ms;
+    bool guard_valid = current_binding && sample->guard_timestamp_ms > 0 &&
+                       guard_age_ms >= 0 && guard_age_ms < TS_TEMP_AUTO_STALE_MS &&
+                       sample->guard_timestamp_ms >= fan->auto_report_ms;
+    bool valid = current_binding && sample->result == TS_TEMP_AUTO_VALID && sample->timestamp_ms > 0 &&
+                 sample_age_ms >= 0 && sample_age_ms < TS_TEMP_AUTO_STALE_MS &&
                  sample->timestamp_ms >= fan->auto_report_ms;
-    bool new_report = valid && sample->timestamp_ms > fan->auto_report_ms;
     bool was_stale = fan->temp_stale;
     bool was_guard = fan->guard_active;
     bool recovered_from_stale = fan->auto_state == TS_FAN_AUTO_STATE_STALE;
     uint8_t old_duty = fan->current_duty;
     int64_t max_poll_gap_ms = 2LL * CONFIG_TS_DRIVERS_FAN_TEMP_UPDATE_MS;
-    if (max_poll_gap_ms > FAN_AUTO_STALE_MS) max_poll_gap_ms = FAN_AUTO_STALE_MS;
+    if (max_poll_gap_ms > TS_TEMP_AUTO_STALE_MS) max_poll_gap_ms = TS_TEMP_AUTO_STALE_MS;
     /* Faster polling must not turn a normal producer interval into a missing report. */
     int64_t max_report_gap_ms = max_poll_gap_ms > FAN_AUTO_REPORT_GAP_MS
                               ? max_poll_gap_ms : FAN_AUTO_REPORT_GAP_MS;
-    update_guard_observation(fan, sample, valid, new_report, now_ms, max_poll_gap_ms, max_report_gap_ms);
+    /* Freshness uses the oldest input. Progress and report gaps belong to each binding slot. */
+    bool new_report = false;
+    bool report_gap = false;
+    if (valid) {
+        for (size_t i = 0; i < TS_TEMP_MAX_BOUND_VARS; i++) {
+            int64_t previous = fan->auto_reports_ms[i];
+            int64_t current = sample->reports_ms[i];
+            if (current < previous) {
+                valid = false;
+                break;
+            }
+            new_report |= current > previous;
+            report_gap |= previous > 0 && current - previous > max_report_gap_ms;
+        }
+    }
+    new_report = valid && new_report;
+    update_guard_observation(fan, sample, guard_valid, valid, new_report, report_gap,
+                             now_ms, max_poll_gap_ms, max_report_gap_ms);
 
     fan->temp_stale = !valid;
     bool slope_valid = false;
     if (new_report) {
         fan->auto_report_ms = sample->timestamp_ms;
+        memcpy(fan->auto_reports_ms, sample->reports_ms, sizeof(fan->auto_reports_ms));
         fan->temperature = sample->value;
         fan->control_temperature = sample->value;
-        fan->guard_temperature = sample->value;
         record_auto_temp_sample(fan, sample->value, now_ms);
         slope_valid = calculate_auto_slope(fan, sample->value, now_ms,
                                            FAN_AUTO_MIN_SAMPLE_MS, &fan->slope_c_per_min);
@@ -510,7 +532,7 @@ static esp_err_t apply_adaptive_auto(fan_instance_t *fan, const ts_temp_auto_sam
         fan->last_auto_update_ms = now_ms;
         fan->response_observing = false;
         if (s_auto_temp_enabled && fan->duty_valid && !recovered_from_stale &&
-            fan->auto_report_ms > 0 && last_age_ms >= 0 && last_age_ms < FAN_AUTO_STALE_MS) {
+            fan->auto_report_ms > 0 && last_age_ms >= 0 && last_age_ms < TS_TEMP_AUTO_STALE_MS) {
             return ESP_OK;
         }
         if (!recovered_from_stale) {
@@ -534,7 +556,7 @@ static esp_err_t apply_adaptive_auto(fan_instance_t *fan, const ts_temp_auto_sam
     }
 
     int16_t control_temp = sample->value;
-    int16_t guard_temp = sample->value;
+    int16_t guard_temp = sample->guard_value;
     if (new_report) update_response_learning(fan, slope_valid, fan->slope_c_per_min, now_ms);
     /* Explicit re-enable can use the same valid report once, without counting
      * it as a new sample or accruing slew time while the fan was off. */

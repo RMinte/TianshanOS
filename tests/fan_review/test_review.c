@@ -106,10 +106,12 @@ void ts_temp_read_auto_binding(ts_temp_auto_sample_t *sample) {
     assert(!host_locks_held && "temperature read under fan mutex");
     ts_temp_data_t snapshot;
     ts_temp_get_effective_nonblocking(&snapshot);
+    bool valid = snapshot.valid && snapshot.source == TS_TEMP_SOURCE_VARIABLE && !snapshot.partial_stale;
     *sample=(ts_temp_auto_sample_t){
-        .timestamp_ms=snapshot.timestamp_ms,.binding_revision=1+snapshot.identity_revision,.value=snapshot.value,
-        .result=snapshot.valid && snapshot.source==TS_TEMP_SOURCE_VARIABLE && !snapshot.partial_stale
-              ? TS_TEMP_AUTO_VALID : TS_TEMP_AUTO_UNAVAILABLE,
+        .timestamp_ms=snapshot.timestamp_ms,.guard_timestamp_ms=valid ? snapshot.timestamp_ms : 0,
+        .binding_revision=1+snapshot.identity_revision,.value=snapshot.value,.guard_value=snapshot.value,
+        .reports_ms={valid ? snapshot.timestamp_ms : 0},
+        .result=valid ? TS_TEMP_AUTO_VALID : TS_TEMP_AUTO_UNAVAILABLE,
     };
 }
 #endif
